@@ -22,6 +22,7 @@ The road ahead leads to **1.0.0**.
 - Extracted editor settings/preferences into `js/editor/preferences.js`, keeping static chrome translation, theme switching, language switching, and quick music panel visibility out of the main editor file.
 - Extracted floating quick menu music controls into `js/editor/quick-audio.js`, keeping playback, pause, volume, and next-track behavior out of the main editor file.
 - Extracted static editor chrome markup into `js/editor/editor-template.js`, so `editor.js` no longer carries the full topbar, panels, overlays, and hidden inputs inline.
+- Extracted topbar and toolbar event wiring into `js/editor/toolbar.js`, keeping tool buttons, snap toggles, level buttons, export buttons, and preview/exit controls out of the main editor file.
 
 ---
 
