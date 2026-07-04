@@ -21,6 +21,7 @@ The road ahead leads to **1.0.0**.
 - Continued reducing risk around `js/editor/editor.js`, which is still the largest and most sensitive file in the project.
 - Extracted editor settings/preferences into `js/editor/preferences.js`, keeping static chrome translation, theme switching, language switching, and quick music panel visibility out of the main editor file.
 - Extracted floating quick menu music controls into `js/editor/quick-audio.js`, keeping playback, pause, volume, and next-track behavior out of the main editor file.
+- Extracted static editor chrome markup into `js/editor/editor-template.js`, so `editor.js` no longer carries the full topbar, panels, overlays, and hidden inputs inline.
 
 ---
 
