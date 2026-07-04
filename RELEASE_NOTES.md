@@ -38,6 +38,7 @@ The road ahead leads to **1.0.0**.
 - Extracted game radio and menu music library inspector sections into `js/editor/music-library-panel.js`.
 - Extracted mesh material inspector controls into `js/editor/material-editor.js`, including presets, texture slots, material sliders, and shadow actions.
 - Extracted the regular scene object inspector into `js/editor/object-inspector.js`, covering headers, transform fields, visibility, collision, light, effect, and object action sections.
+- Extracted Player Blueprint game camera, depth-of-field, and visual grade controls into `js/editor/player-camera-inspector.js`.
 
 ---
 
