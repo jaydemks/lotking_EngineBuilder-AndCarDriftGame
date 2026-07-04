@@ -133,6 +133,7 @@ let inspectorUi = null;
 let materialEditor = null;
 let musicLibraryPanel = null;
 let objectInspector = null;
+let inspectorController = null;
 let selectionManager = null;
 let viewportEvents = null;
 let playerCameraInspector = null;
@@ -781,16 +782,7 @@ function musicLibrarySection(title, api){ return musicLibraryPanel.build(title, 
 function buildMaterialEditor(box, o){ return materialEditor.build(box, o); }
 
 const tf = {inputs: null};   // live transform inputs for sync during gizmo drag
-function syncTransformFields(){
-  const o = ED.selected;
-  if(!o || !tf.inputs) return;
-  const f = v => +v.toFixed(3);
-  tf.inputs.forEach(item => {
-    if(item.kind === 'p') item.input.value = f(o.position[item.prop]);
-    else if(item.kind === 'r') item.input.value = f(THREE.MathUtils.radToDeg(o.rotation[item.prop]));
-    else if(item.kind === 's') item.input.value = f(o.scale[item.prop]);
-  });
-}
+function syncTransformFields(){ if(inspectorController) inspectorController.syncTransformFields(); }
 objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_INSPECTOR.create({
   THREE,
   GAME,
@@ -895,87 +887,33 @@ environmentInspector = window.LK_EDITOR_ENVIRONMENT_INSPECTOR && window.LK_EDITO
   btnRow,
   el,
 });
-
-function buildInspector(){
-  const box = insp();
-  box.innerHTML = '';
-  tf.inputs = null;
-  if(ED.special === 'env') return buildEnvInspector(box);
-  if(ED.special === 'hud') return buildHudInspector(box);
-  const o = ED.selected;
-  if(!o){
-    box.appendChild(el('<div class="lk-empty">No selection.<br>Click an object in the scene<br>or in the list on the left.</div>'));
-    return;
-  }
-  if(o.userData.editorType === 'player') return buildPlayerInspector(box, o);
-  return objectInspector.build(box, o);
-}
-
-function buildPlayerInspector(box, o){
-  box.appendChild(el('<div class="lk-head lk-bp"><span class="lk-head-ic">🚗</span><span class="lk-bp-title">BLUEPRINT · PLAYER</span><span class="lk-head-id">player vehicle</span></div>'));
-  box.appendChild(btnRow([
-    {label:'◇ Copy blueprint', action: copyPlayerBlueprintAsset},
-    {label:'★ Promote current to Base', action:() => {
-      const bp = currentPlayerBlueprint();
-      if(bp && STORE.playerBlueprints && STORE.playerBlueprints.setDefault){
-        STORE.playerBlueprints.setDefault(bp, {levelId: ED.trackId, levelName: ED.trackName, copiedFrom: 'scene-player'});
-        applyPlayerBlueprintAsset(bp, {applySpawn:false, silent:true});
-        status('Current player blueprint promoted to Base');
-      }
-    }},
-  ]));
-
-  // transform (spawn)
-  const st = section('POSIZIONE / SPAWN');
-  st.body.appendChild(el('<div class="lk-hint">Move the car with the gizmo: its position becomes the spawn.</div>'));
-  const row = el('<div class="lk-vec"><label>Posizione</label></div>');
-  const ins = [];
-  ['x','y','z'].forEach(ax => {
-    const i = el('<input type="number" step="0.5">');
-    i.value = +o.position[ax].toFixed(2);
-    i.addEventListener('focus', beginTransformHistory);
-    i.addEventListener('input', () => { o.position[ax] = parseFloat(i.value) || 0; onGizmoChange(); });
-    i.addEventListener('change', () => commitTransformHistory('Player spawn'));
-    row.appendChild(i); ins.push(i);
-  });
-  st.body.appendChild(row);
-  const rowR = el('<div class="lk-vec"><label>Direzione°</label></div>');
-  const rI = el('<input type="number" step="5">');
-  rI.value = +THREE.MathUtils.radToDeg(o.rotation.y).toFixed(1);
-  rI.addEventListener('focus', beginTransformHistory);
-  rI.addEventListener('input', () => { o.rotation.y = THREE.MathUtils.degToRad(parseFloat(rI.value) || 0); onGizmoChange(); });
-  rI.addEventListener('change', () => commitTransformHistory('Player direction'));
-  rowR.appendChild(rI);
-  st.body.appendChild(rowR);
-  tf.inputs = [ins[0], ins[1], ins[2], {set value(v){}, get value(){return 0;}}, rI, {set value(v){}, get value(){return 0;}}, {set value(v){}}, {set value(v){}}, {set value(v){}}];
-  st.body.appendChild(btnRow([{label:'📍 Spawn qui', action: setSpawnHere}, {label:'↺ Spawn default', action:() => {
-    o.position.set(0,0,55); o.rotation.y = Math.PI; onGizmoChange(); buildInspector();
-  }}]));
-  box.appendChild(st.root);
-
-  playerCameraInspector.build(box);
-  playerLightsInspector.build(box);
-  playerAttachmentsInspector.build(box);
-  playerSetupInspector.build(box);
-}
-
-// carica il Sound Designer (modulo separato) solo alla prima apertura
-function openSoundDesigner(setId){
-  const open = () => {
-    if(window.LK_SOUND_DESIGNER) window.LK_SOUND_DESIGNER.open(setId);
-    else status('⚠ Sound Designer non disponibile');
-  };
-  if(window.LK_SOUND_DESIGNER) return open();
-  const s = document.createElement('script');
-  s.src = 'js/editor/sound-designer.js?v=' + Date.now();
-  s.onload = open;
-  s.onerror = () => status('⚠ Sound Designer non caricato');
-  document.body.appendChild(s);
-}
-
-function buildHudInspector(box){ return hudInspector.build(box); }
-
-function buildEnvInspector(box){ return environmentInspector.build(box); }
+inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_INSPECTOR_CONTROLLER.create({
+  THREE,
+  STORE,
+  ED,
+  tf,
+  insp,
+  el,
+  section,
+  btnRow,
+  status,
+  objectInspector,
+  hudInspector,
+  environmentInspector,
+  playerCameraInspector,
+  playerLightsInspector,
+  playerAttachmentsInspector,
+  playerSetupInspector,
+  copyPlayerBlueprintAsset,
+  currentPlayerBlueprint,
+  applyPlayerBlueprintAsset,
+  setSpawnHere,
+  onGizmoChange,
+  beginTransformHistory,
+  commitTransformHistory,
+});
+function buildInspector(){ return inspectorController.buildInspector(); }
+function openSoundDesigner(setId){ return inspectorController.openSoundDesigner(setId); }
 
 // ------------------------------------------------ enter / exit
 function enterEditor(){
