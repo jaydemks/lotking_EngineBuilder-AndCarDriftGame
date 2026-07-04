@@ -97,11 +97,20 @@ function create(deps){
       else deps.status('⚠ Sound Designer non disponibile');
     };
     if(window.LK_SOUND_DESIGNER) return open();
-    const s = document.createElement('script');
-    s.src = 'js/editor/sound-designer.js?v=' + Date.now();
-    s.onload = open;
-    s.onerror = () => deps.status('⚠ Sound Designer non caricato');
-    document.body.appendChild(s);
+    const loadScript = src => new Promise((resolve, reject) => {
+      if(document.querySelector('script[data-lk-src="' + src + '"], script[src^="' + src + '"]')) return resolve();
+      const s = document.createElement('script');
+      s.dataset.lkSrc = src;
+      s.src = src + '?v=' + Date.now();
+      s.onload = resolve;
+      s.onerror = reject;
+      document.body.appendChild(s);
+    });
+    Promise.resolve()
+      .then(() => window.LK_SOUND_DESIGNER_TEMPLATE ? null : loadScript('js/editor/sound-designer-template.js'))
+      .then(() => loadScript('js/editor/sound-designer.js'))
+      .then(open)
+      .catch(() => deps.status('⚠ Sound Designer non caricato'));
   }
 
   return Object.freeze({
