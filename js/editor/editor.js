@@ -126,6 +126,7 @@ let quickAudio = null;
 let toolbar = null;
 let sidePanels = null;
 let assetPanel = null;
+let outliner = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -856,7 +857,6 @@ function importProjectFile(file){
   reader.readAsText(file);
 }
 // ------------------------------------------------ outliner
-let sceneDragId = null;
 let assetDragRef = null;
 let viewportReplaceTarget = null;
 function acceptEditorFileDrag(e){
@@ -1081,94 +1081,11 @@ function collectAssets(){
 }
 
 function visibleEntities(){
-  return GAME.world.registry.filter(o => {
-    if(o.userData.editorType === 'player') return false;
-    if(ED.filter === 'added' && o.userData.builtin) return false;
-    if(ED.filter === 'builtin' && !o.userData.builtin) return false;
-    if(['mesh','light','effect'].includes(ED.filter) && o.userData.editorType !== ED.filter) return false;
-    if(ED.search && !(o.userData.editorName || '').toLowerCase().includes(ED.search)) return false;
-    return true;
-  });
+  return outliner ? outliner.visibleEntities() : [];
 }
 
 function refreshOutliner(){
-  const box = $('#lkOutliner');
-  box.innerHTML = '';
-  const items = visibleEntities();
-  const assignments = folderAssignments('scene');
-  const renderEntity = o => {
-    const id = o.userData.editorId;
-    const div = document.createElement('div');
-    div.className = 'lk-item' + (ED.selected === o ? ' sel' : '') + (o.visible ? '' : ' hidden-e');
-    div.dataset.id = id;
-    div.draggable = true;
-    const thumb = document.createElement('div');
-    thumb.className = 'lk-thumb';
-    if(thumbCache.has(id)){
-      const cached = thumbCache.get(id);
-      if(cached) thumb.style.backgroundImage = 'url(' + cached + ')';
-      else thumb.textContent = entityIcon(o);
-    } else {
-      thumb.textContent = entityIcon(o);
-      if(o.userData.editorType === 'mesh') queueThumb(o, thumb);
-    }
-    const name = document.createElement('span');
-    name.className = 'lk-name';
-    name.textContent = o.userData.editorName || id;
-    name.title = (o.userData.builtin ? '(originale) ' : '(aggiunto) ') + (o.userData.editorName || id);
-    const eye = document.createElement('button');
-    eye.className = 'lk-eye'; eye.textContent = o.visible ? '👁' : '—'; eye.title = 'Mostra/Nascondi';
-    eye.addEventListener('click', ev => { ev.stopPropagation(); toggleVisible(o); });
-    const del = document.createElement('button');
-    del.className = 'lk-del'; del.textContent = '×'; del.title = 'Elimina';
-    del.addEventListener('click', ev => { ev.stopPropagation(); requestDeleteEntity(o); });
-    div.append(thumb, name, eye, del);
-    div.addEventListener('dragstart', ev => {
-      sceneDragId = id;
-      ev.dataTransfer.setData('application/x-lotking-scene-object', id);
-      ev.dataTransfer.effectAllowed = 'move';
-    });
-    div.addEventListener('dragend', () => { sceneDragId = null; });
-    bindReplaceDropTarget(div, o);
-    div.addEventListener('click', () => selectObject(o));
-    div.addEventListener('dblclick', () => { selectObject(o); focusSelected(); });
-    div.addEventListener('contextmenu', ev => {
-      ev.preventDefault(); ev.stopPropagation();
-      selectObject(o);
-      openMenu(objectMenuItems(o, true), ev.clientX, ev.clientY);
-    });
-    return div;
-  };
-  const folders = folderList('scene');
-  const renderFolderTree = parent => {
-    folders.filter(f => (f.parent || null) === (parent || null)).forEach(folder => {
-      box.appendChild(makeFolderRow('scene', folder));
-      if(folder.open){
-        items.filter(o => assignments[o.userData.editorId] === folder.id).forEach(o => box.appendChild(renderEntity(o)));
-        renderFolderTree(folder.id);
-      }
-    });
-  };
-  renderFolderTree(null);
-  items.filter(o => !assignments[o.userData.editorId] || !folderById('scene', assignments[o.userData.editorId])).forEach(o => {
-    box.appendChild(renderEntity(o));
-  });
-  box.ondragover = e => {
-    if(Array.from(e.dataTransfer.types || []).includes('application/x-lotking-scene-object')){
-      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-    }
-  };
-  box.ondrop = e => {
-    const id = e.dataTransfer && e.dataTransfer.getData('application/x-lotking-scene-object');
-    if(id && e.target === box){ delete assignments[id]; writeFolderState(); refreshOutliner(); }
-  };
-  box.oncontextmenu = e => {
-    if(e.target.closest('.lk-item, .lk-folder-row')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    openMenu(scenePanelMenuItems(), e.clientX, e.clientY);
-  };
-  $('#lkStatusRight').textContent = items.length + ' oggetti';
+  if(outliner) outliner.refresh();
 }
 function assetMatchesSearch(item, q){
   if(!q) return true;
@@ -1419,6 +1336,26 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   selectObject,
   setLeftMode,
   setAssetDragRef: ref => { assetDragRef = ref; },
+});
+outliner = window.LK_EDITOR_OUTLINER && window.LK_EDITOR_OUTLINER.create({
+  GAME, ED, $,
+  thumbCache,
+  queueThumb,
+  entityIcon,
+  folderAssignments,
+  folderList,
+  makeFolderRow,
+  folderById,
+  writeFolderState,
+  toggleVisible,
+  requestDeleteEntity,
+  bindReplaceDropTarget,
+  selectObject,
+  focusSelected,
+  openMenu,
+  objectMenuItems,
+  scenePanelMenuItems,
+  setStatusRight: text => { $('#lkStatusRight').textContent = text; },
 });
 
 // ------------------------------------------------ selection
