@@ -43,6 +43,7 @@ The road ahead leads to **1.0.0**.
 - Extracted Player Blueprint exhaust source and 3D data widget controls into `js/editor/player-attachments-inspector.js`.
 - Extracted Player Blueprint driving tuning, vehicle model, and engine sound setup controls into `js/editor/player-setup-inspector.js`.
 - Extracted HUD / Radio TAB layout, preview, button, and layer controls into `js/editor/hud-inspector.js`.
+- Extracted Environment inspector controls into `js/editor/environment-inspector.js`, including sky, fog, procedural environment, sun bloom, lens flare, volumetric clouds, rain, and global light selectors.
 
 ---
 
