@@ -128,6 +128,8 @@ let sidePanels = null;
 let assetPanel = null;
 let outliner = null;
 let editorMenus = null;
+let inspectorUi = null;
+let materialEditor = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -1745,94 +1747,32 @@ function el(html){
   t.innerHTML = html.trim();
   return t.content.firstChild;
 }
-function section(title, open){
-  const s = el('<div class="lk-sec' + (open === false ? ' closed' : '') + '"><div class="lk-sec-h">' + title + '</div><div class="lk-sec-b"></div></div>');
-  s.querySelector('.lk-sec-h').addEventListener('click', () => s.classList.toggle('closed'));
-  return {root: s, body: s.querySelector('.lk-sec-b')};
-}
-function numRow(label, value, step, oninput){
-  const r = el('<div class="lk-row"><label>' + label + '</label><input type="number" step="' + (step || .1) + '"></div>');
-  const i = r.querySelector('input');
-  i.value = (+value).toFixed(3).replace(/\.?0+$/, '') || 0;
-  i.addEventListener('input', () => oninput(parseFloat(i.value) || 0));
-  return {root: r, input: i};
-}
-function sliderRow(label, value, min, max, step, oninput, fmt){
-  const r = el('<div class="lk-row lk-slider"><label>' + label + '</label><input type="range"><output></output></div>');
-  const i = r.querySelector('input'), o = r.querySelector('output');
-  i.min = min; i.max = max; i.step = step; i.value = value;
-  const show = v => o.textContent = fmt ? fmt(v) : (+v).toFixed(step < .01 ? 4 : 2).replace(/\.?0+$/, '');
-  show(value);
-  i.addEventListener('input', () => { const v = parseFloat(i.value); show(v); oninput(v); });
-  return {root: r, input: i};
-}
-function colorRow(label, hex, oninput){
-  const r = el('<div class="lk-row"><label>' + label + '</label><input type="color"></div>');
-  const i = r.querySelector('input');
-  i.value = '#' + ('000000' + (hex >>> 0).toString(16)).slice(-6);
-  i.addEventListener('input', () => oninput(parseInt(i.value.slice(1), 16)));
-  return {root: r};
-}
-function checkRow(label, checked, oninput){
-  const r = el('<div class="lk-row lk-check"><label>' + label + '</label><input type="checkbox"></div>');
-  const i = r.querySelector('input');
-  i.checked = !!checked;
-  i.addEventListener('change', () => oninput(i.checked));
-  return {root: r};
-}
-function btnRow(defs){
-  const r = el('<div class="lk-btnrow"></div>');
-  for(const d of defs){
-    const b = el('<button' + (d.danger ? ' class="danger"' : '') + '>' + d.label + '</button>');
-    b.addEventListener('click', d.action);
-    r.appendChild(b);
-  }
-  return r;
-}
-function getFirstMaterial(o){
-  let mat = null;
-  o.traverse(n => {
-    if(mat || !n.isMesh || !n.material) return;
-    const mats = Array.isArray(n.material) ? n.material : [n.material];
-    mat = mats.find(m => m && (m.color || m.roughness != null || m.metalness != null)) || mats[0];
-  });
-  return mat;
-}
-function selectRow(label, value, options, oninput){
-  const r = el('<div class="lk-row"><label>' + label + '</label><select></select></div>');
-  const s = r.querySelector('select');
-  for(const opt of options){
-    const o = el('<option value="' + opt.value + '">' + opt.label + '</option>');
-    s.appendChild(o);
-  }
-  s.value = value;
-  s.addEventListener('change', () => oninput(s.value));
-  return {root:r, input:s};
-}
-function applyMaterialPatch(o, patch){
-  STORE.applyMatProps(o, patch);
-  thumbCache.delete(o.userData.editorId);
-  markDirty();
-  refreshOutliner();
-}
-function textureDrop(label, desc, onFile){
-  const d = el('<div class="lk-drop" tabindex="0"><strong>' + label + '</strong><span>' + desc + '</span></div>');
-  const input = el('<input type="file" accept="image/*" style="display:none">');
-  const pick = f => { if(f) onFile(f); };
-  d.appendChild(input);
-  d.addEventListener('click', () => input.click());
-  d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('drag'); });
-  d.addEventListener('dragleave', () => d.classList.remove('drag'));
-  d.addEventListener('drop', e => {
-    e.preventDefault(); d.classList.remove('drag');
-    pick(e.dataTransfer.files && e.dataTransfer.files[0]);
-  });
-  input.addEventListener('change', e => {
-    pick(e.target.files && e.target.files[0]);
-    e.target.value = '';
-  });
-  return d;
-}
+inspectorUi = window.LK_EDITOR_INSPECTOR_UI && window.LK_EDITOR_INSPECTOR_UI.create({el});
+function section(title, open){ return inspectorUi.section(title, open); }
+function numRow(label, value, step, oninput){ return inspectorUi.numRow(label, value, step, oninput); }
+function sliderRow(label, value, min, max, step, oninput, fmt){ return inspectorUi.sliderRow(label, value, min, max, step, oninput, fmt); }
+function colorRow(label, hex, oninput){ return inspectorUi.colorRow(label, hex, oninput); }
+function checkRow(label, checked, oninput){ return inspectorUi.checkRow(label, checked, oninput); }
+function btnRow(defs){ return inspectorUi.btnRow(defs); }
+function selectRow(label, value, options, oninput){ return inspectorUi.selectRow(label, value, options, oninput); }
+function textureDrop(label, desc, onFile){ return inspectorUi.textureDrop(label, desc, onFile); }
+materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_EDITOR.create({
+  STORE,
+  thumbCache,
+  markDirty,
+  refreshOutliner,
+  buildInspector,
+  readFileAsDataURL,
+  section,
+  selectRow,
+  colorRow,
+  sliderRow,
+  textureDrop,
+  btnRow,
+  el,
+});
+function getFirstMaterial(o){ return materialEditor.getFirstMaterial(o); }
+function applyMaterialPatch(o, patch){ return materialEditor.applyMaterialPatch(o, patch); }
 function musicLibrarySection(title, api){
   const s = section(title, false);
   if(!api || !api.getTracks){
@@ -1908,51 +1848,7 @@ function musicLibrarySection(title, api){
   render();
   return s.root;
 }
-function buildMaterialEditor(box, o){
-  if(o.userData.editorType !== 'mesh') return;
-  const mat = getFirstMaterial(o);
-  if(!mat) return;
-  const sm = section('EDIT MATERIAL');
-  sm.body.appendChild(el('<div class="lk-hint">Modifica il materiale delle mesh selezionate. Texture: trascina PNG/JPG negli slot oppure clicca lo slot.</div>'));
-  const preset = selectRow('Materiale', 'custom', [
-    {value:'custom', label:'Custom'},
-    {value:'matte', label:'Matte paint'},
-    {value:'plastic', label:'Plastic'},
-    {value:'metal', label:'Metal'},
-    {value:'glass', label:'Glass / transparent'},
-    {value:'emissive', label:'Emissive glow'},
-  ], v => {
-    const presets = {
-      matte: {materialKind:'standard', roughness:.92, metalness:0, opacity:1, transparent:false, emissiveIntensity:0},
-      plastic: {materialKind:'standard', roughness:.45, metalness:.05, opacity:1, transparent:false, emissiveIntensity:0},
-      metal: {materialKind:'standard', roughness:.22, metalness:1, opacity:1, transparent:false, emissiveIntensity:0},
-      glass: {materialKind:'standard', roughness:.04, metalness:0, opacity:.38, transparent:true, emissiveIntensity:0},
-      emissive: {materialKind:'standard', roughness:.35, metalness:0, opacity:1, transparent:false, emissiveIntensity:1.6},
-    };
-    if(presets[v]) applyMaterialPatch(o, presets[v]);
-    buildInspector();
-  });
-  sm.body.appendChild(preset.root);
-  sm.body.appendChild(colorRow('Base color', mat.color ? mat.color.getHex() : 0xffffff, v => applyMaterialPatch(o, {color:v})).root);
-  sm.body.appendChild(colorRow('Tint glow', mat.emissive ? mat.emissive.getHex() : 0x000000, v => applyMaterialPatch(o, {emissive:v})).root);
-  sm.body.appendChild(sliderRow('Tint power', mat.emissiveIntensity != null ? mat.emissiveIntensity : 0, 0, 3, .05, v => applyMaterialPatch(o, {emissiveIntensity:v})).root);
-  sm.body.appendChild(sliderRow('Roughness', mat.roughness != null ? mat.roughness : .7, 0, 1, .01, v => applyMaterialPatch(o, {roughness:v})).root);
-  sm.body.appendChild(sliderRow('Metallic', mat.metalness != null ? mat.metalness : 0, 0, 1, .01, v => applyMaterialPatch(o, {metalness:v})).root);
-  sm.body.appendChild(sliderRow('Opacity', mat.opacity != null ? mat.opacity : 1, .05, 1, .01, v => applyMaterialPatch(o, {opacity:v, transparent:v < 1})).root);
-  sm.body.appendChild(sliderRow('Normal str.', mat.normalScale ? mat.normalScale.x : 1, 0, 2, .05, v => applyMaterialPatch(o, {normalScale:v})).root);
-  sm.body.appendChild(textureDrop('Base texture', 'Albedo/base color map. Accetta immagini PNG/JPG/WebP.', f => {
-    readFileAsDataURL(f).then(src => applyMaterialPatch(o, {mapSrc:src}));
-  }));
-  sm.body.appendChild(textureDrop('Normal map', 'Mappa normale tangent-space. Usa Normal str. per dosarne l\'effetto.', f => {
-    readFileAsDataURL(f).then(src => applyMaterialPatch(o, {normalMapSrc:src}));
-  }));
-  sm.body.appendChild(btnRow([
-    {label:'Reset maps', action:() => applyMaterialPatch(o, {mapSrc:null, normalMapSrc:null})},
-    {label:'Shadows on', action:() => applyMaterialPatch(o, {castShadow:true})},
-    {label:'Shadows off', action:() => applyMaterialPatch(o, {castShadow:false})},
-  ]));
-  box.appendChild(sm.root);
-}
+function buildMaterialEditor(box, o){ return materialEditor.build(box, o); }
 
 const tf = {inputs: null};   // live transform inputs for sync during gizmo drag
 function syncTransformFields(){
