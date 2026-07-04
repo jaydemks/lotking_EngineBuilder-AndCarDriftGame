@@ -195,7 +195,90 @@ function create(deps){
     })).filter(item => visible(item, q));
   }
 
-  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel, importedItems, levelItems, soundSetItems});
+  function blueprintItems(q){
+    const STORE = deps.STORE;
+    const items = [];
+    if(STORE.playerBlueprints){
+      const basePlayer = STORE.playerBlueprints.default() || deps.currentPlayerBlueprint();
+      items.push({
+        kind:'player-blueprint', ref:'blueprint:base', id:'base',
+        name:'Player Blueprint Base',
+        sub:'special · required · used by new levels · controller index 0',
+        source:'Project default', icon:'🚗', filterType:'blueprint', active:true, draggable:false,
+        defaultAction:() => deps.applyPlayerBlueprintAsset(basePlayer, {applySpawn:false}),
+        actions:[
+          {label:'Apply', title:'Apply to scene player', fn:() => deps.applyPlayerBlueprintAsset(basePlayer, {applySpawn:false})},
+          {label:'Copy', title:'Copy current scene player as a new blueprint asset', fn:deps.copyPlayerBlueprintAsset},
+        ],
+      });
+      STORE.playerBlueprints.list().forEach(asset => items.push({
+        kind:'player-blueprint', ref:'blueprint:' + asset.id, id:asset.id,
+        name:asset.name || 'Player Blueprint Copy',
+        sub:'copied blueprint · controller index ' + (asset.controllerIndex == null ? 0 : asset.controllerIndex),
+        source:asset.source && asset.source.levelName || 'Copied blueprint',
+        icon:'🚙', filterType:'blueprint', draggable:false,
+        defaultAction:() => deps.applyPlayerBlueprintAsset(asset.player, {applySpawn:false}),
+        actions:[
+          {label:'Apply', title:'Apply to scene player', fn:() => deps.applyPlayerBlueprintAsset(asset.player, {applySpawn:false})},
+          {label:'★', title:'Promote to Base blueprint', fn:() => deps.setDefaultPlayerBlueprintAsset(asset)},
+          {label:'×', title:'Delete copied blueprint', fn:() => deps.deletePlayerBlueprintAsset(asset)},
+        ],
+      }));
+    }
+    return items.filter(item => visible(item, q));
+  }
+
+  function sceneItems(q){
+    return deps.collectAssets().map(a => ({
+      kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name,
+      filterType:a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'glb' ? 'glb' : 'scene',
+      type:a.type, sub:a.type + ' · ' + a.instances.length + ' instances · ' + a.source,
+      source:a.source, icon:deps.entityIcon(a.sample), thumbObject:a.sample,
+      draggable:['mesh','light','effect'].includes(a.type),
+      defaultAction:() => { deps.selectObject(a.instances[0]); deps.setLeftMode('scene'); },
+      actions:[
+        {label:'Select', title:'Select the first instance in scene', fn:() => { deps.selectObject(a.instances[0]); deps.setLeftMode('scene'); }},
+        {label:'+', title:'Duplicate a new instance near the editor camera', fn:() => deps.placeAssetRef({kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name, type:a.type, raw:a}, deps.spawnPointAhead())},
+      ],
+    })).filter(item => visible(item, q));
+  }
+
+  function refresh(box, q){
+    preparePanel(box);
+    q = q || '';
+    const allFolderedItems = [];
+
+    const blueprints = blueprintItems(q);
+    addGroup(box, 'PLAYER BLUEPRINTS', blueprints);
+    allFolderedItems.push(...blueprints);
+
+    const sounds = soundSetItems(q);
+    addGroup(box, 'ENGINE SOUND SETS', sounds);
+    allFolderedItems.push(...sounds);
+
+    const levels = levelItems(q);
+    addGroup(box, 'LEVELS', levels);
+    allFolderedItems.push(...levels);
+
+    const imported = importedItems(q);
+    allFolderedItems.push(...imported);
+
+    const scene = sceneItems(q);
+    allFolderedItems.push(...scene);
+
+    addGroup(box, 'FOLDERS / ALL ASSETS', allFolderedItems, true);
+    finishPanel(box, {
+      blueprints: blueprints.length,
+      levels: levels.length,
+      imported: imported.length,
+      scene: scene.length,
+    });
+  }
+
+  return Object.freeze({
+    button, makeCard, visible, addGroup, preparePanel, finishPanel,
+    importedItems, levelItems, soundSetItems, blueprintItems, sceneItems, refresh,
+  });
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});

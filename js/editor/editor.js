@@ -1187,9 +1187,6 @@ function assetFilterKey(item){
   if(item.kind === 'scene') return 'scene';
   return 'other';
 }
-function assetVisible(item, q){
-  return assetPanel.visible(item, q);
-}
 function selectAssetItem(ref){
   ED.selectedAsset = ref;
   root.querySelectorAll('#lkAssetsPanel .lk-asset-item').forEach(item => {
@@ -1369,79 +1366,9 @@ function requestDeleteAssetInstances(asset){
     status('Deleted ' + removable.length + ' instance(s)');
   });
 }
-function assetButton(label, title, fn){ return assetPanel.button(label, title, fn); }
-function makeAssetCard(item){ return assetPanel.makeCard(item); }
-function addAssetGroup(box, title, items, folderAware){
-  return assetPanel.addGroup(box, title, items, folderAware);
-}
 function refreshAssetsPanel(){
   const box = $('#lkAssetsPanel');
-  assetPanel.preparePanel(box);
-  const q = ED.search || '';
-  const blueprintItems = [];
-  if(STORE.playerBlueprints){
-    const basePlayer = STORE.playerBlueprints.default() || currentPlayerBlueprint();
-    blueprintItems.push({
-      kind:'player-blueprint', ref:'blueprint:base', id:'base',
-      name:'Player Blueprint Base',
-      sub:'special · required · used by new levels · controller index 0',
-      source:'Project default', icon:'🚗', filterType:'blueprint', active:true, draggable:false,
-      defaultAction:() => applyPlayerBlueprintAsset(basePlayer, {applySpawn:false}),
-      actions:[
-        {label:'Apply', title:'Apply to scene player', fn:() => applyPlayerBlueprintAsset(basePlayer, {applySpawn:false})},
-        {label:'Copy', title:'Copy current scene player as a new blueprint asset', fn:copyPlayerBlueprintAsset},
-      ],
-    });
-    STORE.playerBlueprints.list().forEach(asset => blueprintItems.push({
-      kind:'player-blueprint', ref:'blueprint:' + asset.id, id:asset.id,
-      name:asset.name || 'Player Blueprint Copy',
-      sub:'copied blueprint · controller index ' + (asset.controllerIndex == null ? 0 : asset.controllerIndex),
-      source:asset.source && asset.source.levelName || 'Copied blueprint',
-      icon:'🚙', filterType:'blueprint', draggable:false,
-      defaultAction:() => applyPlayerBlueprintAsset(asset.player, {applySpawn:false}),
-      actions:[
-        {label:'Apply', title:'Apply to scene player', fn:() => applyPlayerBlueprintAsset(asset.player, {applySpawn:false})},
-        {label:'★', title:'Promote to Base blueprint', fn:() => setDefaultPlayerBlueprintAsset(asset)},
-        {label:'×', title:'Delete copied blueprint', fn:() => deletePlayerBlueprintAsset(asset)},
-      ],
-    }));
-  }
-  const visibleBlueprintItems = blueprintItems.filter(item => assetVisible(item, q));
-  const allFolderedItems = [];
-  addAssetGroup(box, 'PLAYER BLUEPRINTS', visibleBlueprintItems);
-  allFolderedItems.push(...visibleBlueprintItems);
-
-  const soundSetItems = assetPanel.soundSetItems(q);
-  addAssetGroup(box, 'ENGINE SOUND SETS', soundSetItems);
-  allFolderedItems.push(...soundSetItems);
-
-  const levelItems = assetPanel.levelItems(q);
-  addAssetGroup(box, 'LEVELS', levelItems);
-  allFolderedItems.push(...levelItems);
-
-  const importedItems = assetPanel.importedItems(q);
-  allFolderedItems.push(...importedItems);
-
-  const sceneItems = collectAssets().map(a => ({
-    kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name,
-    filterType:a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'glb' ? 'glb' : 'scene',
-    type:a.type, sub:a.type + ' · ' + a.instances.length + ' instances · ' + a.source,
-    source:a.source, icon:entityIcon(a.sample), thumbObject:a.sample,
-    draggable:['mesh','light','effect'].includes(a.type),
-    defaultAction:() => { selectObject(a.instances[0]); setLeftMode('scene'); },
-    actions:[
-      {label:'Select', title:'Select the first instance in scene', fn:() => { selectObject(a.instances[0]); setLeftMode('scene'); }},
-      {label:'+', title:'Duplicate a new instance near the editor camera', fn:() => placeAssetRef({kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name, type:a.type, raw:a}, spawnPointAhead())},
-    ],
-  })).filter(item => assetVisible(item, q));
-  allFolderedItems.push(...sceneItems);
-  addAssetGroup(box, 'FOLDERS / ALL ASSETS', allFolderedItems, true);
-  assetPanel.finishPanel(box, {
-    blueprints: visibleBlueprintItems.length,
-    levels: levelItems.length,
-    imported: importedItems.length,
-    scene: sceneItems.length,
-  });
+  assetPanel.refresh(box, ED.search || '');
 }
 
 // ------------------------------------------------ thumbnails (lazy, cached)
@@ -1482,6 +1409,15 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   markDirty,
   status,
   confirmEditorAction,
+  currentPlayerBlueprint,
+  applyPlayerBlueprintAsset,
+  copyPlayerBlueprintAsset,
+  setDefaultPlayerBlueprintAsset,
+  deletePlayerBlueprintAsset,
+  collectAssets,
+  entityIcon,
+  selectObject,
+  setLeftMode,
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 

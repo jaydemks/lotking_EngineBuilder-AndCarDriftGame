@@ -31,6 +31,7 @@ The road ahead leads to **1.0.0**.
 - Moved imported GLB asset item construction into `js/editor/asset-panel.js`.
 - Moved level asset item construction into `js/editor/asset-panel.js`.
 - Moved engine sound set asset item construction into `js/editor/asset-panel.js` while preserving Sound Designer open/assign/duplicate/delete actions.
+- Moved blueprint asset item construction, scene asset item construction, and asset dock refresh orchestration into `js/editor/asset-panel.js`.
 
 ---
 
