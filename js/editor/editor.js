@@ -1456,19 +1456,7 @@ function refreshAssetsPanel(){
   addAssetGroup(box, 'LEVELS', levelItems);
   allFolderedItems.push(...levelItems);
 
-  const importedItems = assetLibraryLoad().map(asset => {
-    const mb = asset.size ? ' · ' + (asset.size / 1e6).toFixed(1) + ' MB' : '';
-    return {
-      kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.name || 'Imported Asset',
-      sub:'imported glb · ' + (asset.source || asset.key) + mb,
-      source:asset.source || asset.key, icon:'📦', draggable:true,
-      defaultAction:() => placeAssetRef({kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.name, raw:asset}, spawnPointAhead()),
-      actions:[
-        {label:'Place', title:'Place this asset in front of the editor camera', fn:() => placeAssetRef({kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.name, raw:asset}, spawnPointAhead())},
-        {label:'×', title:'Remove from imported asset library', fn:() => deleteImportedAsset(asset)},
-      ],
-    };
-  }).filter(item => assetVisible(item, q));
+  const importedItems = assetPanel.importedItems(q);
   allFolderedItems.push(...importedItems);
 
   const sceneItems = collectAssets().map(a => ({
@@ -1516,6 +1504,10 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   refreshAssetsPanel,
   assetsPanelMenuItems,
   setStatusRight: text => { $('#lkStatusRight').textContent = text; },
+  assetLibraryLoad,
+  placeAssetRef,
+  spawnPointAhead,
+  deleteImportedAsset,
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 

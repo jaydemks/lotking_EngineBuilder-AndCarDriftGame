@@ -132,7 +132,25 @@ function create(deps){
     );
   }
 
-  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel});
+  function importedItems(q){
+    return deps.assetLibraryLoad().map(asset => {
+      const mb = asset.size ? ' · ' + (asset.size / 1e6).toFixed(1) + ' MB' : '';
+      const item = {
+        kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.name || 'Imported Asset',
+        sub:'imported glb · ' + (asset.source || asset.key) + mb,
+        source:asset.source || asset.key, icon:'📦', draggable:true,
+      };
+      const refItem = () => ({kind:'imported-glb', ref:item.ref, id:asset.id, name:asset.name, raw:asset});
+      item.defaultAction = () => deps.placeAssetRef(refItem(), deps.spawnPointAhead());
+      item.actions = [
+        {label:'Place', title:'Place this asset in front of the editor camera', fn:() => deps.placeAssetRef(refItem(), deps.spawnPointAhead())},
+        {label:'×', title:'Remove from imported asset library', fn:() => deps.deleteImportedAsset(asset)},
+      ];
+      return item;
+    }).filter(item => visible(item, q));
+  }
+
+  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel, importedItems});
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});
