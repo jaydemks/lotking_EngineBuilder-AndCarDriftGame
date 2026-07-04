@@ -57,6 +57,7 @@ The road ahead leads to **1.0.0**.
 - Extracted viewport/editor visual helper objects into `js/editor/visual-helpers.js`.
 - Extracted inspector routing and player inspector shell into `js/editor/inspector-controller.js`.
 - Extracted editor enter/exit, play preview, frame loop and preview camera sync into `js/editor/editor-runtime.js`.
+- Extracted default editor state, core chrome helpers and canvas viewport rect override into `js/editor/editor-core.js`.
 
 ---
 

@@ -18,39 +18,10 @@ const renderer = GAME.core.renderer;
 const gameCam = GAME.core.camera;
 const canvas = GAME.core.canvas;
 
-// ------------------------------------------------ editor state
-const ED = {
-  active: false,
-  tool: 'translate',          // 'select' | 'translate' | 'rotate' | 'scale'
-  space: 'world',             // default editor convention: Z-up display; engine remains Three.js Y-up internally
-  snap: false,
-  snapMove: 1, snapRot: 15, snapScale: .1,
-  gridOn: true,
-  camHelperOn: true,
-  pipOn: true,
-  pipW: 840,
-  pipPos: null,
-  assetsH: 220,
-  quickAudioPos: null,
-  quickMusicIndex: -1,
-  selected: null,             // Object3D from registry
-  special: null,              // 'env' | null  (pseudo-selections)
-  dirty: false,
-  viewMode: 'grid',           // outliner: 'grid' | 'list'
-  search: '',
-  filter: 'all',
-  leftMode: 'scene',
-  assetFilters: {blueprint:true, sound:true, levels:true, glb:true, scene:true, texture:true, light:true, effect:true, other:true},
-  selectedAsset: null,
-  linkParent: null,
-  trackId: 'parking-lot',
-  trackName: 'Parking Lot',
-  playPreview: false,
-};
+const ED = window.LK_EDITOR_CORE.createState();
 
 // ------------------------------------------------ editor camera + controls
-const camE = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, .1, 2000);
-camE.position.set(18, 14, 70);
+const camE = window.LK_EDITOR_CORE.createCamera(THREE);
 let editorUiReady = false;
 let floatingLayout = null;
 addEventListener('resize', () => {
@@ -66,44 +37,23 @@ addEventListener('resize', () => {
 function restoreFloatingPanels(){ if(editorUiReady && floatingLayout) floatingLayout.restoreFloatingPanels(); }
 
 // ------------------------------------------------ recovered editor chrome + runtime wiring
-const root = document.createElement('div');
-root.id = 'lkEditor';
-root.innerHTML = window.LK_EDITOR_TEMPLATE.create();
-document.body.appendChild(root);
-const $ = sel => root.querySelector(sel);
-
-const helperGroup = new THREE.Group();
-helperGroup.name = 'LK Editor Helpers';
-const grid = new THREE.GridHelper(240, 48, 0x4b5568, 0x273142);
-grid.material.transparent = true;
-grid.material.opacity = .48;
-const axes = new THREE.AxesHelper(8);
-const gizmoProxy = new THREE.Group();
-const zUpGizmoQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const editorChrome = window.LK_EDITOR_CORE.createChrome({THREE, template: window.LK_EDITOR_TEMPLATE.create()});
+const root = editorChrome.root;
+const $ = editorChrome.$;
+const helperGroup = editorChrome.helperGroup;
+const grid = editorChrome.grid;
+const axes = editorChrome.axes;
+const gizmoProxy = editorChrome.gizmoProxy;
+const zUpGizmoQuat = editorChrome.zUpGizmoQuat;
 let gizmoUsingZUpProxy = false;
-const camProxy = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, .1, 1000);
+const camProxy = editorChrome.camProxy;
 let orbit = null;
 let gizmo = null;
 let camHelper = null;
-const camRigLine = new THREE.Line(
-  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
-  new THREE.LineBasicMaterial({color:0x9db4ff, transparent:true, opacity:.65})
-);
+const camRigLine = editorChrome.camRigLine;
 let gizmoPointerActive = false;
 let gizmoSuppressSceneClick = false;
-const fly = {rmb:false, moved:0, lastX:0, lastY:0, speed:14, keys:{}};
-const originalCanvasRect = canvas.getBoundingClientRect.bind(canvas);
-canvas.getBoundingClientRect = function(){
-  if(ED && ED.active && !ED.playPreview){
-    const r = editorViewportRect();
-    return {
-      x: r.x, y: r.y, left: r.x, top: r.y,
-      width: r.w, height: r.h,
-      right: r.x + r.w, bottom: r.y + r.h,
-    };
-  }
-  return originalCanvasRect();
-};
+const fly = editorChrome.fly;
 
 let statusUi = null;
 let dialogUi = null;
@@ -169,6 +119,7 @@ function panelWidth(side){ return floatingLayout ? floatingLayout.panelWidth(sid
 function editorViewportRect(){ return floatingLayout ? floatingLayout.editorViewportRect() : {x:panelWidth('left') + 10, y:46, w:Math.max(220, innerWidth - panelWidth('left') - panelWidth('right') - 20), h:Math.max(160, innerHeight - 46 - 40 - ED.assetsH)}; }
 function clampPanelPos(pos, w, h){ return floatingLayout ? floatingLayout.clampPanelPos(pos, w, h) : pos; }
 function clearHoverPickHelper(){ if(viewportPicking) viewportPicking.clearHover(); }
+window.LK_EDITOR_CORE.installCanvasViewportRectOverride(canvas, ED, editorViewportRect);
 visualHelpers = window.LK_EDITOR_VISUAL_HELPERS && window.LK_EDITOR_VISUAL_HELPERS.create({
   THREE, ED, helperGroup,
   setViewportReplaceTarget: value => { viewportReplaceTarget = value; },
