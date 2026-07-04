@@ -56,6 +56,7 @@ The road ahead leads to **1.0.0**.
 - Extracted toolbar/gizmo/TransformControls helpers into `js/editor/gizmo-controls.js`.
 - Extracted viewport/editor visual helper objects into `js/editor/visual-helpers.js`.
 - Extracted inspector routing and player inspector shell into `js/editor/inspector-controller.js`.
+- Extracted editor enter/exit, play preview, frame loop and preview camera sync into `js/editor/editor-runtime.js`.
 
 ---
 

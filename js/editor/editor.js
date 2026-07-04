@@ -134,6 +134,7 @@ let materialEditor = null;
 let musicLibraryPanel = null;
 let objectInspector = null;
 let inspectorController = null;
+let editorRuntime = null;
 let selectionManager = null;
 let viewportEvents = null;
 let playerCameraInspector = null;
@@ -915,274 +916,60 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
 function buildInspector(){ return inspectorController.buildInspector(); }
 function openSoundDesigner(setId){ return inspectorController.openSoundDesigner(setId); }
 
-// ------------------------------------------------ enter / exit
-function enterEditor(){
-  if(ED.active) return;
-  loadTrackMeta();
-  ensureControls();
-  ED.active = true;
-  GAME.state.editorActive = true;
-  GAME.hooks.frameOverride = editorFrame;
-  root.classList.add('active');
-  document.getElementById('overlay').classList.add('hidden');
-  document.getElementById('hud').style.display = 'none';
-
-  // place the car visual at its physics position (before first start it sits at origin)
-  const car = GAME.player.car;
-  car.position.copy(GAME.player.physics.pos);
-  car.rotation.y = GAME.player.physics.heading;
-
-  // place the game camera behind the car so the frustum helper means something
-  if(!GAME.state.started){
-    const h = GAME.player.physics.heading;
-    const off = new THREE.Vector3(Math.sin(-h + Math.PI) * Math.cos(.32), Math.sin(.32), Math.cos(-h + Math.PI) * Math.cos(.32)).multiplyScalar(9);
-    gameCam.position.copy(car.position).add(off);
-    gameCam.lookAt(car.position.x, car.position.y + 1.1, car.position.z);
-  }
-
-  scene.add(helperGroup);
-  helperGroup.add(grid, axes, gizmoProxy);
-  const rigHelper = ensureCameraRigHelper();
-  if(!camHelper){
-    camHelper = new THREE.CameraHelper(camProxy);
-    camHelper.visible = ED.camHelperOn;
-  }
-  helperGroup.add(camHelper, rigHelper, camRigLine);
-  scene.add(gizmo);
-  $('#lkSpace').textContent = spaceLabel();
-  updateEditorAxesConvention();
-  orbit.enabled = true;
-  orbit.target.copy(car.position).setY(1);
-  camE.position.copy(car.position).add(new THREE.Vector3(12, 9, 14));
-  camE.lookAt(orbit.target);
-
-  setTool(ED.tool);
-  if(GAME.systems && GAME.systems.menuMusic && GAME.systems.menuMusic.fadeOut){
-    GAME.systems.menuMusic.fadeOut(2400).then(syncQuickAudio);
-  }
-  syncQuickAudio();
-  $('#lkAssetsPanel').className = ED.viewMode;
-  if(GAME.player.updateLights) GAME.player.updateLights();
-  if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
-  if(GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
-  refreshOutliner();
-  refreshAssetsPanel();
-  buildInspector();
-  if(ED.special === 'hud' && GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(true);
-  status('Editor active');
-}
-
-function setPlayPreview(on){
-  ED.playPreview = !!on;
-  if(ED.playPreview) clearHoverPickHelper();
-  root.classList.toggle('play-preview', ED.playPreview);
-  const btn = $('#lkPlay');
-  if(btn) btn.textContent = ED.playPreview ? '■ STOP' : '▶ PREVIEW';
-  $('#lkPipFrame').classList.remove('on');
-  if(gizmo) gizmo.visible = !ED.playPreview;
-  if(orbit) orbit.enabled = ED.active && !ED.playPreview;
-}
-
-function startPlayPreview(){
-  if(!saveScene()) return;
-  if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview();
-  setPlayPreview(true);
-  closeMenu();
-  status('Play preview running — Esc to stop');
-}
-
-function stopPlayPreview(){
-  if(GAME.actions.stopEditorPreview) GAME.actions.stopEditorPreview();
-  setPlayPreview(false);
-  if(orbit){
-    orbit.enabled = true;
-    orbit.target.copy(GAME.player.car.position).setY(1);
-  }
-  if(gizmo) gizmo.visible = true;
-  status('Play preview stopped');
-}
-
-function exitEditor(toPlay){
-  if(!ED.active) return;
-  if(ED.playPreview) stopPlayPreview();
-  ED.active = false;
-  GAME.state.editorActive = false;
-  GAME.hooks.frameOverride = null;
-  if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
-  if(GAME.player.updateLights) GAME.player.updateLights();
-  if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
-  root.classList.remove('active');
-  document.body.classList.remove('editor-hud-hidden');
-  const hudToggle = document.getElementById('videoEditorHud');
-  if(hudToggle) hudToggle.checked = true;
-  $('#lkPipFrame').classList.remove('on');
-  closeMenu();
-  clearHoverPickHelper();
-  clearReplaceDropHelper();
-  if(gizmo){ gizmoUsingZUpProxy = false; gizmo.detach(); }
-  scene.remove(gizmo);
-  helperGroup.remove(grid, axes, gizmoProxy);
-  if(camHelper) helperGroup.remove(camHelper);
-  const rigHelper = getCameraRigHelper();
-  if(rigHelper) helperGroup.remove(rigHelper);
-  if(camRigLine) helperGroup.remove(camRigLine);
-  scene.remove(helperGroup);
-  if(orbit) orbit.enabled = false;
-
-  document.getElementById('overlay').classList.remove('hidden');
-}
-
-// ------------------------------------------------ editor frame loop
-const _clock = {t: performance.now()};
-function editorFrame(dt){
-  if(ED.playPreview){
-    if(GAME.actions.stepGameplayPreview) GAME.actions.stepGameplayPreview(dt);
-    helperGroup.visible = false;
-    if(gizmo) gizmo.visible = false;
-    $('#lkPipFrame').classList.remove('on');
-    const viewRect = editorViewportRect();
-    const glRect = {x:viewRect.x, y:innerHeight - viewRect.y - viewRect.h, w:viewRect.w, h:viewRect.h};
-    if(GAME.actions.renderGameplayCameraRect) GAME.actions.renderGameplayCameraRect(glRect);
-    else {
-      renderer.setScissorTest(true);
-      renderer.setViewport(glRect.x, glRect.y, glRect.w, glRect.h);
-      renderer.setScissor(glRect.x, glRect.y, glRect.w, glRect.h);
-      renderer.render(scene, gameCam);
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, innerWidth, innerHeight);
-    }
-    helperGroup.visible = true;
-    if(gizmo) gizmo.visible = false;
-    return;
-  }
-  updateEditorControls(dt);
-  const viewRect = editorViewportRect();
-  camE.aspect = viewRect.w / viewRect.h;
-  camE.updateProjectionMatrix();
-
-  // animate effects in the editor too
-  for(const h of GAME.hooks.frame) h(dt);
-  if(GAME.player.updateExhaust) GAME.player.updateExhaust(dt);
-  if(GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
-
-  syncGamePreviewCamera();
-
-  // player camera proxy + helper
-  camProxy.position.copy(gameCam.position);
-  camProxy.quaternion.copy(gameCam.quaternion);
-  camProxy.fov = gameCam.fov;
-  camProxy.aspect = gameCam.aspect;
-  camProxy.far = Math.min(30, GAME.player.cameraCfg.far);
-  camProxy.updateProjectionMatrix();
-  camProxy.updateMatrixWorld(true);
-  if(camHelper && camHelper.visible) camHelper.update();
-  updateCameraRigHelper();
-  if(camRigLine){
-    camRigLine.visible = ED.camHelperOn;
-    const pts = camRigLine.geometry.attributes.position;
-    pts.setXYZ(0, gameCam.position.x, gameCam.position.y, gameCam.position.z);
-    pts.setXYZ(1, GAME.player.car.position.x, GAME.player.car.position.y + 1.1, GAME.player.car.position.z);
-    pts.needsUpdate = true;
-  }
-
-  viewportPicking.updateHelpers();
-  updateSelectionAndDropHelpers();
-
-  processThumbQueue();
-
-  renderer.setScissorTest(true);
-  renderer.setViewport(viewRect.x, innerHeight - viewRect.y - viewRect.h, viewRect.w, viewRect.h);
-  renderer.setScissor(viewRect.x, innerHeight - viewRect.y - viewRect.h, viewRect.w, viewRect.h);
-  renderer.render(scene, camE);
-  renderer.setScissorTest(false);
-  renderer.setViewport(0, 0, innerWidth, innerHeight);
-
-  // picture-in-picture: player camera view
-  if(ED.pipOn && isPlayerCameraSelection()){
-    const rightW = panelWidth('right');
-    const usableW = Math.max(320, innerWidth - panelWidth('left') - rightW - 28);
-    const aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (gameCam.aspect || innerWidth / innerHeight);
-    const w = Math.round(Math.min(ED.pipW, usableW * .9));
-    const hgt = Math.round(w / aspect);
-    const defaultPos = {
-      x: innerWidth - rightW - w - 14,
-      y: innerHeight - 40 - hgt - 14,
-    };
-    const pos = clampPanelPos(ED.pipPos || defaultPos, w, hgt);
-    const x = pos.x;
-    const y = pos.y;
-    const pipFrame = $('#lkPipFrame');
-    pipFrame.classList.add('on');
-    pipFrame.style.left = x + 'px';
-    pipFrame.style.top = y + 'px';
-    pipFrame.style.width = w + 'px';
-    pipFrame.style.height = hgt + 'px';
-    helperGroup.visible = false;
-    if(gizmo) gizmo.visible = false;
-    const glY = innerHeight - y - hgt;
-    // try/finally: qualunque errore nel post non deve MAI lasciare lo scissor
-    // attivo (viewport "sparito"); in caso di errore si degrada al render diretto
-    try {
-      renderer.setScissorTest(true);
-      renderer.setViewport(x, glY, w, hgt);
-      renderer.setScissor(x, glY, w, hgt);
-      const cc = GAME.player.cameraCfg;
-      const postOn = ((cc.dof && cc.dof.enabled) || (cc.grade && cc.grade.enabled)) && GAME.systems.post && GAME.systems.post.ok;
-      if(postOn){
-        try {
-          GAME.systems.post.composer.setSize(w, hgt);
-          GAME.systems.post.render();
-        } catch(err){
-          console.error('LotKing editor: post-processing PIP fallito, fallback al render diretto', err);
-          status('⚠ Post-processing PIP fallito (' + (err && err.message || err) + '): render diretto');
-          try { renderer.setRenderTarget(null); } catch(e){}
-          renderer.render(scene, gameCam);
-        } finally {
-          try { GAME.systems.post.composer.setSize(innerWidth, innerHeight); } catch(e){}
-        }
-      } else {
-        renderer.render(scene, gameCam);
-      }
-    } finally {
-      renderer.setScissorTest(false);
-      renderer.setViewport(0, 0, innerWidth, innerHeight);
-      helperGroup.visible = true;
-      if(gizmo) gizmo.visible = true;
-    }
-  } else {
-    $('#lkPipFrame').classList.remove('on');
-  }
-}
-
-function syncGamePreviewCamera(){
-  const car = GAME.player.car;
-  const cfg = GAME.player.cameraCfg;
-  const mode = cfg.mode || 'free';
-  const dist = mode === 'free'
-    ? Math.max(cfg.minDist || 4.5, Math.min(cfg.maxDist || 20, (cfg.minDist + cfg.maxDist) * .5 || 9))
-    : Math.max(2, cfg.arcadeDistance || 9);
-  const fwd = new THREE.Vector3(Math.sin(car.rotation.y), 0, Math.cos(car.rotation.y)).normalize();
-  const side = new THREE.Vector3(fwd.z, 0, -fwd.x).normalize();
-  const target = car.position.clone().add(new THREE.Vector3(0, 1.1, 0));
-  let height = mode === 'free' ? Math.max(2.3, dist * .34) : Math.max(1.2, cfg.arcadeHeight || 3.1);
-  let sideOffset = 0;
-  let close = 0;
-  if(mode === 'cinematic'){
-    sideOffset = (cfg.cinematicDriftOrbit || 0) * dist * .7;
-    close = cfg.cinematicDriftClose || 0;
-    height += cfg.cinematicDriftHeight || 0;
-  }
-  gameCam.position.copy(target)
-    .addScaledVector(fwd, -Math.max(2, dist - close))
-    .addScaledVector(side, sideOffset)
-    .add(new THREE.Vector3(0, height, 0));
-  gameCam.lookAt(target);
-  gameCam.fov = cfg.fov || 62;
-  gameCam.aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (innerWidth / innerHeight);
-  gameCam.far = cfg.far || 500;
-  gameCam.updateProjectionMatrix();
-  gameCam.updateMatrixWorld(true);
-}
+editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
+  THREE,
+  GAME,
+  ED,
+  scene,
+  renderer,
+  gameCam,
+  camE,
+  root,
+  helperGroup,
+  grid,
+  axes,
+  gizmoProxy,
+  camProxy,
+  camRigLine,
+  $,
+  loadTrackMeta,
+  ensureControls,
+  ensureCameraRigHelper,
+  getCameraRigHelper,
+  getCamHelper: () => camHelper,
+  setCamHelper: value => { camHelper = value; },
+  getGizmo: () => gizmo,
+  getOrbit: () => orbit,
+  setGizmoUsingZUpProxy: value => { gizmoUsingZUpProxy = value; },
+  spaceLabel,
+  updateEditorAxesConvention,
+  setTool,
+  syncQuickAudio,
+  refreshOutliner,
+  refreshAssetsPanel,
+  buildInspector,
+  status,
+  clearHoverPickHelper,
+  clearReplaceDropHelper,
+  saveScene,
+  closeMenu,
+  updateEditorControls,
+  editorViewportRect,
+  updateCameraRigHelper,
+  updateViewportPickingHelpers: () => viewportPicking.updateHelpers(),
+  updateSelectionAndDropHelpers,
+  processThumbQueue,
+  isPlayerCameraSelection,
+  panelWidth,
+  clampPanelPos,
+});
+function enterEditor(){ return editorRuntime.enterEditor(); }
+function setPlayPreview(on){ return editorRuntime.setPlayPreview(on); }
+function startPlayPreview(){ return editorRuntime.startPlayPreview(); }
+function stopPlayPreview(){ return editorRuntime.stopPlayPreview(); }
+function exitEditor(toPlay){ return editorRuntime.exitEditor(toPlay); }
+function editorFrame(dt){ return editorRuntime.editorFrame(dt); }
+function syncGamePreviewCamera(){ return editorRuntime.syncGamePreviewCamera(); }
 
 // ------------------------------------------------ menu button (start screen)
 const menuBtn = document.getElementById('editorBtn');
