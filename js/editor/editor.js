@@ -1485,14 +1485,12 @@ function refreshAssetsPanel(){
   })).filter(item => assetVisible(item, q));
   allFolderedItems.push(...sceneItems);
   addAssetGroup(box, 'FOLDERS / ALL ASSETS', allFolderedItems, true);
-  if(!visibleBlueprintItems.length && !levelItems.length && !importedItems.length && !sceneItems.length){
-    box.appendChild(el('<div class="lk-empty">No assets visible.<br>Change filters or import GLB/GLTF files.</div>'));
-  }
-  $('#lkStatusRight').textContent =
-    (visibleBlueprintItems.length ? visibleBlueprintItems.length + ' blueprints · ' : '') +
-    (levelItems.length ? levelItems.length + ' levels · ' : '') +
-    (importedItems.length ? importedItems.length + ' imported · ' : '') +
-    sceneItems.length + ' scene assets';
+  assetPanel.finishPanel(box, {
+    blueprints: visibleBlueprintItems.length,
+    levels: levelItems.length,
+    imported: importedItems.length,
+    scene: sceneItems.length,
+  });
 }
 
 // ------------------------------------------------ thumbnails (lazy, cached)
@@ -1517,6 +1515,7 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   writeFolderState,
   refreshAssetsPanel,
   assetsPanelMenuItems,
+  setStatusRight: text => { $('#lkStatusRight').textContent = text; },
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 

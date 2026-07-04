@@ -27,6 +27,7 @@ The road ahead leads to **1.0.0**.
 - Started splitting the asset dock renderer with `js/editor/asset-panel.js`, moving asset card DOM creation and asset card interaction wiring out of the main editor file.
 - Moved asset visibility checks and asset group/folder rendering helpers into `js/editor/asset-panel.js`, reducing another layer of asset dock DOM work in the main editor file.
 - Moved asset panel shell preparation into `js/editor/asset-panel.js`, including root drop handling and empty-space context menu wiring.
+- Moved asset panel empty-state and status summary rendering into `js/editor/asset-panel.js`.
 
 ---
 

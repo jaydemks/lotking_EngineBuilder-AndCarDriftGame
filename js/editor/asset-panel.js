@@ -119,7 +119,20 @@ function create(deps){
     };
   }
 
-  return Object.freeze({button, makeCard, visible, addGroup, preparePanel});
+  function finishPanel(box, counts){
+    counts = counts || {};
+    if(!counts.blueprints && !counts.levels && !counts.imported && !counts.scene){
+      box.appendChild(deps.el('<div class="lk-empty">No assets visible.<br>Change filters or import GLB/GLTF files.</div>'));
+    }
+    deps.setStatusRight(
+      (counts.blueprints ? counts.blueprints + ' blueprints · ' : '') +
+      (counts.levels ? counts.levels + ' levels · ' : '') +
+      (counts.imported ? counts.imported + ' imported · ' : '') +
+      counts.scene + ' scene assets'
+    );
+  }
+
+  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel});
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});
