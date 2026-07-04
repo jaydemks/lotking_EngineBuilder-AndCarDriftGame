@@ -59,6 +59,7 @@ The road ahead leads to **1.0.0**.
 - Extracted editor enter/exit, play preview, frame loop and preview camera sync into `js/editor/editor-runtime.js`.
 - Extracted default editor state, core chrome helpers and canvas viewport rect override into `js/editor/editor-core.js`.
 - Extracted editor floating layout, viewport rect and resize restoration into `js/editor/editor-layout.js`.
+- Reworked `js/editor/loader.js` into a script-stage manifest so module order and cleanup stay in one maintainable list.
 
 ---
 

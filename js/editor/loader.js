@@ -7,6 +7,57 @@
 'use strict';
 
 let loading = null;
+const EDITOR_SCRIPT_STAGES = Object.freeze([
+  [.58, 'loading editor camera tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js'],
+  [.72, 'loading transform tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js'],
+  [.795, 'loading editor core', 'js/editor/editor-core.js'],
+  [.797, 'loading editor layout', 'js/editor/editor-layout.js'],
+  [.80, 'loading editor viewport tools', 'js/editor/viewport-picking.js'],
+  [.805, 'loading editor viewport events', 'js/editor/viewport-events.js'],
+  [.81, 'loading editor fly camera', 'js/editor/fly-camera.js'],
+  [.815, 'loading editor gizmo controls', 'js/editor/gizmo-controls.js'],
+  [.817, 'loading editor visual helpers', 'js/editor/visual-helpers.js'],
+  [.84, 'loading editor asset library', 'js/editor/asset-library.js'],
+  [.85, 'loading editor asset imports', 'js/editor/asset-imports.js'],
+  [.86, 'loading editor status UI', 'js/editor/status-ui.js'],
+  [.87, 'loading editor dialogs', 'js/editor/dialogs.js'],
+  [.875, 'loading context menu', 'js/editor/context-menu.js'],
+  [.88, 'loading level manager', 'js/editor/level-manager.js'],
+  [.89, 'loading player blueprints', 'js/editor/player-blueprints.js'],
+  [.90, 'loading folder manager', 'js/editor/folder-manager.js'],
+  [.91, 'loading keyboard shortcuts', 'js/editor/keyboard-shortcuts.js'],
+  [.92, 'loading thumbnails', 'js/editor/thumbnail-manager.js'],
+  [.925, 'loading floating layout', 'js/editor/floating-layout.js'],
+  [.928, 'loading editor preferences', 'js/editor/preferences.js'],
+  [.929, 'loading quick audio controls', 'js/editor/quick-audio.js'],
+  [.9295, 'loading editor template', 'js/editor/editor-template.js'],
+  [.9297, 'loading editor toolbar', 'js/editor/toolbar.js'],
+  [.9298, 'loading side panel controls', 'js/editor/side-panels.js'],
+  [.92985, 'loading editor menus', 'js/editor/editor-menus.js'],
+  [.9299, 'loading asset panel helpers', 'js/editor/asset-panel.js'],
+  [.92992, 'loading asset catalog', 'js/editor/asset-catalog.js'],
+  [.92993, 'loading asset drag and drop', 'js/editor/asset-dnd.js'],
+  [.92995, 'loading scene outliner', 'js/editor/outliner.js'],
+  [.929952, 'loading selection manager', 'js/editor/selection-manager.js'],
+  [.929955, 'loading history manager', 'js/editor/history-manager.js'],
+  [.92996, 'loading project io', 'js/editor/project-io.js'],
+  [.929965, 'loading add actions', 'js/editor/add-actions.js'],
+  [.929967, 'loading scene menu actions', 'js/editor/scene-menu-actions.js'],
+  [.92997, 'loading inspector ui', 'js/editor/inspector-ui.js'],
+  [.929975, 'loading music library panel', 'js/editor/music-library-panel.js'],
+  [.92998, 'loading material editor', 'js/editor/material-editor.js'],
+  [.929985, 'loading object inspector', 'js/editor/object-inspector.js'],
+  [.92999, 'loading player camera inspector', 'js/editor/player-camera-inspector.js'],
+  [.929992, 'loading player lights inspector', 'js/editor/player-lights-inspector.js'],
+  [.929994, 'loading player attachments inspector', 'js/editor/player-attachments-inspector.js'],
+  [.929996, 'loading player setup inspector', 'js/editor/player-setup-inspector.js'],
+  [.929998, 'loading hud inspector', 'js/editor/hud-inspector.js'],
+  [.929999, 'loading environment inspector', 'js/editor/environment-inspector.js'],
+  [.9299995, 'loading inspector controller', 'js/editor/inspector-controller.js'],
+  [.9299997, 'loading editor runtime', 'js/editor/editor-runtime.js'],
+  [.93, 'loading playable export', 'js/editor/playable-export.js'],
+  [.95, 'starting editor', 'js/editor/editor.js'],
+]);
 
 function loadCss(href){
   if(document.querySelector('link[data-lk-editor-css]')) return Promise.resolve();
@@ -53,62 +104,30 @@ function failEditorLoading(label){
   const assets = window.LOT_KING && window.LOT_KING.assets;
   if(assets && assets.failLoading) assets.failLoading(label);
 }
+function cleanupEditorScripts(){
+  const selectors = ['script[data-lk-src^="js/editor/"]'];
+  EDITOR_SCRIPT_STAGES.forEach(item => {
+    const src = item[2];
+    if(src.indexOf('js/editor/') === 0) selectors.push('script[src^="' + src + '"]');
+  });
+  document.querySelectorAll(selectors.join(', ')).forEach(s => s.remove());
+}
+function loadEditorScriptStages(){
+  return EDITOR_SCRIPT_STAGES.reduce((chain, item) => {
+    return chain.then(() => {
+      editorStage(item[0], item[1]);
+      return loadScript(item[2]);
+    });
+  }, Promise.resolve());
+}
 function ensureEditor(){
   if(window.LOT_KING && window.LOT_KING.editor) return Promise.resolve(window.LOT_KING.editor);
   if(loading) return loading;
-  document.querySelectorAll('script[data-lk-src^="js/editor/"], script[src^="js/editor/editor.js"], script[src^="js/editor/editor-core.js"], script[src^="js/editor/editor-layout.js"], script[src^="js/editor/editor-template.js"], script[src^="js/editor/viewport-picking.js"], script[src^="js/editor/viewport-events.js"], script[src^="js/editor/fly-camera.js"], script[src^="js/editor/gizmo-controls.js"], script[src^="js/editor/visual-helpers.js"], script[src^="js/editor/context-menu.js"], script[src^="js/editor/asset-imports.js"], script[src^="js/editor/level-manager.js"], script[src^="js/editor/player-blueprints.js"], script[src^="js/editor/folder-manager.js"], script[src^="js/editor/keyboard-shortcuts.js"], script[src^="js/editor/thumbnail-manager.js"], script[src^="js/editor/floating-layout.js"], script[src^="js/editor/preferences.js"], script[src^="js/editor/quick-audio.js"], script[src^="js/editor/toolbar.js"], script[src^="js/editor/side-panels.js"], script[src^="js/editor/editor-menus.js"], script[src^="js/editor/asset-panel.js"], script[src^="js/editor/asset-catalog.js"], script[src^="js/editor/asset-dnd.js"], script[src^="js/editor/outliner.js"], script[src^="js/editor/selection-manager.js"], script[src^="js/editor/history-manager.js"], script[src^="js/editor/project-io.js"], script[src^="js/editor/add-actions.js"], script[src^="js/editor/scene-menu-actions.js"], script[src^="js/editor/inspector-ui.js"], script[src^="js/editor/music-library-panel.js"], script[src^="js/editor/material-editor.js"], script[src^="js/editor/object-inspector.js"], script[src^="js/editor/player-camera-inspector.js"], script[src^="js/editor/player-lights-inspector.js"], script[src^="js/editor/player-attachments-inspector.js"], script[src^="js/editor/player-setup-inspector.js"], script[src^="js/editor/hud-inspector.js"], script[src^="js/editor/environment-inspector.js"], script[src^="js/editor/inspector-controller.js"], script[src^="js/editor/editor-runtime.js"], script[src^="js/editor/playable-export.js"]').forEach(s => s.remove());
+  cleanupEditorScripts();
   loading = Promise.resolve()
     .then(() => waitRuntime('editor'))
     .then(() => { editorStage(.45, 'loading editor style'); return loadCss('css/editor.css'); })
-    .then(() => { editorStage(.58, 'loading editor camera tools'); return loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js'); })
-    .then(() => { editorStage(.72, 'loading transform tools'); return loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js'); })
-    .then(() => { editorStage(.795, 'loading editor core'); return loadScript('js/editor/editor-core.js'); })
-    .then(() => { editorStage(.797, 'loading editor layout'); return loadScript('js/editor/editor-layout.js'); })
-    .then(() => { editorStage(.80, 'loading editor viewport tools'); return loadScript('js/editor/viewport-picking.js'); })
-    .then(() => { editorStage(.805, 'loading editor viewport events'); return loadScript('js/editor/viewport-events.js'); })
-    .then(() => { editorStage(.81, 'loading editor fly camera'); return loadScript('js/editor/fly-camera.js'); })
-    .then(() => { editorStage(.815, 'loading editor gizmo controls'); return loadScript('js/editor/gizmo-controls.js'); })
-    .then(() => { editorStage(.817, 'loading editor visual helpers'); return loadScript('js/editor/visual-helpers.js'); })
-    .then(() => { editorStage(.84, 'loading editor asset library'); return loadScript('js/editor/asset-library.js'); })
-    .then(() => { editorStage(.85, 'loading editor asset imports'); return loadScript('js/editor/asset-imports.js'); })
-    .then(() => { editorStage(.86, 'loading editor status UI'); return loadScript('js/editor/status-ui.js'); })
-    .then(() => { editorStage(.87, 'loading editor dialogs'); return loadScript('js/editor/dialogs.js'); })
-    .then(() => { editorStage(.875, 'loading context menu'); return loadScript('js/editor/context-menu.js'); })
-    .then(() => { editorStage(.88, 'loading level manager'); return loadScript('js/editor/level-manager.js'); })
-    .then(() => { editorStage(.89, 'loading player blueprints'); return loadScript('js/editor/player-blueprints.js'); })
-    .then(() => { editorStage(.90, 'loading folder manager'); return loadScript('js/editor/folder-manager.js'); })
-    .then(() => { editorStage(.91, 'loading keyboard shortcuts'); return loadScript('js/editor/keyboard-shortcuts.js'); })
-    .then(() => { editorStage(.92, 'loading thumbnails'); return loadScript('js/editor/thumbnail-manager.js'); })
-    .then(() => { editorStage(.925, 'loading floating layout'); return loadScript('js/editor/floating-layout.js'); })
-    .then(() => { editorStage(.928, 'loading editor preferences'); return loadScript('js/editor/preferences.js'); })
-    .then(() => { editorStage(.929, 'loading quick audio controls'); return loadScript('js/editor/quick-audio.js'); })
-    .then(() => { editorStage(.9295, 'loading editor template'); return loadScript('js/editor/editor-template.js'); })
-    .then(() => { editorStage(.9297, 'loading editor toolbar'); return loadScript('js/editor/toolbar.js'); })
-    .then(() => { editorStage(.9298, 'loading side panel controls'); return loadScript('js/editor/side-panels.js'); })
-    .then(() => { editorStage(.92985, 'loading editor menus'); return loadScript('js/editor/editor-menus.js'); })
-    .then(() => { editorStage(.9299, 'loading asset panel helpers'); return loadScript('js/editor/asset-panel.js'); })
-    .then(() => { editorStage(.92992, 'loading asset catalog'); return loadScript('js/editor/asset-catalog.js'); })
-    .then(() => { editorStage(.92993, 'loading asset drag and drop'); return loadScript('js/editor/asset-dnd.js'); })
-    .then(() => { editorStage(.92995, 'loading scene outliner'); return loadScript('js/editor/outliner.js'); })
-    .then(() => { editorStage(.929952, 'loading selection manager'); return loadScript('js/editor/selection-manager.js'); })
-    .then(() => { editorStage(.929955, 'loading history manager'); return loadScript('js/editor/history-manager.js'); })
-    .then(() => { editorStage(.92996, 'loading project io'); return loadScript('js/editor/project-io.js'); })
-    .then(() => { editorStage(.929965, 'loading add actions'); return loadScript('js/editor/add-actions.js'); })
-    .then(() => { editorStage(.929967, 'loading scene menu actions'); return loadScript('js/editor/scene-menu-actions.js'); })
-    .then(() => { editorStage(.92997, 'loading inspector ui'); return loadScript('js/editor/inspector-ui.js'); })
-    .then(() => { editorStage(.929975, 'loading music library panel'); return loadScript('js/editor/music-library-panel.js'); })
-    .then(() => { editorStage(.92998, 'loading material editor'); return loadScript('js/editor/material-editor.js'); })
-    .then(() => { editorStage(.929985, 'loading object inspector'); return loadScript('js/editor/object-inspector.js'); })
-    .then(() => { editorStage(.92999, 'loading player camera inspector'); return loadScript('js/editor/player-camera-inspector.js'); })
-    .then(() => { editorStage(.929992, 'loading player lights inspector'); return loadScript('js/editor/player-lights-inspector.js'); })
-    .then(() => { editorStage(.929994, 'loading player attachments inspector'); return loadScript('js/editor/player-attachments-inspector.js'); })
-    .then(() => { editorStage(.929996, 'loading player setup inspector'); return loadScript('js/editor/player-setup-inspector.js'); })
-    .then(() => { editorStage(.929998, 'loading hud inspector'); return loadScript('js/editor/hud-inspector.js'); })
-    .then(() => { editorStage(.929999, 'loading environment inspector'); return loadScript('js/editor/environment-inspector.js'); })
-    .then(() => { editorStage(.9299995, 'loading inspector controller'); return loadScript('js/editor/inspector-controller.js'); })
-    .then(() => { editorStage(.9299997, 'loading editor runtime'); return loadScript('js/editor/editor-runtime.js'); })
-    .then(() => { editorStage(.93, 'loading playable export'); return loadScript('js/editor/playable-export.js'); })
-    .then(() => { editorStage(.95, 'starting editor'); return loadScript('js/editor/editor.js'); })
+    .then(loadEditorScriptStages)
     .then(() => {
       if(!window.LOT_KING || !window.LOT_KING.editor) throw new Error('Editor non inizializzato');
       finishEditorLoading();
