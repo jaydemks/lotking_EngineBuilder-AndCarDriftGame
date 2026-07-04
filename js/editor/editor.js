@@ -135,6 +135,7 @@ let materialEditor = null;
 let musicLibraryPanel = null;
 let objectInspector = null;
 let selectionManager = null;
+let viewportEvents = null;
 let playerCameraInspector = null;
 let playerLightsInspector = null;
 let playerAttachmentsInspector = null;
@@ -798,74 +799,35 @@ function focusSelected(){ return selectionManager.focusSelected(); }
 function onGizmoChange(){ return selectionManager.onGizmoChange(); }
 
 // ------------------------------------------------ picking + context menu on canvas
-let downX = 0, downY = 0, downBtn = -1;
-
 function pickAt(clientX, clientY, opts){ return viewportPicking.pickAt(clientX, clientY, opts); }
 function groundPointAt(clientX, clientY){ return viewportPicking.groundPointAt(clientX, clientY); }
 function spawnPointAhead(){ return viewportPicking.spawnPointAhead(); }
 function isGroundLikeEntity(o){ return viewportPicking.isGroundLikeEntity(o); }
-function updateViewportHover(e){
-  if(!ED.active || e.target !== canvas){
-    clearHoverPickHelper();
-    return;
-  }
-  viewportPicking.updateHover(e);
-}
-
-canvas.addEventListener('pointerdown', e => {
-  if(!ED.active || ED.playPreview || ED.levelsOpen) return;
-  downX = e.clientX; downY = e.clientY; downBtn = e.button;
-  clearHoverPickHelper();
-  if(e.button === 2) flyStart(e);
+viewportEvents = window.LK_EDITOR_VIEWPORT_EVENTS && window.LK_EDITOR_VIEWPORT_EVENTS.create({
+  ED, canvas,
+  clearHoverPickHelper,
+  updateHover: e => viewportPicking.updateHover(e),
+  flyStart,
+  flyMove,
+  flyEnd,
+  isFlyActive: () => fly.rmb,
+  flyMoved: () => fly.moved,
+  adjustFlySpeed: deltaY => {
+    fly.speed = Math.max(2, Math.min(80, fly.speed * (deltaY > 0 ? .85 : 1.18)));
+    status('Velocità volo: ' + fly.speed.toFixed(0));
+  },
+  shouldSuppressSceneClick: () => !!(gizmoSuppressSceneClick || gizmoPointerActive || (gizmo && (gizmo.dragging || gizmo.axis))),
+  pickAt,
+  groundPointAt,
+  isGroundLikeEntity,
+  selectObject,
+  deselect,
+  openMenu,
+  objectMenuItems,
+  playerMenuItems,
+  canvasMenuItems,
 });
-addEventListener('pointermove', e => {
-  if(ED.active && !ED.playPreview && !ED.levelsOpen){
-    flyMove(e);
-    updateViewportHover(e);
-  }
-});
-addEventListener('pointerup', e => {
-  if(!ED.active || ED.playPreview || ED.levelsOpen) return;
-  const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
-  const wasFlying = fly.rmb && fly.moved > 6;
-  if(e.button === 2) flyEnd(e);
-  if(e.target !== canvas) return;
-  if(gizmoSuppressSceneClick || gizmoPointerActive || (gizmo && (gizmo.dragging || gizmo.axis))) return;
-  if(e.button === 0 && downBtn === 0 && dist < 5){
-    const hit = pickAt(e.clientX, e.clientY);
-    if(hit) selectObject(hit.entity);
-    else deselect();
-  }
-  if(e.button === 2 && !wasFlying && dist < 5){
-    const hit = pickAt(e.clientX, e.clientY);
-    const gp = hit ? hit.point.clone().setY(0) : groundPointAt(e.clientX, e.clientY);
-    const isGround = hit && isGroundLikeEntity(hit.entity);
-    if(hit && !isGround && hit.entity.userData.editorType !== 'player'){
-      selectObject(hit.entity);
-      openMenu(objectMenuItems(hit.entity, false, gp), e.clientX, e.clientY);
-    } else if(hit && hit.entity.userData.editorType === 'player'){
-      selectObject(hit.entity);
-      openMenu(playerMenuItems(), e.clientX, e.clientY);
-    } else {
-      openMenu(canvasMenuItems(gp), e.clientX, e.clientY);
-    }
-  }
-});
-canvas.addEventListener('contextmenu', e => { if(ED.active && !ED.levelsOpen) e.preventDefault(); });
-addEventListener('contextmenu', e => {
-  if(!ED.active || ED.levelsOpen) return;
-  e.preventDefault();
-}, true);
-canvas.addEventListener('wheel', e => {
-  if(ED.levelsOpen) return;
-  if(ED.active && !ED.playPreview){
-    e.preventDefault();
-    if(fly.rmb){
-      fly.speed = Math.max(2, Math.min(80, fly.speed * (e.deltaY > 0 ? .85 : 1.18)));
-      status('Velocità volo: ' + fly.speed.toFixed(0));
-    }
-  }
-}, {passive:false});
+function updateViewportHover(e){ return viewportEvents.updateViewportHover(e); }
 
 // ------------------------------------------------ scene menu definitions
 sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE_MENU_ACTIONS.create({

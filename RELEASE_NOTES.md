@@ -51,6 +51,7 @@ The road ahead leads to **1.0.0**.
 - Extracted asset catalog logic into `js/editor/asset-catalog.js`, including scene asset grouping, asset lookup, placement, search/filter helpers, icon resolution, asset-instance deletion, and asset panel refresh.
 - Extracted selection management into `js/editor/selection-manager.js`, including object/special selection, visibility/collider toggles, delete/duplicate, focus, and gizmo-change synchronization.
 - Extracted asset drag/drop and viewport replace-drop wiring into `js/editor/asset-dnd.js`.
+- Extracted viewport pointer/context/wheel event wiring into `js/editor/viewport-events.js`.
 
 ---
 
