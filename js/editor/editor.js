@@ -466,6 +466,7 @@ function makeFolderRow(kind, folder){ return folderManager ? folderManager.makeR
 function folderList(kind){ return folderManager ? folderManager.list(kind) : []; }
 function folderAssignments(kind){ return folderManager ? folderManager.assignments(kind) : {}; }
 function folderById(kind, id){ return folderManager ? folderManager.byId(kind, id) : null; }
+function writeFolderState(){ if(folderManager) folderManager.write(); }
 
 keyboardShortcuts = window.LK_EDITOR_KEYBOARD_SHORTCUTS && window.LK_EDITOR_KEYBOARD_SHORTCUTS.create({
   ED, fly, GAME, closeMenu, setPrefsOpen, setLevelsOverlayOpen, stopPlayPreview,
@@ -1375,22 +1376,7 @@ function addAssetGroup(box, title, items, folderAware){
 }
 function refreshAssetsPanel(){
   const box = $('#lkAssetsPanel');
-  box.innerHTML = '';
-  box.ondragover = e => {
-    if(Array.from(e.dataTransfer.types || []).includes('application/x-lotking-asset')){
-      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-    }
-  };
-  box.ondrop = e => {
-    const ref = e.dataTransfer && e.dataTransfer.getData('application/x-lotking-asset');
-    if(ref && e.target === box){ delete folderAssignments('assets')[ref]; writeFolderState(); refreshAssetsPanel(); }
-  };
-  box.oncontextmenu = e => {
-    if(e.target.closest('.lk-asset-item, .lk-folder-row, .lk-asset-group')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    openMenu(assetsPanelMenuItems(), e.clientX, e.clientY);
-  };
+  assetPanel.preparePanel(box);
   const q = ED.search || '';
   const blueprintItems = [];
   if(STORE.playerBlueprints){
@@ -1528,6 +1514,9 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   makeFolderRow,
   folderAssignments,
   folderById,
+  writeFolderState,
+  refreshAssetsPanel,
+  assetsPanelMenuItems,
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 

@@ -96,7 +96,30 @@ function create(deps){
       .forEach(item => box.appendChild(makeCard(item)));
   }
 
-  return Object.freeze({button, makeCard, visible, addGroup});
+  function preparePanel(box){
+    box.innerHTML = '';
+    box.ondragover = e => {
+      if(Array.from(e.dataTransfer.types || []).includes('application/x-lotking-asset')){
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      }
+    };
+    box.ondrop = e => {
+      const ref = e.dataTransfer && e.dataTransfer.getData('application/x-lotking-asset');
+      if(ref && e.target === box){
+        delete deps.folderAssignments('assets')[ref];
+        deps.writeFolderState();
+        deps.refreshAssetsPanel();
+      }
+    };
+    box.oncontextmenu = e => {
+      if(e.target.closest('.lk-asset-item, .lk-folder-row, .lk-asset-group')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      deps.openMenu(deps.assetsPanelMenuItems(), e.clientX, e.clientY);
+    };
+  }
+
+  return Object.freeze({button, makeCard, visible, addGroup, preparePanel});
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});
