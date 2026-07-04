@@ -40,6 +40,7 @@ The road ahead leads to **1.0.0**.
 - Extracted the regular scene object inspector into `js/editor/object-inspector.js`, covering headers, transform fields, visibility, collision, light, effect, and object action sections.
 - Extracted Player Blueprint game camera, depth-of-field, and visual grade controls into `js/editor/player-camera-inspector.js`.
 - Extracted Player Blueprint vehicle light and neon controls into `js/editor/player-lights-inspector.js`.
+- Extracted Player Blueprint exhaust source and 3D data widget controls into `js/editor/player-attachments-inspector.js`.
 
 ---
 
