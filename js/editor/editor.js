@@ -140,6 +140,7 @@ let hudInspector = null;
 let environmentInspector = null;
 let projectIo = null;
 let addActions = null;
+let historyManager = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -503,231 +504,40 @@ editorUiReady = true;
 requestAnimationFrame(restoreFloatingPanels);
 
 // ------------------------------------------------ undo / redo / repeat
-const undoStack = [];
-const redoStack = [];
-let transformBefore = null;
-let lastTransformRepeat = null;
-
-function sameT(a, b){
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-function transformMask(before, after){
-  const eq = (aa, bb) => aa.length === bb.length && aa.every((v, i) => Math.abs(v - bb[i]) < 1e-5);
-  return {
-    p: before && after && !eq(before.p, after.p),
-    r: before && after && !eq(before.r, after.r),
-    s: before && after && !eq(before.s, after.s),
-  };
-}
-function historyChanged(){
-  $('#lkUndo').classList.toggle('disabled', !undoStack.length);
-  $('#lkRedo').classList.toggle('disabled', !redoStack.length);
-}
-function pushHistory(cmd){
-  if(!cmd) return;
-  undoStack.push(cmd);
-  if(undoStack.length > 80) undoStack.shift();
-  redoStack.length = 0;
-  historyChanged();
-}
-function undo(){
-  flushHudHistory();
-  const cmd = undoStack.pop();
-  if(!cmd){ status('Niente da annullare'); return; }
-  cmd.undo();
-  redoStack.push(cmd);
-  historyChanged();
-  markDirty();
-  status('Undo: ' + cmd.label);
-}
-function redo(){
-  flushHudHistory();
-  const cmd = redoStack.pop();
-  if(!cmd){ status('Niente da rifare'); return; }
-  cmd.redo();
-  undoStack.push(cmd);
-  historyChanged();
-  markDirty();
-  status('Redo: ' + cmd.label);
-}
-
-let hudHistoryPending = null;
-let hudHistoryTimer = null;
-let hudHistorySuppress = false;
-
-function cloneHudConfig(v){
-  return JSON.parse(JSON.stringify(v || {}));
-}
-function sameHudConfig(a, b){
-  return JSON.stringify(a || {}) === JSON.stringify(b || {});
-}
-function hudPatchLabel(patch){
-  if(!patch) return 'HUD radio';
-  if(patch.buttons) return 'HUD radio pulsanti';
-  if('editTarget' in patch) return 'HUD radio modalità edit';
-  if('buttonLayer' in patch || 'imageLayer' in patch || 'screenLayer' in patch) return 'HUD radio layer';
-  if('frameX' in patch || 'frameY' in patch || 'width' in patch || 'pngScaleX' in patch || 'pngScaleY' in patch) return 'HUD radio frame';
-  if('screenLeft' in patch || 'screenTop' in patch || 'screenWidth' in patch || 'screenHeight' in patch) return 'HUD radio interfaccia';
-  return 'HUD radio';
-}
-function applyHudSnapshot(snapshot){
-  const setHud = GAME.ui && GAME.ui.setRadioHud;
-  if(!setHud || !snapshot) return;
-  hudHistorySuppress = true;
-  setHud(cloneHudConfig(snapshot));
-  hudHistorySuppress = false;
-  if(GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(true);
-  if(ED.active && ED.special === 'hud') buildInspector();
-}
-function queueHudHistory(before, after, label){
-  if(!before || !after || sameHudConfig(before, after)) return;
-  if(!hudHistoryPending){
-    hudHistoryPending = {before: cloneHudConfig(before), after: cloneHudConfig(after), label: label || 'HUD radio'};
-  } else {
-    hudHistoryPending.after = cloneHudConfig(after);
-    hudHistoryPending.label = label || hudHistoryPending.label;
-  }
-  clearTimeout(hudHistoryTimer);
-  hudHistoryTimer = setTimeout(flushHudHistory, 260);
-}
-function flushHudHistory(){
-  if(!hudHistoryPending) return;
-  clearTimeout(hudHistoryTimer);
-  const pending = hudHistoryPending;
-  hudHistoryPending = null;
-  if(sameHudConfig(pending.before, pending.after)) return;
-  pushHistory({
-    label: pending.label,
-    undo: () => applyHudSnapshot(pending.before),
-    redo: () => applyHudSnapshot(pending.after),
-  });
-  historyChanged();
-}
-function restoreEntity(o){
-  if(!o) return;
-  if(!GAME.world.registry.includes(o)){
-    const col = o.userData.collider;
-    const isBuiltin = !!o.userData.builtin && !o.userData.addedEntry;
-    if(col && col.ref){
-      const arr = col.kind === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
-      if(!arr.includes(col.ref)) arr.push(col.ref);
-    }
-    GAME.world.register(o, o.userData.editorName || 'Entity', o.userData.editorType || 'mesh', {
-      id: o.userData.editorId,
-      builtin: isBuiltin,
-      collider: col || null,
-    });
-  }
-  if(!o.parent) scene.add(o);
-  STORE.syncCollider(o);
-}
-function removeEntity(o){
-  if(!o || o.userData.editorType === 'player') return;
-  GAME.world.unregister(o);
-  if(o.parent) o.parent.remove(o);
-  if(ED.selected === o) selectObject(null);
-}
-function applyTransform(o, t){
-  if(!o || !t) return;
-  restoreEntity(o);
-  STORE.applyT(o, t);
-  if(o.userData.editorType === 'player'){
-    GAME.player.physics.pos.copy(o.position);
-    GAME.player.physics.heading = o.rotation.y;
-    if(GAME.player.spawn){
-      GAME.player.spawn.x = o.position.x;
-      GAME.player.spawn.z = o.position.z;
-      GAME.player.spawn.heading = o.rotation.y;
-    }
-    if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
-  }
-  if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
-  STORE.syncCollider(o);
-  refreshSelectionHelpers();
-  if(ED.selected === o && gizmo && !gizmo.dragging) attachGizmoToSelection();
-  syncTransformFields();
-  refreshOutliner();
-}
-function setLinkParent(o){
-  ED.linkParent = o || null;
-  status(o ? 'Parent pronto: ' + (o.userData.editorName || o.userData.editorId) : 'Parent link svuotato');
-}
-function linkToParent(child, parent){
-  if(!child || !parent || child === parent) return;
-  let n = parent;
-  while(n){
-    if(n === child){ status('Link non valido: creerebbe un ciclo'); return; }
-    n = n.parent;
-  }
-  parent.attach(child);
-  child.userData.linkParentId = parent.userData.editorId;
-  STORE.syncCollider(child);
-  markDirty();
-  buildInspector();
-  status('Link: ' + (child.userData.editorName || 'object') + ' → ' + (parent.userData.editorName || 'parent'));
-}
-function unlinkObject(child){
-  if(!child || !child.parent || child.parent === scene) return;
-  scene.attach(child);
-  delete child.userData.linkParentId;
-  STORE.syncCollider(child);
-  markDirty();
-  buildInspector();
-  status('Link rimosso');
-}
-function beginTransformHistory(){
-  transformBefore = ED.selected ? {obj: ED.selected, t: STORE.tOf(ED.selected)} : null;
-}
-function commitTransformHistory(label){
-  if(!transformBefore || !transformBefore.obj) return;
-  const obj = transformBefore.obj;
-  const before = transformBefore.t;
-  const after = STORE.tOf(obj);
-  transformBefore = null;
-  if(sameT(before, after)) return;
-  const mask = transformMask(before, after);
-  lastTransformRepeat = {label: label || 'Transform', t: after, mask};
-  pushHistory({
-    label: label || 'Transform',
-    undo: () => applyTransform(obj, before),
-    redo: () => applyTransform(obj, after),
-  });
-}
-function withTransformHistory(label, fn){
-  const obj = ED.selected;
-  if(!obj) return;
-  const before = STORE.tOf(obj);
-  fn(obj);
-  const after = STORE.tOf(obj);
-  if(sameT(before, after)) return;
-  const mask = transformMask(before, after);
-  lastTransformRepeat = {label, t: after, mask};
-  pushHistory({
-    label,
-    undo: () => applyTransform(obj, before),
-    redo: () => applyTransform(obj, after),
-  });
-}
-function applyLastTransform(){
-  const obj = ED.selected;
-  if(!obj || !lastTransformRepeat){ status('No transform to repeat'); return; }
-  if(obj.userData.editorType === 'player'){ status('Il player non usa Ctrl+R rapido'); return; }
-  const before = STORE.tOf(obj);
-  const next = STORE.tOf(obj);
-  if(lastTransformRepeat.mask.p) next.p = lastTransformRepeat.t.p.slice();
-  if(lastTransformRepeat.mask.r) next.r = lastTransformRepeat.t.r.slice();
-  if(lastTransformRepeat.mask.s) next.s = lastTransformRepeat.t.s.slice();
-  applyTransform(obj, next);
-  if(sameT(before, next)){ status('Trasformazione gia applicata'); return; }
-  pushHistory({
-    label: 'Repeat ' + lastTransformRepeat.label,
-    undo: () => applyTransform(obj, before),
-    redo: () => applyTransform(obj, next),
-  });
-  markDirty();
-  status('Repeated transform on ' + (obj.userData.editorName || 'object'));
-}
-historyChanged();
+historyManager = window.LK_EDITOR_HISTORY_MANAGER && window.LK_EDITOR_HISTORY_MANAGER.create({
+  GAME,
+  STORE,
+  ED,
+  scene,
+  $,
+  status,
+  markDirty,
+  selectObject,
+  refreshSelectionHelpers,
+  attachGizmoToSelection,
+  syncTransformFields,
+  refreshOutliner,
+  buildInspector,
+  getGizmo: () => gizmo,
+});
+function pushHistory(cmd){ return historyManager.pushHistory(cmd); }
+function undo(){ return historyManager.undo(); }
+function redo(){ return historyManager.redo(); }
+function hudPatchLabel(patch){ return historyManager.hudPatchLabel(patch); }
+function queueHudHistory(before, after, label){ return historyManager.queueHudHistory(before, after, label); }
+function flushHudHistory(){ return historyManager.flushHudHistory(); }
+function restoreEntity(o){ return historyManager.restoreEntity(o); }
+function removeEntity(o){ return historyManager.removeEntity(o); }
+function applyTransform(o, t){ return historyManager.applyTransform(o, t); }
+function setLinkParent(o){ return historyManager.setLinkParent(o); }
+function linkToParent(child, parent){ return historyManager.linkToParent(child, parent); }
+function unlinkObject(child){ return historyManager.unlinkObject(child); }
+function beginTransformHistory(){ return historyManager.beginTransformHistory(); }
+function commitTransformHistory(label){ return historyManager.commitTransformHistory(label); }
+function withTransformHistory(label, fn){ return historyManager.withTransformHistory(label, fn); }
+function applyLastTransform(){ return historyManager.applyLastTransform(); }
+function hasLastTransformRepeat(){ return historyManager.hasLastTransformRepeat(); }
+function isHudHistorySuppress(){ return historyManager.isHudHistorySuppress(); }
 
 function markDirty(){
   ED.dirty = true;
@@ -1474,7 +1284,7 @@ function objectMenuItems(o, fromOutliner, gp){
       {label:'Duplica  Ctrl+D', icon:'⧉', action:() => duplicateEntity(o)},
       {label:'Popola in fila x5', icon:'▦', action:() => duplicateLine(o, 5)},
     ]},
-    {label:'Applica ultima trasformazione  Ctrl+R', icon:'↻', disabled:!lastTransformRepeat, action:applyLastTransform},
+    {label:'Applica ultima trasformazione  Ctrl+R', icon:'↻', disabled:!hasLastTransformRepeat(), action:applyLastTransform},
     {label:'Link / Parent', icon:'⛓', sub: [
       {label:'Set as link parent', icon:'◎', action:() => setLinkParent(o)},
       {label:'Link to ' + (ED.linkParent ? (ED.linkParent.userData.editorName || 'parent') : 'parent'), icon:'→', disabled:!ED.linkParent || ED.linkParent === o, action:() => linkToParent(o, ED.linkParent)},
@@ -2104,7 +1914,7 @@ if(menuBtn) menuBtn.addEventListener('click', enterEditor);
 addEventListener('lotking:radiohudchange', e => {
   if(!(ED.active && ED.special === 'hud')) return;
   markDirty();
-  if(hudHistorySuppress) return;
+  if(isHudHistorySuppress()) return;
   const d = e.detail || {};
   if(d.before && d.after) queueHudHistory(d.before, d.after, hudPatchLabel(d.patch));
 });
