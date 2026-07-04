@@ -126,6 +126,7 @@ let quickAudio = null;
 let toolbar = null;
 let sidePanels = null;
 let assetCatalog = null;
+let assetDnd = null;
 let assetPanel = null;
 let outliner = null;
 let editorMenus = null;
@@ -571,163 +572,32 @@ function projectFilename(project){ return projectIo.projectFilename(project); }
 function exportProject(){ return projectIo.exportProject(); }
 function importProjectFile(file){ return projectIo.importProjectFile(file); }
 // ------------------------------------------------ outliner
-let assetDragRef = null;
 let viewportReplaceTarget = null;
-function acceptEditorFileDrag(e){
-  if(!hasExternalFileDrag(e)) return false;
-  e.preventDefault();
-  e.stopPropagation();
-  if(e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-  return true;
-}
-function acceptAssetBrowserDrag(e){
-  if(!e.dataTransfer || !e.dataTransfer.types || !Array.from(e.dataTransfer.types).includes('application/x-lotking-asset')) return false;
-  e.preventDefault();
-  e.stopPropagation();
-  e.dataTransfer.dropEffect = 'copy';
-  return true;
-}
-function canReplaceTarget(o){
-  return !!(o && o.userData && o.userData.editorType !== 'player' &&
-    !['playerLight','playerEffect','playerDataWidget'].includes(o.userData.editorType));
-}
-function dragAssetModel(e){
-  const ref = e.dataTransfer && (e.dataTransfer.getData('application/x-lotking-asset') || assetDragRef);
-  const asset = ref ? getAssetByRef(ref) : null;
-  return asset && asset.kind === 'imported-glb' ? asset : null;
-}
-function updateViewportReplaceHint(e){
-  const hasModelAsset = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('application/x-lotking-asset');
-  const hasFile = hasExternalFileDrag(e);
-  if(!hasModelAsset && !hasFile){ clearReplaceDropHelper(); return null; }
-  const hit = pickAt(e.clientX, e.clientY);
-  if(!hit || !hit.entity){ clearReplaceDropHelper(); return null; }
-  let modelOk = hasFile;
-  if(hasModelAsset){
-    const asset = dragAssetModel(e);
-    modelOk = !!(asset && asset.kind === 'imported-glb');
-  }
-  const ok = modelOk && canReplaceTarget(hit.entity);
-  setReplaceDropHelper(hit.entity, ok);
-  return ok ? hit.entity : null;
-}
-function bindReplaceDropTarget(el, target){
-  if(!el || !target) return;
-  const clear = () => {
-    el.classList.remove('replace-ok');
-    el.classList.remove('replace-bad');
-  };
-  const evaluate = e => {
-    const types = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
-    const hasAsset = types.includes('application/x-lotking-asset');
-    const hasFile = hasExternalFileDrag(e);
-    if(!hasAsset && !hasFile) return null;
-    const ok = canReplaceTarget(target) && (hasFile || !!dragAssetModel(e));
-    return {ok, hasAsset, hasFile};
-  };
-  el.addEventListener('dragover', e => {
-    const info = evaluate(e);
-    if(!info) return;
-    e.preventDefault();
-    e.stopPropagation();
-    el.classList.toggle('replace-ok', info.ok);
-    el.classList.toggle('replace-bad', !info.ok);
-    e.dataTransfer.dropEffect = info.ok ? 'copy' : 'none';
-  });
-  el.addEventListener('dragleave', clear);
-  el.addEventListener('drop', e => {
-    const info = evaluate(e);
-    if(!info) return;
-    e.preventDefault();
-    e.stopPropagation();
-    clear();
-    if(!info.ok){
-      status('Questo oggetto non puo essere sostituito direttamente');
-      return;
-    }
-    if(info.hasAsset){
-      const asset = dragAssetModel(e);
-      if(asset) replaceSelectedWithAsset(asset.raw, target);
-      return;
-    }
-    const files = supportedAssetFiles(e.dataTransfer.files);
-    if(files.length !== 1){
-      status('Drop one GLB/GLTF to replace this object');
-      return;
-    }
-    replaceObjectWithFile(target, files[0]);
-  });
-}
-function bindAssetDropZone(el){
-  if(!el) return;
-  el.addEventListener('dragenter', e => { if(acceptEditorFileDrag(e)) el.classList.add('drag'); });
-  el.addEventListener('dragover', e => acceptEditorFileDrag(e));
-  el.addEventListener('dragleave', e => {
-    if(!el.contains(e.relatedTarget)) el.classList.remove('drag');
-  });
-  el.addEventListener('drop', e => {
-    if(!acceptEditorFileDrag(e)) return;
-    el.classList.remove('drag');
-    importAssetFiles(e.dataTransfer.files);
-  });
-}
-bindAssetDropZone($('#lkAssetsPanel'));
-bindAssetDropZone($('#lkAssetsToolbar'));
-canvas.addEventListener('dragover', e => {
-  if(!ED.active || ED.playPreview) return;
-  const target = updateViewportReplaceHint(e);
-  if(target){
-    e.preventDefault(); e.stopPropagation();
-    e.dataTransfer.dropEffect = 'copy';
-    return;
-  }
-  if(acceptAssetBrowserDrag(e)) return;
-  acceptEditorFileDrag(e);
+assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
+  ED, canvas, $,
+  hasExternalFileDrag,
+  getAssetByRef,
+  clearReplaceDropHelper,
+  setReplaceDropHelper,
+  getViewportReplaceTarget: () => viewportReplaceTarget,
+  hasReplaceDropHelper: () => !!replaceDropHelper,
+  pickAt,
+  groundPointAt,
+  supportedAssetFiles,
+  importAssetFiles,
+  replaceSelectedWithAsset,
+  replaceObjectWithFile,
+  placeAssetRef,
+  status,
 });
-canvas.addEventListener('dragleave', e => { if(e.target === canvas) clearReplaceDropHelper(); });
-canvas.addEventListener('drop', e => {
-  if(!ED.active || ED.playPreview) return;
-  const replaceTargetNow = viewportReplaceTarget;
-  const blockedReplaceNow = !!(replaceDropHelper && !viewportReplaceTarget);
-  if(acceptAssetBrowserDrag(e)){
-    const asset = getAssetByRef(e.dataTransfer.getData('application/x-lotking-asset') || assetDragRef);
-    if(!asset){ status('Asset non disponibile'); return; }
-    if(blockedReplaceNow){
-      clearReplaceDropHelper();
-      status('Questo oggetto non puo essere sostituito direttamente');
-      return;
-    }
-    if(replaceTargetNow && asset.kind === 'imported-glb'){
-      clearReplaceDropHelper();
-      replaceSelectedWithAsset(asset.raw, replaceTargetNow);
-      return;
-    }
-    clearReplaceDropHelper();
-    placeAssetRef(asset, groundPointAt(e.clientX, e.clientY));
-    return;
-  }
-  if(!acceptEditorFileDrag(e)) return;
-  const files = supportedAssetFiles(e.dataTransfer.files);
-  if(files.length !== 1){
-    clearReplaceDropHelper();
-    status('Viewport drop accepts one model at a time');
-    return;
-  }
-  if(blockedReplaceNow){
-    clearReplaceDropHelper();
-    status('Questo oggetto non puo essere sostituito direttamente');
-    return;
-  }
-  if(replaceTargetNow){
-    const f = files[0];
-    clearReplaceDropHelper();
-    replaceObjectWithFile(replaceTargetNow, f);
-    return;
-  }
-  clearReplaceDropHelper();
-  const at = groundPointAt(e.clientX, e.clientY);
-  importAssetFiles(files, {placePoint: at});
-});
+function acceptEditorFileDrag(e){ return assetDnd.acceptEditorFileDrag(e); }
+function acceptAssetBrowserDrag(e){ return assetDnd.acceptAssetBrowserDrag(e); }
+function canReplaceTarget(o){ return assetDnd.canReplaceTarget(o); }
+function dragAssetModel(e){ return assetDnd.dragAssetModel(e); }
+function updateViewportReplaceHint(e){ return assetDnd.updateViewportReplaceHint(e); }
+function bindReplaceDropTarget(el, target){ return assetDnd.bindReplaceDropTarget(el, target); }
+function bindAssetDropZone(el){ return assetDnd.bindAssetDropZone(el); }
+function setAssetDragRef(ref){ return assetDnd.setAssetDragRef(ref); }
 function setLeftMode(mode){
   ED.leftMode = 'scene';
   $('#lkSceneTab').classList.add('on');
@@ -871,7 +741,7 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   entityIcon,
   selectObject,
   setLeftMode,
-  setAssetDragRef: ref => { assetDragRef = ref; },
+  setAssetDragRef,
 });
 outliner = window.LK_EDITOR_OUTLINER && window.LK_EDITOR_OUTLINER.create({
   GAME, ED, $,
