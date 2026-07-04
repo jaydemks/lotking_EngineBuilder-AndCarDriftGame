@@ -33,6 +33,7 @@ The road ahead leads to **1.0.0**.
 - Moved engine sound set asset item construction into `js/editor/asset-panel.js` while preserving Sound Designer open/assign/duplicate/delete actions.
 - Moved blueprint asset item construction, scene asset item construction, and asset dock refresh orchestration into `js/editor/asset-panel.js`.
 - Extracted scene outliner rendering into `js/editor/outliner.js`, including visible entity filtering, row DOM creation, folder rendering, scene tree drag/drop, and empty-space context menu wiring.
+- Extracted asset, scene, and asset-dock context menu factories into `js/editor/editor-menus.js`.
 
 ---
 

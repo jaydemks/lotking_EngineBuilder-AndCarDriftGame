@@ -127,6 +127,7 @@ let toolbar = null;
 let sidePanels = null;
 let assetPanel = null;
 let outliner = null;
+let editorMenus = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -1169,103 +1170,13 @@ function placeAssetRef(item, at){
   status('Questo tipo di asset non può essere piazzato nel viewport');
 }
 function assetContextMenuItems(item){
-  if(!item) return [];
-  if(item.kind === 'level'){
-    const l = item.raw;
-    return [
-      {label:'Load in editor', icon:'▶', disabled:!!l.active, action:() => loadLevel(l.id, l.name)},
-      {label:'Rename', icon:'✎', action:() => renameLevel(l.id, l.name)},
-      {label:'Duplicate', icon:'⧉', action:() => duplicateLevel(l.id, l.name)},
-      {label:'Export LKEP', icon:'⇩', action:() => exportLevel(l.id)},
-      {sep:true},
-      {label:'Delete', icon:'🗑', action:() => deleteLevel(l.id, l.name)},
-    ];
-  }
-  if(item.kind === 'sound-set'){
-    const s = item.raw;
-    const assignedSoundSet = GAME.player.engineAudio && GAME.player.engineAudio.setId;
-    return [
-      {label:'Open Engine Sound Designer', icon:'🎛', action:() => openSoundDesigner(s.id)},
-      {label:'Assign to player vehicle', icon:'🚗', disabled:assignedSoundSet === s.id, action:() => {
-        GAME.player.setEngineSound(s.id); markDirty(); refreshAssetsPanel();
-        status('Sound set "' + s.name + '" assegnato al veicolo');
-      }},
-      {label:'Duplicate sound set', icon:'⧉', action:() => { STORE.soundSets.duplicate(s.id); refreshAssetsPanel(); }},
-      {sep:true},
-      {label:'Delete sound set', icon:'🗑', action:() => {
-        confirmEditorAction({title:'Delete sound set?', message:'Eliminare il sound set "' + s.name + '"?', okText:'Delete'}).then(ok => {
-          if(!ok) return;
-          STORE.soundSets.remove(s.id);
-          if(assignedSoundSet === s.id){ GAME.player.setEngineSound(null); markDirty(); }
-          refreshAssetsPanel();
-        });
-      }},
-    ];
-  }
-  if(item.kind === 'imported-glb'){
-    const asset = item.raw;
-    return [
-      {label:'Add to level', icon:'＋', action:() => placeAssetRef(item, spawnPointAhead())},
-      {label:'Replace selected scene object', icon:'📦', disabled:!ED.selected || ED.selected.userData.editorType === 'player', action:() => replaceSelectedWithAsset(asset)},
-      {sep:true},
-      {label:'Delete imported asset', icon:'🗑', action:() => deleteImportedAsset(asset)},
-    ];
-  }
-  if(item.kind === 'scene'){
-    const a = item.raw;
-    return [
-      {label:'Select first instance', icon:'☝', action:() => { selectObject(a.instances[0]); setLeftMode('scene'); }},
-      {label:'Add another instance', icon:'＋', action:() => placeAssetRef(item, spawnPointAhead())},
-      {label:'Focus first instance', icon:'🔍', action:() => { selectObject(a.instances[0]); focusSelected(); setLeftMode('scene'); }},
-      {sep:true},
-      {label:'Delete all instances', icon:'🗑', action:() => requestDeleteAssetInstances(a)},
-    ];
-  }
-  if(item.kind === 'player-blueprint'){
-    const asset = item.raw;
-    return [
-      {label:'Apply to scene player', icon:'🚗', action:() => applyPlayerBlueprintAsset(asset.player, {applySpawn:false})},
-      {label:'Promote to Base blueprint', icon:'★', action:() => setDefaultPlayerBlueprintAsset(asset)},
-      {sep:true},
-      {label:'Delete copied blueprint', icon:'🗑', disabled:!!item.base, action:() => deletePlayerBlueprintAsset(asset)},
-    ];
-  }
-  return [];
+  return editorMenus ? editorMenus.assetContextMenuItems(item) : [];
 }
 function scenePanelMenuItems(){
-  return [
-    {label:'Create scene folder/group', icon:'📁', action:() => newFolder('scene')},
-    {label:'Add', icon:'＋', sub:addMenuItems(spawnPointAhead())},
-    {sep:true},
-    {label:'Grid view', icon:'▦', disabled:ED.viewMode === 'grid', action:() => setViewMode('grid')},
-    {label:'List view', icon:'☰', disabled:ED.viewMode === 'list', action:() => setViewMode('list')},
-    {label:ED.gridOn ? 'Hide viewport grid' : 'Show viewport grid', icon:'▦', action:() => setGrid(!ED.gridOn)},
-    {sep:true},
-    {label:'Deselect', icon:'✕', disabled:!ED.selected && !ED.special, action:deselect},
-    {label:'Focus selected', icon:'🔍', disabled:!ED.selected, action:focusSelected},
-    {label:'Save track', icon:'💾', action:saveScene},
-  ];
+  return editorMenus ? editorMenus.scenePanelMenuItems() : [];
 }
 function assetsPanelMenuItems(){
-  const filterItems = Object.keys(ED.assetFilters).map(key => ({
-    label:(ED.assetFilters[key] === false ? 'Show ' : 'Hide ') + key,
-    icon:ED.assetFilters[key] === false ? '☐' : '☑',
-    action:() => {
-      ED.assetFilters[key] = ED.assetFilters[key] === false;
-      const input = root.querySelector('[data-asset-filter="' + key + '"]');
-      if(input) input.checked = ED.assetFilters[key] !== false;
-      refreshAssetsPanel();
-    },
-  }));
-  return [
-    {label:'Create assets folder/group', icon:'📁', action:() => newFolder('assets')},
-    {label:'Import GLB/GLTF assets', icon:'＋', action:() => $('#lkAssetInput').click()},
-    {label:'Refresh assets', icon:'↻', action:() => { refreshAssetsPanel(); status('Asset library refreshed'); }},
-    {sep:true},
-    {label:'Grid view', icon:'▦', disabled:ED.viewMode === 'grid', action:() => setViewMode('grid')},
-    {label:'List view', icon:'☰', disabled:ED.viewMode === 'list', action:() => setViewMode('list')},
-    {label:'Filters', icon:'☑', sub:filterItems},
-  ];
+  return editorMenus ? editorMenus.assetsPanelMenuItems() : [];
 }
 function requestDeleteAssetInstances(asset){
   if(!asset || !asset.instances || !asset.instances.length) return;
@@ -1292,6 +1203,36 @@ function refreshAssetsPanel(){
 const thumbCache = {has: thumbnails.has, get: thumbnails.get, delete: thumbnails.remove};
 function queueThumb(o, el){ thumbnails.queue(o, el); }
 function processThumbQueue(){ thumbnails.process(); }
+editorMenus = window.LK_EDITOR_MENUS && window.LK_EDITOR_MENUS.create({
+  GAME, STORE, ED, root, $,
+  loadLevel,
+  renameLevel,
+  duplicateLevel,
+  exportLevel,
+  deleteLevel,
+  openSoundDesigner,
+  markDirty,
+  refreshAssetsPanel,
+  status,
+  confirmEditorAction,
+  placeAssetRef,
+  spawnPointAhead,
+  replaceSelectedWithAsset,
+  deleteImportedAsset,
+  selectObject,
+  setLeftMode,
+  focusSelected,
+  requestDeleteAssetInstances,
+  applyPlayerBlueprintAsset,
+  setDefaultPlayerBlueprintAsset,
+  deletePlayerBlueprintAsset,
+  newFolder,
+  addMenuItems,
+  setViewMode,
+  setGrid,
+  deselect,
+  saveScene,
+});
 assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create({
   GAME,
   STORE,
