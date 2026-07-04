@@ -25,6 +25,7 @@ The road ahead leads to **1.0.0**.
 - Extracted topbar and toolbar event wiring into `js/editor/toolbar.js`, keeping tool buttons, snap toggles, level buttons, export buttons, and preview/exit controls out of the main editor file.
 - Extracted left scene tools and asset dock control wiring into `js/editor/side-panels.js`, covering search, filters, view toggles, import, folders, refresh, and asset category checkboxes.
 - Started splitting the asset dock renderer with `js/editor/asset-panel.js`, moving asset card DOM creation and asset card interaction wiring out of the main editor file.
+- Moved asset visibility checks and asset group/folder rendering helpers into `js/editor/asset-panel.js`, reducing another layer of asset dock DOM work in the main editor file.
 
 ---
 

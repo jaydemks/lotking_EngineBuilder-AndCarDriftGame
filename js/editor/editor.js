@@ -465,6 +465,7 @@ function newFolder(kind){ if(folderManager) folderManager.newFolder(kind); }
 function makeFolderRow(kind, folder){ return folderManager ? folderManager.makeRow(kind, folder) : document.createElement('div'); }
 function folderList(kind){ return folderManager ? folderManager.list(kind) : []; }
 function folderAssignments(kind){ return folderManager ? folderManager.assignments(kind) : {}; }
+function folderById(kind, id){ return folderManager ? folderManager.byId(kind, id) : null; }
 
 keyboardShortcuts = window.LK_EDITOR_KEYBOARD_SHORTCUTS && window.LK_EDITOR_KEYBOARD_SHORTCUTS.create({
   ED, fly, GAME, closeMenu, setPrefsOpen, setLevelsOverlayOpen, stopPlayPreview,
@@ -1186,7 +1187,7 @@ function assetFilterKey(item){
   return 'other';
 }
 function assetVisible(item, q){
-  return ED.assetFilters[assetFilterKey(item)] !== false && assetMatchesSearch(item, q);
+  return assetPanel.visible(item, q);
 }
 function selectAssetItem(ref){
   ED.selectedAsset = ref;
@@ -1370,25 +1371,7 @@ function requestDeleteAssetInstances(asset){
 function assetButton(label, title, fn){ return assetPanel.button(label, title, fn); }
 function makeAssetCard(item){ return assetPanel.makeCard(item); }
 function addAssetGroup(box, title, items, folderAware){
-  if(!items.length && !(folderAware && folderList('assets').length)) return;
-  box.appendChild(el('<div class="lk-asset-group">' + title + '</div>'));
-  if(folderAware){
-    const assignments = folderAssignments('assets');
-    const folders = folderList('assets');
-    const renderFolderTree = parent => {
-      folders.filter(f => (f.parent || null) === (parent || null)).forEach(folder => {
-        box.appendChild(makeFolderRow('assets', folder));
-        if(folder.open){
-          items.filter(item => assignments[item.ref] === folder.id).forEach(item => box.appendChild(makeAssetCard(item)));
-          renderFolderTree(folder.id);
-        }
-      });
-    };
-    renderFolderTree(null);
-    return;
-  }
-  const assignments = folderAssignments('assets');
-  items.filter(item => !assignments[item.ref] || !folderById('assets', assignments[item.ref])).forEach(item => box.appendChild(makeAssetCard(item)));
+  return assetPanel.addGroup(box, title, items, folderAware);
 }
 function refreshAssetsPanel(){
   const box = $('#lkAssetsPanel');
@@ -1538,6 +1521,13 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   openMenu,
   assetContextMenuItems,
   getAssetByRef,
+  assetFilterKey,
+  assetMatchesSearch,
+  el,
+  folderList,
+  makeFolderRow,
+  folderAssignments,
+  folderById,
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 

@@ -68,7 +68,35 @@ function create(deps){
     return div;
   }
 
-  return Object.freeze({button, makeCard});
+  function visible(item, q){
+    return ED.assetFilters[deps.assetFilterKey(item)] !== false && deps.assetMatchesSearch(item, q);
+  }
+
+  function addGroup(box, title, items, folderAware){
+    if(!items.length && !(folderAware && deps.folderList('assets').length)) return;
+    box.appendChild(deps.el('<div class="lk-asset-group">' + title + '</div>'));
+    if(folderAware){
+      const assignments = deps.folderAssignments('assets');
+      const folders = deps.folderList('assets');
+      const renderFolderTree = parent => {
+        folders.filter(f => (f.parent || null) === (parent || null)).forEach(folder => {
+          box.appendChild(deps.makeFolderRow('assets', folder));
+          if(folder.open){
+            items.filter(item => assignments[item.ref] === folder.id).forEach(item => box.appendChild(makeCard(item)));
+            renderFolderTree(folder.id);
+          }
+        });
+      };
+      renderFolderTree(null);
+      return;
+    }
+    const assignments = deps.folderAssignments('assets');
+    items
+      .filter(item => !assignments[item.ref] || !deps.folderById('assets', assignments[item.ref]))
+      .forEach(item => box.appendChild(makeCard(item)));
+  }
+
+  return Object.freeze({button, makeCard, visible, addGroup});
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});
