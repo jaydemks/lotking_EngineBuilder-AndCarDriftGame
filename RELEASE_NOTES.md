@@ -35,6 +35,7 @@ The road ahead leads to **1.0.0**.
 - Extracted scene outliner rendering into `js/editor/outliner.js`, including visible entity filtering, row DOM creation, folder rendering, scene tree drag/drop, and empty-space context menu wiring.
 - Extracted asset, scene, and asset-dock context menu factories into `js/editor/editor-menus.js`.
 - Extracted reusable inspector UI row/section builders into `js/editor/inspector-ui.js`.
+- Extracted game radio and menu music library inspector sections into `js/editor/music-library-panel.js`.
 - Extracted mesh material inspector controls into `js/editor/material-editor.js`, including presets, texture slots, material sliders, and shadow actions.
 
 ---
