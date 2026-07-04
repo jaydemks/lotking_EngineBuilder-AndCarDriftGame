@@ -24,6 +24,7 @@ The road ahead leads to **1.0.0**.
 - Extracted static editor chrome markup into `js/editor/editor-template.js`, so `editor.js` no longer carries the full topbar, panels, overlays, and hidden inputs inline.
 - Extracted topbar and toolbar event wiring into `js/editor/toolbar.js`, keeping tool buttons, snap toggles, level buttons, export buttons, and preview/exit controls out of the main editor file.
 - Extracted left scene tools and asset dock control wiring into `js/editor/side-panels.js`, covering search, filters, view toggles, import, folders, refresh, and asset category checkboxes.
+- Started splitting the asset dock renderer with `js/editor/asset-panel.js`, moving asset card DOM creation and asset card interaction wiring out of the main editor file.
 
 ---
 

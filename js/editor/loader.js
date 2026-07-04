@@ -56,7 +56,7 @@ function failEditorLoading(label){
 function ensureEditor(){
   if(window.LOT_KING && window.LOT_KING.editor) return Promise.resolve(window.LOT_KING.editor);
   if(loading) return loading;
-  document.querySelectorAll('script[data-lk-src^="js/editor/"], script[src^="js/editor/editor.js"], script[src^="js/editor/editor-template.js"], script[src^="js/editor/viewport-picking.js"], script[src^="js/editor/context-menu.js"], script[src^="js/editor/asset-imports.js"], script[src^="js/editor/level-manager.js"], script[src^="js/editor/player-blueprints.js"], script[src^="js/editor/folder-manager.js"], script[src^="js/editor/keyboard-shortcuts.js"], script[src^="js/editor/thumbnail-manager.js"], script[src^="js/editor/floating-layout.js"], script[src^="js/editor/preferences.js"], script[src^="js/editor/quick-audio.js"], script[src^="js/editor/toolbar.js"], script[src^="js/editor/side-panels.js"], script[src^="js/editor/playable-export.js"]').forEach(s => s.remove());
+  document.querySelectorAll('script[data-lk-src^="js/editor/"], script[src^="js/editor/editor.js"], script[src^="js/editor/editor-template.js"], script[src^="js/editor/viewport-picking.js"], script[src^="js/editor/context-menu.js"], script[src^="js/editor/asset-imports.js"], script[src^="js/editor/level-manager.js"], script[src^="js/editor/player-blueprints.js"], script[src^="js/editor/folder-manager.js"], script[src^="js/editor/keyboard-shortcuts.js"], script[src^="js/editor/thumbnail-manager.js"], script[src^="js/editor/floating-layout.js"], script[src^="js/editor/preferences.js"], script[src^="js/editor/quick-audio.js"], script[src^="js/editor/toolbar.js"], script[src^="js/editor/side-panels.js"], script[src^="js/editor/asset-panel.js"], script[src^="js/editor/playable-export.js"]').forEach(s => s.remove());
   loading = Promise.resolve()
     .then(() => waitRuntime('editor'))
     .then(() => { editorStage(.45, 'loading editor style'); return loadCss('css/editor.css'); })
@@ -79,6 +79,7 @@ function ensureEditor(){
     .then(() => { editorStage(.9295, 'loading editor template'); return loadScript('js/editor/editor-template.js'); })
     .then(() => { editorStage(.9297, 'loading editor toolbar'); return loadScript('js/editor/toolbar.js'); })
     .then(() => { editorStage(.9298, 'loading side panel controls'); return loadScript('js/editor/side-panels.js'); })
+    .then(() => { editorStage(.9299, 'loading asset panel helpers'); return loadScript('js/editor/asset-panel.js'); })
     .then(() => { editorStage(.93, 'loading playable export'); return loadScript('js/editor/playable-export.js'); })
     .then(() => { editorStage(.95, 'starting editor'); return loadScript('js/editor/editor.js'); })
     .then(() => {

@@ -125,6 +125,7 @@ let preferences = null;
 let quickAudio = null;
 let toolbar = null;
 let sidePanels = null;
+let assetPanel = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -1366,53 +1367,8 @@ function requestDeleteAssetInstances(asset){
     status('Deleted ' + removable.length + ' instance(s)');
   });
 }
-function assetButton(label, title, fn){
-  const b = document.createElement('button');
-  b.textContent = label;
-  b.title = title;
-  b.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
-  return b;
-}
-function makeAssetCard(item){
-  const div = document.createElement('div');
-  div.className = 'lk-asset-item lk-asset-' + item.kind + (ED.selectedAsset === item.ref ? ' sel' : '') + (item.active ? ' active' : '');
-  div.dataset.assetRef = item.ref;
-  div.draggable = true;
-  const thumb = document.createElement('div');
-  thumb.className = 'lk-asset-thumb';
-  if(item.thumbUrl) thumb.style.backgroundImage = 'url(' + item.thumbUrl + ')';
-  else thumb.textContent = item.icon || '▣';
-  if(item.thumbObject){
-    const sid = item.thumbObject.userData.editorId;
-    if(thumbCache.has(sid)){
-      const cached = thumbCache.get(sid);
-      if(cached){ thumb.style.backgroundImage = 'url(' + cached + ')'; thumb.textContent = ''; }
-    } else queueThumb(item.thumbObject, thumb);
-  }
-  const meta = document.createElement('div');
-  meta.className = 'lk-asset-meta';
-  meta.innerHTML = '<div class="lk-asset-name"></div><div class="lk-asset-sub"></div>';
-  meta.querySelector('.lk-asset-name').textContent = item.name;
-  meta.querySelector('.lk-asset-sub').textContent = item.sub || '';
-  const actions = document.createElement('div');
-  actions.className = 'lk-asset-actions';
-  (item.actions || []).forEach(a => actions.appendChild(assetButton(a.label, a.title, a.fn)));
-  div.append(thumb, meta, actions);
-  div.addEventListener('click', () => selectAssetItem(item.ref));
-  div.addEventListener('dblclick', () => { if(item.defaultAction) item.defaultAction(); });
-  div.addEventListener('contextmenu', ev => {
-    ev.preventDefault(); ev.stopPropagation();
-    selectAssetItem(item.ref);
-    openMenu(assetContextMenuItems(getAssetByRef(item.ref)), ev.clientX, ev.clientY);
-  });
-  div.addEventListener('dragstart', ev => {
-    assetDragRef = item.ref;
-    ev.dataTransfer.setData('application/x-lotking-asset', item.ref);
-    ev.dataTransfer.effectAllowed = item.draggable ? 'copyMove' : 'move';
-  });
-  div.addEventListener('dragend', () => { assetDragRef = null; });
-  return div;
-}
+function assetButton(label, title, fn){ return assetPanel.button(label, title, fn); }
+function makeAssetCard(item){ return assetPanel.makeCard(item); }
 function addAssetGroup(box, title, items, folderAware){
   if(!items.length && !(folderAware && folderList('assets').length)) return;
   box.appendChild(el('<div class="lk-asset-group">' + title + '</div>'));
@@ -1574,6 +1530,16 @@ function refreshAssetsPanel(){
 const thumbCache = {has: thumbnails.has, get: thumbnails.get, delete: thumbnails.remove};
 function queueThumb(o, el){ thumbnails.queue(o, el); }
 function processThumbQueue(){ thumbnails.process(); }
+assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create({
+  ED,
+  thumbCache,
+  queueThumb,
+  selectAssetItem,
+  openMenu,
+  assetContextMenuItems,
+  getAssetByRef,
+  setAssetDragRef: ref => { assetDragRef = ref; },
+});
 
 // ------------------------------------------------ selection
 function selectObject(o){
