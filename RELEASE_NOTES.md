@@ -37,6 +37,7 @@ The road ahead leads to **1.0.0**.
 - Extracted reusable inspector UI row/section builders into `js/editor/inspector-ui.js`.
 - Extracted game radio and menu music library inspector sections into `js/editor/music-library-panel.js`.
 - Extracted mesh material inspector controls into `js/editor/material-editor.js`, including presets, texture slots, material sliders, and shadow actions.
+- Extracted the regular scene object inspector into `js/editor/object-inspector.js`, covering headers, transform fields, visibility, collision, light, effect, and object action sections.
 
 ---
 
