@@ -1,0 +1,67 @@
+Lot King Source License 0.1
+
+Copyright (c) 2026 w4k3 / Lot King project contributors.
+
+This project is source-available for learning, modification, private use,
+research, streaming, reviewing, and non-commercial distribution.
+
+Permission is granted, free of charge, to any person obtaining a copy of this
+software and associated files (the "Project") to use, copy, modify, merge,
+publish, distribute, sublicense, and/or share modified versions, subject to the
+conditions below.
+
+1. Attribution
+
+Any public copy, fork, derivative work, video, playable build, article, store
+page, repository, or documentation that uses a substantial part of this Project
+must give visible credit to:
+
+  Lot King by w4k3
+
+The credit must be reasonably discoverable by users or readers. In software
+repositories, keeping this LICENSE file and attribution in the README is enough.
+
+2. Commercial Revenue Threshold
+
+Commercial use is allowed without a separate agreement while total gross
+revenue attributable to the Project or a derivative work remains below
+USD 100,000.
+
+If a person or organization earns USD 100,000 or more in total gross revenue
+from this Project or a derivative work, they must contact the original project
+owner and negotiate a separate commercial agreement in good faith before
+continuing commercial distribution or monetization.
+
+The exact revenue share, if any, is not fixed by this license and must be agreed
+in writing by the parties.
+
+3. No Misrepresentation
+
+You may not present an unmodified or modified version as the original official
+Lot King project unless you are authorized to do so. Forks and derivatives must
+make their relationship to the original project clear.
+
+4. Preserve Notices
+
+Copies or substantial portions of the Project must include this license text and
+the copyright notice above.
+
+5. Assets
+
+Bundled code and project-authored assets are covered by this license unless a
+file or folder states otherwise. Third-party assets, libraries, fonts, models,
+audio, or samples may have their own licenses and remain under their original
+terms.
+
+6. No Warranty
+
+THE PROJECT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE PROJECT OR THE USE OR OTHER DEALINGS IN THE PROJECT.
+
+Note: this is a custom source-available license. It is intentionally not an
+OSI-approved open-source license because it includes attribution and commercial
+revenue conditions.

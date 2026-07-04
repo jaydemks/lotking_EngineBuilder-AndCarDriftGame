@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOT KING — Parking Lot Drift</title>
+<link rel="stylesheet" href="css/lot-king.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="overlay" class="menu-preloading">
+  <h1>LOT KING</h1>
+  <div class="sub">Parking-lot drift challenge</div>
+  <div id="menuMain" class="menu-main">
+    <div id="controls-list">
+      <span><b>W / ↑</b></span><span>Accelerate</span>
+      <span><b>S / ↓</b></span><span>Brake / Reverse</span>
+      <span><b>A D / ← →</b></span><span>Steer</span>
+      <span><b>SPACE</b></span><span>Handbrake (drift!)</span>
+      <span><b>Mouse drag</b></span><span>Look around</span>
+      <span><b>Scroll</b></span><span>Zoom camera</span>
+      <span><b>C</b></span><span>Camera mode</span>
+      <span><b>R</b></span><span>Reset car</span>
+      <span><b>M</b></span><span>Mute sound</span>
+      <span><b>TAB</b></span><span>Radio (slow-motion)</span>
+      <span><b>P / N / B</b></span><span>Play · Next · Prev</span>
+      <span><b>U</b></span><span>Setup guida</span>
+      <span><b>ESC</b></span><span>Menu audio</span>
+      <span><b>H</b></span><span>Toggle controls legend</span>
+      <span><b>Drag &amp; drop .glb</b></span><span>Use your own car model</span>
+      <span><b>F</b></span><span>Flip loaded model 180°</span>
+    </div>
+    <button id="startBtn">CHOOSE TRACK</button>
+    <button id="editorBtn" title="Open the engine editor">⚙ ENGINE EDITOR</button>
+    <button id="menuMusicBtn">♪ MUSIC ON</button>
+  </div>
+  <div id="levelSelect" class="level-select" aria-hidden="true">
+    <div class="level-shell">
+      <div class="level-head">
+        <div>
+          <div class="level-kicker">TRACK SELECT</div>
+          <h2>Choose Track</h2>
+        </div>
+        <button id="levelBackBtn" type="button">BACK</button>
+      </div>
+      <div id="levelCards" class="level-grid"></div>
+    </div>
+  </div>
+  <div id="loadBarWrap"><div id="loadBar"></div></div>
+  <div id="loadTxt">loading world…</div>
+</div>
+
+<div id="hud">
+  <div id="score"><div class="total" id="totalScore">0</div><div class="label">DRIFT POINTS</div></div>
+  <div id="driftBox"><div id="driftPts">+0</div><div id="driftMult">x1</div></div>
+  <div id="speedo">
+    <div class="speedReadout">
+      <div class="kmh" id="kmh">0</div>
+      <div class="gearBox"><span>GEAR</span><b id="gearHud">1</b></div>
+    </div>
+    <div class="unit">KM/H</div>
+  </div>
+  <button id="settingsBtn" type="button" title="Menu">⚙</button>
+  <div id="tuneDock">
+    <button id="tuneBtn" type="button" title="Setup guida">🔧</button>
+    <div id="tunePanel">
+      <div class="tuneHead">
+        <div class="tuneTitle">SETUP GUIDA</div>
+        <div class="tuneHint">0 = stile base</div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Coppia veicolo*</div><output class="tuneVal" for="tuneTorque">0</output>
+          <div class="tuneDesc">Più spinta in accelerazione e uscita curva.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">0</span><input id="tuneTorque" data-tune="torque" type="range" min="0" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Velocità massima*</div><output class="tuneVal" for="tuneMaxSpeed">0</output>
+          <div class="tuneDesc">Allunga il limite massimo sul rettilineo.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">0</span><input id="tuneMaxSpeed" data-tune="maxSpeed" type="range" min="0" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Sovrasterzo</div><output class="tuneVal" for="tuneOversteer">0</output>
+          <div class="tuneDesc">Negativo più stabile, positivo più facile da mettere di traverso.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">-10</span><input id="tuneOversteer" data-tune="oversteer" type="range" min="-10" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Freno a mano</div><output class="tuneVal" for="tuneHandbrake">0</output>
+          <div class="tuneDesc">Quanto rompe il grip quando lo premi.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">-10</span><input id="tuneHandbrake" data-tune="handbrake" type="range" min="-10" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Sensibilità sterzo</div><output class="tuneVal" for="tuneSteer">0</output>
+          <div class="tuneDesc">Negativo più morbida, positivo più agile e reattiva.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">-10</span><input id="tuneSteer" data-tune="steer" type="range" min="-10" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Frenata</div><output class="tuneVal" for="tuneBrake">0</output>
+          <div class="tuneDesc">Da freno progressivo a staccata più aggressiva.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">-10</span><input id="tuneBrake" data-tune="brake" type="range" min="-10" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+
+      <div class="tuneRow">
+        <div class="tuneMeta">
+          <div class="tuneName">Aderenza gomme</div><output class="tuneVal" for="tuneGrip">0</output>
+          <div class="tuneDesc">Negativo più scivolosa, positivo più incollata.</div>
+        </div>
+        <div class="tuneControl"><span class="tuneMin">-10</span><input id="tuneGrip" data-tune="grip" type="range" min="-10" max="10" step="1" value="0"><span class="tuneMax">10</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="legend">
+    <div class="lg-title">CONTROLS · [H] hide</div>
+    <div class="lg-body">
+      <b>W A S D / frecce</b> guida · <b>SPACE</b> freno a mano (drift)<br>
+      <b>Mouse</b> free look · <b>Scroll</b> zoom · <b>V</b> look back · <b>C</b> camera · <b>R</b> reset<br>
+      <b>TAB</b> radio · <b>P</b> play/pausa · <b>N</b> next · <b>B</b> prev<br>
+      <b>ESC</b> menu audio · <b>U</b> setup guida · <b>M</b> muto · <b>F</b> flip modello · <b>H</b> mostra/nascondi questo pannello
+    </div>
+  </div>
+  <div id="popup"></div>
+</div>
+
+<div id="settingsOverlay">
+  <div id="settingsPanel">
+    <div class="settingsHead">
+      <div>
+        <div class="settingsEyebrow">PAUSE</div>
+        <div class="settingsTitle" id="settingsTitle">GAME MENU</div>
+      </div>
+      <button id="settingsClose" type="button" title="Resume">×</button>
+    </div>
+
+    <div class="pauseActions">
+      <button id="pauseResume" type="button">Resume</button>
+      <button id="pauseBackMenu" type="button">Back to menu</button>
+    </div>
+
+    <div class="settingsTabs">
+      <button class="on" type="button" data-settings-tab="audio">Audio</button>
+      <button type="button" data-settings-tab="video">Video</button>
+      <button type="button" data-settings-tab="gameplay">Gameplay</button>
+    </div>
+
+    <div class="settingsSection on" data-settings-section="audio">
+      <div class="settingsRow" data-audio-row="master">
+        <div class="settingsMeta">
+          <div class="settingsName">Volume generale</div><output class="settingsVal" for="volMaster">100%</output>
+          <div class="settingsDesc">Controlla tutto il mix attivo.</div>
+        </div>
+        <div class="settingsControl"><span>0</span><input id="volMaster" data-audio="master" type="range" min="0" max="100" step="1" value="100"><span>100</span></div>
+      </div>
+
+      <div class="settingsRow" data-audio-row="car">
+        <div class="settingsMeta">
+          <div class="settingsName">Motore e gomme</div><output class="settingsVal" for="volCar">100%</output>
+          <div class="settingsDesc">Regola motore, turbo sonoro e stridio gomme.</div>
+        </div>
+        <div class="settingsControl"><span>0</span><input id="volCar" data-audio="car" type="range" min="0" max="100" step="1" value="100"><span>100</span></div>
+      </div>
+
+      <div class="settingsRow" data-audio-row="sfx">
+        <div class="settingsMeta">
+          <div class="settingsName">Effetti gioco</div><output class="settingsVal" for="volSfx">100%</output>
+          <div class="settingsDesc">Urti, coni e ambiente del parcheggio.</div>
+        </div>
+        <div class="settingsControl"><span>0</span><input id="volSfx" data-audio="sfx" type="range" min="0" max="100" step="1" value="100"><span>100</span></div>
+      </div>
+
+      <div class="settingsRow" data-audio-row="music">
+        <div class="settingsMeta">
+          <div class="settingsName">Musica</div><output class="settingsVal" for="volMusic">100%</output>
+          <div class="settingsDesc">Volume radio e musica del menu iniziale.</div>
+        </div>
+        <div class="settingsControl"><span>0</span><input id="volMusic" data-audio="music" type="range" min="0" max="100" step="1" value="100"><span>100</span></div>
+      </div>
+    </div>
+
+    <div class="settingsSection" data-settings-section="video">
+      <div class="settingsRow">
+        <div class="settingsMeta">
+          <div class="settingsName">Qualità render</div>
+          <div class="settingsDesc">Profilo visivo dell'engine editor e del viewport.</div>
+        </div>
+        <select id="videoQuality" class="settingsSelect">
+          <option>High</option>
+          <option>Balanced</option>
+          <option>Performance</option>
+        </select>
+      </div>
+      <div class="settingsRow">
+        <div class="settingsMeta">
+          <div class="settingsName">Antialiasing</div>
+          <div class="settingsDesc">Aumenta la nitidezza di bordi e linee nel gioco e nell'editor.</div>
+        </div>
+        <select id="videoAA" class="settingsSelect">
+          <option>High</option>
+          <option>Normal</option>
+          <option>Performance</option>
+        </select>
+      </div>
+      <div class="settingsRow">
+        <div class="settingsMeta">
+          <div class="settingsName">HUD editor</div>
+          <div class="settingsDesc">Mostra pannelli e helper dell'editor.</div>
+        </div>
+        <label class="settingsToggle"><input id="videoEditorHud" type="checkbox" checked><span>Visible</span></label>
+      </div>
+    </div>
+
+    <div class="settingsSection" data-settings-section="gameplay">
+      <div class="settingsRow">
+        <div class="settingsMeta">
+          <div class="settingsName">Setup guida</div>
+          <div class="settingsDesc">Apri i parametri di guida già presenti nel gioco.</div>
+        </div>
+        <button id="openGameplayTune" type="button" class="settingsInlineBtn">Open setup</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="radio">
+  <img id="radioImg" alt="" draggable="false">
+  <div id="radioScreen">
+    <div class="rs-head">
+      <span class="rs-np"><span class="tri">▲</span> NOW PLAYING</span>
+      <span class="rs-clockdate"><b id="rsClock">--:--</b><span id="rsDate">—</span></span>
+      <span></span>
+    </div>
+    <div class="rs-main">
+      <div class="rs-left">
+        <canvas id="albumArt" width="220" height="220"></canvas>
+        <div class="rs-g">G-FORCE: <b id="rsG">0.0G</b> Side</div>
+        <canvas id="gGraph" width="220" height="42"></canvas>
+        <div class="rs-g">BOOST: <b id="rsBoost">0.0 BAR</b></div>
+      </div>
+      <div class="rs-center">
+        <div id="rsTitle">—</div>
+        <div id="rsArtist">—</div>
+        <div class="rs-controls">
+          <button id="btnPrev" title="Previous [B]">⏮</button>
+          <button id="btnPlay" title="Play/Pause [P]">⏸</button>
+          <button id="btnNext" title="Next [N]">⏭</button>
+          <button id="btnShuffle" title="Shuffle">⇄</button>
+        </div>
+        <div class="rs-progress"><span id="tCur">0:00</span><div class="bar" id="tBar"><div id="tFill"></div></div><span id="tTot">0:00</span></div>
+        <div class="rs-vol"><span class="lbl">VOL</span><input id="rsVol" type="range" min="0" max="10" step="1" value="10"><b id="rsVolVal">10</b></div>
+      </div>
+      <div class="rs-right">
+        <div class="lbl">OIL TEMP:</div><div class="val" id="rsOil">90°C</div>
+        <div class="lbl">SPEED:</div><div class="val" id="rsSpeed">0</div>
+        <div class="lbl">KM/H</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
+<script src="js/runtime/assets.js"></script>
+<script src="js/runtime/music-library.js"></script>
+<script src="js/runtime/menu-music.js"></script>
+<script src="js/runtime/player-camera.js"></script>
+<script src="js/runtime/radio-hud.js"></script>
+<script src="js/runtime/audio.js"></script>
+<script src="js/runtime/engine-audio.js"></script>
+<script src="js/runtime/volumetric-clouds.js"></script>
+<script src="js/runtime/rain.js"></script>
+<script src="js/runtime/sky.js"></script>
+<script src="js/runtime/post.js"></script>
+<script src="js/runtime/physics-world.js"></script>
+<script src="js/runtime/drive-tuning.js"></script>
+<script src="js/runtime/player-data-widgets.js"></script>
+<script src="js/runtime/game-hud.js"></script>
+<script src="js/runtime/track-catalog.js"></script>
+<script src="js/runtime/loading-flow.js"></script>
+<script src="js/runtime/runtime-loader.js"></script>
+<script src="js/runtime/model-assets.js"></script>
+<script src="js/runtime/player-model.js"></script>
+<script src="js/runtime/world-state.js"></script>
+<script src="js/runtime/world-generation.js"></script>
+<script src="js/runtime/session-flow.js"></script>
+<script src="js/runtime/settings-menu.js"></script>
+<script src="js/runtime/game-flow.js"></script>
+<script src="js/lot-king.js"></script>
+<script src="js/engine/scene-store.js?v=player-blueprint-rig-2"></script>
+<script src="js/editor/loader.js"></script>
+</body>
+</html>

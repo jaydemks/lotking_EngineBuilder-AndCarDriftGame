@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>LK editor test</title>
+<link rel="stylesheet" href="css/lot-king.css">
+<link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <h1>LOT KING</h1><div class="sub">test</div><div id="controls-list"></div>
+  <button id="startBtn">START ENGINE</button>
+  <button id="editorBtn">⚙ ENGINE EDITOR</button>
+  <button id="menuMusicBtn">♪</button>
+  <div id="loadBarWrap"><div id="loadBar"></div></div><div id="loadTxt">loading…</div>
+</div>
+<div id="hud">
+  <div id="score"><div class="total" id="totalScore">0</div><div class="label">DRIFT POINTS</div></div>
+  <div id="driftBox"><div id="driftPts">+0</div><div id="driftMult">x1</div></div>
+  <div id="speedo"><div class="kmh" id="kmh">0</div><div class="unit">KM/H</div></div>
+  <button id="settingsBtn" type="button">⚙</button>
+  <div id="tuneDock"><button id="tuneBtn" type="button">🔧</button><div id="tunePanel"></div></div>
+  <div id="settingsOverlay"><div id="settingsPanel"><div class="settingsHead"><div class="settingsTitle">A</div><button id="settingsClose" type="button">×</button></div></div></div>
+  <div id="legend"><div class="lg-title">C</div><div class="lg-body"></div></div>
+  <div id="popup"></div>
+</div>
+<div id="radio">
+  <img id="radioImg" alt="" draggable="false">
+  <div id="radioScreen"><div class="rs-head"><span class="rs-np"><span class="tri">▲</span></span><span class="rs-clockdate"><b id="rsClock">--:--</b><span id="rsDate">—</span></span><span></span></div>
+    <div class="rs-main">
+      <div class="rs-left"><canvas id="albumArt" width="220" height="220"></canvas><div class="rs-g">G: <b id="rsG">0</b></div><canvas id="gGraph" width="220" height="42"></canvas><div class="rs-g">B: <b id="rsBoost">0</b></div></div>
+      <div class="rs-center"><div id="rsTitle">—</div><div id="rsArtist">—</div>
+        <div class="rs-controls"><button id="btnPrev">⏮</button><button id="btnPlay">⏸</button><button id="btnNext">⏭</button><button id="btnShuffle">⇄</button></div>
+        <div class="rs-progress"><span id="tCur">0:00</span><div class="bar" id="tBar"><div id="tFill"></div></div><span id="tTot">0:00</span></div>
+        <div class="rs-vol"><span class="lbl">VOL</span><input id="rsVol" type="range" min="0" max="10" step="1" value="10"><b id="rsVolVal">10</b></div></div>
+      <div class="rs-right"><div class="lbl">OIL:</div><div class="val" id="rsOil">90</div><div class="lbl">SPD:</div><div class="val" id="rsSpeed">0</div><div class="lbl">KM/H</div></div>
+    </div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
+<script src="js/lot-king.js"></script>
+<script src="js/engine/scene-store.js"></script>
+<script src="js/editor/viewport-picking.js"></script>
+<script src="js/editor/asset-library.js"></script>
+<script src="js/editor/asset-imports.js"></script>
+<script src="js/editor/status-ui.js"></script>
+<script src="js/editor/dialogs.js"></script>
+<script src="js/editor/context-menu.js"></script>
+<script src="js/editor/level-manager.js"></script>
+<script src="js/editor/player-blueprints.js"></script>
+<script src="js/editor/folder-manager.js"></script>
+<script src="js/editor/keyboard-shortcuts.js"></script>
+<script src="js/editor/thumbnail-manager.js"></script>
+<script src="js/editor/floating-layout.js"></script>
+<script src="js/editor/playable-export.js"></script>
+<script src="js/editor/editor.js"></script>
+<script>
+const T = m => console.log('TEST: ' + m);
+const A = (cond, m) => console.log((cond ? 'TEST-PASS: ' : 'TEST-FAIL: ') + m);
+addEventListener('error', e => console.log('TEST-ERROR: ' + e.message + ' @ ' + e.filename + ':' + e.lineno));
+
+setTimeout(() => {
+  try {
+    const G = window.LOT_KING, S = window.LK_STORE;
+    const pre = S.load();
+    T('saved scene present at boot: ' + !!pre);
+
+    if(pre){
+      // ---- PHASE 2: verify the saved scene was re-applied at boot
+      setTimeout(() => {
+        A(G.world.registry.some(o => o.userData.editorName === 'TestBox'), 'phase2: TestBox recreated');
+        A(G.world.registry.some(o => o.userData.editorName === 'TestSpot'), 'phase2: TestSpot recreated');
+        A(G.world.registry.some(o => o.userData.editorName === 'TestFire'), 'phase2: TestFire recreated');
+        const tb = G.world.registry.find(o => o.userData.editorName === 'TestBox');
+        A(tb && Math.abs(tb.position.z - 40) < .01 && Math.abs(tb.scale.y - 2) < .01, 'phase2: TestBox transform restored');
+        A(G.player.cameraCfg.fov === 72, 'phase2: camera fov restored');
+        A(G.player.cameraCfg.dof.enabled === true, 'phase2: DOF restored');
+        A(G.world.colliders.box.some(c => Math.abs(c.z - 40) < 1.2 && Math.abs(c.x - 3) < 1.2), 'phase2: TestBox collider present');
+        T('done phase2');
+      }, 1500);
+      return;
+    }
+
+    A(G.world.registry.length > 50, 'registry populated: ' + G.world.registry.length);
+    A(G.systems.post && G.systems.post.ok, 'post-processing (DOF) available');
+
+    G.editor.enter();
+    A(document.getElementById('lkEditor').classList.contains('active'), 'editor entered');
+    A(G.state.editorActive === true, 'editorActive flag');
+    A(document.querySelectorAll('#lkOutliner .lk-item').length > 10, 'outliner items rendered');
+
+    document.querySelector('[data-tool="rotate"]').click(); T('tool rotate ok');
+    document.querySelector('[data-tool="translate"]').click();
+    document.querySelector('.lk-pin[data-special="player"]').click();
+    A(document.querySelector('#lkInspector .lk-bp-title') !== null, 'player blueprint inspector');
+    document.querySelector('.lk-pin[data-special="env"]').click();
+    A(document.querySelector('#lkInspector').textContent.includes('ENVIRONMENT'), 'environment inspector');
+
+    const first = document.querySelector('#lkOutliner .lk-item');
+    first.click();
+    A(document.querySelector('#lkInspector .lk-head-name') !== null, 'entity inspector after outliner click');
+
+    // add objects through the shared factories (same path the menus use)
+    const addBox = S.createPrimitive('box');
+    S.registerAdded(G, addBox, {id:S.nextId(), kind:'primitive', prim:'box', name:'TestBox', collide:true, t:{p:[3,0,40],r:[0,.4,0],s:[1,2,1],v:true}});
+    const addSpot = S.createLight('spot');
+    S.registerAdded(G, addSpot, {id:S.nextId(), kind:'light', light:'spot', name:'TestSpot', collide:false, t:{p:[0,8,40],r:[0,0,0],s:[1,1,1],v:true}});
+    const addFx = S.createEmitter('fire');
+    S.registerAdded(G, addFx, {id:S.nextId(), kind:'effect', effect:'fire', params:Object.assign({}, addFx.userData.effectParams), name:'TestFire', collide:false, t:{p:[-3,0,40],r:[0,0,0],s:[1,1,1],v:true}});
+    A(G.world.registry.some(o => o.userData.editorName === 'TestBox'), 'primitive added');
+    A(G.world.registry.some(o => o.userData.editorName === 'TestSpot'), 'light added');
+    A(G.world.registry.some(o => o.userData.editorName === 'TestFire'), 'effect added');
+
+    // camera / dof edits
+    G.player.cameraCfg.fov = 72;
+    G.player.cameraCfg.dof.enabled = true;
+    G.player.applyCameraCfg();
+
+    // save
+    document.getElementById('lkSave').click();
+    const data = JSON.parse(localStorage.getItem('lotking.scene.v1'));
+    A(data && data.added.length >= 3, 'saved added entries: ' + (data ? data.added.length : 'none'));
+    A(data && data.player.cam.fov === 72, 'saved player camera fov');
+    A(data && Object.keys(data.transforms).length > 50, 'saved builtin transforms: ' + Object.keys(data.transforms).length);
+
+    // play (exits editor, starts game, runs DOF render path)
+    document.getElementById('lkPlay').click();
+    setTimeout(() => {
+      A(G.state.started === true, 'game started after PLAY');
+      A(G.state.editorActive === false, 'editor exited');
+      T('done phase1 — reloading for phase 2');
+      location.reload();
+    }, 800);
+  } catch(err){
+    console.log('TEST-ERROR: ' + err.message + '\n' + err.stack);
+  }
+}, 2500);
+</script>
+</body>
+</html>

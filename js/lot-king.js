@@ -1,0 +1,2101 @@
+/* =========================================================
+   LOT KING — arcade drift game in a parking lot
+   Runtime · Three.js r128 · procedural WebAudio sound
+   ========================================================= */
+(function(){
+'use strict';
+
+const GAME = window.LOT_KING = {
+  version: '0.2.0',
+  assets: null,
+  core: {},
+  world: {},
+  player: {},
+  systems: {},
+  settings: {},
+  actions: {},
+  ui: {},
+  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false},
+  hooks: {frame: [], frameOverride: null},
+};
+
+// ------------------------------------------------ local assets
+const RUNTIME_ASSETS = window.LK_RUNTIME_ASSETS;
+const ASSET_DIR = RUNTIME_ASSETS.dirs;
+const ASSETS = RUNTIME_ASSETS.paths;
+const IS_FILE_MODE = RUNTIME_ASSETS.isFileMode;
+GAME.assets = {dirs: ASSET_DIR, paths: ASSETS, isFileMode: IS_FILE_MODE};
+
+// ------------------------------------------------ basics
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+const VIDEO_SETTINGS = window.LK_RUNTIME_SETTINGS_MENU.createVideo({
+  renderer,
+  pixelRatio: () => devicePixelRatio,
+  size: () => ({width: innerWidth, height: innerHeight}),
+});
+const VIDEO = VIDEO_SETTINGS.values;
+function applyVideoSettings(){
+  VIDEO_SETTINGS.apply();
+}
+applyVideoSettings();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1420);
+scene.fog = new THREE.FogExp2(0x0e1420, 0.008);
+
+const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.1, 500);
+
+addEventListener('resize', () => {
+  if(GAME.player && GAME.player.applyCameraCfg) GAME.player.applyCameraCfg();
+  else { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); }
+  applyVideoSettings();
+});
+
+// ------------------------------------------------ lights (dusk lot)
+const hemi = new THREE.HemisphereLight(0x35507a, 0x141210, 0.55);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffd9a0, 0.85);
+sun.position.set(60, 80, -40);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -90; sun.shadow.camera.right = 90;
+sun.shadow.camera.top = 90; sun.shadow.camera.bottom = -90;
+sun.shadow.camera.far = 250;
+sun.shadow.bias = -0.0006;
+scene.add(sun);
+
+// ------------------------------------------------ world state / editable entity registry
+const WORLD_STATE = window.LK_RUNTIME_WORLD_STATE.create({lot:72, wallH:4, seed:1337});
+const LOT = WORLD_STATE.constants.LOT;               // half-size of drivable lot
+const WALL_H = WORLD_STATE.constants.WALL_H;
+const circleColliders = WORLD_STATE.colliders.circle;   // {x,z,r}
+const boxColliders = WORLD_STATE.colliders.box;         // {x,z,hx,hz} axis-aligned
+const REGISTRY = WORLD_STATE.registry;
+function srand(){ return WORLD_STATE.srand(); }
+function tagEntity(obj, name, type, opts){
+  return WORLD_STATE.tagEntity(obj, name, type, opts);
+}
+function unregisterEntity(obj){
+  WORLD_STATE.unregisterEntity(obj);
+}
+
+tagEntity(hemi, 'Hemisphere Light', 'light');
+tagEntity(sun, 'Sun / Moon Light', 'light');
+
+// ------------------------------------------------ default track/world generation
+const WORLD_GENERATOR = window.LK_RUNTIME_WORLD_GENERATION.create({
+  THREERef: THREE,
+  scene,
+  tagEntity,
+  colliders: {circle: circleColliders, box: boxColliders},
+  srand,
+  constants: {LOT, WALL_H},
+});
+const WORLD_TRACK = WORLD_GENERATOR.buildDefaultParkingLot({
+  id: 'default-parking-lot',
+  name: 'Parking Lot',
+});
+const parkedGroups = WORLD_TRACK.parkedGroups;
+const cones = WORLD_TRACK.cones;
+const lampMat = WORLD_TRACK.materials.lamp;
+const pl1 = WORLD_TRACK.lights.pl1;
+const pl2 = WORLD_TRACK.lights.pl2;
+
+// ------------------------------------------------ dynamic sky: day/night cycle
+const SKY = window.LK_RUNTIME_SKY.createSky({
+  scene, renderer, paths: ASSETS, isFileMode: IS_FILE_MODE,
+  sun, hemi, lampMat, pl1, pl2,
+});
+
+// ------------------------------------------------ rain (environment weather)
+// audio passato come accessor lazy: SFX viene creato piu' in basso nel file
+const RAIN = window.LK_RUNTIME_RAIN ? window.LK_RUNTIME_RAIN.create({scene, audio: {
+  getContext: () => SFX.getContext(),
+  getSfxGain: () => SFX.getSfxGain(),
+}}) : null;
+// la pioggia segue il veicolo e si anima anche in editor (i frame hook girano
+// in entrambi i loop); le nuvole volumetriche avanzano qui solo in editor,
+// in gameplay le fa avanzare SKY.update.
+GAME.hooks.frame.push(dt => {
+  if(RAIN) RAIN.update(dt, GAME.player.car ? GAME.player.car.position : null);
+  if(GAME.state.editorActive && SKY.volClouds) SKY.volClouds.tick(dt);
+});
+
+// ------------------------------------------------ player car
+const car = new THREE.Group();
+const carVisual = new THREE.Group();   // procedural body — replaced if a GLTF model loads
+car.add(carVisual);
+let headlight = null;                  // exposed for the editor (player blueprint)
+const PLAYER_LIGHT_CFG = {
+  front: {enabled:true, auto:true, count:2, color:0xfff0c8, intensity:1.55, distance:42, angle:.50, penumbra:.55,
+    glow:true, bloom:true, bloomIntensity:.55, flare:true, glowSize:.62, flareSize:.42},
+  rear: {enabled:true, color:0xff1f18, baseIntensity:.45, brakeIntensity:2.8, reverseColor:0xf3f4ff, reverseIntensity:2.2,
+    glow:true, bloom:true, bloomIntensity:.55, flare:true, glowSize:.55, flareSize:.34},
+  neon: {enabled:false, dummyVisible:true, layout:'all', colorA:0x19f7ff, colorB:0xff3df2, intensity:1.25, spill:2.8, shadows:false, animation:'pulse', speed:1.0},
+  aux: [
+    {enabled:false, condition:'always', color:0xffd166, intensity:1.0, glow:true, flare:false, size:.42},
+    {enabled:false, condition:'brake', color:0xff3030, intensity:1.4, glow:true, flare:false, size:.42},
+  ],
+  dummies: {visible:false},
+};
+const playerLightRig = {front:[], rear:{position:[], brake:[], reverse:[]}, aux:[], neon:[], glowTex:null};
+const PLAYER_EXHAUST_CFG = {
+  enabled:true,
+  dummyVisible:true,
+  intensity:1,
+  smoke:true,
+  idleSmoke:true,
+  smokeThrottle:.18,
+  fire:true,
+  fireRpm:.88,
+  shiftFire:true,
+  limiterFire:true,
+  sources:[
+    {enabled:true},
+    {enabled:true},
+  ],
+};
+const playerExhaustRig = {sources:[]};
+let exhaustTestPulse = 0;
+function defaultAuxLightConfig(index){
+  const presets = [
+    {condition:'always', color:0xffd166, intensity:1.0},
+    {condition:'brake', color:0xff3030, intensity:1.4},
+    {condition:'reverse', color:0xf3f4ff, intensity:1.2},
+    {condition:'left', color:0xffaa18, intensity:1.1},
+    {condition:'right', color:0xffaa18, intensity:1.1},
+  ];
+  const p = presets[index % presets.length];
+  return {enabled:false, condition:p.condition, color:p.color, intensity:p.intensity, glow:true, flare:false, size:.42};
+}
+function defaultExhaustSourceConfig(){
+  return {enabled:true};
+}
+{
+  const bodyMat = new THREE.MeshStandardMaterial({color:0xef476f, roughness:.3, metalness:.55});
+  const dark = new THREE.MeshStandardMaterial({color:0x0e1013, roughness:.4, metalness:.4});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, .55, 4.1), bodyMat);
+  body.position.y = .55; body.castShadow = true; carVisual.add(body);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, .18, 1.2), bodyMat);
+  hood.position.set(0, .9, 1.5); hood.castShadow = true; carVisual.add(hood);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, .5, 1.9), dark);
+  cab.position.set(0, 1.05, -.35); cab.castShadow = true; carVisual.add(cab);
+  const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, .1, .45), dark);
+  spoiler.position.set(0, 1.15, -1.95); carVisual.add(spoiler);
+  const hl = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0xfff2c0, emissiveIntensity:2});
+  const tl = new THREE.MeshStandardMaterial({color:0xff0000, emissive:0xff2222, emissiveIntensity:1.6});
+  for(const s of [-1,1]){
+    const h = new THREE.Mesh(new THREE.BoxGeometry(.34,.16,.08), hl);
+    h.position.set(s*.6,.62,2.06); carVisual.add(h);
+    const t = new THREE.Mesh(new THREE.BoxGeometry(.42,.14,.08), tl);
+    t.position.set(s*.6,.62,-2.06); t.visible = false; carVisual.add(t);
+  }
+}
+function makeGlowTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const r = g.createRadialGradient(64,64,0,64,64,64);
+  r.addColorStop(0,'rgba(255,255,255,1)');
+  r.addColorStop(.22,'rgba(255,255,255,.72)');
+  r.addColorStop(.55,'rgba(255,255,255,.22)');
+  r.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0,0,128,128);
+  const tx = new THREE.CanvasTexture(c);
+  tx.encoding = THREE.sRGBEncoding;
+  return tx;
+}
+function makeLightSprite(color, size, opacity){
+  const mat = new THREE.SpriteMaterial({
+    map: playerLightRig.glowTex || (playerLightRig.glowTex = makeGlowTexture()),
+    color, transparent:true, opacity, depthWrite:false, blending:THREE.AdditiveBlending,
+  });
+  const s = new THREE.Sprite(mat);
+  s.scale.set(size, size, 1);
+  return s;
+}
+function makeLightDummy(name, color){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(.34, 18, 12),
+    new THREE.MeshBasicMaterial({color, wireframe:true, depthTest:false, depthWrite:false})
+  );
+  body.userData.helperOnly = true;
+  body.renderOrder = 999;
+  g.add(body);
+  g.userData.editorType = 'playerLight';
+  g.userData.builtin = true;
+  g.userData.editorName = name;
+  return g;
+}
+function createAuxLightRig(idx, cfg){
+  const side = idx % 2 === 0 ? -1 : 1;
+  const row = Math.floor(idx / 2);
+  const anchor = makeLightDummy('Aux Vehicle Light ' + (idx + 1), cfg.color);
+  anchor.position.set(side * (.9 + row * .14), .78, 1.4 - row * .48);
+  const point = new THREE.PointLight(cfg.color, 0, 10, 1.7);
+  const glow = makeLightSprite(cfg.color, cfg.size, .5);
+  const flare = makeLightSprite(cfg.color, cfg.size, .65);
+  anchor.add(point); anchor.add(glow); anchor.add(flare);
+  point.position.set(0,0,0); glow.position.set(0,0,0); flare.position.set(0,0,.04);
+  car.add(anchor);
+  tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_aux_light_' + idx});
+  playerLightRig.aux[idx] = {anchor, point, glow, flare};
+  return playerLightRig.aux[idx];
+}
+function ensureAuxLightRigs(){
+  for(let i=0;i<PLAYER_LIGHT_CFG.aux.length;i++){
+    if(!PLAYER_LIGHT_CFG.aux[i]) PLAYER_LIGHT_CFG.aux[i] = defaultAuxLightConfig(i);
+    if(!playerLightRig.aux[i]) createAuxLightRig(i, PLAYER_LIGHT_CFG.aux[i]);
+  }
+}
+function createExhaustSourceRig(idx, cfg){
+  const side = idx % 2 === 0 ? -1 : 1;
+  const row = Math.floor(idx / 2);
+  const anchor = new THREE.Group();
+  anchor.position.set(side * .42, .42, -2.22 - row * .18);
+  anchor.rotation.y = Math.PI;
+  anchor.userData.editorType = 'playerEffect';
+  anchor.userData.builtin = true;
+  anchor.userData.editorName = 'Exhaust Smoke Source ' + (idx + 1);
+  const helper = new THREE.Mesh(
+    new THREE.ConeGeometry(.18, .55, 14),
+    new THREE.MeshBasicMaterial({color:0x9aa3b8, wireframe:true, transparent:true, opacity:.9, depthTest:false, depthWrite:false})
+  );
+  helper.rotation.x = Math.PI / 2;
+  helper.userData.helperOnly = true;
+  helper.renderOrder = 999;
+  anchor.add(helper);
+  car.add(anchor);
+  tagEntity(anchor, anchor.userData.editorName, 'playerEffect', {id:'player_exhaust_' + idx});
+  playerExhaustRig.sources[idx] = {anchor, helper};
+  return playerExhaustRig.sources[idx];
+}
+function ensureExhaustRigs(){
+  for(let i=0;i<PLAYER_EXHAUST_CFG.sources.length;i++){
+    if(!PLAYER_EXHAUST_CFG.sources[i]) PLAYER_EXHAUST_CFG.sources[i] = defaultExhaustSourceConfig();
+    if(!playerExhaustRig.sources[i]) createExhaustSourceRig(i, PLAYER_EXHAUST_CFG.sources[i]);
+  }
+}
+function buildPlayerLightRig(){
+  for(const [idx, x] of [[0,-.58],[1,.58]]){
+    const anchor = makeLightDummy(idx === 0 ? 'Front Headlight L' : 'Front Headlight R', 0xfff0c8);
+    anchor.position.set(x, .78, 1.98);
+    const sp = new THREE.SpotLight(PLAYER_LIGHT_CFG.front.color, PLAYER_LIGHT_CFG.front.intensity, PLAYER_LIGHT_CFG.front.distance, PLAYER_LIGHT_CFG.front.angle, PLAYER_LIGHT_CFG.front.penumbra, 1.25);
+    const tg = new THREE.Object3D(); tg.position.set(x * -.35, -.12, 14);
+    anchor.add(sp); anchor.add(tg); sp.target = tg;
+    const glow = makeLightSprite(PLAYER_LIGHT_CFG.front.color, PLAYER_LIGHT_CFG.front.glowSize, .7); glow.position.set(0,0,.08); anchor.add(glow);
+    const flare = makeLightSprite(PLAYER_LIGHT_CFG.front.color, PLAYER_LIGHT_CFG.front.flareSize, .95); flare.position.set(0,0,.12); anchor.add(flare);
+    car.add(anchor);
+    tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_front_light_' + idx});
+    playerLightRig.front.push({anchor, light:sp, target:tg, glow, flare});
+  }
+  headlight = playerLightRig.front[0].light;
+  const rearDefs = [
+    ['position', 'Rear Position', 0xff2020, [[-.72,.64,-2.18],[.72,.64,-2.18]]],
+    ['brake', 'Rear Brake', 0xff1010, [[-.48,.68,-2.2],[.48,.68,-2.2]]],
+    ['reverse', 'Rear Reverse', 0xf3f4ff, [[-.22,.68,-2.22],[.22,.68,-2.22]]],
+  ];
+  for(const [role, label, color, pts] of rearDefs){
+    pts.forEach((pnt, idx) => {
+      const anchor = makeLightDummy(label + (idx === 0 ? ' L' : ' R'), color);
+      anchor.position.set(pnt[0], pnt[1], pnt[2]);
+      const point = new THREE.PointLight(color, 0, 7, 1.8);
+      const glow = makeLightSprite(color, PLAYER_LIGHT_CFG.rear.glowSize, .55);
+      const flare = makeLightSprite(color, PLAYER_LIGHT_CFG.rear.flareSize, .72);
+      anchor.add(point); anchor.add(glow); anchor.add(flare);
+      point.position.set(0,0,-.08); glow.position.set(0,0,-.1); flare.position.set(0,0,-.12);
+      car.add(anchor);
+      tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_rear_' + role + '_' + idx});
+      playerLightRig.rear[role].push({anchor, point, glow, flare});
+    });
+  }
+  ensureAuxLightRigs();
+  const neonDefs = [
+    ['left',  -1.05, .18, 0, .08, 2.7],
+    ['right',  1.05, .18, 0, .08, 2.7],
+    ['front', 0, .18, 1.75, 1.9, .08],
+    ['rear',  0, .18, -1.75, 1.9, .08],
+  ];
+  for(const [side,x,y,z,sx,sz] of neonDefs){
+    const anchor = new THREE.Group();
+    anchor.position.set(x,y,z);
+    anchor.userData.editorType = 'playerLight';
+    anchor.userData.builtin = true;
+    anchor.userData.editorName = 'Neon ' + side.charAt(0).toUpperCase() + side.slice(1);
+    const helper = new THREE.Mesh(
+      new THREE.BoxGeometry(sx, .12, sz),
+      new THREE.MeshBasicMaterial({color:PLAYER_LIGHT_CFG.neon.colorA, wireframe:true, transparent:true, opacity:.85, depthTest:false, depthWrite:false})
+    );
+    helper.userData.helperOnly = true;
+    helper.renderOrder = 999;
+    const mat = new THREE.MeshBasicMaterial({color:PLAYER_LIGHT_CFG.neon.colorA, transparent:true, opacity:.65, depthWrite:false, blending:THREE.AdditiveBlending});
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(sx,.035,sz), mat);
+    const glow = new THREE.PointLight(PLAYER_LIGHT_CFG.neon.colorA, 0, 6, 2);
+    glow.shadow.mapSize.set(256, 256);
+    glow.shadow.bias = -.003;
+    anchor.add(helper, strip, glow);
+    car.add(anchor);
+    tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_neon_' + side});
+    playerLightRig.neon.push({side, anchor, helper, strip, mat, glow});
+  }
+}
+function isNightTime(){
+  const t = SKY && SKY.getTime ? SKY.getTime() : .5;
+  return t < .24 || t > .70;
+}
+function applyPlayerLightConfig(){
+  ensureAuxLightRigs();
+  const dummyVisible = !!PLAYER_LIGHT_CFG.dummies.visible && !!GAME.state.editorActive;
+  for(const rig of playerLightRig.front) rig.anchor.children.forEach(c => { if(c.userData.helperOnly) c.visible = dummyVisible; });
+  for(const group of Object.values(playerLightRig.rear)) for(const rig of group) rig.anchor.children.forEach(c => { if(c.userData.helperOnly) c.visible = dummyVisible; });
+  for(const rig of playerLightRig.aux) rig.anchor.children.forEach(c => { if(c.userData.helperOnly) c.visible = dummyVisible; });
+  const neonDummyVisible = !!PLAYER_LIGHT_CFG.neon.dummyVisible && !!GAME.state.editorActive;
+  for(const rig of playerLightRig.neon) if(rig.helper) rig.helper.visible = neonDummyVisible;
+  const f = PLAYER_LIGHT_CFG.front;
+  for(let i=0;i<playerLightRig.front.length;i++){
+    const rig = playerLightRig.front[i], sp = rig.light;
+    sp.color.setHex(f.color);
+    sp.intensity = f.intensity;
+    sp.distance = f.distance;
+    sp.angle = f.angle;
+    sp.penumbra = f.penumbra;
+    sp.visible = !!f.enabled && i < Math.max(1, Math.min(2, f.count)) && (!f.auto || isNightTime());
+    rig.glow.material.color.setHex(f.color);
+    rig.glow.material.opacity = f.glow ? (.42 + (f.bloom ? f.bloomIntensity * .45 : 0)) : 0;
+    rig.glow.scale.setScalar(f.glowSize);
+    rig.flare.material.color.setHex(f.color);
+    rig.flare.material.opacity = f.flare ? .88 : 0;
+    rig.flare.scale.setScalar(f.flareSize);
+  }
+}
+function applyPlayerExhaustConfig(){
+  ensureExhaustRigs();
+  const show = !!PLAYER_EXHAUST_CFG.dummyVisible && !!GAME.state.editorActive;
+  for(const rig of playerExhaustRig.sources) if(rig && rig.helper) rig.helper.visible = show;
+}
+function updatePlayerLights(){
+  applyPlayerLightConfig();
+  const braking = !!(keys['s'] || keys['arrowdown']) && !ENGINE.reverseActive && speedKmh > 2;
+  const reversing = !!ENGINE.reverseActive;
+  const r = PLAYER_LIGHT_CFG.rear;
+  const applyRear = (group, color, intensity) => {
+    for(const rig of group){
+      rig.point.color.setHex(color); rig.point.intensity = intensity; rig.point.visible = !!r.enabled && intensity > 0;
+      rig.glow.material.color.setHex(color);
+      rig.glow.material.opacity = r.enabled && r.glow ? Math.min(1, .16 + intensity * .14 + (r.bloom ? r.bloomIntensity * .42 : 0)) : 0;
+      rig.glow.scale.setScalar(r.glowSize);
+      rig.flare.material.color.setHex(color);
+      rig.flare.material.opacity = r.enabled && r.flare ? Math.min(1, .22 + intensity * .2) : 0;
+      rig.flare.scale.setScalar(r.flareSize);
+    }
+  };
+  applyRear(playerLightRig.rear.position, r.color, r.enabled ? r.baseIntensity : 0);
+  applyRear(playerLightRig.rear.brake, r.color, r.enabled && braking ? r.brakeIntensity : 0);
+  applyRear(playerLightRig.rear.reverse, r.reverseColor, r.enabled && reversing ? r.reverseIntensity : 0);
+  const auxOn = condition => {
+    if(condition === 'always') return true;
+    if(condition === 'night') return isNightTime();
+    if(condition === 'brake') return braking;
+    if(condition === 'reverse') return reversing;
+    if(condition === 'left') return keys['a'] || keys['arrowleft'];
+    if(condition === 'right') return keys['d'] || keys['arrowright'];
+    return false;
+  };
+  for(let i=0;i<playerLightRig.aux.length;i++){
+    const rig = playerLightRig.aux[i], cfg = PLAYER_LIGHT_CFG.aux[i];
+    const on = !!cfg.enabled && auxOn(cfg.condition);
+    rig.point.color.setHex(cfg.color); rig.point.intensity = on ? cfg.intensity : 0; rig.point.visible = on;
+    rig.glow.material.color.setHex(cfg.color); rig.glow.material.opacity = on && cfg.glow ? Math.min(1, .2 + cfg.intensity * .22) : 0; rig.glow.scale.setScalar(cfg.size);
+    rig.flare.material.color.setHex(cfg.color); rig.flare.material.opacity = on && cfg.flare ? Math.min(1, .35 + cfg.intensity * .18) : 0; rig.flare.scale.setScalar(cfg.size);
+  }
+  updatePlayerNeon();
+}
+function updatePlayerNeon(){
+  const n = PLAYER_LIGHT_CFG.neon;
+  const t = performance.now() * .001 * n.speed;
+  const pulse = n.animation === 'pulse' ? .55 + .45 * Math.sin(t * 4) : 1;
+  const chasePhase = Math.floor(t * 6) % 4;
+  const active = side => {
+    if(!n.enabled || n.layout === 'none') return false;
+    if(n.layout === 'all') return true;
+    if(n.layout === 'sides') return side === 'left' || side === 'right';
+    if(n.layout === 'frontRear') return side === 'front' || side === 'rear';
+    return true;
+  };
+  const order = ['left','front','right','rear'];
+  for(const rig of playerLightRig.neon){
+    let k = active(rig.side) ? pulse : 0;
+    if(n.animation === 'chase') k *= order[chasePhase] === rig.side ? 1 : .28;
+    const c = (n.animation === 'alternate' && (rig.side === 'right' || rig.side === 'rear')) ? n.colorB : n.colorA;
+    const editorPreview = !!GAME.state.editorActive;
+    rig.mat.color.setHex(c);
+    rig.mat.opacity = editorPreview ? Math.max(k * .72, .18) : k * .72;
+    rig.strip.visible = k > .02 || editorPreview;
+    if(rig.helper){
+      rig.helper.material.color.setHex(c);
+      rig.helper.visible = editorPreview && !!n.dummyVisible;
+    }
+    rig.glow.color.setHex(c);
+    rig.glow.intensity = k * n.intensity;
+    rig.glow.distance = n.spill == null ? 2.8 : n.spill;
+    rig.glow.decay = 2.8;
+    rig.glow.castShadow = !!n.shadows;
+    rig.glow.visible = k > .02;
+  }
+}
+function setPlayerLightConfig(patch){
+  if(!patch) return;
+  if(patch.front) Object.assign(PLAYER_LIGHT_CFG.front, patch.front);
+  if(patch.rear) Object.assign(PLAYER_LIGHT_CFG.rear, patch.rear);
+  if(patch.neon) Object.assign(PLAYER_LIGHT_CFG.neon, patch.neon);
+  if(patch.aux) patch.aux.forEach((v, i) => {
+    if(!v) return;
+    if(!PLAYER_LIGHT_CFG.aux[i]) PLAYER_LIGHT_CFG.aux[i] = defaultAuxLightConfig(i);
+    Object.assign(PLAYER_LIGHT_CFG.aux[i], v);
+  });
+  if(patch.dummies) Object.assign(PLAYER_LIGHT_CFG.dummies, patch.dummies);
+  ensureAuxLightRigs();
+  applyPlayerLightConfig();
+  updatePlayerLights();
+}
+function setPlayerExhaustConfig(patch){
+  if(!patch) return;
+  if(patch.sources) patch.sources.forEach((v, i) => {
+    if(!v) return;
+    if(!PLAYER_EXHAUST_CFG.sources[i]) PLAYER_EXHAUST_CFG.sources[i] = defaultExhaustSourceConfig();
+    Object.assign(PLAYER_EXHAUST_CFG.sources[i], v);
+  });
+  const rest = Object.assign({}, patch);
+  delete rest.sources;
+  Object.assign(PLAYER_EXHAUST_CFG, rest);
+  if(PLAYER_EXHAUST_CFG.sources.length === 2 && PLAYER_EXHAUST_CFG.sources[0] && PLAYER_EXHAUST_CFG.sources[1] && PLAYER_EXHAUST_CFG.sources[1].enabled === false && !PLAYER_EXHAUST_CFG.sources[1].userDisabled){
+    PLAYER_EXHAUST_CFG.sources[1].enabled = true;
+  }
+  ensureExhaustRigs();
+  applyPlayerExhaustConfig();
+}
+function addPlayerExhaustSource(preset){
+  const idx = PLAYER_EXHAUST_CFG.sources.length;
+  PLAYER_EXHAUST_CFG.sources.push(Object.assign(defaultExhaustSourceConfig(), preset || {}));
+  ensureExhaustRigs();
+  applyPlayerExhaustConfig();
+  return playerExhaustRig.sources[idx] && playerExhaustRig.sources[idx].anchor;
+}
+function addPlayerAuxLight(preset){
+  const idx = PLAYER_LIGHT_CFG.aux.length;
+  PLAYER_LIGHT_CFG.aux.push(Object.assign(defaultAuxLightConfig(idx), preset || {}));
+  ensureAuxLightRigs();
+  applyPlayerLightConfig();
+  updatePlayerLights();
+  return playerLightRig.aux[idx] && playerLightRig.aux[idx].anchor;
+}
+buildPlayerLightRig();
+applyPlayerLightConfig();
+ensureExhaustRigs();
+applyPlayerExhaustConfig();
+const wheelGeo = new THREE.CylinderGeometry(.38,.38,.32,14);
+const wheelMat = new THREE.MeshStandardMaterial({color:0x101216, roughness:.9});
+const rimMat = new THREE.MeshStandardMaterial({color:0xd9d9d9, roughness:.3, metalness:.8});
+const wheels = [];
+for(const [wx, wz, front] of [[-.92,1.35,1],[.92,1.35,1],[-.92,-1.35,0],[.92,-1.35,0]]){
+  const pivot = new THREE.Group(); pivot.position.set(wx,.38,wz);
+  const w = new THREE.Mesh(wheelGeo, wheelMat); w.rotation.z = Math.PI/2; w.castShadow = true;
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.34,8), rimMat); rim.rotation.z = Math.PI/2;
+  pivot.add(w); pivot.add(rim); carVisual.add(pivot);
+  wheels.push({pivot, mesh:w, rim, front:!!front, spin:0});
+}
+scene.add(car);
+tagEntity(car, 'Player (Blueprint)', 'player');
+
+const PLAYER_DATA_WIDGETS = window.LK_RUNTIME_PLAYER_DATA_WIDGETS.create({
+  THREERef: THREE,
+  car,
+  tagEntity,
+  getMetrics: () => ({
+    driftScore,
+    lastLatG,
+    speedKmh,
+    rpm: ENGINE.rpm,
+    drifting: lastCamDrifting,
+    driftSide: Math.abs(lastCamVR) > .35 ? Math.sign(lastCamVR) : (Math.abs(P.steer) > .08 ? Math.sign(P.steer) : 1),
+  }),
+  isEditorActive: () => !!GAME.state.editorActive,
+  isEditorPreview: () => !!GAME.state.editorPreview,
+  getSelected: () => GAME.editor && GAME.editor.state && GAME.editor.state.selected,
+});
+
+// ------------------------------------------------ car physics
+// Axle slip-angle model ("bicycle model" + friction circle):
+// - lateral tire force per axle saturates with the slip angle (tanh ≈ Pacejka-lite)
+// - RWD: throttle usage eats rear lateral grip (friction circle) → power oversteer
+// - weight transfer front/rear modulates axle grip (lift-off oversteer on entry)
+// - handbrake locks the rear axle only (rear μ collapses) → drift entry
+// Countersteer and slide-holding emerge naturally from the model.
+const SPAWN = {x: 0, z: 55, heading: Math.PI};   // editable from the engine editor
+const P = {
+  pos: new THREE.Vector3(SPAWN.x, 0, SPAWN.z),
+  heading: SPAWN.heading,     // facing -z into the lot
+  vel: new THREE.Vector3(),
+  yawRate: 0,                 // rad/s
+  steer: 0,
+};
+car.position.copy(P.pos);
+car.rotation.y = P.heading;
+const G_ACC = 9.81;
+const CFG = {
+  // powertrain / brakes (accelerations, m/s²)
+  accel: 52, revAccel: 17, brake: 46, maxSpeed: 48,
+  drag: 0.18,                 // linear drag coef (1/s)
+  // chassis
+  axleF: 1.30, axleR: 1.30,   // CG → front / rear axle [m]
+  cgHeight: 0.52,             // weight transfer strength
+  kSq: 1.35,                  // yaw inertia / mass [m²]
+  // tires
+  muF: 1.06, muR: 1.00,       // friction coefficient per axle
+  stiffF: 6.5, stiffR: 7.5,   // slip-angle sharpness
+  rearFalloff: 0.28,          // rear grip drop past the peak → slides sustain
+  powerOver: 1.25,            // how much throttle usage eats rear lateral grip
+  hbMuR: 0.30,                // rear μ multiplier while handbrake is pulled
+  // steering
+  steerMax: 0.60,             // rad at standstill
+  steerHiSpeed: 0.34,         // fraction of steerMax kept at very high speed
+  // drift feel (arcade assists on top of the model)
+  driftAssist: 1.05,          // direct yaw authority while sliding (countersteer feel)
+  driftGasPush: 2.45,         // throttle keeps the tail alive while drifting
+  driftThrottlePull: 1.15,    // light recovery so the car stays playful, not rail-guided
+  yawDamp: 0.55,
+  driftEnterSlip: 0.34,       // rear slip angle [rad] that starts a drift
+  driftEnterVy: 3.2, driftExitVy: 1.5, driftMinSpeed: 8,
+};
+const BASE_CFG = Object.freeze({...CFG});
+const DRIVE = {
+  steerResponse: 6.5,         // how fast the wheel turns toward the key input
+  brakeBias: 0.62,            // fraction of braking on the front axle
+  wheelspin: 1.85,            // drive force allowed past rear grip (wheelspin margin)
+};
+const BASE_DRIVE = Object.freeze({...DRIVE});
+const ENGINE = {
+  gear: 1,
+  rpm: 1100,
+  rpm01: 0,
+  torque01: .6,
+  shiftTimer: 0,
+  limiterTimer: 0,
+  shiftPulse: 0,
+  limiterPulse: 0,
+  throttle: 0,
+  reverseActive: false,
+};
+const GEARBOX = Object.freeze({
+  idle: 950,
+  redline: 6900,
+  limiter: 7600,
+  upshift: 7050,
+  downshift: 2700,
+  limiterHold: .34,
+  shiftCut: .34,
+  tops: [13, 22, 31, 40, 52],     // m/s per gear at redline
+  torque: [1.55, 1.34, 1.16, 1.02, .92],
+});
+
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function dampAlpha(rate, dt){ return 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dt)); }
+function angleDelta(target, current){
+  return ((target - current + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+}
+function yawQuat(q){
+  return Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+}
+function resetEngine(){
+  ENGINE.gear = 1;
+  ENGINE.rpm = GEARBOX.idle;
+  ENGINE.rpm01 = 0;
+  ENGINE.torque01 = .6;
+  ENGINE.shiftTimer = 0;
+  ENGINE.limiterTimer = 0;
+  ENGINE.shiftPulse = 0;
+  ENGINE.limiterPulse = 0;
+  ENGINE.throttle = 0;
+  ENGINE.reverseActive = false;
+}
+function updateEngineModel(vF, throttle, sliding, dt){
+  const speed = Math.abs(vF);
+  ENGINE.throttle = throttle;
+  ENGINE.shiftTimer = Math.max(0, ENGINE.shiftTimer - dt);
+  ENGINE.limiterTimer = Math.max(0, ENGINE.limiterTimer - dt);
+  ENGINE.shiftPulse = Math.max(0, ENGINE.shiftPulse - dt);
+  ENGINE.limiterPulse = Math.max(0, ENGINE.limiterPulse - dt);
+  const g = ENGINE.gear - 1;
+  const top = GEARBOX.tops[g] || GEARBOX.tops[0];
+  let targetRpm = GEARBOX.idle + clamp(speed / top, 0, 1.25) * (GEARBOX.redline - GEARBOX.idle);
+  if(throttle > .05){
+    targetRpm += 650 * throttle;
+    if(sliding || speed < 8) targetRpm += 1250 * throttle;
+  }
+  if(ENGINE.shiftTimer > 0) targetRpm *= .58;
+  const slew = throttle > .05 ? 7.2 : 4.0;
+  ENGINE.rpm += (targetRpm - ENGINE.rpm) * Math.min(1, dt * slew);
+  if(throttle > .05 && ENGINE.rpm > GEARBOX.upshift && ENGINE.gear < GEARBOX.tops.length && ENGINE.shiftTimer <= 0){
+    if(ENGINE.limiterTimer <= 0){
+      ENGINE.limiterTimer = GEARBOX.limiterHold;
+      ENGINE.limiterPulse = .18;
+    } else if(ENGINE.limiterTimer < .08){
+      ENGINE.gear++;
+      ENGINE.shiftTimer = GEARBOX.shiftCut;
+      ENGINE.shiftPulse = .24;
+      ENGINE.limiterTimer = 0;
+      ENGINE.rpm *= .70;
+    }
+  } else if(ENGINE.rpm < GEARBOX.downshift && ENGINE.gear > 1 && (throttle > .05 || speed < GEARBOX.tops[ENGINE.gear - 2] * .42)){
+    ENGINE.gear--;
+    ENGINE.rpm = Math.min(GEARBOX.redline * .92, ENGINE.rpm * 1.34);
+  }
+  if(ENGINE.rpm > GEARBOX.limiter || ENGINE.limiterTimer > 0){
+    ENGINE.rpm = GEARBOX.redline + Math.sin(performance.now() * .075) * 520;
+  }
+  const rev01 = clamp((ENGINE.rpm - GEARBOX.idle) / (GEARBOX.redline - GEARBOX.idle), 0, 1.12);
+  const curve = clamp(0.48 + Math.sin(clamp(rev01, 0, 1) * Math.PI) * .72 + rev01 * .25, .45, 1.35);
+  ENGINE.rpm01 = clamp(rev01, 0, 1.12);
+  ENGINE.torque01 = curve * GEARBOX.torque[ENGINE.gear - 1] * (ENGINE.shiftTimer > 0 ? .25 : (ENGINE.limiterTimer > 0 ? .82 : 1));
+  return ENGINE;
+}
+
+const PHYS_WORLD = window.LK_RUNTIME_PHYSICS_WORLD.create({
+  CANNONRef: typeof CANNON !== 'undefined' ? CANNON : null,
+  worldState: WORLD_STATE,
+  playerState: P,
+  constants: {LOT, WALL_H},
+  colliders: {circle: circleColliders, box: boxColliders},
+});
+const PHYS = PHYS_WORLD.state;
+const cannonVec = PHYS_WORLD.cannonVec;
+const colliderSignature = PHYS_WORLD.colliderSignature;
+const initPhysicsWorld = PHYS_WORLD.init;
+const rebuildPhysicsStatics = PHYS_WORLD.rebuildStatics;
+const syncCarBodyToPlayer = PHYS_WORLD.syncPlayer;
+const disposePhysicsWorld = PHYS_WORLD.dispose;
+
+function updateConesOnly(){
+  WORLD_STATE.kickCones(cones, P, () => {
+    SFX.thud(.25);
+    addPoints(50, 'CONE! +50');
+  });
+}
+
+const DRIVE_TUNING = window.LK_RUNTIME_DRIVE_TUNING.create({
+  config: CFG,
+  baseConfig: BASE_CFG,
+  drive: DRIVE,
+  baseDrive: BASE_DRIVE,
+  clamp,
+});
+const setTuneOpen = DRIVE_TUNING.setOpen;
+const toggleTunePanel = DRIVE_TUNING.toggle;
+
+const AUDIO = {
+  master: 1,
+  car: 1,
+  sfx: 1,
+  music: 1,
+};
+let SETTINGS_MENU = null;
+let setSettingsOpen = () => {};
+let toggleSettingsMenu = () => {};
+
+function applyAudioSettings(){
+  SFX.setVolumes(AUDIO);
+  RADIO.setVolume(AUDIO.master * AUDIO.music);
+  MENU_MUSIC.setVolume(.55 * AUDIO.master * AUDIO.music);
+}
+
+function setAudioChannel(channel, value){
+  if(SETTINGS_MENU){
+    SETTINGS_MENU.setAudioChannel(channel, value);
+    return;
+  }
+  if(AUDIO[channel] == null) return;
+  AUDIO[channel] = clamp(value, 0, 1);
+  applyAudioSettings();
+}
+
+function initSettingsMenu(){
+  SETTINGS_MENU = window.LK_RUNTIME_SETTINGS_MENU.createMenu({
+    gameState: GAME.state,
+    audio: AUDIO,
+    video: VIDEO,
+    applyAudio: applyAudioSettings,
+    applyVideo: applyVideoSettings,
+    onEditorExit: () => {
+      if(GAME.editor) GAME.editor.exit(false);
+    },
+    onBackMenu: backToMainMenu,
+    onOpenTune: () => setTuneOpen(true),
+  });
+  setSettingsOpen = SETTINGS_MENU.setOpen;
+  toggleSettingsMenu = SETTINGS_MENU.toggle;
+}
+let handbrake = false, driftAngle = 0, speedKmh = 0, isDrifting = false, lastLatG = 0;
+let axPrev = 0;                 // longitudinal accel of the previous step (weight transfer)
+let lastSteerAngle = 0;         // actual front wheel angle (for the visual rig)
+const PHYS_STEP = 1/120;        // fixed physics substep
+const REVERSE_ENTRY_SPEED = 5 / 3.6; // 5 km/h: brake must slow the car before reverse can engage
+const carRenderPos = new THREE.Vector3();
+let carRenderHeading = 0, carRenderPitch = 0, carRenderRoll = 0, carRenderSnap = true;
+
+function applyPlayerVisual(vF, vR, steerAngle, up, down, dt){
+  const snap = carRenderSnap;
+  carRenderSnap = false;
+  const bodyAlpha = snap ? 1 : dampAlpha(24, dt);
+  const tiltAlpha = snap ? 1 : dampAlpha(12, dt);
+  carRenderPos.lerp(P.pos, bodyAlpha);
+  carRenderHeading += angleDelta(P.heading, carRenderHeading) * bodyAlpha;
+  carRenderRoll += ((-vR * 0.008) - carRenderRoll) * tiltAlpha;
+  carRenderPitch += (((up ? -.02 : 0) + (down ? .025 : 0)) - carRenderPitch) * tiltAlpha;
+  car.position.copy(carRenderPos);
+  car.rotation.set(carRenderPitch, carRenderHeading, carRenderRoll);
+
+  const visSteer = steerAngle * 1.25;
+  for(const w of wheels){
+    w.spin += vF * dt / .38;
+    w.mesh.rotation.x = w.spin;
+    w.rim.rotation.x = w.spin;
+    if(w.front) w.pivot.rotation.y = visSteer;
+  }
+  RIG.drive(vF, dt, visSteer);
+}
+
+function updateCarCannon(dt){
+  if(!initPhysicsWorld()) return null;
+  if(PHYS.staticsSignature !== colliderSignature()) rebuildPhysicsStatics();
+
+  const body = PHYS.carBody;
+  const up = keys['w']||keys['arrowup'], down = keys['s']||keys['arrowdown'];
+  const left = keys['a']||keys['arrowleft'], rightK = keys['d']||keys['arrowright'];
+  handbrake = !!keys[' '];
+  const steerTarget = (left?1:0) - (rightK?1:0);
+  const steerRate = DRIVE.steerResponse * (steerTarget === 0 || steerTarget * P.steer < 0 ? 1.6 : 1);
+  P.steer += (steerTarget - P.steer) * Math.min(1, dt*steerRate);
+
+  P.heading = yawQuat(body.quaternion);
+  const fwd = new THREE.Vector3(Math.sin(P.heading), 0, Math.cos(P.heading));
+  const rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
+  const vel = new THREE.Vector3(body.velocity.x, 0, body.velocity.z);
+  let vx = vel.dot(fwd), vy = vel.dot(rightV);
+  const r = body.angularVelocity.y;
+  const speed = Math.abs(vx);
+  const speedTot = Math.hypot(vx, vy);
+  const steerScale = CFG.steerHiSpeed + (1 - CFG.steerHiSpeed) * Math.exp(-speed / 20);
+  const delta = P.steer * CFG.steerMax * steerScale;
+  lastSteerAngle = delta;
+
+  const L = CFG.axleF + CFG.axleR;
+  const dirSign = vx < -.05 ? -1 : 1;
+  const vxs = Math.max(speed, 2.0);
+  const alphaF = Math.atan2(vy + CFG.axleF * r, vxs) - delta * dirSign;
+  const alphaR = Math.atan2(vy - CFG.axleR * r, vxs);
+  const dW = clamp(CFG.cgHeight / L * axPrev, -G_ACC * .32, G_ACC * .32);
+  const gF = Math.max(1.5, G_ACC * CFG.axleR / L - dW);
+  const gR = Math.max(1.5, G_ACC * CFG.axleF / L + dW);
+
+  let ax = -CFG.drag * vx;
+  let driveA = 0, brakeA = 0, muRl = CFG.muR;
+  const engine = updateEngineModel(vx, up ? 1 : 0, isDrifting || handbrake || Math.abs(vy) > 2.0, dt);
+  ENGINE.reverseActive = false;
+  if(handbrake){
+    muRl *= CFG.hbMuR;
+    if(speed > .3) ax -= Math.sign(vx) * muRl * gR * 1.1;
+  } else if(up){
+    driveA = CFG.accel * engine.torque01 * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
+    driveA = Math.min(driveA, CFG.muR * gR * DRIVE.wheelspin);
+    ax += driveA;
+  }
+  if(down){
+    const alreadyReversing = vx < -.35;
+    const reverseAllowed = alreadyReversing || speedTot < REVERSE_ENTRY_SPEED;
+    if(!reverseAllowed){
+      brakeA = CFG.brake * (speedTot > 7 ? 1 : .85);
+      ax -= Math.sign(vx || 1) * brakeA;
+      if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * .35;
+    }
+    else {
+      ENGINE.reverseActive = true;
+      updateEngineModel(vx, 0.55, false, dt);
+      ax -= CFG.revAccel * (1 + vx / 12);
+    }
+  }
+
+  const rearUse = handbrake ? 0 : Math.abs(driveA) / Math.max(.001, CFG.muR * gR);
+  muRl *= Math.max(.22, 1 - CFG.powerOver * Math.pow(rearUse, 1.6));
+  let muFl = CFG.muF;
+  if(brakeA){
+    muFl *= Math.max(.55, 1 - .35 * (brakeA * DRIVE.brakeBias) / Math.max(.001, CFG.muF * gF));
+    muRl *= Math.max(.5, 1 - .5 * (brakeA * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR));
+  }
+
+  const latScale = clamp(speedTot / 2.5, 0, 1);
+  const rearPeak = Math.max(.35, 1 - CFG.rearFalloff * Math.min(1, Math.abs(alphaR) / .7));
+  const fyF = -muFl * gF * Math.tanh(CFG.stiffF * alphaF) * latScale;
+  const fyR = -muRl * gR * Math.tanh(CFG.stiffR * alphaR) * rearPeak * latScale;
+  const yawAssist = (isDrifting ? P.steer * CFG.driftAssist * (vx < 0 ? -1 : 1) * 2.2 : 0) - r * CFG.yawDamp;
+  if(isDrifting && up && Math.abs(vy) > .5){
+    const pull = clamp(CFG.driftThrottlePull * dt, 0, .06);
+    const hold = Math.sign(vy) * CFG.driftGasPush * dt;
+    body.velocity.x += rightV.x * (hold - vy * pull);
+    body.velocity.z += rightV.z * (hold - vy * pull);
+  }
+  const mass = body.mass || PHYS.mass;
+  const forceAt = (accel, dir, px, pz) => {
+    const force = cannonVec(dir.x * accel * mass, 0, dir.z * accel * mass);
+    const point = cannonVec(body.position.x + px, .55, body.position.z + pz);
+    body.applyForce(force, point);
+  };
+  forceAt(ax, fwd, 0, 0);
+  forceAt(fyF, rightV, fwd.x * CFG.axleF, fwd.z * CFG.axleF);
+  forceAt(fyR, rightV, -fwd.x * CFG.axleR, -fwd.z * CFG.axleR);
+  body.torque.y += yawAssist * mass * CFG.kSq;
+
+  const beforeSpeed = Math.hypot(body.velocity.x, body.velocity.z);
+  PHYS.world.step(PHYS_STEP, dt, 8);
+  body.position.y = .55;
+  body.velocity.y = 0;
+  body.angularVelocity.x = 0;
+  body.angularVelocity.z = 0;
+  P.heading = yawQuat(body.quaternion);
+  body.quaternion.setFromAxisAngle(cannonVec(0,1,0), P.heading);
+  fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
+  rightV.set(fwd.z, 0, -fwd.x);
+  const afterSpeed = Math.hypot(body.velocity.x, body.velocity.z);
+  if(beforeSpeed - afterSpeed > 3) PHYS.lastImpact = Math.max(PHYS.lastImpact, beforeSpeed - afterSpeed);
+
+  P.pos.set(body.position.x, 0, body.position.z);
+  P.vel.set(body.velocity.x, 0, body.velocity.z);
+  P.yawRate = body.angularVelocity.y;
+  vx = P.vel.dot(fwd);
+  vy = P.vel.dot(rightV);
+  axPrev = ax;
+
+  const rearSlip = Math.abs(Math.atan2(vy - CFG.axleR * P.yawRate, Math.max(Math.abs(vx), 2)));
+  if(isDrifting){
+    if((Math.abs(vy) < CFG.driftExitVy && rearSlip < CFG.driftEnterSlip * .55) || P.vel.length() < 4.5) isDrifting = false;
+  } else {
+    const handbrakeKick = handbrake && Math.abs(P.steer) > .15 && Math.abs(vx) > CFG.driftMinSpeed;
+    const slipDrift = (rearSlip > CFG.driftEnterSlip || Math.abs(vy) > CFG.driftEnterVy) && P.vel.length() > CFG.driftMinSpeed;
+    if(handbrakeKick || slipDrift) isDrifting = true;
+  }
+  const drifting = isDrifting;
+  driftAngle = Math.atan2(Math.abs(vy), Math.max(0.001, Math.abs(vx)));
+  speedKmh = P.vel.length() * 3.6;
+  lastLatG = Math.abs(P.yawRate * P.vel.length()) / G_ACC;
+
+  updateConesOnly();
+  if(PHYS.lastImpact > 1.5){ lastImpact = PHYS.lastImpact; onCrash(PHYS.lastImpact); PHYS.lastImpact = 0; }
+
+  applyPlayerVisual(vx, vy, delta, up, down, dt);
+  return {vF:vx, vR:vy, drifting};
+}
+
+function updateCar(dt){
+  const cannonState = updateCarCannon(dt);
+  if(cannonState) return cannonState;
+
+  // input
+  const up = keys['w']||keys['arrowup'], down = keys['s']||keys['arrowdown'];
+  const left = keys['a']||keys['arrowleft'], rightK = keys['d']||keys['arrowright'];
+  handbrake = !!keys[' '];
+  const steerTarget = (left?1:0) - (rightK?1:0);
+  // wheel returns to center faster than it turns in (feels crisper mid-drift)
+  const steerRate = DRIVE.steerResponse * (steerTarget === 0 || steerTarget * P.steer < 0 ? 1.6 : 1);
+  P.steer += (steerTarget - P.steer) * Math.min(1, dt*steerRate);
+
+  // body-frame velocity (fwd / right) carried through the substeps
+  let fwd = new THREE.Vector3(Math.sin(P.heading), 0, Math.cos(P.heading));
+  let rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
+  let vx = P.vel.dot(fwd), vy = P.vel.dot(rightV);
+  let r = P.yawRate;
+  let delta = lastSteerAngle;
+
+  const n = clamp(Math.ceil(dt / PHYS_STEP), 1, 8);
+  const h = dt / n;
+  const L = CFG.axleF + CFG.axleR;
+
+  for(let i = 0; i < n; i++){
+    const sp = Math.abs(vx);
+    const speedTot = Math.hypot(vx, vy);
+
+    // steering angle: full at low speed, tightens smoothly at high speed
+    const steerScale = CFG.steerHiSpeed + (1 - CFG.steerHiSpeed) * Math.exp(-sp / 20);
+    delta = P.steer * CFG.steerMax * steerScale;
+
+    // slip angles: speed magnitude keeps atan2 sane; steering sign handles reverse.
+    const dirSign = vx < -.05 ? -1 : 1;
+    const vxs = Math.max(sp, 2.0);
+    const alphaF = Math.atan2(vy + CFG.axleF * r, vxs) - delta * dirSign;
+    const alphaR = Math.atan2(vy - CFG.axleR * r, vxs);
+
+    // axle loads (per unit mass) with longitudinal weight transfer
+    const dW = clamp(CFG.cgHeight / L * axPrev, -G_ACC * .32, G_ACC * .32);
+    const gF = Math.max(1.5, G_ACC * CFG.axleR / L - dW);
+    const gR = Math.max(1.5, G_ACC * CFG.axleF / L + dW);
+
+    // ---- longitudinal (RWD, drive on the rear axle)
+    let ax = -CFG.drag * vx;
+    let muRl = CFG.muR;                       // rear lateral μ, eaten by throttle/handbrake
+    let driveA = 0;
+    const engine = updateEngineModel(vx, up ? 1 : 0, isDrifting || handbrake || Math.abs(vy) > 2.0, h);
+    ENGINE.reverseActive = false;
+    if(handbrake){
+      // rear wheels locked: kinetic friction opposes motion, no drive
+      muRl *= CFG.hbMuR;
+      if(sp > .3) ax -= Math.sign(vx) * muRl * gR * .9;
+    } else if(up){
+      driveA = CFG.accel * engine.torque01 * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
+      driveA = Math.min(driveA, CFG.muR * gR * DRIVE.wheelspin);   // traction limit (+ wheelspin margin)
+      ax += driveA;
+    }
+    if(down){
+      const alreadyReversing = vx < -.35;
+      const reverseAllowed = alreadyReversing || speedTot < REVERSE_ENTRY_SPEED;
+      if(!reverseAllowed){
+        const bA = CFG.brake;
+        ax -= Math.sign(vx || 1) * bA;   // split kept for the friction circle below
+        if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * .35;
+      } else {
+        ENGINE.reverseActive = true;
+        ax -= CFG.revAccel * (1 + vx / 12);
+      }
+    }
+
+    // ---- friction circle: longitudinal usage reduces lateral grip
+    const rearUse = handbrake ? 0 : Math.abs(driveA) / Math.max(.001, CFG.muR * gR);
+    muRl *= Math.max(.22, 1 - CFG.powerOver * Math.pow(rearUse, 1.6));
+    let muFl = CFG.muF;
+    if(down && vx > 0.5) muFl *= Math.max(.55, 1 - .35 * (CFG.brake * DRIVE.brakeBias) / Math.max(.001, CFG.muF * gF));
+    if(down && vx > 0.5) muRl *= Math.max(.5, 1 - .5 * (CFG.brake * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR));
+
+    // ---- lateral tire forces (per unit mass), tanh saturation ≈ simplified Pacejka
+    const latScale = clamp(speedTot / 2.5, 0, 1);   // no lateral forces when parked
+    const rearPeak = Math.max(.35, 1 - CFG.rearFalloff * Math.min(1, Math.abs(alphaR) / .7));
+    const satR = Math.tanh(CFG.stiffR * alphaR) * rearPeak;
+    const fyF = -muFl * gF * Math.tanh(CFG.stiffF * alphaF) * latScale;
+    const fyR = -muRl * gR * satR * latScale;
+
+    // ---- integrate body-frame dynamics
+    const cosD = Math.cos(delta);
+    vx += (ax + r * vy) * h;
+    vy += (fyF * cosD + fyR - r * vx) * h;
+    r  += ((CFG.axleF * fyF * cosD - CFG.axleR * fyR) / CFG.kSq) * h;
+
+    // ---- arcade assists
+    r -= r * CFG.yawDamp * h;
+    if(isDrifting){
+      r += P.steer * CFG.driftAssist * (vx < 0 ? -1 : 1) * h * 2.2;          // countersteer authority
+      if(up && Math.abs(vy) > .5){
+        vy += Math.sign(vy) * CFG.driftGasPush * h;
+        vy -= vy * clamp(CFG.driftThrottlePull * h, 0, .06);
+      }
+    }
+    // low speed: settle rotation and creep so the car doesn't "ice skate" when parking
+    if(speedTot < 1.2){
+      const settle = Math.min(1, h * 6);
+      vy -= vy * settle; r -= r * settle;
+    }
+    vx = clamp(vx, -12, CFG.maxSpeed * 1.05);
+    axPrev = ax;
+    P.heading += r * h;
+  }
+  P.yawRate = r;
+  lastSteerAngle = delta;
+
+  // back to world space with the updated heading
+  fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
+  rightV.set(fwd.z, 0, -fwd.x);
+  P.vel.copy(fwd).multiplyScalar(vx).addScaledVector(rightV, vy);
+  P.pos.addScaledVector(P.vel, dt);
+
+  const vF = vx, vR = vy;
+  const speed = Math.abs(vF);
+
+  // drift state with hysteresis: handbrake kick, rear slip breakaway, or big lateral speed
+  const rearSlip = Math.abs(Math.atan2(vy - CFG.axleR * r, Math.max(speed, 2)));
+  if(isDrifting){
+    if((Math.abs(vR) < CFG.driftExitVy && rearSlip < CFG.driftEnterSlip * .55) || P.vel.length() < 4.5) isDrifting = false;
+  } else {
+    const handbrakeKick = handbrake && Math.abs(P.steer) > .15 && speed > CFG.driftMinSpeed;
+    const slipDrift = (rearSlip > CFG.driftEnterSlip || Math.abs(vR) > CFG.driftEnterVy) && P.vel.length() > CFG.driftMinSpeed;
+    if(handbrakeKick || slipDrift) isDrifting = true;
+  }
+  const drifting = isDrifting;
+
+  driftAngle = Math.atan2(Math.abs(vR), Math.max(0.001, Math.abs(vF)));
+  speedKmh = P.vel.length() * 3.6;
+  lastLatG = Math.abs(r * P.vel.length()) / G_ACC;
+
+  // ---- collisions
+  handleCollisions();
+
+  applyPlayerVisual(vF, vR, delta, up, down, dt);
+  return {vF, vR, drifting};
+}
+
+let lastImpact = 0;
+function handleCollisions(){
+  WORLD_STATE.collideCar({
+    player: P,
+    cones,
+    radius: 1.4,
+    onConeHit: () => {
+      SFX.thud(.25);
+      addPoints(50, 'CONE! +50');
+    },
+    onImpact: impact => {
+      lastImpact = impact;
+      onCrash(impact);
+    },
+  });
+}
+
+function updateCones(dt){
+  WORLD_STATE.updateCones(cones, dt);
+}
+
+// ------------------------------------------------ scoring
+let totalScore = 0, driftScore = 0, driftMult = 1, driftTime = 0, driftEndTimer = 0;
+const HUD = window.LK_RUNTIME_GAME_HUD.create();
+
+function popup(txt, color){
+  HUD.popup(txt, color);
+}
+function addPoints(p, msg){
+  totalScore += p;
+  HUD.setTotal(totalScore);
+  if(msg) popup(msg, '#ffd166');
+}
+function updateScoring(dt, drifting){
+  const active = drifting && speedKmh > 22;
+  if(active){
+    driftEndTimer = 0;
+    driftTime += dt;
+    driftScore += driftAngle * speedKmh * dt * 1.6;
+    driftMult = Math.min(8, 1 + Math.floor(driftTime / 1.6));
+    HUD.showDrift(driftScore, driftMult);
+  } else if(driftScore > 0){
+    driftEndTimer += dt;
+    if(driftEndTimer > .65){   // bank it
+      const gained = Math.round(driftScore * driftMult);
+      addPoints(gained);
+      popup('+' + gained.toLocaleString() + (driftMult>1 ? '  (x'+driftMult+')' : ''), '#7CFC9A');
+      driftScore = 0; driftMult = 1; driftTime = 0;
+      HUD.hideDrift();
+    }
+  }
+}
+function onCrash(impact){
+  SFX.crash(Math.min(1, impact/18));
+  camShake = Math.min(1, impact/14);
+  if(impact > 7 && driftScore > 0){
+    popup('CRASH — DRIFT LOST', '#ff5566');
+    driftScore = 0; driftMult = 1; driftTime = 0;
+    HUD.hideDrift();
+  }
+}
+
+// ------------------------------------------------ smoke particles
+function makeSmokeTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32,32,2,32,32,30);
+  gr.addColorStop(0,'rgba(230,230,235,.85)');
+  gr.addColorStop(.5,'rgba(220,220,228,.35)');
+  gr.addColorStop(1,'rgba(220,220,228,0)');
+  g.fillStyle = gr; g.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+function makeFlameTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 96;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(48,58,2,48,58,42);
+  gr.addColorStop(0,'rgba(255,255,235,1)');
+  gr.addColorStop(.24,'rgba(255,211,82,.95)');
+  gr.addColorStop(.55,'rgba(255,84,20,.72)');
+  gr.addColorStop(1,'rgba(255,20,0,0)');
+  g.fillStyle = gr;
+  g.beginPath();
+  g.ellipse(48,58,28,39,0,0,Math.PI*2);
+  g.fill();
+  const tx = new THREE.CanvasTexture(c);
+  tx.encoding = THREE.sRGBEncoding;
+  return tx;
+}
+const smokeTex = makeSmokeTexture();
+const flameTex = makeFlameTexture();
+const SMOKE_N = 140;
+const smokePool = [];
+for(let i=0;i<SMOKE_N;i++){
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, transparent:true, opacity:0, depthWrite:false}));
+  s.visible = false; scene.add(s);
+  smokePool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1});
+}
+let smokeIdx = 0;
+function spawnSmoke(pos, intensity){
+  const p = smokePool[smokeIdx++ % SMOKE_N];
+  p.s.visible = true;
+  p.s.position.copy(pos); p.s.position.y = .25;
+  p.life = 0; p.max = .8 + Math.random()*.7;
+  p.size = .6 + intensity*1.4;
+  p.vel.set((Math.random()-.5)*1.5, 1 + Math.random()*1.2, (Math.random()-.5)*1.5);
+}
+function updateSmoke(dt){
+  for(const p of smokePool){
+    if(!p.s.visible) continue;
+    p.life += dt;
+    if(p.life >= p.max){ p.s.visible = false; p.s.material.opacity = 0; continue; }
+    const t = p.life / p.max;
+    p.s.position.addScaledVector(p.vel, dt);
+    const sc = p.size * (0.6 + t*2.2);
+    p.s.scale.set(sc, sc, 1);
+    p.s.material.opacity = (1-t) * .5;
+  }
+}
+
+const EXHAUST_N = 180;
+const exhaustPool = [];
+for(let i=0;i<EXHAUST_N;i++){
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:smokeTex, transparent:true, opacity:0, depthWrite:false, blending:THREE.NormalBlending,
+  }));
+  s.visible = false; scene.add(s);
+  exhaustPool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1, fire:false});
+}
+let exhaustIdx = 0, exhaustSmokeAcc = 0, exhaustFireAcc = 0;
+function spawnExhaustParticle(anchor, fire, intensity){
+  const p = exhaustPool[exhaustIdx++ % EXHAUST_N];
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  anchor.getWorldPosition(pos);
+  anchor.getWorldQuaternion(quat);
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat).normalize();
+  p.s.visible = true;
+  p.s.position.copy(pos);
+  p.life = 0;
+  p.fire = !!fire;
+  if(fire){
+    p.max = .22 + Math.random() * .16;
+    p.size = (.72 + Math.random() * .42) * intensity;
+    p.vel.copy(dir).multiplyScalar(8.5 + Math.random() * 5.5).addScaledVector(P.vel, .08);
+    p.s.material.map = flameTex;
+    p.s.material.blending = THREE.AdditiveBlending;
+    p.s.material.color.setHex(0xffffff);
+    p.s.material.opacity = .95;
+  } else {
+    p.max = 1.25 + Math.random() * 1.15;
+    p.size = (.32 + Math.random() * .42) * intensity;
+    p.vel.copy(dir).multiplyScalar(.45 + Math.random() * 1.25).add(new THREE.Vector3((Math.random()-.5)*.42, .62 + Math.random()*.72, (Math.random()-.5)*.42)).addScaledVector(P.vel, .025);
+    p.s.material.map = smokeTex;
+    p.s.material.blending = THREE.NormalBlending;
+    p.s.material.color.setHex(0xbec3cc);
+    p.s.material.opacity = .30;
+  }
+  p.s.material.needsUpdate = true;
+}
+function updatePlayerExhaust(dt){
+  applyPlayerExhaustConfig();
+  const cfg = PLAYER_EXHAUST_CFG;
+  if(!cfg.enabled){ updateExhaustParticles(dt); return; }
+  const active = [];
+  for(let i=0;i<playerExhaustRig.sources.length;i++){
+    const src = cfg.sources[i], rig = playerExhaustRig.sources[i];
+    if(src && rig && src.enabled !== false) active.push(rig.anchor);
+  }
+  if(!active.length){ updateExhaustParticles(dt); return; }
+  const throttle = ENGINE.throttle || 0;
+  const intensity = Math.max(.05, cfg.intensity || 1);
+  const rpmHot = ENGINE.rpm01 >= (cfg.fireRpm == null ? .88 : cfg.fireRpm);
+  const shiftFire = cfg.shiftFire && ENGINE.shiftPulse > 0;
+  const limiterFire = cfg.limiterFire && ENGINE.limiterPulse > 0;
+  const testFire = exhaustTestPulse > 0;
+  exhaustTestPulse = Math.max(0, exhaustTestPulse - dt);
+  const idleSmoke = cfg.idleSmoke && throttle <= (cfg.smokeThrottle == null ? .18 : cfg.smokeThrottle);
+  const fireOn = !!cfg.fire && ((throttle > .05 && (rpmHot || shiftFire || limiterFire)) || testFire);
+  if(cfg.smoke && (idleSmoke || throttle > (cfg.smokeThrottle == null ? .18 : cfg.smokeThrottle))){
+    const rate = idleSmoke ? 2.2 : (5 + 22 * throttle * intensity);
+    exhaustSmokeAcc += dt * rate * intensity;
+    while(exhaustSmokeAcc >= 1){
+      exhaustSmokeAcc -= 1;
+      spawnExhaustParticle(active[Math.floor(Math.random() * active.length)], false, intensity);
+    }
+  }
+  if(fireOn){
+    exhaustFireAcc += dt * (testFire || shiftFire || limiterFire ? 120 : 24) * intensity;
+    while(exhaustFireAcc >= 1){
+      exhaustFireAcc -= 1;
+      spawnExhaustParticle(active[Math.floor(Math.random() * active.length)], true, intensity);
+    }
+  } else {
+    exhaustFireAcc = Math.min(exhaustFireAcc, .6);
+  }
+  updateExhaustParticles(dt);
+}
+function testPlayerExhaust(targetAnchor){
+  exhaustTestPulse = .55;
+  const targets = targetAnchor ? [targetAnchor] : playerExhaustRig.sources.map(r => r && r.anchor).filter(Boolean);
+  for(const anchor of targets){
+    spawnExhaustParticle(anchor, false, PLAYER_EXHAUST_CFG.intensity || 1);
+  }
+}
+function updateExhaustParticles(dt){
+  for(const p of exhaustPool){
+    if(!p.s.visible) continue;
+    p.life += dt;
+    if(p.life >= p.max){ p.s.visible = false; p.s.material.opacity = 0; continue; }
+    const t = p.life / p.max;
+    p.s.position.addScaledVector(p.vel, dt);
+    if(!p.fire) p.vel.y += .28 * dt;
+    const sc = p.fire ? p.size * (1.25 - t * .55) : p.size * (.65 + t * 2.9);
+    p.s.scale.set(sc, sc, 1);
+    p.s.material.opacity = p.fire ? (.95 * (1 - t)) : (.30 * (1 - t));
+  }
+}
+
+// ------------------------------------------------ skid marks
+const SKID_N = 700;
+const skidGeo = new THREE.PlaneGeometry(.24, .7);
+const skidPool = [];
+for(let i=0;i<SKID_N;i++){
+  const m = new THREE.Mesh(skidGeo, new THREE.MeshBasicMaterial({color:0x0a0a0c, transparent:true, opacity:0, depthWrite:false}));
+  m.rotation.x = -Math.PI/2; m.position.y = .015; m.visible = false;
+  scene.add(m); skidPool.push({m, life:0});
+}
+let skidIdx = 0;
+function spawnSkid(x, z, heading){
+  const p = skidPool[skidIdx++ % SKID_N];
+  p.m.visible = true;
+  p.m.position.set(x, .015 + (skidIdx%7)*0.0004, z);
+  p.m.rotation.z = -heading;
+  p.m.material.opacity = .55;
+  p.life = 14;
+}
+function updateSkids(dt){
+  for(const p of skidPool){
+    if(!p.m.visible) continue;
+    p.life -= dt;
+    if(p.life < 4) p.m.material.opacity = Math.max(0, p.life/4*.55);
+    if(p.life <= 0) p.m.visible = false;
+  }
+}
+
+// ------------------------------------------------ speed lines (screen wind sprites)
+const windPool = [];
+const windMat = new THREE.MeshBasicMaterial({color:0xd0e8ff, transparent:true, opacity:0});
+for(let i=0;i<24;i++){
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(.03, 3.2), windMat.clone());
+  m.visible = false; scene.add(m);
+  windPool.push({m, life:0});
+}
+let windIdx = 0;
+function updateWind(dt, speed){
+  if(speed > 70 && Math.random() < (speed-70)/60){
+    const p = windPool[windIdx++ % windPool.length];
+    const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
+    const side = new THREE.Vector3(fwd.z,0,-fwd.x);
+    p.m.position.copy(P.pos).addScaledVector(fwd, 10 + Math.random()*8)
+      .addScaledVector(side, (Math.random()-.5)*10);
+    p.m.position.y = .5 + Math.random()*2.5;
+    p.m.lookAt(p.m.position.clone().add(new THREE.Vector3(-fwd.z,0,fwd.x)));
+    p.m.rotation.z = Math.PI/2 - P.heading;
+    p.m.visible = true; p.life = .3; p.m.material.opacity = .35;
+  }
+  for(const p of windPool){
+    if(!p.m.visible) continue;
+    p.life -= dt;
+    p.m.material.opacity = Math.max(0, p.life/.3*.35);
+    if(p.life<=0) p.m.visible=false;
+  }
+}
+
+// ------------------------------------------------ camera
+// Player camera config — editable from the engine editor (saved with the scene)
+const PLAYER_CAMERA = window.LK_RUNTIME_PLAYER_CAMERA;
+const CAM_CFG = PLAYER_CAMERA.createConfig();
+const CAMERA_ASPECTS = PLAYER_CAMERA.ASPECTS;
+const camPos = new THREE.Vector3(0, 6, 65);
+const camFocus = new THREE.Vector3();
+const camLook = new THREE.Vector3();
+let camYaw = 0, camPitch = .32, camDist = 9, camMode = 0; // 0 chase, 1 free orbit
+let dragging = false, lastMX = 0, lastMY = 0, userCamTimer = 0, camShake = 0;
+let camDriftSide = 0, camReverseBlend = 0, camCinematicRoll = 0, lastCamVF = 0, lastCamVR = 0, lastCamDrifting = false;
+let camSnapNext = false;
+let camReverseHold = 0;
+let camHeading = 0, camSpeedForFov = 0;
+function resetCameraState(){
+  dragging = false;
+  camMode = 0;
+  camPitch = .32;
+  camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist || CAM_CFG.arcadeDistance || 9));
+  camYaw = -P.heading + Math.PI;
+  camHeading = P.heading;
+  camFocus.copy(P.pos);
+  camLook.set(P.pos.x, P.pos.y + 1.1, P.pos.z);
+  camSpeedForFov = speedKmh || 0;
+  camDriftSide = 0;
+  camReverseBlend = 0;
+  camCinematicRoll = 0;
+  camReverseHold = 0;
+  lastCamVF = 0;
+  lastCamVR = 0;
+  lastCamDrifting = false;
+  userCamTimer = 0;
+  camSnapNext = true;
+}
+function cameraAspectValue(){
+  return PLAYER_CAMERA.aspectValue(CAM_CFG, innerWidth, innerHeight);
+}
+function cameraRenderRect(w, h){
+  return PLAYER_CAMERA.renderRect(CAM_CFG, w, h);
+}
+function applyCameraCfg(){
+  Object.assign(CAM_CFG, {
+    mode: CAM_CFG.mode || 'free',
+    arcadeDistance: CAM_CFG.arcadeDistance == null ? 9 : CAM_CFG.arcadeDistance,
+    arcadeHeight: CAM_CFG.arcadeHeight == null ? 3.1 : CAM_CFG.arcadeHeight,
+    arcadeLag: CAM_CFG.arcadeLag == null ? 5.8 : CAM_CFG.arcadeLag,
+    reverseFrontSpeed: CAM_CFG.reverseFrontSpeed == null ? 7 : CAM_CFG.reverseFrontSpeed,
+    cinematicDriftOrbit: CAM_CFG.cinematicDriftOrbit == null ? .18 : CAM_CFG.cinematicDriftOrbit,
+    cinematicDriftClose: CAM_CFG.cinematicDriftClose == null ? 1.65 : CAM_CFG.cinematicDriftClose,
+    cinematicDriftHeight: CAM_CFG.cinematicDriftHeight == null ? .45 : CAM_CFG.cinematicDriftHeight,
+    cinematicLag: CAM_CFG.cinematicLag == null ? 4.2 : CAM_CFG.cinematicLag,
+  });
+  CAM_CFG.grade = Object.assign({enabled:false, exposure:1, brightness:0, contrast:1, saturation:1, gamma:1}, CAM_CFG.grade || {});
+  CAM_CFG.dof = Object.assign({enabled:false, focus:9, aperture:.025, maxblur:.04, autoFocus:true, focusRadius:.16, feather:.38, showFocus:false}, CAM_CFG.dof || {});
+  delete CAM_CFG.dof.exposure;
+  if(CAM_CFG.dof.aperture > 0 && CAM_CFG.dof.aperture < .006) CAM_CFG.dof.aperture = .025;
+  if(CAM_CFG.dof.maxblur > 0 && CAM_CFG.dof.maxblur < .02) CAM_CFG.dof.maxblur = .04;
+  camera.aspect = cameraAspectValue();
+  camera.far = CAM_CFG.far;
+  camera.updateProjectionMatrix();
+  scene.fog.density = CAM_CFG.fogDensity;
+  renderer.toneMappingExposure = CAM_CFG.grade && CAM_CFG.grade.enabled && CAM_CFG.grade.exposure != null ? CAM_CFG.grade.exposure : 1;
+  camDist = clamp(camDist, CAM_CFG.minDist, CAM_CFG.maxDist);
+}
+function setCameraConfig(patch, reset){
+  if(!patch) return;
+  const previousMode = CAM_CFG.mode;
+  if(patch.dof) CAM_CFG.dof = Object.assign({}, CAM_CFG.dof, patch.dof);
+  if(patch.grade) CAM_CFG.grade = Object.assign({}, CAM_CFG.grade, patch.grade);
+  const rest = Object.assign({}, patch);
+  delete rest.dof;
+  delete rest.grade;
+  Object.assign(CAM_CFG, rest);
+  applyCameraCfg();
+  if(reset || (patch.mode && patch.mode !== previousMode)) resetCameraState();
+  camSnapNext = true;
+}
+function renderPlayerCamera(targetRect){
+  const area = targetRect || {x:0, y:0, w:innerWidth, h:innerHeight};
+  PLAYER_CAMERA.renderScoped({
+    config: CAM_CFG,
+    renderer,
+    camera,
+    width: area.w,
+    height: area.h,
+    offsetX: area.x || 0,
+    offsetY: area.y || 0,
+    clip: !!targetRect,
+    clearColor: scene.background && scene.background.isColor ? scene.background : scene.fog.color,
+    render: rect => {
+      if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled))){
+        if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
+        POST.render();
+        if(rect.scoped || targetRect) POST.composer.setSize(innerWidth, innerHeight);
+      } else {
+        renderer.render(scene, camera);
+      }
+    },
+  });
+}
+canvas.addEventListener('pointerdown', e => {
+  if((GAME.state.editorActive && !GAME.state.editorPreview) || e.button > 0) return;
+  dragging = true;
+  lastMX = e.clientX;
+  lastMY = e.clientY;
+  if(canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointerup', e => {
+  dragging = false;
+  if(canvas.releasePointerCapture) canvas.releasePointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointercancel', () => dragging = false);
+addEventListener('pointerup', () => dragging = false);
+function isCameraUiTarget(target){
+  return !!(target && target.closest && target.closest('#lkEditor, #settingsOverlay, #tunePanel, #radio'));
+}
+function viewportOwnsPointerEvent(e){
+  if(e.target && e.target.closest && e.target.closest('input,textarea,select,button')) return false;
+  return e.target === canvas || SESSION.isStarted() || GAME.state.editorPreview;
+}
+['contextmenu','selectstart','dragstart'].forEach(type => {
+  addEventListener(type, e => {
+    if(!viewportOwnsPointerEvent(e)) return;
+    e.preventDefault();
+  }, true);
+});
+addEventListener('pointermove', e => {
+  const freeMouseLook = !dragging && (CAM_CFG.mode || 'free') === 'free' && (SESSION.isStarted() || GAME.state.editorPreview) &&
+    !(GAME.state.editorActive && !GAME.state.editorPreview) && !isCameraUiTarget(e.target);
+  if((!dragging && !freeMouseLook) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
+  const dx = dragging ? (e.clientX-lastMX) : (e.movementX || 0);
+  const dy = dragging ? (e.clientY-lastMY) : (e.movementY || 0);
+  camYaw   -= dx*.005;
+  camPitch += dy*.004;
+  camPitch = Math.max(.05, Math.min(1.2, camPitch));
+  lastMX = e.clientX; lastMY = e.clientY;
+  userCamTimer = freeMouseLook ? 1e9 : 2.2;
+});
+addEventListener('wheel', e => {
+  if(GAME.state.editorActive && !GAME.state.editorPreview) return;
+  camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist + Math.sign(e.deltaY)*1.1));
+}, {passive:true});
+
+function updateCamera(dt){
+  const snap = camSnapNext;
+  camSnapNext = false;
+  const mode = CAM_CFG.mode || 'free';
+  const focusAlpha = snap ? 1 : dampAlpha(mode === 'free' ? 13 : 16, dt);
+  const headingAlpha = snap ? 1 : dampAlpha(mode === 'free' ? 12 : 14, dt);
+  camFocus.lerp(P.pos, focusAlpha);
+  camHeading += angleDelta(P.heading, camHeading) * headingAlpha;
+  if(mode === 'free' && camMode === 0 && !dragging){
+    userCamTimer -= dt;
+    if(userCamTimer <= 0){
+      // ease yaw back behind the car
+      let target = -camHeading + Math.PI;
+      camYaw += angleDelta(target, camYaw) * (snap ? 1 : dampAlpha(2.4, dt));
+    }
+  }
+  let look = new THREE.Vector3(camFocus.x, camFocus.y + 1.1, camFocus.z);
+  let lag = 6;
+  if(mode === 'arcade' || mode === 'cinematic'){
+    const reversingForCamera = ENGINE.reverseActive && lastCamVF < -1.8;
+    camReverseHold = reversingForCamera ? camReverseHold + dt : Math.max(0, camReverseHold - dt * 2.4);
+    const lookBack = !!keys['v'];
+    const reverseTarget = (lookBack || camReverseHold > .65) ? 1 : 0;
+    camReverseBlend += (reverseTarget - camReverseBlend) * (snap ? 1 : dampAlpha(CAM_CFG.reverseFrontSpeed, dt));
+    const fwd = new THREE.Vector3(Math.sin(camHeading), 0, Math.cos(camHeading));
+    const side = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    let dist = Math.max(2, CAM_CFG.arcadeDistance);
+    let height = CAM_CFG.arcadeHeight;
+    lag = CAM_CFG.arcadeLag;
+    let sideOffset = 0;
+
+    if(mode === 'cinematic'){
+      const driftAmount = lastCamDrifting && speedKmh > 18 ? clamp(driftAngle / .82, 0, 1) : 0;
+      const driftDir = Math.sign(lastCamVR || P.steer || 1);
+      const driftTarget = driftDir * driftAmount;
+      camDriftSide += (driftTarget - camDriftSide) * (snap ? 1 : dampAlpha(4.6, dt));
+      sideOffset = -camDriftSide * dist * clamp(CAM_CFG.cinematicDriftOrbit, 0, .22) * (1 - camReverseBlend * .65);
+      camCinematicRoll += ((-camDriftSide * .045) - camCinematicRoll) * (snap ? 1 : dampAlpha(4.8, dt));
+      dist -= Math.abs(camDriftSide) * CAM_CFG.cinematicDriftClose;
+      height += Math.abs(camDriftSide) * CAM_CFG.cinematicDriftHeight;
+      lag = CAM_CFG.cinematicLag;
+    } else {
+      camDriftSide += (0 - camDriftSide) * (snap ? 1 : dampAlpha(5, dt));
+      camCinematicRoll += (0 - camCinematicRoll) * (snap ? 1 : dampAlpha(5, dt));
+    }
+
+    const behind = camFocus.clone().addScaledVector(fwd, -dist).addScaledVector(side, sideOffset);
+    const front = camFocus.clone().addScaledVector(fwd, dist).addScaledVector(side, -sideOffset);
+    const want = behind.lerp(front, camReverseBlend);
+    want.y = camFocus.y + height;
+    camPos.lerp(want, snap ? 1 : dampAlpha(Math.max(lag, 8), dt));
+    look.addScaledVector(fwd, camReverseBlend > .5 ? -2.2 : clamp(lastCamVF * .06, -1.2, 1.8));
+  } else {
+    const cy = Math.cos(camPitch), sy = Math.sin(camPitch);
+    const off = new THREE.Vector3(Math.sin(camYaw)*cy, sy, Math.cos(camYaw)*cy).multiplyScalar(camDist);
+    const want = camFocus.clone().add(off);
+    want.y = Math.max(1.2, want.y);
+    camPos.lerp(want, snap ? 1 : dampAlpha(6, dt));
+  }
+  camShake = Math.max(0, camShake - dt*2.5);
+  const sh = camShake * .35 * CAM_CFG.shake;
+  camera.position.copy(camPos).add(new THREE.Vector3((Math.random()-.5)*sh,(Math.random()-.5)*sh,(Math.random()-.5)*sh));
+  camLook.lerp(look, snap ? 1 : dampAlpha(18, dt));
+  camera.lookAt(camLook);
+  if(mode === 'cinematic') camera.rotateZ(camCinematicRoll);
+  // speed FOV
+  camSpeedForFov += ((speedKmh || 0) - camSpeedForFov) * (snap ? 1 : dampAlpha(7, dt));
+  const targetFov = CAM_CFG.fov + Math.min(CAM_CFG.fovSpeedMax, camSpeedForFov * CAM_CFG.fovSpeedGain);
+  camera.fov += (targetFov - camera.fov) * (snap ? 1 : dampAlpha(4, dt));
+  camera.updateProjectionMatrix();
+}
+
+// ------------------------------------------------ post-processing (DOF + visual grade)
+const POST = window.LK_RUNTIME_POST.createPost({
+  THREERef: THREE,
+  scene,
+  camera,
+  renderer,
+  config: CAM_CFG,
+  size: () => ({width: innerWidth, height: innerHeight}),
+  focusTarget: () => (typeof player !== 'undefined' && player?.car ? player.car : car),
+});
+
+// ------------------------------------------------ sound (procedural WebAudio)
+const SFX = window.LK_RUNTIME_AUDIO.createSfx({getVolumes: () => AUDIO});
+
+// ------------------------------------------------ engine sound sets (sample-based, fallback sul synth)
+const ENGINE_AUDIO = window.LK_RUNTIME_ENGINE_AUDIO.create({
+  audio: SFX,
+  engine: ENGINE,
+  gearbox: GEARBOX,
+  getSpeed: () => speedKmh,
+  getTimescale: () => TS.cur,
+  resolveSrc: src => {
+    if(src && src.indexOf('blob:') === 0 && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(src.slice(5));
+    return Promise.resolve(src);
+  },
+});
+const PLAYER_ENGINE_AUDIO_CFG = {setId: null, set: null};
+function setPlayerEngineSound(setId){
+  PLAYER_ENGINE_AUDIO_CFG.setId = setId || null;
+  const store = window.LK_STORE;
+  const set = setId && store && store.soundSets ? store.soundSets.get(setId) : null;
+  PLAYER_ENGINE_AUDIO_CFG.set = set;
+  ENGINE_AUDIO.setConfig(set);
+}
+
+// ------------------------------------------------ input
+const keys = {};
+addEventListener('keydown', e => {
+  if(e.key === 'F1'){
+    e.preventDefault();
+    return;
+  }
+  if(GAME.state.editorActive && GAME.state.editorPreview && e.key.toLowerCase() === 'escape') return;
+  if(GAME.state.editorActive && !GAME.state.editorPreview) return;      // editor owns the keyboard outside play preview
+  const key = e.key.toLowerCase();
+  if(key === 'escape'){
+    e.preventDefault();
+    toggleSettingsMenu('game');
+    return;
+  }
+  if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
+  if(key === 'u'){
+    e.preventDefault();
+    toggleTunePanel();
+    return;
+  }
+  keys[key] = true;
+  if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) e.preventDefault();
+  if(key === 'r') resetCar();
+  if(key === 'c'){
+    if(CAM_CFG.mode === 'free'){
+      camMode = 1-camMode; userCamTimer = camMode ? 1e9 : 0;
+    } else {
+      CAM_CFG.mode = CAM_CFG.mode === 'arcade' ? 'cinematic' : 'arcade';
+      popup(CAM_CFG.mode === 'cinematic' ? 'CINEMATIC CAMERA' : 'ARCADE CAMERA', '#9db4ff');
+    }
+  }
+  if(key === 'm'){ const m = SFX.toggleMute(); popup(m?'MUTED':'SOUND ON','#9aa3b8'); }
+  if(key === 'f' && PLAYER_MODEL && PLAYER_MODEL.flip()) popup('MODEL FLIPPED','#9aa3b8');
+  if(e.key === 'Tab'){ e.preventDefault(); RADIO.toggleOpen(); }
+  if(key === 'p'){ RADIO.togglePlay(); }
+  if(key === 'n'){ RADIO.next(); }
+  if(key === 'b'){ RADIO.prev(); }
+  if(key === 'h'){ document.getElementById('legend').classList.toggle('collapsed'); }
+});
+addEventListener('keyup', e => {
+  if(GAME.state.editorActive && !GAME.state.editorPreview) return;
+  if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
+  keys[e.key.toLowerCase()] = false;
+});
+
+function resetCar(){
+  P.pos.set(SPAWN.x, 0, SPAWN.z); P.heading = SPAWN.heading; P.vel.set(0,0,0);
+  P.yawRate = 0; P.steer = 0;
+  axPrev = 0; lastSteerAngle = 0; isDrifting = false; handbrake = false;
+  resetEngine();
+  if(PHYS.carBody) syncCarBodyToPlayer();
+  carRenderPos.copy(P.pos);
+  carRenderHeading = P.heading;
+  carRenderPitch = 0;
+  carRenderRoll = 0;
+  carRenderSnap = true;
+  car.position.copy(P.pos); car.rotation.set(0, P.heading, 0);
+  driftScore = 0; driftMult = 1; driftTime = 0;
+  HUD.hideDrift();
+}
+
+// ------------------------------------------------ local 3D models
+// Load order: ./models/*.glb first, optional ./models/*/scene.gltf fallback,
+// then procedural placeholders if no model can be loaded.
+// You can also DRAG & DROP a .glb file onto the page to use it as the player car.
+const MODEL_ASSETS = window.LK_RUNTIME_MODEL_ASSETS.create({THREERef: THREE, car, isFileMode: IS_FILE_MODE});
+const gltfLoader = MODEL_ASSETS.gltfLoader;
+const RIG = MODEL_ASSETS.rig;
+const MODEL_SIZE = Object.freeze({
+  playerLen: 5.6,
+  parkedLen: 4.2,
+  coneHeight: .9,
+});
+
+function tryLoadModel(paths, onProg){
+  return MODEL_ASSETS.tryLoadModel(paths, onProg);
+}
+
+const PLAYER_MODEL = window.LK_RUNTIME_PLAYER_MODEL.create({
+  modelAssets: MODEL_ASSETS,
+  car,
+  carVisual,
+  modelSize: MODEL_SIZE,
+  popup,
+  canDropReplace: () => GAME.state.started && !GAME.state.editorActive && !GAME.state.editorPreview,
+});
+const prepModel = PLAYER_MODEL.prepModel;
+const setPlayerModel = PLAYER_MODEL.setPlayerModel;
+PLAYER_MODEL.bindDrop(window);
+
+// ------------------------------------------------ RADIO (soundhud) + slow-motion
+const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
+  paths: ASSETS,
+  canvas,
+  clamp,
+  popup,
+  telemetry: () => ({speedKmh, lastLatG}),
+});
+
+// slow-motion state (radio open → super slow-mo)
+const TS = {cur:1, get target(){ return RADIO.isOpen() ? 0.1 : 1; }};
+
+// menu music (loops on the start screen; starts at first interaction - browser policy)
+const MENU_MUSIC = window.LK_RUNTIME_MENU_MUSIC.create({
+  tracks: [
+    {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Menu default'},
+  ],
+  popup,
+  getVolume: () => .55 * AUDIO.master * AUDIO.music,
+});
+initSettingsMenu();
+applyAudioSettings();
+
+// ------------------------------------------------ start / loading flow
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+const loadTxt = document.getElementById('loadTxt');
+const levelSelect = document.getElementById('levelSelect');
+const levelCards = document.getElementById('levelCards');
+const levelBackBtn = document.getElementById('levelBackBtn');
+
+const TRACK_CATALOG = window.LK_RUNTIME_TRACK_CATALOG.create({
+  overlay,
+  levelSelect,
+  levelCards,
+  loadText: loadTxt,
+  onLaunch: levelId => launchLevel(levelId),
+});
+const SESSION = window.LK_RUNTIME_SESSION_FLOW.create({
+  gameState: GAME.state,
+  trackCatalog: TRACK_CATALOG,
+});
+
+let GAME_FLOW = null;
+function showLevelSelect(){ if(GAME_FLOW) GAME_FLOW.showLevelSelect(); }
+function hideLevelSelect(){ if(GAME_FLOW) GAME_FLOW.hideLevelSelect(); }
+function unloadCurrentLevel(){ if(GAME_FLOW) GAME_FLOW.unloadCurrentLevel(); }
+function prepareEditorLevel(){ return GAME_FLOW ? GAME_FLOW.prepareEditorLevel() : null; }
+function setEditorTrack(track){ if(GAME_FLOW) GAME_FLOW.setEditorTrack(track); }
+function enterGameplayMode(){ if(GAME_FLOW) GAME_FLOW.enterGameplayMode(); }
+function beginGameplaySession(editorPreview){ if(GAME_FLOW) GAME_FLOW.beginGameplaySession(editorPreview); }
+function stopEditorPreview(){ if(GAME_FLOW) GAME_FLOW.stopEditorPreview(); }
+function backToMainMenu(){ if(GAME_FLOW) GAME_FLOW.backToMainMenu(); }
+function startGame(){ if(GAME_FLOW) GAME_FLOW.startGame(); }
+function startEditorPreview(){ if(GAME_FLOW) GAME_FLOW.startEditorPreview(); }
+function launchLevel(levelId){
+  // livelli della libreria editor: se serve, lo store attiva il livello
+  // scelto (ed eventualmente ricarica la pagina quando la scena è già applicata)
+  const store = window.LK_STORE;
+  if(store && store.levels && store.levels.prepareLaunch){
+    const prepareResult = store.levels.prepareLaunch(levelId);
+    if(prepareResult === 'reload') return;
+    const levelsStore = store.levels;
+    if(levelsStore && typeof levelsStore.setActive === 'function'){
+      const currentId = typeof levelsStore.activeId === 'function' ? levelsStore.activeId() : null;
+      if(currentId !== levelId){
+        const changed = levelsStore.setActive(levelId);
+        if(changed && store.isApplied && store.isApplied()){
+          try { sessionStorage.setItem('lk.autolaunch', levelId); } catch(err){}
+          location.reload();
+          return;
+        }
+      }
+    }
+  }
+  if(GAME_FLOW) GAME_FLOW.launchLevel(levelId);
+}
+
+const loadBar = document.getElementById('loadBar');
+const editorBtn = document.getElementById('editorBtn');
+let RUNTIME_LOADER = null;
+const LOADING = window.LK_RUNTIME_LOADING_FLOW.create({
+  loadBar,
+  loadText: loadTxt,
+  overlay,
+  startButton: startBtn,
+  editorButton: editorBtn,
+  getLoadReport: () => RUNTIME_LOADER ? RUNTIME_LOADER.report() : [],
+  isFileMode: () => IS_FILE_MODE,
+  hasGltfLoader: () => !!gltfLoader,
+});
+LOADING.setIdleText('choose track or editor');
+LOADING.setBar(0);
+function preloadMenuShell(){
+  if(!overlay) return;
+  const tasks = [];
+  const setMenuProgress = (pct, label) => {
+    if(loadBar) loadBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if(loadTxt) loadTxt.textContent = label + '... ' + Math.round(pct) + '%';
+  };
+  setMenuProgress(8, 'loading menu');
+  tasks.push(new Promise(resolve => {
+    const img = new Image();
+    const done = () => resolve();
+    img.onload = done;
+    img.onerror = done;
+    img.src = 'media/images/menu_bg.png';
+    setTimeout(done, 1200);
+  }).then(() => setMenuProgress(46, 'loading menu background')));
+  if(MENU_MUSIC && MENU_MUSIC.audio){
+    tasks.push(new Promise(resolve => {
+      const audio = MENU_MUSIC.audio;
+      const done = () => {
+        audio.removeEventListener('canplaythrough', done);
+        audio.removeEventListener('loadeddata', done);
+        audio.removeEventListener('error', done);
+        resolve();
+      };
+      audio.addEventListener('canplaythrough', done, {once:true});
+      audio.addEventListener('loadeddata', done, {once:true});
+      audio.addEventListener('error', done, {once:true});
+      try { audio.load(); } catch(err){ done(); }
+      setTimeout(done, 1800);
+    }).then(() => setMenuProgress(82, 'loading menu music')));
+  }
+  Promise.all(tasks).then(() => {
+    setMenuProgress(100, 'menu ready');
+    setTimeout(() => {
+      overlay.classList.remove('menu-preloading');
+      LOADING.setIdleText('choose track or editor');
+      LOADING.setBar(0);
+    }, 280);
+  });
+}
+preloadMenuShell();
+RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
+  loading: LOADING,
+  gameState: GAME.state,
+  paths: ASSETS,
+  isFileMode: () => IS_FILE_MODE,
+  hasGltfLoader: () => !!gltfLoader,
+  tryLoadModel,
+  prepModel,
+  modelSize: MODEL_SIZE,
+  setPlayerModel,
+  parkedGroups,
+  cones,
+  keys,
+  engine: ENGINE,
+  getSpeed: () => speedKmh,
+  setSpeed: value => { speedKmh = value; },
+  renderer,
+  scene,
+  camera,
+  updatePlayerLights,
+  getSceneReady: () => window.LK_STORE && (window.LK_STORE.ensureApplied ? window.LK_STORE.ensureApplied(GAME) : window.LK_STORE.ready),
+});
+
+GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
+  gameState: GAME.state,
+  session: SESSION,
+  trackCatalog: TRACK_CATALOG,
+  overlay,
+  loadText: loadTxt,
+  hud: document.getElementById('hud'),
+  ensureRuntimeReady: RUNTIME_LOADER.ensureReady,
+  isRuntimeReady: RUNTIME_LOADER.isReady,
+  clearInput: () => { for(const k of Object.keys(keys)) keys[k] = false; },
+  pauseRadio: () => {
+    RADIO.audio.pause();
+    try { RADIO.audio.currentTime = 0; } catch(err){}
+    ENGINE_AUDIO.stop();
+    if(SFX.stopEngineSynth) SFX.stopEngineSynth();
+  },
+  beginRadio: () => {
+    RADIO.begin();
+    RADIO.audio.play().catch(()=>{});
+  },
+  previewRadioHud: visible => {
+    if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(visible);
+  },
+  resetTimescale: () => { TS.cur = 1; },
+  resetCar,
+  disposePhysicsWorld,
+  disposeRenderLists: () => {
+    if(renderer && renderer.renderLists) renderer.renderLists.dispose();
+  },
+  exitEditor: () => {
+    if(GAME.editor && GAME.editor.state && GAME.editor.state.active && GAME.editor.exit) GAME.editor.exit(false);
+  },
+  clearFrameOverride: () => { GAME.hooks.frameOverride = null; },
+  setDragging: value => { dragging = !!value; },
+  resetGameplayCamera: resetCameraState,
+  setSettingsOpen,
+  setTuneOpen,
+  initGameplayPhysics: () => {
+    if(initPhysicsWorld()){
+      rebuildPhysicsStatics();
+      syncCarBodyToPlayer();
+    }
+    SFX.init();
+    ENGINE_AUDIO.start();   // sample engine + accensione (fallback synth se set assente)
+  },
+  pauseMenuMusic: () => {
+    if(MENU_MUSIC.fadeOut) return MENU_MUSIC.fadeOut(2200);
+    return MENU_MUSIC.pause();
+  },
+  playMenuMusic: () => MENU_MUSIC.play().catch(()=>{}),
+  setMenuBusy: RUNTIME_LOADER.setBusy,
+});
+
+// menu music: explicit button (browsers require a user gesture for audio)
+MENU_MUSIC.bindButton(document.getElementById('menuMusicBtn'));
+MENU_MUSIC.bindAutoStart(overlay, () => SESSION.isStarted());
+
+if(startBtn) startBtn.addEventListener('click', showLevelSelect);
+if(levelBackBtn) levelBackBtn.addEventListener('click', hideLevelSelect);
+
+Object.assign(GAME.assets, {
+  ensureReady: RUNTIME_LOADER.ensureReady,
+  isReady: RUNTIME_LOADER.isReady,
+  setLoadingStage: RUNTIME_LOADER.setLoadingStage,
+  finishLoading: RUNTIME_LOADER.finishLoading,
+  failLoading: RUNTIME_LOADER.failLoading,
+});
+GAME.levels = {
+  available: TRACK_CATALOG.available(),
+  current: TRACK_CATALOG.current,
+  isLoaded: SESSION.isLoaded,
+  choose: showLevelSelect,
+  launch: launchLevel,
+  unload: unloadCurrentLevel,
+  prepareEditor: prepareEditorLevel,
+  setTracks: TRACK_CATALOG.setTracks,
+  setEditorTrack,
+};
+
+Object.assign(GAME.core, {canvas, renderer, scene, camera, lights: {hemi, sun, pl1, pl2}});
+Object.assign(GAME.world, {
+  state: WORLD_STATE,
+  generator: WORLD_GENERATOR,
+  activeTrack: WORLD_TRACK,
+  constants: {LOT, WALL_H},
+  colliders: {circle: circleColliders, box: boxColliders},
+  entities: {parkedGroups, cones},
+  registry: REGISTRY,
+  register: tagEntity,
+  unregister: unregisterEntity,
+});
+Object.assign(GAME.player, {
+  car,
+  visual: carVisual,
+  wheels,
+  physics: P,
+  config: CFG,
+  drive: DRIVE,
+  engine: ENGINE,
+  tuning: DRIVE_TUNING,
+  reset: resetCar,
+  spawn: SPAWN,
+  setModel: setPlayerModel,
+  getModel: PLAYER_MODEL.getPlayerModel,
+  headlight: () => headlight,
+  lights: PLAYER_LIGHT_CFG,
+  setLights: setPlayerLightConfig,
+  addLight: addPlayerAuxLight,
+  updateLights: updatePlayerLights,
+  dataWidgets: PLAYER_DATA_WIDGETS.config,
+  setDataWidgets: PLAYER_DATA_WIDGETS.set,
+  updateDataWidgets: PLAYER_DATA_WIDGETS.update,
+  syncDataWidget: PLAYER_DATA_WIDGETS.syncFromAnchor,
+  engineAudio: PLAYER_ENGINE_AUDIO_CFG,
+  setEngineSound: setPlayerEngineSound,
+  exhaust: PLAYER_EXHAUST_CFG,
+  setExhaust: setPlayerExhaustConfig,
+  addExhaust: addPlayerExhaustSource,
+  updateExhaust: updatePlayerExhaust,
+  testExhaust: testPlayerExhaust,
+  cameraCfg: CAM_CFG,
+  cameraAspects: CAMERA_ASPECTS,
+  cameraAspectValue,
+  cameraRenderRect,
+  applyCameraCfg,
+  setCameraConfig,
+  resetCamera: resetCameraState,
+  setTuning: values => DRIVE_TUNING.syncInputs(values),
+});
+Object.assign(GAME.systems, {
+  audio: SFX,
+  engineAudio: ENGINE_AUDIO,
+  rain: RAIN,
+  radio: RADIO,
+  menuMusic: {
+    audio: MENU_MUSIC.audio,
+    play: MENU_MUSIC.play,
+    pause: MENU_MUSIC.pause,
+    toggle: MENU_MUSIC.toggle,
+    setVolume: MENU_MUSIC.setVolume,
+    getTracks: MENU_MUSIC.getTracks,
+    addTracks: MENU_MUSIC.addTracks,
+    loadTrack: MENU_MUSIC.loadTrack,
+    fadeOut: MENU_MUSIC.fadeOut,
+  },
+  sky: SKY,
+  rig: RIG,
+  post: POST,
+  session: SESSION,
+  physics: {
+    available: () => PHYS.available,
+    active: () => PHYS.active,
+    rebuild: rebuildPhysicsStatics,
+    syncPlayer: syncCarBodyToPlayer,
+    raw: PHYS,
+  },
+});
+Object.assign(GAME.actions, {
+  start: startGame,
+  chooseLevel: showLevelSelect,
+  launchLevel,
+  startEditorPreview,
+  stopEditorPreview,
+  stepGameplayPreview: dt => stepGameplayFrame(dt, false),
+  renderGameplayCamera: renderPlayerCamera,
+  renderGameplayCameraRect: renderPlayerCamera,
+  unloadLevel: unloadCurrentLevel,
+  prepareEditorLevel,
+  backToMenu: backToMainMenu,
+  openPause: mode => setSettingsOpen(true, mode),
+  closePause: () => setSettingsOpen(false),
+  togglePause: mode => toggleSettingsMenu(mode),
+  toggleMenuMusic: MENU_MUSIC.toggle,
+});
+Object.assign(GAME.ui, {
+  popup,
+  radioHud: RADIO.config,
+  setRadioHud: RADIO.setConfig,
+  previewRadioHud: RADIO.setEditorPreview,
+});
+Object.assign(GAME.settings, {
+  audio: AUDIO,
+  applyAudio: applyAudioSettings,
+  setAudio: setAudioChannel,
+  video: VIDEO,
+  applyVideo: applyVideoSettings,
+  menuMusic: MENU_MUSIC.audio,
+  setAudioOpen: setSettingsOpen,
+  toggleAudio: toggleSettingsMenu,
+  setTuningOpen: setTuneOpen,
+  toggleTuning: toggleTunePanel,
+});
+
+// ------------------------------------------------ main loop
+let prevT = performance.now();
+
+function stepGameplayFrame(dt, shouldRender){
+  if(GAME.state.paused){
+    SFX.update(0, 0, 0);
+    ENGINE_AUDIO.setMuted(true);
+    ENGINE_AUDIO.update(dt);
+    if(shouldRender) renderPlayerCamera();
+    return;
+  }
+  ENGINE_AUDIO.setMuted(false);
+
+  // super slow-motion while the radio is open (smooth in/out)
+  TS.cur += (TS.target - TS.cur) * Math.min(1, dt*4);
+  const sdt = dt * TS.cur;
+
+  const {vF, vR, drifting} = updateCar(sdt);
+  lastCamVF = vF;
+  lastCamVR = vR;
+  lastCamDrifting = drifting;
+  updatePlayerLights();
+  updatePlayerExhaust(sdt);
+  updateScoring(sdt, drifting);
+  PLAYER_DATA_WIDGETS.update();
+  updateCones(sdt);
+
+  // effects: sgommate laterali (drift/freno a mano) + slittamento longitudinale
+  // (staccata violenta o wheelspin in accelerazione da fermo)
+  const slide = Math.min(1, Math.abs(vR)/12);
+  const brakeSlip = (keys['s'] || keys['arrowdown']) && !ENGINE.reverseActive && speedKmh > 28;
+  const accelSlip = (ENGINE.throttle || 0) > .55 && !ENGINE.reverseActive &&
+    speedKmh > 2 && speedKmh < 26 && (ENGINE.rpm01 || 0) > .4;
+  const lateralSlip = (drifting || (handbrake && speedKmh > 15)) && speedKmh > 12;
+  if(lateralSlip || brakeSlip || accelSlip){
+    const slipAmount = lateralSlip ? slide : (brakeSlip ? .35 : Math.min(1, .25 + (ENGINE.rpm01 || 0) * .5));
+    const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
+    const side = new THREE.Vector3(fwd.z,0,-fwd.x);
+    for(const s of [-1,1]){
+      const wp = P.pos.clone().addScaledVector(fwd,-1.35).addScaledVector(side, s*.92);
+      if(Math.random() < .3 + slipAmount*.6) spawnSmoke(wp, slipAmount);
+      spawnSkid(wp.x, wp.z, P.heading);
+      if(brakeSlip){   // in staccata bloccano anche le anteriori
+        const wf = P.pos.clone().addScaledVector(fwd, 1.25).addScaledVector(side, s*.92);
+        spawnSkid(wf.x, wf.z, P.heading);
+      }
+    }
+  }
+  updateSmoke(sdt);
+  updateSkids(sdt);
+  updateWind(sdt, speedKmh);
+  for(const h of GAME.hooks.frame) h(sdt);   // editor-added effects (emitters, ...)
+  updateCamera(dt);                       // camera stays responsive in slow-mo
+  SKY.update(sdt);                        // day/night cycle (slows down with slow-mo)
+
+  // sound
+  const rpm01 = ENGINE.rpm01 || Math.min(1, Math.abs(vF)/CFG.maxSpeed);
+  const throttle = (keys['w']||keys['arrowup']) ? 1 : 0;
+  // sgommate → engine audio: stessi flag delle skid mark, cosi' suono e segni
+  // partono e finiscono insieme; lo screech del synth resta come fallback
+  const skidByEngineAudio = ENGINE_AUDIO.handlesSkids();
+  ENGINE_AUDIO.setSkids({
+    drift: lateralSlip ? Math.min(1, .35 + slide * .8) * TS.cur : 0,
+    brake: brakeSlip ? Math.min(1, .4 + speedKmh / 140) * TS.cur : 0,
+    accel: accelSlip ? Math.min(1, .3 + (ENGINE.rpm01 || 0) * .7) * TS.cur : 0,
+  });
+  const screech01 = skidByEngineAudio ? 0 : (drifting || (handbrake && speedKmh>15) ? Math.min(1,.3+slide) : 0);
+  SFX.update(rpm01 * TS.cur, throttle * TS.cur, screech01 * TS.cur);
+  ENGINE_AUDIO.update(sdt);
+
+  RADIO.updateHUD(dt, rpm01, throttle);
+
+  HUD.setSpeedGear(speedKmh, (ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1));
+  if(shouldRender) renderPlayerCamera();
+}
+
+function loop(now){
+  requestAnimationFrame(loop);
+  let dt = (now - prevT)/1000; prevT = now;
+  if(dt > .05) dt = .05;                 // clamp: no physics explosions on tab-back
+  if(GAME.hooks.frameOverride){ GAME.hooks.frameOverride(dt); return; }   // editor takes over
+  if(!SESSION.isStarted()){ renderPlayerCamera(); return; }
+  stepGameplayFrame(dt, true);
+}
+requestAnimationFrame(loop);
+
+})();

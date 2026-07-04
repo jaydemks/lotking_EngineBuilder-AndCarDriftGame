@@ -1,0 +1,45 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Local dependency/cache folders
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Build/export output
+dist/
+build/
+out/
+exports/
+playable-exports/
+*.zip
+
+# Oversized source/runtime assets: keep locally, publish through Git LFS or release assets.
+models/player.glb
+models_sources/
+
+# Local runtime data and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# Local/private environment files
+.env
+.env.*
+!.env.example
+
+# Tooling/private assistant state
+.claude/
+.codex/
+.agents/
+
+# Sandbox fallback git directory used when .git is unavailable/read-only
+.git-local/

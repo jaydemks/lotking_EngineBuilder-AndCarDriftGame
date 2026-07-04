@@ -1,0 +1,197 @@
+/* =========================================================
+   LOT KING — EDITOR ASSET IMPORTS
+   GLB/GLTF import, placement, deletion, and replacement flows.
+   ========================================================= */
+(function(){
+'use strict';
+
+function create(deps){
+  deps = deps || {};
+  const GAME = deps.GAME;
+  const STORE = deps.STORE;
+  const status = deps.status || function(){};
+  const setAssetLoading = deps.setAssetLoading || function(){};
+  const confirmEditorAction = deps.confirmEditorAction || function(){ return Promise.resolve(false); };
+  const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
+  const finishAdd = deps.finishAdd || function(){};
+  const spawnPointAhead = deps.spawnPointAhead || function(){ return null; };
+  const performDeleteEntity = deps.performDeleteEntity || function(){};
+  const assetLibraryLoad = deps.assetLibraryLoad || function(){ return []; };
+  const assetLibrarySave = deps.assetLibrarySave || function(){ return false; };
+  const supportedAssetFiles = deps.supportedAssetFiles || function(){ return []; };
+  const assetKeyFromFile = deps.assetKeyFromFile || function(file){ return file && file.name || 'asset'; };
+  const assetDbKeyFromFile = deps.assetDbKeyFromFile || function(file, key){ return key || (file && file.name) || 'asset'; };
+  const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return Promise.resolve(asset && asset.src); };
+  const upsertImportedAsset = deps.upsertImportedAsset || function(){ return null; };
+  const createGlbEntryFromAsset = deps.createGlbEntryFromAsset || function(){ return {}; };
+
+  function readFileAsDataURL(f){
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = () => rej(new Error('lettura file fallita'));
+      r.readAsDataURL(f);
+    });
+  }
+  function hasExternalFileDrag(e){
+    const dt = e.dataTransfer;
+    if(!dt) return false;
+    if(dt.files && supportedAssetFiles(dt.files).length) return true;
+    if(dt.items && Array.from(dt.items).some(item => item.kind === 'file')) return true;
+    return false;
+  }
+  function registerImportedObject(asset, obj, at){
+    const entry = createGlbEntryFromAsset(asset, at || spawnPointAhead());
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = asset.key;
+    obj.userData.assetName = asset.name;
+    obj.userData.assetSource = asset.source || 'Imported asset';
+    finishAdd(obj);
+    return obj;
+  }
+  function placeImportedAsset(asset, at){
+    if(!asset) return Promise.reject(new Error('asset non valido'));
+    return resolveImportedAssetUrl(asset)
+      .then(src => STORE.loadGlb(src, asset.fit || 5))
+      .then(obj => registerImportedObject(asset, obj, at));
+  }
+  function deleteImportedAsset(asset){
+    if(!asset) return;
+    confirmEditorAction({
+      title: 'Delete imported asset?',
+      message: 'Remove "' + asset.name + '" from the imported asset library? Scene instances already placed will stay.',
+      okText: 'Delete asset',
+    }).then(ok => {
+      if(!ok) return;
+      const next = assetLibraryLoad().filter(a => a.id !== asset.id);
+      if(assetLibrarySave(next)){
+        if(asset.dbKey && window.LK_ASSET_BLOBS) window.LK_ASSET_BLOBS.remove(asset.dbKey).catch(()=>{});
+        refreshAssetsPanel();
+        status('Asset removed from library');
+      }
+    });
+  }
+  function importAssetFiles(files, opts){
+    const list = supportedAssetFiles(files);
+    const options = opts || {};
+    if(!list.length){ status('Drop GLB/GLTF files to import assets'); return Promise.resolve([]); }
+    if(options.placePoint && list.length !== 1){
+      status('Viewport drop accepts one model at a time');
+      return Promise.resolve([]);
+    }
+    const imported = [];
+    const total = list.length;
+    setAssetLoading(true, total > 1 ? total + ' assets' : list[0].name, 3, 'Preparing import queue');
+    let chain = Promise.resolve();
+    list.forEach((file, index) => {
+      chain = chain.then(() => {
+        const basePct = Math.round(index / total * 100);
+        setAssetLoading(true, file.name, basePct, 'Reading file ' + (index + 1) + ' of ' + total);
+        const key = assetKeyFromFile(file);
+        const dbKey = assetDbKeyFromFile(file, key);
+        const objectUrl = URL.createObjectURL(file);
+        return STORE.loadGlb(objectUrl, 5).then(obj => {
+          setAssetLoading(true, file.name, basePct + Math.round(42 / total), 'Saving asset blob');
+          const put = window.LK_ASSET_BLOBS
+            ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
+            : readFileAsDataURL(file).then(src => ({src}));
+          return put.then(sourceInfo => {
+            const asset = upsertImportedAsset(file, sourceInfo);
+            if(asset) imported.push(asset);
+            setAssetLoading(true, file.name, Math.round((index + .75) / total * 100), 'Registering asset');
+            if(options.placePoint && asset){
+              setAssetLoading(true, file.name, 86, 'Spawning in viewport');
+              registerImportedObject(asset, obj, options.placePoint);
+              return null;
+            }
+            return null;
+          });
+        }).then(() => {
+          URL.revokeObjectURL(objectUrl);
+          setAssetLoading(true, file.name, Math.round((index + 1) / total * 100), 'Imported');
+        }).catch(err => {
+          URL.revokeObjectURL(objectUrl);
+          throw err;
+        });
+      });
+    });
+    return chain.then(() => {
+      setAssetLoading(true, 'Asset import complete', 100, imported.length + ' asset' + (imported.length === 1 ? '' : 's') + ' imported');
+      refreshAssetsPanel();
+      setTimeout(() => setAssetLoading(false), 450);
+      status(imported.length + ' asset importati');
+      return imported;
+    }).catch(err => {
+      setAssetLoading(false);
+      status('Asset import failed: ' + err.message);
+      return imported;
+    });
+  }
+  function replaceSelectedWithAsset(asset, targetOverride){
+    const target = targetOverride || deps.selected && deps.selected();
+    if(!asset || !target || target.userData.editorType === 'player'){
+      status('Select a scene object to replace');
+      return;
+    }
+    setAssetLoading(true, asset.name, 20, 'Loading replacement');
+    resolveImportedAssetUrl(asset).then(src => STORE.loadGlb(src, asset.fit || 5)).then(obj => {
+      const at = target.position.clone();
+      obj.position.copy(target.position);
+      obj.rotation.copy(target.rotation);
+      obj.scale.copy(target.scale);
+      const entry = createGlbEntryFromAsset(asset, at);
+      entry.t = STORE.tOf(obj);
+      entry.collide = !!target.userData.collider;
+      performDeleteEntity(target);
+      STORE.registerAdded(GAME, obj, entry);
+      finishAdd(obj);
+      setAssetLoading(true, asset.name, 100, 'Replacement complete');
+      setTimeout(() => setAssetLoading(false), 300);
+    }).catch(err => {
+      setAssetLoading(false);
+      status('Replace failed: ' + err.message);
+    });
+  }
+  function replaceObjectWithFile(target, file){
+    if(!target || !file) return;
+    setAssetLoading(true, file.name, 12, 'Importing replacement');
+    readFileAsDataURL(file).then(src => STORE.loadGlb(src, 5).then(obj => {
+      const asset = upsertImportedAsset(file, {src});
+      const id = STORE.nextId();
+      const entry = {
+        id, kind:'glb', src, fit:5,
+        name:file.name.replace(/\.(glb|gltf)$/i,''),
+        collide:!!target.userData.collider,
+        asset: asset ? {key:asset.key, name:asset.name, source:asset.source} : undefined,
+      };
+      obj.position.copy(target.position);
+      obj.rotation.copy(target.rotation);
+      obj.scale.copy(target.scale);
+      entry.t = STORE.tOf(obj);
+      performDeleteEntity(target);
+      STORE.registerAdded(GAME, obj, entry);
+      finishAdd(obj);
+      if(asset) refreshAssetsPanel();
+      setAssetLoading(true, file.name, 100, 'Replacement complete');
+      setTimeout(() => setAssetLoading(false), 300);
+      status('Sostituito con ' + file.name);
+    })).catch(err => {
+      setAssetLoading(false);
+      status('Sostituzione fallita: ' + err.message);
+    });
+  }
+
+  return Object.freeze({
+    readFileAsDataURL,
+    hasExternalFileDrag,
+    registerImportedObject,
+    placeImportedAsset,
+    deleteImportedAsset,
+    importAssetFiles,
+    replaceSelectedWithAsset,
+    replaceObjectWithFile,
+  });
+}
+
+window.LK_EDITOR_ASSET_IMPORTS = Object.freeze({create});
+})();
