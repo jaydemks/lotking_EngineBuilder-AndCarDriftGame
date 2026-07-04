@@ -158,7 +158,7 @@ root.innerHTML = `
     <div id="lkAssetsPanel" class="grid"></div>
   </section>
   <div id="lkStatus">
-    <b>Lot King Editor</b>
+    <b>Lot King Engine Editor</b>
     <span class="lk-status-help"><b>LMB</b> seleziona/orbita · <b>RMB drag</b> vola · <b>RMB click</b> menu rapido · <b>MMB</b> pan · <b>Wheel</b> zoom/velocità volo · <b>Q/W/E/R</b> select/move/rotate/scale · <b>Ctrl+Z/Y</b> undo/redo · <b>Ctrl+R</b> ripeti trasformazione · <b>Ctrl+D</b> duplica · <b>Del</b> elimina</span>
     <span id="lkStatusRightWrap">
       <span id="lkStatusRight"></span>

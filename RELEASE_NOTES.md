@@ -1,6 +1,6 @@
 # Release Notes
 
-Lot King is built with an AI-assisted workflow: the very first version came out of a single prompt to Claude (Fable 5) in a normal chat, and everything after that has been iterated in VS Code with Claude Code and Codex, under constant human direction and testing.
+Lot King Engine Builder & Car Drift Game is built with an AI-assisted workflow: the very first version came out of a single prompt to Claude (Fable 5) in a normal chat, and everything after that has been iterated in VS Code with Claude Code and Codex, under constant human direction and testing.
 
 A note on honesty and version numbers: the early versions (0.0.2 to 0.0.5) were not tagged while they happened — they are reconstructed here from the actual work, in logical order. Development hopped between AI tools: **at least twice a Claude session lost the thread of the project, and the owner simply switched to Codex and kept going**, later handing work back the other way. Those handoffs are marked below because they shaped where the version lines fall — though with so many hops between sessions, their exact placement is a best guess too. From 0.5.0 onward the notes are written as the work happens.
 
@@ -53,7 +53,7 @@ The first "Git-ready" milestone: the point where the prototype officially become
 
 ### Level And Project Storage
 
-- Lot King Editor Project (LKEP) storage through `scene-store.js`.
+- Lot King Engine Builder Editor Project (LKEP) storage through `scene-store.js`.
 - Project export/import as `.lkep` files, self-contained (player blueprint and sound set travel with the level).
 - Local multi-level storage: one active-level slot the runtime applies at boot, plus a library of levels stored individually.
 - Level metadata with track names and IDs, and early structure for future format versioning and migration.

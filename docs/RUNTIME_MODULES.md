@@ -1,4 +1,4 @@
-# Lot King Runtime Modules
+# Lot King Engine Builder & Car Drift Game Runtime Modules
 
 `js/lot-king.js` is being split gradually into runtime modules. The current rule is:
 extract low-risk, self-contained blocks first, keep `window.LOT_KING` stable, and avoid behavior changes during mechanical moves.

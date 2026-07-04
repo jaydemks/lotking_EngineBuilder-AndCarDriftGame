@@ -9,7 +9,7 @@
 
 const KEY = 'lotking.scene.v1';
 const PROJECT_FORMAT = 'LKEP';
-const PROJECT_NAME = 'Lot King Editor Project';
+const PROJECT_NAME = 'Lot King Engine Builder Editor Project';
 const PROJECT_VERSION = 1;
 const HUD_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level Test';
 const PLAYER_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level';
@@ -106,7 +106,7 @@ function projectFromScene(scene, meta){
     format: PROJECT_FORMAT,
     name: PROJECT_NAME,
     version: PROJECT_VERSION,
-    game: 'Lot King',
+    game: 'Lot King Engine Builder & Car Drift Game',
     savedAt: new Date().toISOString(),
     meta: Object.assign({trackId:'parking-lot', trackName:'Parking Lot'}, meta || {}),
     scene: scene || blank(),
@@ -824,7 +824,7 @@ function catalogTracks(){
     active: normalizeLevelId(l.id) === activeId,
     primary: normalizeLevelId(l.id) === activeId || !!l.__lkExportPrimary,
     tag: normalizeLevelId(l.id) === activeId ? 'EDITOR TRACK' : 'CUSTOM TRACK',
-    description: 'Livello del Lot King Editor salvato localmente' +
+    description: 'Livello del Lot King Engine Builder salvato localmente' +
       (l.savedAt ? ' · ' + new Date(l.savedAt).toLocaleString() : '') + '.',
     surface: 'Custom',
     goal: 'Drift sandbox',

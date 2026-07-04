@@ -158,8 +158,8 @@ function safeJsonForInlineScript(value){
     return {
       format: 'LKEP',
       version: src.version || 1,
-      game: src.game || 'Lot King',
-      name: src.name || 'Lot King Editor Project',
+      game: src.game || 'Lot King Engine Builder & Car Drift Game',
+      name: src.name || 'Lot King Engine Builder Editor Project',
       savedAt: src.savedAt || new Date().toISOString(),
       meta: Object.assign({}, meta, {trackId, trackName}),
       scene: src.scene || src,
@@ -327,7 +327,7 @@ function safeJsonForInlineScript(value){
     zip.file('index.html', buildPlayableBootstrapHtml(bundle));
     zip.file('README.txt',
       [
-        'Lot King playable package',
+        'Lot King Engine Builder playable package',
         '',
         'Windows: doppio click su play.bat',
         'Linux/macOS: eseguire bash play.sh',
@@ -492,7 +492,7 @@ function safeJsonForInlineScript(value){
     return {
       format: 'LKPKG',
       version: 1,
-      game: 'Lot King',
+      game: 'Lot King Engine Builder & Car Drift Game',
       createdAt: now,
       exportMode: 'playable-track',
       runtime: runtimePath || 'drift-parking-lot.html',
@@ -512,10 +512,10 @@ function safeJsonForInlineScript(value){
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LOT KING — Playable Track</title>
+    <title>LOT KING ENGINE BUILDER — Playable Track</title>
   </head>
   <body>
-  <p>Loading playable Lot King level...</p>
+  <p>Loading playable Lot King Engine Builder level...</p>
   <script>
   (function(){
     'use strict';

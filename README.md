@@ -1,6 +1,6 @@
-# Lot King
+# Lot King Engine Builder & Car Drift Game
 
-Lot King is a drift game that runs entirely in the browser — and, at the same time, the small game engine you use to build it.
+Lot King Engine Builder & Car Drift Game is a browser drift game and the small game-engine editor used to build it.
 
 It started as a single parking lot where you slide a car around and rack up drift points. It's growing into something closer to a tiny Unreal-style workflow: you open the **Engine Editor**, build or edit a level, tune your car, design how it sounds, save the level as an asset — and then go back to the main menu and actually play the thing you just made.
 
@@ -53,13 +53,13 @@ Three.js r128 for rendering, Cannon.js 0.6.2 for optional physics, WebAudio for 
 
 ## License
 
-Lot King is released under the custom **Lot King Source License 0.1**. In short: you can read, learn from, modify, fork and share it, but public uses must credit **Lot King by w4k3**. Commercial use is allowed below USD 100,000 gross revenue; above that threshold, a separate written commercial agreement must be negotiated.
+Lot King Engine Builder & Car Drift Game is released under the custom **Lot King Engine Builder & Car Drift Game Source License 0.1**. In short: you can read, learn from, modify, fork and share it, but public uses must credit **Lot King Engine Builder & Car Drift Game by w4k3**. Commercial use is allowed below USD 100,000 gross revenue; above that threshold, a separate written commercial agreement must be negotiated.
 
 This is source-available, not OSI-approved open source, because it includes attribution and commercial revenue conditions. See `LICENSE` for the exact terms.
 
 ## How this project is made
 
-Lot King is an experiment in AI-assisted development, with a human directing, testing and correcting everything.
+Lot King Engine Builder & Car Drift Game is an experiment in AI-assisted development, with a human directing, testing and correcting everything.
 
 The very first version (0.0.1) was born from a **single prompt** to Claude (Fable 5) in a normal chat — one shot, one playable parking lot. From 0.0.2 onward the project moved into a real iterative workflow: Claude Code and Codex working inside VS Code, with the project owner driving the design and playing every build — and more than once switching from one AI to the other to keep going when a session lost the thread. The release notes tell that story honestly.
 
