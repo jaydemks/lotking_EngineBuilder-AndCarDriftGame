@@ -54,6 +54,7 @@ The road ahead leads to **1.0.0**.
 - Extracted viewport pointer/context/wheel event wiring into `js/editor/viewport-events.js`.
 - Extracted RMB fly-camera movement helpers into `js/editor/fly-camera.js`.
 - Extracted toolbar/gizmo/TransformControls helpers into `js/editor/gizmo-controls.js`.
+- Extracted viewport/editor visual helper objects into `js/editor/visual-helpers.js`.
 
 ---
 

@@ -84,15 +84,11 @@ let gizmoUsingZUpProxy = false;
 const camProxy = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, .1, 1000);
 let orbit = null;
 let gizmo = null;
-let selBox = null;
-let lightHelper = null;
 let camHelper = null;
-let camRigHelper = null;
 const camRigLine = new THREE.Line(
   new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
   new THREE.LineBasicMaterial({color:0x9db4ff, transparent:true, opacity:.65})
 );
-let replaceDropHelper = null;
 let gizmoPointerActive = false;
 let gizmoSuppressSceneClick = false;
 const fly = {rmb:false, moved:0, lastX:0, lastY:0, speed:14, keys:{}};
@@ -125,6 +121,7 @@ let preferences = null;
 let quickAudio = null;
 let flyCamera = null;
 let gizmoControls = null;
+let visualHelpers = null;
 let toolbar = null;
 let sidePanels = null;
 let assetCatalog = null;
@@ -170,50 +167,18 @@ function panelWidth(side){ return floatingLayout ? floatingLayout.panelWidth(sid
 function editorViewportRect(){ return floatingLayout ? floatingLayout.editorViewportRect() : {x:panelWidth('left') + 10, y:46, w:Math.max(220, innerWidth - panelWidth('left') - panelWidth('right') - 20), h:Math.max(160, innerHeight - 46 - 40 - ED.assetsH)}; }
 function clampPanelPos(pos, w, h){ return floatingLayout ? floatingLayout.clampPanelPos(pos, w, h) : pos; }
 function clearHoverPickHelper(){ if(viewportPicking) viewportPicking.clearHover(); }
-function clearReplaceDropHelper(){
-  if(replaceDropHelper && helperGroup) helperGroup.remove(replaceDropHelper);
-  replaceDropHelper = null;
-  viewportReplaceTarget = null;
-}
-function setReplaceDropHelper(target, ok){
-  if(!target){ clearReplaceDropHelper(); return; }
-  viewportReplaceTarget = ok ? target : null;
-  if(!replaceDropHelper || replaceDropHelper.userData.target !== target){
-    clearReplaceDropHelper();
-    replaceDropHelper = new THREE.BoxHelper(target, ok ? 0x4be3a0 : 0xff5566);
-    replaceDropHelper.userData.target = target;
-    helperGroup.add(replaceDropHelper);
-  }
-  replaceDropHelper.material.color.setHex(ok ? 0x4be3a0 : 0xff5566);
-}
-function refreshSelectionHelpers(){
-  if(selBox && helperGroup) helperGroup.remove(selBox);
-  selBox = null;
-  if(lightHelper && helperGroup) helperGroup.remove(lightHelper);
-  lightHelper = null;
-  if(ED.selected){
-    selBox = new THREE.BoxHelper(ED.selected, 0xffd166);
-    helperGroup.add(selBox);
-    const l = ED.selected.isLight ? ED.selected : ED.selected.userData && ED.selected.userData.light;
-    if(l){
-      try {
-        lightHelper = l.isDirectionalLight ? new THREE.DirectionalLightHelper(l, 2) :
-          l.isSpotLight ? new THREE.SpotLightHelper(l) :
-          l.isPointLight ? new THREE.PointLightHelper(l, 1.2) : null;
-        if(lightHelper) helperGroup.add(lightHelper);
-      } catch(err){}
-    }
-  }
-}
-function ensureCameraRigHelper(){
-  if(camRigHelper) return;
-  camRigHelper = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(.7, .45, .32), new THREE.MeshBasicMaterial({color:0x9db4ff, wireframe:true}));
-  const lens = new THREE.Mesh(new THREE.ConeGeometry(.18, .42, 12), new THREE.MeshBasicMaterial({color:0x9db4ff, wireframe:true}));
-  lens.rotation.x = Math.PI / 2;
-  lens.position.z = -.34;
-  camRigHelper.add(body, lens);
-}
+visualHelpers = window.LK_EDITOR_VISUAL_HELPERS && window.LK_EDITOR_VISUAL_HELPERS.create({
+  THREE, ED, helperGroup,
+  setViewportReplaceTarget: value => { viewportReplaceTarget = value; },
+});
+function clearReplaceDropHelper(){ return visualHelpers.clearReplaceDropHelper(); }
+function setReplaceDropHelper(target, ok){ return visualHelpers.setReplaceDropHelper(target, ok); }
+function refreshSelectionHelpers(){ return visualHelpers.refreshSelectionHelpers(); }
+function ensureCameraRigHelper(){ return visualHelpers.ensureCameraRigHelper(); }
+function updateSelectionAndDropHelpers(){ return visualHelpers.updateSelectionAndDropHelpers(); }
+function updateCameraRigHelper(){ return visualHelpers.updateCameraRigHelper(gameCam); }
+function getCameraRigHelper(){ return visualHelpers.getCameraRigHelper(); }
+function getReplaceDropHelper(){ return visualHelpers.getReplaceDropHelper(); }
 flyCamera = window.LK_EDITOR_FLY_CAMERA && window.LK_EDITOR_FLY_CAMERA.create({
   THREE, ED, fly, camE, canvas,
   getOrbit: () => orbit,
@@ -256,7 +221,7 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   getGizmo: () => gizmo,
   getPlayableExport: () => playableExport,
   getCamHelper: () => camHelper,
-  getCamRigHelper: () => camRigHelper,
+  getCamRigHelper: getCameraRigHelper,
   getCamRigLine: () => camRigLine,
   syncToolbarState, transformControlsSpace, updateEditorAxesConvention, setGrid,
   openMenu, addMenuItems, spawnPointAhead, setTool, undo, redo, saveScene,
@@ -452,7 +417,7 @@ assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
   clearReplaceDropHelper,
   setReplaceDropHelper,
   getViewportReplaceTarget: () => viewportReplaceTarget,
-  hasReplaceDropHelper: () => !!replaceDropHelper,
+  hasReplaceDropHelper: () => !!getReplaceDropHelper(),
   pickAt,
   groundPointAt,
   supportedAssetFiles,
@@ -1039,12 +1004,12 @@ function enterEditor(){
 
   scene.add(helperGroup);
   helperGroup.add(grid, axes, gizmoProxy);
-  ensureCameraRigHelper();
+  const rigHelper = ensureCameraRigHelper();
   if(!camHelper){
     camHelper = new THREE.CameraHelper(camProxy);
     camHelper.visible = ED.camHelperOn;
   }
-  helperGroup.add(camHelper, camRigHelper, camRigLine);
+  helperGroup.add(camHelper, rigHelper, camRigLine);
   scene.add(gizmo);
   $('#lkSpace').textContent = spaceLabel();
   updateEditorAxesConvention();
@@ -1120,7 +1085,8 @@ function exitEditor(toPlay){
   scene.remove(gizmo);
   helperGroup.remove(grid, axes, gizmoProxy);
   if(camHelper) helperGroup.remove(camHelper);
-  if(camRigHelper) helperGroup.remove(camRigHelper);
+  const rigHelper = getCameraRigHelper();
+  if(rigHelper) helperGroup.remove(rigHelper);
   if(camRigLine) helperGroup.remove(camRigLine);
   scene.remove(helperGroup);
   if(orbit) orbit.enabled = false;
@@ -1172,11 +1138,7 @@ function editorFrame(dt){
   camProxy.updateProjectionMatrix();
   camProxy.updateMatrixWorld(true);
   if(camHelper && camHelper.visible) camHelper.update();
-  if(camRigHelper){
-    camRigHelper.visible = ED.camHelperOn;
-    camRigHelper.position.copy(gameCam.position);
-    camRigHelper.quaternion.copy(gameCam.quaternion);
-  }
+  updateCameraRigHelper();
   if(camRigLine){
     camRigLine.visible = ED.camHelperOn;
     const pts = camRigLine.geometry.attributes.position;
@@ -1185,10 +1147,8 @@ function editorFrame(dt){
     pts.needsUpdate = true;
   }
 
-  if(selBox) selBox.update();
   viewportPicking.updateHelpers();
-  if(replaceDropHelper) replaceDropHelper.update();
-  if(lightHelper && lightHelper.update) lightHelper.update();
+  updateSelectionAndDropHelpers();
 
   processThumbQueue();
 
