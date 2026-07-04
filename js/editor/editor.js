@@ -1411,31 +1411,7 @@ function refreshAssetsPanel(){
   addAssetGroup(box, 'PLAYER BLUEPRINTS', visibleBlueprintItems);
   allFolderedItems.push(...visibleBlueprintItems);
 
-  // engine sound sets: asset audio del veicolo, come i blueprint
-  const assignedSoundSet = GAME.player.engineAudio && GAME.player.engineAudio.setId;
-  const soundSetItems = (STORE.soundSets ? STORE.soundSets.list() : []).map(s => ({
-    kind:'sound-set', ref:'sound:' + s.id, id:s.id,
-    name:s.name + (s.id === assignedSoundSet ? ' · ON CAR' : ''),
-    sub:'engine sound set · ' + (s.savedAt ? new Date(s.savedAt).toLocaleDateString() : s.id),
-    source:s.id, icon:'🔊', filterType:'sound', active:s.id === assignedSoundSet, draggable:false,
-    defaultAction:() => openSoundDesigner(s.id),
-    actions:[
-      {label:'🎛', title:'Apri nel Sound Designer', fn:() => openSoundDesigner(s.id)},
-      {label:'🚗', title:'Assegna al veicolo player', fn:() => {
-        GAME.player.setEngineSound(s.id); markDirty(); refreshAssetsPanel();
-        status('Sound set "' + s.name + '" assegnato al veicolo');
-      }},
-      {label:'⧉', title:'Duplica', fn:() => { STORE.soundSets.duplicate(s.id); refreshAssetsPanel(); }},
-      {label:'×', title:'Elimina', fn:() => {
-        confirmEditorAction({title:'Delete sound set?', message:'Eliminare il sound set "' + s.name + '"?', okText:'Delete'}).then(ok => {
-          if(!ok) return;
-          STORE.soundSets.remove(s.id);
-          if(assignedSoundSet === s.id){ GAME.player.setEngineSound(null); markDirty(); }
-          refreshAssetsPanel();
-        });
-      }},
-    ],
-  })).filter(item => assetVisible(item, q));
+  const soundSetItems = assetPanel.soundSetItems(q);
   addAssetGroup(box, 'ENGINE SOUND SETS', soundSetItems);
   allFolderedItems.push(...soundSetItems);
 
@@ -1473,6 +1449,8 @@ const thumbCache = {has: thumbnails.has, get: thumbnails.get, delete: thumbnails
 function queueThumb(o, el){ thumbnails.queue(o, el); }
 function processThumbQueue(){ thumbnails.process(); }
 assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create({
+  GAME,
+  STORE,
   ED,
   thumbCache,
   queueThumb,
@@ -1500,6 +1478,10 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   renameLevel,
   duplicateLevel,
   deleteLevel,
+  openSoundDesigner,
+  markDirty,
+  status,
+  confirmEditorAction,
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 

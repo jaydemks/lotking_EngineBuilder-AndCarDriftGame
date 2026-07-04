@@ -166,7 +166,36 @@ function create(deps){
     })).filter(item => visible(item, q));
   }
 
-  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel, importedItems, levelItems});
+  function soundSetItems(q){
+    const STORE = deps.STORE;
+    const GAME = deps.GAME;
+    const assignedSoundSet = GAME.player.engineAudio && GAME.player.engineAudio.setId;
+    return (STORE.soundSets ? STORE.soundSets.list() : []).map(s => ({
+      kind:'sound-set', ref:'sound:' + s.id, id:s.id,
+      name:s.name + (s.id === assignedSoundSet ? ' · ON CAR' : ''),
+      sub:'engine sound set · ' + (s.savedAt ? new Date(s.savedAt).toLocaleDateString() : s.id),
+      source:s.id, icon:'🔊', filterType:'sound', active:s.id === assignedSoundSet, draggable:false,
+      defaultAction:() => deps.openSoundDesigner(s.id),
+      actions:[
+        {label:'🎛', title:'Apri nel Sound Designer', fn:() => deps.openSoundDesigner(s.id)},
+        {label:'🚗', title:'Assegna al veicolo player', fn:() => {
+          GAME.player.setEngineSound(s.id); deps.markDirty(); deps.refreshAssetsPanel();
+          deps.status('Sound set "' + s.name + '" assegnato al veicolo');
+        }},
+        {label:'⧉', title:'Duplica', fn:() => { STORE.soundSets.duplicate(s.id); deps.refreshAssetsPanel(); }},
+        {label:'×', title:'Elimina', fn:() => {
+          deps.confirmEditorAction({title:'Delete sound set?', message:'Eliminare il sound set "' + s.name + '"?', okText:'Delete'}).then(ok => {
+            if(!ok) return;
+            STORE.soundSets.remove(s.id);
+            if(assignedSoundSet === s.id){ GAME.player.setEngineSound(null); deps.markDirty(); }
+            deps.refreshAssetsPanel();
+          });
+        }},
+      ],
+    })).filter(item => visible(item, q));
+  }
+
+  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel, importedItems, levelItems, soundSetItems});
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});
