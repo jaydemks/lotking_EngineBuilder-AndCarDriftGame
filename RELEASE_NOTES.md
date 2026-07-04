@@ -42,6 +42,7 @@ The road ahead leads to **1.0.0**.
 - Extracted Player Blueprint vehicle light and neon controls into `js/editor/player-lights-inspector.js`.
 - Extracted Player Blueprint exhaust source and 3D data widget controls into `js/editor/player-attachments-inspector.js`.
 - Extracted Player Blueprint driving tuning, vehicle model, and engine sound setup controls into `js/editor/player-setup-inspector.js`.
+- Extracted HUD / Radio TAB layout, preview, button, and layer controls into `js/editor/hud-inspector.js`.
 
 ---
 
