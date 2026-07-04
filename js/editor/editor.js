@@ -124,6 +124,7 @@ let playableExport = null;
 let preferences = null;
 let quickAudio = null;
 let flyCamera = null;
+let gizmoControls = null;
 let toolbar = null;
 let sidePanels = null;
 let assetCatalog = null;
@@ -168,76 +169,6 @@ function setGrid(on){
 function panelWidth(side){ return floatingLayout ? floatingLayout.panelWidth(side) : (parseFloat(getComputedStyle(root).getPropertyValue(side === 'left' ? '--lk-left-w' : '--lk-right-w')) || 280); }
 function editorViewportRect(){ return floatingLayout ? floatingLayout.editorViewportRect() : {x:panelWidth('left') + 10, y:46, w:Math.max(220, innerWidth - panelWidth('left') - panelWidth('right') - 20), h:Math.max(160, innerHeight - 46 - 40 - ED.assetsH)}; }
 function clampPanelPos(pos, w, h){ return floatingLayout ? floatingLayout.clampPanelPos(pos, w, h) : pos; }
-function spaceLabel(){
-  if(ED.space === 'local') return '📍 Local Z-up';
-  if(ED.space === 'engine') return '⚙ Engine Y-up';
-  return '🌐 World Z-up';
-}
-function transformControlsSpace(){
-  if(ED.space === 'local') return 'local';
-  return 'world';
-}
-function syncToolbarState(){
-  const space = $('#lkSpace');
-  if(space) space.textContent = spaceLabel();
-  const snap = $('#lkSnap');
-  if(snap) snap.classList.toggle('on', ED.snap);
-  const gridBtn = $('#lkGrid');
-  if(gridBtn) gridBtn.classList.toggle('on', ED.gridOn);
-  const camBtn = $('#lkCamHelper');
-  if(camBtn) camBtn.classList.toggle('on', ED.camHelperOn);
-  const pipBtn = $('#lkPipToggle');
-  if(pipBtn) pipBtn.classList.toggle('on', ED.pipOn);
-  root.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === ED.tool));
-}
-function updateEditorAxesConvention(){
-  syncToolbarState();
-  if(gizmo) gizmo.setSpace(transformControlsSpace());
-  if(ED.selected && gizmo && ED.tool !== 'select') attachGizmoToSelection();
-}
-function usesZUpGizmoProxy(){
-  return !!(ED.selected && ED.space !== 'engine' && ED.tool === 'translate');
-}
-function syncZUpProxyFromSelected(){
-  if(!ED.selected) return;
-  ED.selected.updateMatrixWorld(true);
-  ED.selected.getWorldPosition(gizmoProxy.position);
-  if(ED.space === 'local'){
-    ED.selected.getWorldQuaternion(gizmoProxy.quaternion);
-    gizmoProxy.quaternion.multiply(zUpGizmoQuat);
-  } else {
-    gizmoProxy.quaternion.copy(zUpGizmoQuat);
-  }
-  gizmoProxy.scale.set(1, 1, 1);
-  gizmoProxy.updateMatrixWorld(true);
-}
-function applyZUpProxyToSelected(){
-  const o = ED.selected;
-  if(!o || !gizmoUsingZUpProxy) return;
-  if(o.parent && o.parent.isObject3D && o.parent !== scene){
-    o.parent.updateMatrixWorld(true);
-    o.position.copy(o.parent.worldToLocal(gizmoProxy.position.clone()));
-  } else {
-    o.position.copy(gizmoProxy.position);
-  }
-  o.updateMatrixWorld(true);
-}
-function attachGizmoToSelection(){
-  if(!gizmo || !ED.selected) return;
-  gizmo.setMode(ED.tool);
-  if(usesZUpGizmoProxy()){
-    syncZUpProxyFromSelected();
-    gizmo.setSpace('local');
-    gizmoUsingZUpProxy = true;
-  } else {
-    gizmo.setSpace(transformControlsSpace());
-    gizmoUsingZUpProxy = false;
-  }
-  gizmo.setTranslationSnap(ED.snap ? ED.snapMove : null);
-  gizmo.setRotationSnap(ED.snap ? THREE.MathUtils.degToRad(ED.snapRot) : null);
-  gizmo.setScaleSnap(ED.snap ? ED.snapScale : null);
-  gizmo.attach(gizmoUsingZUpProxy ? gizmoProxy : ED.selected);
-}
 function clearHoverPickHelper(){ if(viewportPicking) viewportPicking.clearHover(); }
 function clearReplaceDropHelper(){
   if(replaceDropHelper && helperGroup) helperGroup.remove(replaceDropHelper);
@@ -283,47 +214,6 @@ function ensureCameraRigHelper(){
   lens.position.z = -.34;
   camRigHelper.add(body, lens);
 }
-function ensureControls(){
-  if(!orbit && THREE.OrbitControls){
-    orbit = new THREE.OrbitControls(camE, renderer.domElement);
-    orbit.enabled = false;
-    orbit.enableDamping = true;
-    orbit.dampingFactor = .08;
-    orbit.screenSpacePanning = true;
-    orbit.enablePan = true;
-    orbit.enableZoom = true;
-    orbit.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT: null,
-    };
-  }
-  if(!gizmo && THREE.TransformControls){
-    gizmo = new THREE.TransformControls(camE, renderer.domElement);
-    gizmo.setMode(ED.tool);
-    gizmo.setSpace(transformControlsSpace());
-    gizmo.setTranslationSnap(ED.snap ? ED.snapMove : null);
-    gizmo.setRotationSnap(ED.snap ? THREE.MathUtils.degToRad(ED.snapRot) : null);
-    gizmo.setScaleSnap(ED.snap ? ED.snapScale : null);
-    gizmo.addEventListener('mouseDown', () => { gizmoPointerActive = true; gizmoSuppressSceneClick = true; beginTransformHistory(); if(orbit) orbit.enabled = false; });
-    gizmo.addEventListener('mouseUp', () => { commitTransformHistory('Transform'); gizmoPointerActive = false; setTimeout(() => { gizmoSuppressSceneClick = false; }, 0); if(orbit) orbit.enabled = ED.active && !ED.playPreview; });
-    gizmo.addEventListener('objectChange', onGizmoChange);
-    gizmo.addEventListener('dragging-changed', e => { if(orbit) orbit.enabled = !e.value && ED.active && !ED.playPreview; });
-  }
-}
-function setTool(tool){
-  ED.tool = tool || 'select';
-  syncToolbarState();
-  if(gizmo){
-    if(ED.tool === 'select' || !ED.selected){ gizmoUsingZUpProxy = false; gizmo.detach(); }
-    else {
-      gizmo.setMode(ED.tool);
-      gizmo.setSpace(transformControlsSpace());
-      attachGizmoToSelection();
-    }
-  }
-  status('Tool: ' + ED.tool);
-}
 flyCamera = window.LK_EDITOR_FLY_CAMERA && window.LK_EDITOR_FLY_CAMERA.create({
   THREE, ED, fly, camE, canvas,
   getOrbit: () => orbit,
@@ -333,6 +223,33 @@ function flyMove(e){ return flyCamera.flyMove(e); }
 function syncOrbitAfterFly(){ return flyCamera.syncOrbitAfterFly(); }
 function flyEnd(e){ return flyCamera.flyEnd(e); }
 function flyUpdate(dt){ return flyCamera.flyUpdate(dt); }
+gizmoControls = window.LK_EDITOR_GIZMO_CONTROLS && window.LK_EDITOR_GIZMO_CONTROLS.create({
+  THREE, ED, root, $, scene, camE, renderer, gizmoProxy, zUpGizmoQuat, fly,
+  getGizmo: () => gizmo,
+  setGizmo: value => { gizmo = value; },
+  getOrbit: () => orbit,
+  setOrbit: value => { orbit = value; },
+  isGizmoUsingZUpProxy: () => gizmoUsingZUpProxy,
+  setGizmoUsingZUpProxy: value => { gizmoUsingZUpProxy = !!value; },
+  setGizmoPointerActive: value => { gizmoPointerActive = !!value; },
+  setGizmoSuppressSceneClick: value => { gizmoSuppressSceneClick = !!value; },
+  beginTransformHistory,
+  commitTransformHistory,
+  onGizmoChange,
+  flyUpdate,
+  status,
+});
+function spaceLabel(){ return gizmoControls.spaceLabel(); }
+function transformControlsSpace(){ return gizmoControls.transformControlsSpace(); }
+function syncToolbarState(){ return gizmoControls.syncToolbarState(); }
+function updateEditorAxesConvention(){ return gizmoControls.updateEditorAxesConvention(); }
+function usesZUpGizmoProxy(){ return gizmoControls.usesZUpGizmoProxy(); }
+function syncZUpProxyFromSelected(){ return gizmoControls.syncZUpProxyFromSelected(); }
+function applyZUpProxyToSelected(){ return gizmoControls.applyZUpProxyToSelected(); }
+function attachGizmoToSelection(){ return gizmoControls.attachGizmoToSelection(); }
+function ensureControls(){ return gizmoControls.ensureControls(); }
+function setTool(tool){ return gizmoControls.setTool(tool); }
+function updateEditorControls(dt){ return gizmoControls.updateFly(dt); }
 function syncQuickAudio(){ if(quickAudio) quickAudio.sync(); }
 toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   root, ED, $, THREE,
@@ -1234,8 +1151,7 @@ function editorFrame(dt){
     if(gizmo) gizmo.visible = false;
     return;
   }
-  flyUpdate(dt);
-  if(orbit && orbit.enabled) orbit.update();
+  updateEditorControls(dt);
   const viewRect = editorViewportRect();
   camE.aspect = viewRect.w / viewRect.h;
   camE.updateProjectionMatrix();
