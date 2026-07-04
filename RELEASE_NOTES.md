@@ -48,6 +48,7 @@ The road ahead leads to **1.0.0**.
 - Extracted editor add/import/replace actions into `js/editor/add-actions.js`, including primitive/light/effect creation, GLB import placement, entity GLB replacement, and player model replacement.
 - Extracted editor history management into `js/editor/history-manager.js`, including undo/redo stacks, transform repeat, HUD history batching, entity restore/remove, parent links, and transform snapshots.
 - Extracted scene context-menu definitions and small menu-triggered actions into `js/editor/scene-menu-actions.js`.
+- Extracted asset catalog logic into `js/editor/asset-catalog.js`, including scene asset grouping, asset lookup, placement, search/filter helpers, icon resolution, asset-instance deletion, and asset panel refresh.
 
 ---
 
