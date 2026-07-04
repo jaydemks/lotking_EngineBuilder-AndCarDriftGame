@@ -41,6 +41,7 @@ The road ahead leads to **1.0.0**.
 - Extracted Player Blueprint game camera, depth-of-field, and visual grade controls into `js/editor/player-camera-inspector.js`.
 - Extracted Player Blueprint vehicle light and neon controls into `js/editor/player-lights-inspector.js`.
 - Extracted Player Blueprint exhaust source and 3D data widget controls into `js/editor/player-attachments-inspector.js`.
+- Extracted Player Blueprint driving tuning, vehicle model, and engine sound setup controls into `js/editor/player-setup-inspector.js`.
 
 ---
 
