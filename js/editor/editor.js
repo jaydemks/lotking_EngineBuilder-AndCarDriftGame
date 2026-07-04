@@ -141,6 +141,7 @@ let environmentInspector = null;
 let projectIo = null;
 let addActions = null;
 let historyManager = null;
+let sceneMenuActions = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -1251,115 +1252,46 @@ canvas.addEventListener('wheel', e => {
   }
 }, {passive:false});
 
-// ------------------------------------------------ menu definitions
-function addMenuItems(at){
-  const P = at ? {x: at.x, y: at.y, z: at.z} : spawnPointAhead();
-  const prim = k => ({label: k[0].toUpperCase()+k.slice(1), icon:'▣', action: () => addPrimitive(k, P)});
-  return [
-    {label:'Primitiva', icon:'▣', sub: ['box','sphere','cylinder','cone','plane','torus','ramp'].map(prim)},
-    {label:'Luce', icon:'💡', sub: [
-      {label:'Point Light', icon:'💡', action:() => addLight('point', P)},
-      {label:'Spot Light', icon:'🔦', action:() => addLight('spot', P)},
-      {label:'Directional Light', icon:'☀️', action:() => addLight('directional', P)},
-      {label:'Hemisphere Light', icon:'🌗', action:() => addLight('hemisphere', P)},
-      {label:'Ambient Light', icon:'💠', action:() => addLight('ambient', P)},
-    ]},
-    {label:'Effetto', icon:'✨', sub: Object.keys(STORE.EFFECT_PRESETS).map(k => (
-      {label: k[0].toUpperCase()+k.slice(1), icon:'✨', action:() => addEffect(k, P)}
-    ))},
-    {sep:true},
-    {label:'Importa modello GLB…', icon:'📦', action:() => openGlbImportAt(P)},
-  ];
-}
-function objectMenuItems(o, fromOutliner, gp){
-  const items = [
-    {label:'Strumento', icon:'✥', sub: [
-      {label:'Select  Q', icon:'☝', action:() => setTool('select')},
-      {label:'Move  W', icon:'✥', action:() => { selectObject(o); setTool('translate'); }},
-      {label:'Rotate  E', icon:'⟳', action:() => { selectObject(o); setTool('rotate'); }},
-      {label:'Scale  R', icon:'⤢', action:() => { selectObject(o); setTool('scale'); }},
-    ]},
-    {label:'Focus', icon:'🔍', action: focusSelected},
-    {label:'Duplica', icon:'⧉', sub: [
-      {label:'Duplica  Ctrl+D', icon:'⧉', action:() => duplicateEntity(o)},
-      {label:'Popola in fila x5', icon:'▦', action:() => duplicateLine(o, 5)},
-    ]},
-    {label:'Applica ultima trasformazione  Ctrl+R', icon:'↻', disabled:!hasLastTransformRepeat(), action:applyLastTransform},
-    {label:'Link / Parent', icon:'⛓', sub: [
-      {label:'Set as link parent', icon:'◎', action:() => setLinkParent(o)},
-      {label:'Link to ' + (ED.linkParent ? (ED.linkParent.userData.editorName || 'parent') : 'parent'), icon:'→', disabled:!ED.linkParent || ED.linkParent === o, action:() => linkToParent(o, ED.linkParent)},
-      {label:'Unlink from parent', icon:'×', disabled:!o.parent || o.parent === scene, action:() => unlinkObject(o)},
-      {label:'Clear pending parent', icon:'⌫', disabled:!ED.linkParent, action:() => setLinkParent(null)},
-    ]},
-    {label: o.visible ? 'Nascondi' : 'Mostra', icon:'👁', action:() => toggleVisible(o)},
-    {label:'Rinomina…', icon:'✏️', action:() => renameEntity(o)},
-    {label:'Reset trasformazione', icon:'↺', action:() => resetTransform(o)},
-    {sep:true},
-    {label:'Replace with GLB...', icon:'📦', action:() => beginReplaceObject(o)},
-  ];
-  if(!fromOutliner && gp){
-    items.push({sep:true});
-    items.push({label:'Add here', icon:'＋', sub: addMenuItems(gp)});
-  }
-  items.push({sep:true});
-  items.push({label:'Elimina', icon:'🗑', action:() => requestDeleteEntity(o)});
-  return items;
-}
-function duplicateLine(o, count){
-  if(!o) return;
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camE.quaternion).setY(0);
-  if(right.lengthSq() < .01) right.set(1, 0, 0);
-  right.normalize();
-  const spacing = Math.max(2.5, new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).length() * .45);
-  for(let i=1;i<=count;i++) duplicateEntity(o, right.clone().multiplyScalar(spacing * i));
-  status('Popolati ' + count + ' duplicati');
-}
-function playerMenuItems(){
-  return [
-    {label:'Focus', icon:'🔍', action: focusSelected},
-    {label:'Apri Blueprint Player', icon:'🚗', action:() => buildInspector()},
-    {label:'Copy blueprint', icon:'◇', action: copyPlayerBlueprintAsset},
-    {label:'Replace GLB model...', icon:'📦', action:() => $('#lkPlayerModelInput').click()},
-    {label:'Imposta spawn qui', icon:'📍', action: setSpawnHere},
-  ];
-}
-function canvasMenuItems(gp){
-  return [
-    {label:'Add', icon:'＋', sub: addMenuItems(gp)},
-    {sep:true},
-    {label:'Deseleziona', icon:'✕', action: deselect},
-    {label: ED.gridOn ? 'Nascondi griglia' : 'Mostra griglia', icon:'▦', action:() => setGrid(!ED.gridOn)},
-    {label:'Vai al player', icon:'🚗', action:() => { selectObject(GAME.player.car); focusSelected(); }},
-    {label:'Save track', icon:'💾', action: saveScene},
-  ];
-}
-async function renameEntity(o){
-  const n = await promptEditorAction({title:'Rename object', message:'Nuovo nome:', value:o.userData.editorName || '', okText:'Rename'});
-  if(n){ o.userData.editorName = n; markDirty(); refreshOutliner(); buildInspector(); }
-}
-function resetTransform(o){
-  const prev = ED.selected;
-  if(ED.selected !== o) ED.selected = o;
-  withTransformHistory('Reset transform', target => {
-    target.rotation.set(0, target.userData.editorType === 'mesh' && target.userData.builtin ? target.rotation.y : 0, 0);
-    target.scale.set(1,1,1);
-    STORE.syncCollider(target);
-  });
-  ED.selected = prev;
-  markDirty(); syncTransformFields();
-}
-function setSpawnHere(){
-  const car = GAME.player.car;
-  if(GAME.player.spawn){
-    GAME.player.spawn.x = car.position.x;
-    GAME.player.spawn.z = car.position.z;
-    GAME.player.spawn.heading = car.rotation.y;
-  }
-  GAME.player.physics.pos.copy(car.position);
-  GAME.player.physics.heading = car.rotation.y;
-  if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
-  markDirty(); status('Spawn del player aggiornato');
-}
+// ------------------------------------------------ scene menu definitions
+sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE_MENU_ACTIONS.create({
+  THREE, GAME, STORE, ED, scene, camE, $,
+  status,
+  spawnPointAhead,
+  addPrimitive,
+  addLight,
+  addEffect,
+  openGlbImportAt,
+  setTool,
+  selectObject,
+  focusSelected,
+  duplicateEntity,
+  hasLastTransformRepeat,
+  applyLastTransform,
+  setLinkParent,
+  linkToParent,
+  unlinkObject,
+  toggleVisible,
+  beginReplaceObject,
+  requestDeleteEntity,
+  buildInspector,
+  copyPlayerBlueprintAsset,
+  deselect,
+  setGrid,
+  saveScene,
+  promptEditorAction,
+  markDirty,
+  refreshOutliner,
+  withTransformHistory,
+  syncTransformFields,
+});
+function addMenuItems(at){ return sceneMenuActions.addMenuItems(at); }
+function objectMenuItems(o, fromOutliner, gp){ return sceneMenuActions.objectMenuItems(o, fromOutliner, gp); }
+function duplicateLine(o, count){ return sceneMenuActions.duplicateLine(o, count); }
+function playerMenuItems(){ return sceneMenuActions.playerMenuItems(); }
+function canvasMenuItems(gp){ return sceneMenuActions.canvasMenuItems(gp); }
+function renameEntity(o){ return sceneMenuActions.renameEntity(o); }
+function resetTransform(o){ return sceneMenuActions.resetTransform(o); }
+function setSpawnHere(){ return sceneMenuActions.setSpawnHere(); }
 
 // ------------------------------------------------ add actions
 addActions = window.LK_EDITOR_ADD_ACTIONS && window.LK_EDITOR_ADD_ACTIONS.create({
