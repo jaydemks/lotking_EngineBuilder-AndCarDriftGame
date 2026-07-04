@@ -150,7 +150,23 @@ function create(deps){
     }).filter(item => visible(item, q));
   }
 
-  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel, importedItems});
+  function levelItems(q){
+    const LV = deps.levelsApi();
+    return (LV ? LV.list() : []).map(l => ({
+      kind:'level', ref:'level:' + l.id, id:l.id, name:l.name + (l.active ? ' · ACTIVE' : ''),
+      sub:'level · LKEP · ' + (l.savedAt ? new Date(l.savedAt).toLocaleDateString() : l.id),
+      source:l.id, icon:'🗺', active:l.active, draggable:false,
+      defaultAction:() => { if(!l.active) deps.loadLevel(l.id, l.name); },
+      actions:[
+        ...(l.active ? [] : [{label:'▶', title:'Load in editor', fn:() => deps.loadLevel(l.id, l.name)}]),
+        {label:'✎', title:'Rename', fn:() => deps.renameLevel(l.id, l.name)},
+        {label:'⧉', title:'Duplicate', fn:() => deps.duplicateLevel(l.id, l.name)},
+        {label:'×', title:'Delete', fn:() => deps.deleteLevel(l.id, l.name)},
+      ],
+    })).filter(item => visible(item, q));
+  }
+
+  return Object.freeze({button, makeCard, visible, addGroup, preparePanel, finishPanel, importedItems, levelItems});
 }
 
 window.LK_EDITOR_ASSET_PANEL = Object.freeze({create});

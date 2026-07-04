@@ -1439,20 +1439,7 @@ function refreshAssetsPanel(){
   addAssetGroup(box, 'ENGINE SOUND SETS', soundSetItems);
   allFolderedItems.push(...soundSetItems);
 
-  // levels: asset "particolari" come in Unreal — in cima alla lista
-  const LV = levelsApi();
-  const levelItems = (LV ? LV.list() : []).map(l => ({
-    kind:'level', ref:'level:' + l.id, id:l.id, name:l.name + (l.active ? ' · ACTIVE' : ''),
-    sub:'level · LKEP · ' + (l.savedAt ? new Date(l.savedAt).toLocaleDateString() : l.id),
-    source:l.id, icon:'🗺', active:l.active, draggable:false,
-    defaultAction:() => { if(!l.active) loadLevel(l.id, l.name); },
-    actions:[
-      ...(l.active ? [] : [{label:'▶', title:'Load in editor', fn:() => loadLevel(l.id, l.name)}]),
-      {label:'✎', title:'Rename', fn:() => renameLevel(l.id, l.name)},
-      {label:'⧉', title:'Duplicate', fn:() => duplicateLevel(l.id, l.name)},
-      {label:'×', title:'Delete', fn:() => deleteLevel(l.id, l.name)},
-    ],
-  })).filter(item => assetVisible(item, q));
+  const levelItems = assetPanel.levelItems(q);
   addAssetGroup(box, 'LEVELS', levelItems);
   allFolderedItems.push(...levelItems);
 
@@ -1508,6 +1495,11 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   placeAssetRef,
   spawnPointAhead,
   deleteImportedAsset,
+  levelsApi,
+  loadLevel,
+  renameLevel,
+  duplicateLevel,
+  deleteLevel,
   setAssetDragRef: ref => { assetDragRef = ref; },
 });
 
