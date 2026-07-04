@@ -108,6 +108,7 @@ function create(deps){
     });
     Promise.resolve()
       .then(() => window.LK_SOUND_DESIGNER_TEMPLATE ? null : loadScript('js/editor/sound-designer-template.js'))
+      .then(() => window.LK_SOUND_DESIGNER_FORM ? null : loadScript('js/editor/sound-designer-form.js'))
       .then(() => loadScript('js/editor/sound-designer.js'))
       .then(open)
       .catch(() => deps.status('⚠ Sound Designer non caricato'));

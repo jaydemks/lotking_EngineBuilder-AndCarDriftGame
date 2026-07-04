@@ -64,6 +64,7 @@ The road ahead leads to **1.0.0**.
 - Extracted playable export blob/database asset normalization into `js/editor/playable-export-assets.js`.
 - Extracted playable ZIP packaging/runtime asset collection into `js/editor/playable-export-zip.js`.
 - Extracted Sound Designer static CSS/DOM shell into `js/editor/sound-designer-template.js`.
+- Extracted Sound Designer reusable form controls into `js/editor/sound-designer-form.js`.
 
 ---
 

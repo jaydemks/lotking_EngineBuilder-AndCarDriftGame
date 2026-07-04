@@ -18,9 +18,10 @@ const RPM_MIN = 500, RPM_MAX = 8200;
 const ARC_A0 = -215, ARC_A1 = 35;   // gradi: arco del contagiri
 const CX = 210, CY = 205, R_ON = 168, R_OFF = 128;
 const TEMPLATE = window.LK_SOUND_DESIGNER_TEMPLATE;
+const FORM_HELPERS = window.LK_SOUND_DESIGNER_FORM;
 
 // ------------------------------------------------ DOM
-if(!TEMPLATE){ console.warn('LotKing Sound Designer: template non trovato'); return; }
+if(!TEMPLATE || !FORM_HELPERS){ console.warn('LotKing Sound Designer: moduli UI non trovati'); return; }
 TEMPLATE.installStyles();
 const root = TEMPLATE.createRoot(RPM_MIN, RPM_MAX);
 document.body.appendChild(root);
@@ -47,6 +48,15 @@ function fileOptions(current){
   opts.push({v: '__upload__', l: '📁 Carica file audio…'});
   return opts;
 }
+const formUi = FORM_HELPERS.create({
+  fileOptions,
+  markDirty,
+  applyLive,
+  renderTach,
+  renderEngine,
+  renderAll,
+});
+const {rowSlider, rowFile, rowCheck, rowSelect, ledRow, pct, flt, hz} = formUi;
 
 // applica la copia di lavoro al motore audio (structural = ricostruisce i nodi)
 function applyLive(structural){
@@ -235,97 +245,6 @@ function renderEngine(){
 }
 
 // ------------------------------------------------ pannelli parametri
-function rowSlider(label, value, min, max, step, fmt, onChange){
-  const row = document.createElement('div');
-  row.className = 'lksd-row';
-  row.innerHTML = `<label></label><input type="range"><output></output>`;
-  row.querySelector('label').textContent = label;
-  const inp = row.querySelector('input');
-  const out = row.querySelector('output');
-  inp.min = min; inp.max = max; inp.step = step; inp.value = value;
-  out.value = fmt(value);
-  inp.addEventListener('input', () => {
-    const v = +inp.value;
-    out.value = fmt(v);
-    onChange(v);
-    markDirty();
-    applyLive(false);
-    renderTach();
-  });
-  return row;
-}
-function rowFile(slot, structuralRefresh){
-  const row = document.createElement('div');
-  row.className = 'lksd-row';
-  row.innerHTML = `<label>Sample</label><select></select>`;
-  const sel = row.querySelector('select');
-  for(const o of fileOptions(slot.src)) sel.appendChild(new Option(o.l, o.v, false, o.v === (slot.src || '')));
-  sel.value = slot.src || '';
-  sel.addEventListener('change', () => {
-    if(sel.value === '__upload__'){
-      const inp = document.createElement('input');
-      inp.type = 'file';
-      inp.accept = 'audio/*,.wav,.ogg,.mp3';
-      inp.addEventListener('change', () => {
-        const f = inp.files && inp.files[0];
-        if(!f){ sel.value = slot.src || ''; return; }
-        if(!window.LK_ASSET_BLOBS){ sel.value = slot.src || ''; return; }
-        const key = 'sfx_' + Date.now().toString(36) + '_' + f.name.replace(/[^a-z0-9.]+/gi, '_');
-        window.LK_ASSET_BLOBS.put(key, f).then(() => {
-          slot.src = 'blob:' + key;
-          markDirty();
-          applyLive(true);
-          renderAll();
-        }).catch(() => { sel.value = slot.src || ''; });
-      });
-      inp.click();
-      return;
-    }
-    slot.src = sel.value;
-    markDirty();
-    applyLive(true);
-    if(structuralRefresh) structuralRefresh();
-    renderAll();
-  });
-  return row;
-}
-function rowCheck(label, value, onChange){
-  const l = document.createElement('label');
-  l.className = 'lksd-check';
-  l.innerHTML = `<input type="checkbox"><span></span>`;
-  l.querySelector('span').textContent = label;
-  const c = l.querySelector('input');
-  c.checked = !!value;
-  c.addEventListener('change', () => { onChange(c.checked); markDirty(); applyLive(false); renderEngine(); });
-  return l;
-}
-function rowSelect(label, value, options, onChange){
-  const row = document.createElement('div');
-  row.className = 'lksd-row';
-  row.innerHTML = `<label></label><select></select>`;
-  row.querySelector('label').textContent = label;
-  const sel = row.querySelector('select');
-  for(const o of options) sel.appendChild(new Option(o.label, o.value, false, o.value === value));
-  sel.value = value;
-  sel.addEventListener('change', () => {
-    onChange(sel.value);
-    markDirty();
-    applyLive(true);
-    renderAll();
-  });
-  return row;
-}
-function ledRow(status){
-  const wrap = document.createElement('div');
-  wrap.className = 'lksd-slot-head';
-  const texts = {ok: 'sample caricato', loading: 'caricamento…', error: 'ERRORE: file non caricabile → fallback sintetico', empty: 'slot vuoto → fallback sintetico', generated: 'fuorigiri generato dal motore'};
-  wrap.innerHTML = `<span class="lksd-led ${status}"></span><span class="lksd-led-label">${texts[status] || status}</span>`;
-  return wrap;
-}
-const pct = v => Math.round(v * 100) + '%';
-const flt = d => v => (+v).toFixed(d);
-const hz = v => v >= 15500 ? 'off' : (v >= 1000 ? (v / 1000).toFixed(1) + 'kHz' : Math.round(v) + 'Hz');
-
 function renderSlotPanel(){
   const box = $('#lksdSlot');
   box.innerHTML = '';
