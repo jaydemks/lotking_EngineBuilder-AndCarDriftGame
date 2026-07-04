@@ -8,6 +8,21 @@ The road ahead leads to **1.0.0**.
 
 ---
 
+## 0.5.1 — Continuing editor refactor
+
+### Release Status
+
+- Status: in progress.
+- Scope: continue the Engine Editor refactor after the `v0.5.0-beta` baseline, keeping each extraction small, reviewed, and recoverable.
+
+### Refactor Notes
+
+- Started from a clean Git-backed baseline so editor recovery points are always available.
+- Continued reducing risk around `js/editor/editor.js`, which is still the largest and most sensitive file in the project.
+- Extracted editor settings/preferences into `js/editor/preferences.js`, keeping static chrome translation, theme switching, language switching, and quick music panel visibility out of the main editor file.
+
+---
+
 ## 0.5.0-beta — Git-ready stabilization
 
 The first "Git-ready" milestone: the point where the prototype officially becomes a project with an initial repository, license, release notes, and a recoverable baseline. The jump from 0.0.5 to 0.5.0-beta is intentional — it marks the consolidation of everything below into one coherent, documented codebase.

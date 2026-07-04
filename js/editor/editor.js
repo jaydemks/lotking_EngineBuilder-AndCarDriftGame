@@ -259,6 +259,7 @@ let folderManager = null;
 let keyboardShortcuts = null;
 let thumbnails = null;
 let playableExport = null;
+let preferences = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -629,109 +630,12 @@ if(hudToggle){
   });
 }
 // ------------------------------------------------ editor preferences (settings panel)
-const PREFS_KEY = 'lotking.editorPrefs.v1';
-const PREFS = Object.assign({musicPanel: true, theme: 'dark', lang: 'en'}, (() => {
-  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch(err){ return {}; }
-})());
-function savePrefs(){
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify(PREFS)); } catch(err){}
-}
-
-// traduzioni del "chrome" statico dell'editor (i pannelli dinamici migrano man mano)
-const I18N = {
-  prefsSub:       {en:'preferences saved locally', it:'preferenze salvate in locale'},
-  tabInterface:   {en:'Interface', it:'Interfaccia'},
-  tabTheme:       {en:'Theme', it:'Tema'},
-  tabLanguage:    {en:'Language', it:'Lingua'},
-  musicPanelName: {en:'Menu music player', it:'Player musica del menu'},
-  musicPanelDesc: {en:'Show the floating quick music player in the editor.', it:'Mostra il mini-player musicale flottante nell\'editor.'},
-  themeDark:      {en:'Dark', it:'Scuro'},
-  themeDarkDesc:  {en:'The current game-engine dark look.', it:'Il look scuro attuale, stile game-engine.'},
-  themeLight:     {en:'Light', it:'Chiaro'},
-  themeLightDesc: {en:'Bright panels, same layout.', it:'Pannelli chiari, stesso layout.'},
-  langEnDesc:     {en:'Default editor language.', it:'Lingua predefinita dell\'editor.'},
-  langItDesc:     {en:'Main interface in Italian (inner panels migrate over time).', it:'Interfaccia principale in italiano (i pannelli interni migrano man mano).'},
-};
-// chrome statico: selettore → proprietà → testi
-const CHROME_I18N = [
-  ['#lkSearch', 'placeholder', {en:'search…', it:'cerca…'}],
-  ['#lkSceneTab', 'text', {en:'Scene', it:'Scena'}],
-  ['#lkAssetsTab', 'text', {en:'Assets', it:'Assets'}],
-  ['#lkFilter option[value="all"]', 'text', {en:'All', it:'Tutti'}],
-  ['#lkFilter option[value="mesh"]', 'text', {en:'Meshes', it:'Mesh'}],
-  ['#lkFilter option[value="light"]', 'text', {en:'Lights', it:'Luci'}],
-  ['#lkFilter option[value="effect"]', 'text', {en:'Effects', it:'Effetti'}],
-  ['#lkFilter option[value="added"]', 'text', {en:'Added', it:'Aggiunti'}],
-  ['#lkFilter option[value="builtin"]', 'text', {en:'Built-in', it:'Originali'}],
-  ['#lkSave', 'text', {en:'💾 Save', it:'💾 Salva'}],
-  ['#lkNewTrack', 'text', {en:'New', it:'Nuovo'}],
-  ['#lkSaveAsTrack', 'text', {en:'Save As', it:'Salva come'}],
-  ['#lkLevels', 'text', {en:'🗀 Levels', it:'🗀 Livelli'}],
-  ['#lkResetScene', 'text', {en:'↺ Reset', it:'↺ Reset'}],
-  ['#lkPlay', 'text', {en:'▶ PREVIEW', it:'▶ PROVA'}],
-  ['.lk-levels-title', 'text', {en:'🗀 PROJECT LEVELS', it:'🗀 LIVELLI DEL PROGETTO'}],
-  ['.lk-levels-sub', 'text', {en:'stored locally · LKEP format', it:'salvati localmente · formato LKEP'}],
-  ['#lkLevelsNew', 'text', {en:'＋ New level', it:'＋ Nuovo livello'}],
-  ['#lkLevelsFromFile', 'text', {en:'⇧ Load from file…', it:'⇧ Carica da file…'}],
-  ['#lkPinned .lk-pin[data-special="env"] .lk-pin-label', 'text', {en:'Environment', it:'Environment'}],
-  ['#lkPinned .lk-pin[data-special="player"] .lk-pin-label', 'text', {en:'Player (Blueprint)', it:'Player (Blueprint)'}],
-  ['#lkPinned .lk-pin[data-special="hud"] .lk-pin-label', 'text', {en:'HUD / Radio TAB', it:'HUD / Radio TAB'}],
-];
-function editorLang(){ return PREFS.lang === 'it' ? 'it' : 'en'; }
-function applyLanguage(){
-  const L = editorLang();
-  root.querySelectorAll('[data-pref-i18n]').forEach(n => {
-    const e = I18N[n.dataset.prefI18n];
-    if(e) n.textContent = e[L];
-  });
-  for(const [sel, prop, texts] of CHROME_I18N){
-    const n = root.querySelector(sel);
-    if(!n) continue;
-    if(prop === 'placeholder') n.placeholder = texts[L];
-    else n.textContent = texts[L];
-  }
-}
-function applyPrefs(){
-  const qa = $('#lkQuickAudio');
-  if(qa) qa.style.display = PREFS.musicPanel ? '' : 'none';
-  root.classList.toggle('lk-light', PREFS.theme === 'light');
-  document.body.classList.toggle('lk-light', PREFS.theme === 'light');
-  applyLanguage();
-}
-function setPrefsOpen(open){
-  ED.prefsOpen = !!open;
-  $('#lkPrefsOverlay').classList.toggle('open', ED.prefsOpen);
-  if(!ED.prefsOpen) return;
-  $('#lkPrefMusicPanel').checked = !!PREFS.musicPanel;
-  root.querySelectorAll('[name="lkPrefTheme"]').forEach(r => { r.checked = r.value === PREFS.theme; });
-  root.querySelectorAll('[name="lkPrefLang"]').forEach(r => { r.checked = r.value === editorLang(); });
-}
-function setPrefsTab(tab){
-  root.querySelectorAll('[data-prefs-tab]').forEach(b => b.classList.toggle('on', b.dataset.prefsTab === tab));
-  root.querySelectorAll('[data-prefs-sec]').forEach(s => s.classList.toggle('on', s.dataset.prefsSec === tab));
-}
-$('#lkLogoBtn').addEventListener('click', () => setPrefsOpen(!ED.prefsOpen));
-$('#lkPrefsClose').addEventListener('click', () => setPrefsOpen(false));
-$('#lkPrefsOverlay').addEventListener('pointerdown', e => { if(e.target === e.currentTarget) setPrefsOpen(false); });
-root.querySelectorAll('[data-prefs-tab]').forEach(b => b.addEventListener('click', () => setPrefsTab(b.dataset.prefsTab)));
-$('#lkPrefMusicPanel').addEventListener('change', e => {
-  PREFS.musicPanel = e.target.checked;
-  savePrefs();
-  applyPrefs();
+function editorLang(){ return preferences ? preferences.lang() : 'en'; }
+function setPrefsOpen(open){ if(preferences) preferences.setOpen(open); }
+function applyPrefs(){ if(preferences) preferences.apply(); }
+preferences = window.LK_EDITOR_PREFERENCES && window.LK_EDITOR_PREFERENCES.create({
+  root, ED, $, status, refreshOutliner,
 });
-root.querySelectorAll('[name="lkPrefTheme"]').forEach(r => r.addEventListener('change', () => {
-  if(r.checked){ PREFS.theme = r.value; savePrefs(); applyPrefs(); }
-}));
-root.querySelectorAll('[name="lkPrefLang"]').forEach(r => r.addEventListener('change', () => {
-  if(r.checked){ PREFS.lang = r.value; savePrefs(); applyPrefs(); refreshOutliner(); }
-}));
-$('#lkQuickHide').addEventListener('click', () => {
-  PREFS.musicPanel = false;
-  savePrefs();
-  applyPrefs();
-  status(editorLang() === 'it' ? 'Player nascosto: riattivalo da ⚙ Impostazioni → Interfaccia' : 'Player hidden: re-enable it from ⚙ Settings → Interface');
-});
-applyPrefs();
 
 statusUi = window.LK_EDITOR_STATUS_UI && window.LK_EDITOR_STATUS_UI.create({root});
 dialogUi = window.LK_EDITOR_DIALOGS && window.LK_EDITOR_DIALOGS.create({root});

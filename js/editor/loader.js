@@ -56,7 +56,7 @@ function failEditorLoading(label){
 function ensureEditor(){
   if(window.LOT_KING && window.LOT_KING.editor) return Promise.resolve(window.LOT_KING.editor);
   if(loading) return loading;
-  document.querySelectorAll('script[data-lk-src^="js/editor/"], script[src^="js/editor/editor.js"], script[src^="js/editor/viewport-picking.js"], script[src^="js/editor/context-menu.js"], script[src^="js/editor/asset-imports.js"], script[src^="js/editor/level-manager.js"], script[src^="js/editor/player-blueprints.js"], script[src^="js/editor/folder-manager.js"], script[src^="js/editor/keyboard-shortcuts.js"], script[src^="js/editor/thumbnail-manager.js"], script[src^="js/editor/floating-layout.js"], script[src^="js/editor/playable-export.js"]').forEach(s => s.remove());
+  document.querySelectorAll('script[data-lk-src^="js/editor/"], script[src^="js/editor/editor.js"], script[src^="js/editor/viewport-picking.js"], script[src^="js/editor/context-menu.js"], script[src^="js/editor/asset-imports.js"], script[src^="js/editor/level-manager.js"], script[src^="js/editor/player-blueprints.js"], script[src^="js/editor/folder-manager.js"], script[src^="js/editor/keyboard-shortcuts.js"], script[src^="js/editor/thumbnail-manager.js"], script[src^="js/editor/floating-layout.js"], script[src^="js/editor/preferences.js"], script[src^="js/editor/playable-export.js"]').forEach(s => s.remove());
   loading = Promise.resolve()
     .then(() => waitRuntime('editor'))
     .then(() => { editorStage(.45, 'loading editor style'); return loadCss('css/editor.css'); })
@@ -74,6 +74,7 @@ function ensureEditor(){
     .then(() => { editorStage(.91, 'loading keyboard shortcuts'); return loadScript('js/editor/keyboard-shortcuts.js'); })
     .then(() => { editorStage(.92, 'loading thumbnails'); return loadScript('js/editor/thumbnail-manager.js'); })
     .then(() => { editorStage(.925, 'loading floating layout'); return loadScript('js/editor/floating-layout.js'); })
+    .then(() => { editorStage(.928, 'loading editor preferences'); return loadScript('js/editor/preferences.js'); })
     .then(() => { editorStage(.93, 'loading playable export'); return loadScript('js/editor/playable-export.js'); })
     .then(() => { editorStage(.95, 'starting editor'); return loadScript('js/editor/editor.js'); })
     .then(() => {
