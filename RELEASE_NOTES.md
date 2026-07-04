@@ -61,6 +61,7 @@ The road ahead leads to **1.0.0**.
 - Extracted editor floating layout, viewport rect and resize restoration into `js/editor/editor-layout.js`.
 - Reworked `js/editor/loader.js` into a script-stage manifest so module order and cleanup stay in one maintainable list.
 - Extracted playable ZIP level selection modal into `js/editor/playable-export-level-picker.js`.
+- Extracted playable export blob/database asset normalization into `js/editor/playable-export-assets.js`.
 
 ---
 
