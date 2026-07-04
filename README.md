@@ -22,11 +22,11 @@ No build step, no install. One HTML file, plain JavaScript, and a local static s
 
 ## Current Status
 
-Current working milestone: **0.5.0-beta**.
+Current working milestone: **0.5.1**.
 
-This is the first Git-ready consolidation pass. The runtime has already been split into focused modules, and the editor refactor is underway, but the editor is still being stabilized carefully after a risky extraction temporarily disconnected parts of the UI. The current priority is keeping the Engine Editor usable and recoverable before continuing the next refactor slices.
+This release closes the main Engine Editor refactor pass after the first Git-ready beta baseline. The editor has been split into focused modules, the playable export flow has been broken into smaller pieces, and the Sound Designer now has separate template and form-control modules.
 
-Recently restored editor areas include transform gizmos, viewport camera movement, menu music controls, loading/progress overlays, settings tabs, pinned sidebar icons, quick audio positioning, and the top toolbar actions.
+Recently restored and hardened editor areas include transform gizmos, viewport camera movement, menu music controls, loading/progress overlays, settings tabs, pinned sidebar icons, quick audio positioning, top toolbar actions, playable ZIP export, and Sound Designer loading.
 
 ## Project layout
 
@@ -81,4 +81,4 @@ Opening the HTML file directly (`file://`) partially works, but a local server i
 
 ## Where it's going
 
-The current working version is **0.5.0-beta**, on the road to **1.0.0 Stable Beta**. Between here and there: a formal level format with versioned migrations (old tracks must keep loading as the engine grows), a proper split between "export editor project" and "build playable track", real mesh collision for imported maps, GLB hierarchy editing, and the groundwork for sharing tracks online. See `RELEASE_NOTES.md` for the full history and the current plan.
+The current released version is **0.5.1**, on the road to **1.0.0 Stable Beta**. The next working release notes live in `RELEASE_NOTES.md`; archived release notes live under `docs/releases/`, including `docs/releases/v0.5.1.md` for the completed refactor release.
