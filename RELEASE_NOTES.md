@@ -45,6 +45,7 @@ The road ahead leads to **1.0.0**.
 - Extracted HUD / Radio TAB layout, preview, button, and layer controls into `js/editor/hud-inspector.js`.
 - Extracted Environment inspector controls into `js/editor/environment-inspector.js`, including sky, fog, procedural environment, sun bloom, lens flare, volumetric clouds, rain, and global light selectors.
 - Extracted editor project metadata, save, import, and export helpers into `js/editor/project-io.js`.
+- Extracted editor add/import/replace actions into `js/editor/add-actions.js`, including primitive/light/effect creation, GLB import placement, entity GLB replacement, and player model replacement.
 
 ---
 

@@ -139,6 +139,7 @@ let playerSetupInspector = null;
 let hudInspector = null;
 let environmentInspector = null;
 let projectIo = null;
+let addActions = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -1457,7 +1458,7 @@ function addMenuItems(at){
       {label: k[0].toUpperCase()+k.slice(1), icon:'✨', action:() => addEffect(k, P)}
     ))},
     {sep:true},
-    {label:'Importa modello GLB…', icon:'📦', action:() => { pendingGlbPoint = P; $('#lkGlbInput').click(); }},
+    {label:'Importa modello GLB…', icon:'📦', action:() => openGlbImportAt(P)},
   ];
 }
 function objectMenuItems(o, fromOutliner, gp){
@@ -1484,7 +1485,7 @@ function objectMenuItems(o, fromOutliner, gp){
     {label:'Rinomina…', icon:'✏️', action:() => renameEntity(o)},
     {label:'Reset trasformazione', icon:'↺', action:() => resetTransform(o)},
     {sep:true},
-    {label:'Replace with GLB...', icon:'📦', action:() => { replaceTarget = o; $('#lkReplaceInput').click(); }},
+    {label:'Replace with GLB...', icon:'📦', action:() => beginReplaceObject(o)},
   ];
   if(!fromOutliner && gp){
     items.push({sep:true});
@@ -1551,90 +1552,32 @@ function setSpawnHere(){
 }
 
 // ------------------------------------------------ add actions
-function addPrimitive(prim, at){
-  const id = STORE.nextId();
-  const obj = STORE.createPrimitive(prim);
-  const entry = {id, kind:'primitive', prim, name: prim[0].toUpperCase()+prim.slice(1), collide: prim !== 'plane',
-    asset:{key:'primitive:' + prim, name:'Primitive ' + prim[0].toUpperCase() + prim.slice(1), source:'Editor primitive'},
-    t:{p:[at.x, 0, at.z], r:[0,0,0], s:[1,1,1], v:true}};
-  STORE.registerAdded(GAME, obj, entry);
-  obj.userData.assetKey = 'primitive:' + prim;
-  obj.userData.assetName = 'Primitive ' + prim[0].toUpperCase() + prim.slice(1);
-  obj.userData.assetSource = 'Editor primitive';
-  finishAdd(obj);
-}
-function addLight(kind, at){
-  const id = STORE.nextId();
-  const obj = STORE.createLight(kind);
-  const y = obj.position.y;
-  const entry = {id, kind:'light', light: kind, name: kind[0].toUpperCase()+kind.slice(1)+' Light', collide:false,
-    asset:{key:'light:' + kind, name:kind[0].toUpperCase() + kind.slice(1) + ' Light', source:'Editor light'},
-    t:{p:[at.x, y, at.z], r:[0,0,0], s:[1,1,1], v:true}};
-  STORE.registerAdded(GAME, obj, entry);
-  obj.userData.assetKey = 'light:' + kind;
-  obj.userData.assetName = kind[0].toUpperCase() + kind.slice(1) + ' Light';
-  obj.userData.assetSource = 'Editor light';
-  finishAdd(obj);
-}
-function addEffect(kind, at){
-  const id = STORE.nextId();
-  const obj = STORE.createEmitter(kind);
-  const entry = {id, kind:'effect', effect: kind, params: Object.assign({}, obj.userData.effectParams), name: 'FX ' + kind, collide:false,
-    asset:{key:'effect:' + kind, name:'FX ' + kind, source:'Editor effect'},
-    t:{p:[at.x, .3, at.z], r:[0,0,0], s:[1,1,1], v:true}};
-  STORE.registerAdded(GAME, obj, entry);
-  obj.userData.assetKey = 'effect:' + kind;
-  obj.userData.assetName = 'FX ' + kind;
-  obj.userData.assetSource = 'Editor effect';
-  finishAdd(obj);
-}
-function finishAdd(obj){
-  pushHistory({
-    label: 'Add ' + (obj.userData.editorName || 'Entity'),
-    undo: () => removeEntity(obj),
-    redo: () => { restoreEntity(obj); selectObject(obj); },
-  });
-  markDirty(); refreshOutliner(); selectObject(obj);
-  if(ED.tool === 'select') setTool('translate');
-  status('Aggiunto: ' + obj.userData.editorName);
-}
-
-// GLB import
-let pendingGlbPoint = null;
-$('#lkGlbInput').addEventListener('change', e => {
-  const f = e.target.files && e.target.files[0];
-  e.target.value = '';
-  if(!f) return;
-  const at = pendingGlbPoint || spawnPointAhead();
-  pendingGlbPoint = null;
-  importAssetFiles([f], {placePoint: at}).then(() => {
-    if(f.size > 4.5e6) status('⚠ GLB grande (' + (f.size/1e6).toFixed(1) + ' MB): il salvataggio permanente può fallire');
-  });
+addActions = window.LK_EDITOR_ADD_ACTIONS && window.LK_EDITOR_ADD_ACTIONS.create({
+  THREE,
+  GAME,
+  STORE,
+  ED,
+  $,
+  pushHistory,
+  removeEntity,
+  restoreEntity,
+  markDirty,
+  refreshOutliner,
+  selectObject,
+  setTool,
+  status,
+  spawnPointAhead,
+  importAssetFiles,
+  replaceObjectWithFile,
+  readFileAsDataURL,
+  buildInspector,
 });
-// replace an entity with a GLB (keeps the transform)
-let replaceTarget = null;
-$('#lkReplaceInput').addEventListener('change', e => {
-  const f = e.target.files && e.target.files[0];
-  e.target.value = '';
-  if(!f || !replaceTarget) return;
-  const target = replaceTarget; replaceTarget = null;
-  replaceObjectWithFile(target, f);
-});
-
-// player model replacement
-$('#lkPlayerModelInput').addEventListener('change', e => {
-  const f = e.target.files && e.target.files[0];
-  e.target.value = '';
-  if(!f) return;
-  readFileAsDataURL(f).then(src => {
-    new THREE.GLTFLoader().load(src, g => {
-      GAME.player.setModel(g.scene);
-      GAME.player.car.userData.modelSrc = src;
-      markDirty(); buildInspector();
-      status(f.size > 4.5e6 ? '⚠ Modello grande: il salvataggio permanente può fallire' : 'Modello player sostituito');
-    }, undefined, () => status('Model loading failed'));
-  });
-});
+function addPrimitive(prim, at){ return addActions.addPrimitive(prim, at); }
+function addLight(kind, at){ return addActions.addLight(kind, at); }
+function addEffect(kind, at){ return addActions.addEffect(kind, at); }
+function finishAdd(obj){ return addActions.finishAdd(obj); }
+function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
+function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }
 
 // ------------------------------------------------ inspector
 const insp = () => $('#lkInspector');
@@ -1720,7 +1663,7 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   buildMaterialEditor,
   duplicateEntity,
   requestDeleteEntity,
-  replaceSelectedGlb: o => { replaceTarget = o; $('#lkReplaceInput').click(); },
+  replaceSelectedGlb: beginReplaceObject,
 });
 playerCameraInspector = window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR && window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR.create({
   GAME,
