@@ -124,6 +124,7 @@ let playableExport = null;
 let preferences = null;
 let quickAudio = null;
 let toolbar = null;
+let sidePanels = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -370,6 +371,10 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   newTrack, saveAsTrack, setLevelsOverlayOpen, importProjectFile,
   confirmEditorAction, exportProject, stopPlayPreview, startPlayPreview,
   exitEditor, restoreFloatingPanels,
+});
+sidePanels = window.LK_EDITOR_SIDE_PANELS && window.LK_EDITOR_SIDE_PANELS.create({
+  root, ED, $, status, refreshOutliner, refreshAssetsPanel,
+  setLeftMode, setViewMode, newFolder, importAssetFiles,
 });
 // ------------------------------------------------ editor preferences (settings panel)
 function editorLang(){ return preferences ? preferences.lang() : 'en'; }
@@ -851,26 +856,6 @@ function importProjectFile(file){
 let sceneDragId = null;
 let assetDragRef = null;
 let viewportReplaceTarget = null;
-$('#lkSearch').addEventListener('input', e => { ED.search = e.target.value.toLowerCase(); refreshOutliner(); });
-$('#lkFilter').addEventListener('change', e => { ED.filter = e.target.value; refreshOutliner(); });
-$('#lkSceneTab').addEventListener('click', () => setLeftMode('scene'));
-$('#lkViewGrid').addEventListener('click', () => setViewMode('grid'));
-$('#lkViewList').addEventListener('click', () => setViewMode('list'));
-$('#lkAssetImport').addEventListener('click', () => $('#lkAssetInput').click());
-$('#lkAssetFolder').addEventListener('click', () => newFolder('assets'));
-$('#lkSceneFolder').addEventListener('click', () => newFolder('scene'));
-$('#lkAssetRefresh').addEventListener('click', () => { refreshAssetsPanel(); status('Asset library refreshed'); });
-$('#lkAssetInput').addEventListener('change', e => {
-  const files = Array.from(e.target.files || []);
-  e.target.value = '';
-  importAssetFiles(files);
-});
-root.querySelectorAll('[data-asset-filter]').forEach(chk => {
-  chk.addEventListener('change', () => {
-    ED.assetFilters[chk.dataset.assetFilter] = chk.checked;
-    refreshAssetsPanel();
-  });
-});
 function acceptEditorFileDrag(e){
   if(!hasExternalFileDrag(e)) return false;
   e.preventDefault();
