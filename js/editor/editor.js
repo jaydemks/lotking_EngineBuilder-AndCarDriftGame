@@ -22,19 +22,6 @@ const ED = window.LK_EDITOR_CORE.createState();
 
 // ------------------------------------------------ editor camera + controls
 const camE = window.LK_EDITOR_CORE.createCamera(THREE);
-let editorUiReady = false;
-let floatingLayout = null;
-addEventListener('resize', () => {
-  camE.aspect = innerWidth/innerHeight;
-  camE.updateProjectionMatrix();
-  if(!editorUiReady) return;
-  try {
-    restoreFloatingPanels();
-  } catch(err) {
-    console.warn('LotKing: restoreFloatingPanels (resize) skipped', err);
-  }
-});
-function restoreFloatingPanels(){ if(editorUiReady && floatingLayout) floatingLayout.restoreFloatingPanels(); }
 
 // ------------------------------------------------ recovered editor chrome + runtime wiring
 const editorChrome = window.LK_EDITOR_CORE.createChrome({THREE, template: window.LK_EDITOR_TEMPLATE.create()});
@@ -67,6 +54,7 @@ let folderManager = null;
 let keyboardShortcuts = null;
 let thumbnails = null;
 let playableExport = null;
+let editorLayout = null;
 let preferences = null;
 let quickAudio = null;
 let flyCamera = null;
@@ -115,9 +103,10 @@ function setGrid(on){
   syncToolbarState();
   status(ED.gridOn ? 'Grid on' : 'Grid off');
 }
-function panelWidth(side){ return floatingLayout ? floatingLayout.panelWidth(side) : (parseFloat(getComputedStyle(root).getPropertyValue(side === 'left' ? '--lk-left-w' : '--lk-right-w')) || 280); }
-function editorViewportRect(){ return floatingLayout ? floatingLayout.editorViewportRect() : {x:panelWidth('left') + 10, y:46, w:Math.max(220, innerWidth - panelWidth('left') - panelWidth('right') - 20), h:Math.max(160, innerHeight - 46 - 40 - ED.assetsH)}; }
-function clampPanelPos(pos, w, h){ return floatingLayout ? floatingLayout.clampPanelPos(pos, w, h) : pos; }
+function restoreFloatingPanels(){ return editorLayout.restoreFloatingPanels(); }
+function panelWidth(side){ return editorLayout.panelWidth(side); }
+function editorViewportRect(){ return editorLayout.editorViewportRect(); }
+function clampPanelPos(pos, w, h){ return editorLayout.clampPanelPos(pos, w, h); }
 function clearHoverPickHelper(){ if(viewportPicking) viewportPicking.clearHover(); }
 window.LK_EDITOR_CORE.installCanvasViewportRectOverride(canvas, ED, editorViewportRect);
 visualHelpers = window.LK_EDITOR_VISUAL_HELPERS && window.LK_EDITOR_VISUAL_HELPERS.create({
@@ -202,7 +191,7 @@ dialogUi = window.LK_EDITOR_DIALOGS && window.LK_EDITOR_DIALOGS.create({root});
 contextMenu = window.LK_EDITOR_CONTEXT_MENU && window.LK_EDITOR_CONTEXT_MENU.create({ctxEl: $('#lkCtx')});
 assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status});
 thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({THREE, active: () => ED.active && !ED.playPreview});
-floatingLayout = window.LK_EDITOR_FLOATING_LAYOUT && window.LK_EDITOR_FLOATING_LAYOUT.create({
+editorLayout = window.LK_EDITOR_LAYOUT && window.LK_EDITOR_LAYOUT.create({
   root, ED, $, status,
   cameraAspect: () => GAME.player && GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (gameCam.aspect || innerWidth / innerHeight),
 });
@@ -288,14 +277,7 @@ playableExport = window.LK_EDITOR_PLAYABLE_EXPORT && window.LK_EDITOR_PLAYABLE_E
   currentTrackMeta, slugifyTrackName, assetLibraryLoad, levelsApi,
 });
 
-if(floatingLayout){
-  floatingLayout.wirePanelResize();
-  floatingLayout.wireAssetsResize();
-  floatingLayout.wirePipResize();
-  floatingLayout.wireFloatingPanels();
-}
-editorUiReady = true;
-requestAnimationFrame(restoreFloatingPanels);
+editorLayout.init();
 
 // ------------------------------------------------ undo / redo / repeat
 historyManager = window.LK_EDITOR_HISTORY_MANAGER && window.LK_EDITOR_HISTORY_MANAGER.create({
