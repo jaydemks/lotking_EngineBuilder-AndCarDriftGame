@@ -1,10 +1,11 @@
-# Release Notes
+# Lot King Engine Builder v0.5.2 — Input system
 
 ## v0.5.2 — Input system (keyboard · gamepad · touch)
 
 ### Release Status
 
-- Status: in progress (feature landed, pending manual test).
+- Status: released.
+- Tag target: `v0.5.2`.
 - Scope: new multi-device input system and focused fixes after the `v0.5.1` refactor release.
 
 ### Highlights
