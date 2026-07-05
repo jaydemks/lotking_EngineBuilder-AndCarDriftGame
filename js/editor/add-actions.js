@@ -25,6 +25,7 @@ function create(deps){
   const replaceObjectWithFile = deps.replaceObjectWithFile;
   const readFileAsDataURL = deps.readFileAsDataURL;
   const buildInspector = deps.buildInspector;
+  const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
 
   let pendingGlbPoint = null;
   let replaceTarget = null;
@@ -75,7 +76,7 @@ function create(deps){
       undo: () => removeEntity(obj),
       redo: () => { restoreEntity(obj); selectObject(obj); },
     });
-    markDirty(); refreshOutliner(); selectObject(obj);
+    markDirty(); refreshOutliner(); refreshAssetsPanel(); selectObject(obj);
     if(ED.tool === 'select') setTool('translate');
     status('Aggiunto: ' + obj.userData.editorName);
   }

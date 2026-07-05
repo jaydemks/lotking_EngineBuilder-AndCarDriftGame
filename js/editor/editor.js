@@ -194,6 +194,7 @@ assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.
 thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({THREE, active: () => ED.active && !ED.playPreview});
 editorLayout = window.LK_EDITOR_LAYOUT && window.LK_EDITOR_LAYOUT.create({
   root, ED, $, status,
+  camE,
   cameraAspect: () => GAME.player && GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (gameCam.aspect || innerWidth / innerHeight),
 });
 viewportPicking = window.LK_EDITOR_VIEWPORT_PICKING && window.LK_EDITOR_VIEWPORT_PICKING.create({
@@ -438,6 +439,7 @@ assetCatalog = window.LK_EDITOR_ASSET_CATALOG && window.LK_EDITOR_ASSET_CATALOG.
   assetLibraryLoad,
   currentPlayerBlueprint,
   setAssetLoading,
+  placeProjectAsset,
   placeImportedAsset,
   spawnPointAhead,
   status,
@@ -451,11 +453,60 @@ function entityIcon(o){ return assetCatalog.entityIcon(o); }
 function assetKeyOf(o){ return assetCatalog.assetKeyOf(o); }
 function assetNameOf(o){ return assetCatalog.assetNameOf(o); }
 function collectAssets(){ return assetCatalog.collectAssets(); }
+function collectProjectAssets(){ return assetCatalog.collectProjectAssets(); }
 function assetMatchesSearch(item, q){ return assetCatalog.assetMatchesSearch(item, q); }
 function assetFilterKey(item){ return assetCatalog.assetFilterKey(item); }
 function selectAssetItem(ref){ return assetCatalog.selectAssetItem(ref); }
 function getAssetByRef(ref){ return assetCatalog.getAssetByRef(ref); }
 function placeAssetRef(item, at){ return assetCatalog.placeAssetRef(item, at); }
+function cloneForStorage(value){
+  try { return value == null ? value : JSON.parse(JSON.stringify(value)); } catch(err){ return value; }
+}
+function placeProjectAsset(rawAsset, at){
+  if(!rawAsset || !rawAsset.entry){
+    status('Asset di progetto non disponibile');
+    return;
+  }
+  const entry = cloneForStorage(rawAsset.entry);
+  const point = at || spawnPointAhead();
+  if(!entry || !point){
+    status('Posizione non disponibile per il posizionamento');
+    return;
+  }
+  setAssetLoading(true, entry.name || entry.kind || 'project asset', 15, 'Caricamento template');
+  return Promise.resolve()
+    .then(() => STORE.createFromEntry(entry, GAME))
+    .then(obj => {
+      const nextEntry = cloneForStorage(entry);
+      nextEntry.id = STORE.nextId();
+      if(!nextEntry.t || typeof nextEntry.t !== 'object'){ nextEntry.t = {}; }
+      obj.position.copy(point);
+      obj.rotation.set(
+        Array.isArray(nextEntry.t.r) && nextEntry.t.r.length >= 3 ? nextEntry.t.r[0] : 0,
+        Array.isArray(nextEntry.t.r) && nextEntry.t.r.length >= 3 ? nextEntry.t.r[1] : 0,
+        Array.isArray(nextEntry.t.r) && nextEntry.t.r.length >= 3 ? nextEntry.t.r[2] : 0
+      );
+      if(Array.isArray(nextEntry.t.s) && nextEntry.t.s.length >= 3){
+        obj.scale.fromArray(nextEntry.t.s);
+      }
+      nextEntry.t = STORE.tOf(obj);
+      if(nextEntry.props && nextEntry.kind === 'light' && obj.userData && obj.userData.light){
+        const l = obj.userData.light;
+        if(l) STORE.applyLightProps(l, nextEntry.props);
+      } else if(nextEntry.props && nextEntry.kind !== 'light'){
+        STORE.applyMatProps(obj, nextEntry.props);
+      }
+      STORE.registerAdded(GAME, obj, nextEntry);
+      finishAdd(obj);
+      setAssetLoading(true, entry.name || entry.kind || 'project asset', 100, 'Posizionato');
+      setTimeout(() => setAssetLoading(false), 300);
+    })
+    .catch(err => {
+      setAssetLoading(false);
+      status('Aggiunta asset progetto fallita: ' + err.message);
+    });
+}
+
 function assetContextMenuItems(item){
   return editorMenus ? editorMenus.assetContextMenuItems(item) : [];
 }
@@ -542,6 +593,7 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   setDefaultPlayerBlueprintAsset,
   deletePlayerBlueprintAsset,
   collectAssets,
+  collectProjectAssets,
   entityIcon,
   selectObject,
   setLeftMode,
@@ -620,7 +672,9 @@ viewportEvents = window.LK_EDITOR_VIEWPORT_EVENTS && window.LK_EDITOR_VIEWPORT_E
     status('Velocità volo: ' + fly.speed.toFixed(0));
   },
   shouldSuppressSceneClick: () => !!(gizmoSuppressSceneClick || gizmoPointerActive || (gizmo && (gizmo.dragging || gizmo.axis))),
+  getGizmo: () => gizmo,
   pickAt,
+  setTool,
   groundPointAt,
   isGroundLikeEntity,
   selectObject,
@@ -693,6 +747,7 @@ addActions = window.LK_EDITOR_ADD_ACTIONS && window.LK_EDITOR_ADD_ACTIONS.create
   replaceObjectWithFile,
   readFileAsDataURL,
   buildInspector,
+  refreshAssetsPanel,
 });
 function addPrimitive(prim, at){ return addActions.addPrimitive(prim, at); }
 function addLight(kind, at){ return addActions.addLight(kind, at); }

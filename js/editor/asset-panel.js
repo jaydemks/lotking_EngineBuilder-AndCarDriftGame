@@ -121,13 +121,14 @@ function create(deps){
 
   function finishPanel(box, counts){
     counts = counts || {};
-    if(!counts.blueprints && !counts.levels && !counts.imported && !counts.scene){
+    if(!counts.blueprints && !counts.levels && !counts.imported && !counts.projectAssets && !counts.scene){
       box.appendChild(deps.el('<div class="lk-empty">No assets visible.<br>Change filters or import GLB/GLTF files.</div>'));
     }
     deps.setStatusRight(
       (counts.blueprints ? counts.blueprints + ' blueprints · ' : '') +
       (counts.levels ? counts.levels + ' levels · ' : '') +
       (counts.imported ? counts.imported + ' imported · ' : '') +
+      (counts.projectAssets ? counts.projectAssets + ' project assets · ' : '') +
       counts.scene + ' scene assets'
     );
   }
@@ -229,9 +230,26 @@ function create(deps){
   }
 
   function sceneItems(q){
+    function looksLikeGlbAsset(item){
+      const entry = item && item.sample && item.sample.userData && item.sample.userData.addedEntry;
+      if(!entry || typeof entry !== 'object') return false;
+      if(entry.kind === 'glb') return true;
+      if(entry.dbKey || (entry.asset && entry.asset.dbKey)) return true;
+      const type = entry.kind;
+      if(type === 'light' || type === 'effect') return false;
+      const src = entry.src || (entry.asset && (entry.asset.src || entry.asset.source)) || entry.assetName || entry.name;
+      const source = String(src || '').toLowerCase();
+      if(!source) return false;
+      if(source.startsWith('data:') || source.startsWith('blob:')) return true;
+      return /(\.glb|\.gltf)(?:[?#].*)?$/i.test(source);
+    }
+
     return deps.collectAssets().map(a => ({
       kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name,
-      filterType:a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'glb' ? 'glb' : 'scene',
+      filterType: looksLikeGlbAsset(a) ? 'glb' :
+        (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'light') ? 'light' :
+        (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'effect') ? 'effect' :
+        'scene',
       type:a.type, sub:a.type + ' · ' + a.instances.length + ' instances · ' + a.source,
       source:a.source, icon:deps.entityIcon(a.sample), thumbObject:a.sample,
       draggable:['mesh','light','effect'].includes(a.type),
@@ -241,6 +259,10 @@ function create(deps){
         {label:'+', title:'Duplicate a new instance near the editor camera', fn:() => deps.placeAssetRef({kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name, type:a.type, raw:a}, deps.spawnPointAhead())},
       ],
     })).filter(item => visible(item, q));
+  }
+
+  function projectAssetItems(q){
+    return (deps.collectProjectAssets ? deps.collectProjectAssets() : []).filter(item => visible(item, q));
   }
 
   function refresh(box, q){
@@ -261,7 +283,9 @@ function create(deps){
     allFolderedItems.push(...levels);
 
     const imported = importedItems(q);
-    allFolderedItems.push(...imported);
+    const projectAssets = imported.concat(projectAssetItems(q));
+    addGroup(box, 'PROJECT ASSETS', projectAssets);
+    allFolderedItems.push(...projectAssets);
 
     const scene = sceneItems(q);
     allFolderedItems.push(...scene);
@@ -271,6 +295,7 @@ function create(deps){
       blueprints: blueprints.length,
       levels: levels.length,
       imported: imported.length,
+      projectAssets: projectAssets.length,
       scene: scene.length,
     });
   }

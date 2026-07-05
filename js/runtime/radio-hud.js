@@ -46,6 +46,7 @@ function createRadioHud(deps){
   audio.preload = 'auto';
 
   let idx = 0, shuffle = false, open = false, started = false;
+  let frameRect = null;
   const $ = id => document.getElementById(id);
   const el = {radio:$('radio'), img:$('radioImg'), screen:$('radioScreen'), title:$('rsTitle'), artist:$('rsArtist'),
     play:$('btnPlay'), prev:$('btnPrev'), next:$('btnNext'), shuf:$('btnShuffle'),
@@ -53,6 +54,12 @@ function createRadioHud(deps){
     clock:$('rsClock'), date:$('rsDate'), oil:$('rsOil'), speed:$('rsSpeed'), g:$('rsG'), boost:$('rsBoost'),
     vol:$('rsVol'), volVal:$('rsVolVal'),
     art:$('albumArt'), gGraph:$('gGraph')};
+  const viewport = document.getElementById('radioViewport') || document.createElement('div');
+  if(!viewport.id) viewport.id = 'radioViewport';
+  if(el.radio && el.radio.parentNode !== viewport){
+    el.radio.parentNode.insertBefore(viewport, el.radio);
+    viewport.appendChild(el.radio);
+  }
   el.img.src = paths.media('soundhud.png');
 
   const edit = {
@@ -76,6 +83,8 @@ function createRadioHud(deps){
   ];
   const knobWrap = document.createElement('div');
   knobWrap.id = 'radioKnobs';
+  const playerHitWrap = document.createElement('div');
+  playerHitWrap.id = 'radioPlayerHits';
   const knobs = {};
   for(const d of KNOB_DEFS){
     const b = document.createElement('button');
@@ -87,14 +96,50 @@ function createRadioHud(deps){
     knobWrap.appendChild(b);
     knobs[d.key] = b;
   }
-  el.radio.appendChild(knobWrap);
+  const playerHits = {};
+  for(const key of ['prev', 'play', 'next', 'shuffle']){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'radioPlayerHit';
+    b.dataset.hit = key;
+    b.setAttribute('aria-hidden', 'true');
+    playerHitWrap.appendChild(b);
+    playerHits[key] = b;
+  }
+  el.radio.append(knobWrap, playerHitWrap);
   let editorPreview = false;
+
+  function getFrameInfo(){
+    if(!frameRect) return {x:0, y:0, w:innerWidth, h:innerHeight};
+    return {
+      x: frameRect.x,
+      y: frameRect.y,
+      w: frameRect.w,
+      h: frameRect.h,
+    };
+  }
+
+  function setFrameRect(rect){
+    if(rect && isFinite(rect.x) && isFinite(rect.y) && isFinite(rect.w) && isFinite(rect.h)){
+      frameRect = {
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+      };
+    } else {
+      frameRect = null;
+    }
+    applyConfig();
+  }
 
   function applyConfig(){
     el.radio.classList.toggle('disabled', !cfg.enabled);
     el.radio.classList.toggle('hud-edit-frame', editorPreview && cfg.editTarget === 'frame');
     el.radio.classList.toggle('hud-edit-screen', editorPreview && cfg.editTarget === 'screen');
     el.radio.classList.toggle('hud-edit-buttons', editorPreview && cfg.editTarget === 'buttons');
+    viewport.classList.toggle('editor-preview', editorPreview);
+    viewport.classList.toggle('interactive', open || editorPreview);
     knobWrap.style.setProperty('--knob-alpha', String(cfg.buttonOpacity == null ? .22 : clamp(cfg.buttonOpacity, 0, 1)));
     for(const k in knobs){
       const b = cfg.buttons && cfg.buttons[k];
@@ -103,9 +148,33 @@ function createRadioHud(deps){
       knobs[k].style.top = clamp(b.y, 0, 100) + '%';
       knobs[k].style.width = clamp(b.size, 2, 25) + '%';
     }
-    el.radio.style.setProperty('--radio-x', clamp(cfg.frameX, 5, 95) + '%');
-    el.radio.style.setProperty('--radio-y', clamp(cfg.frameY, 0, 60) + 'vh');
-    el.radio.style.setProperty('--radio-width', 'min(92vw, ' + Math.max(220, cfg.width|0) + 'px)');
+    const scoped = frameRect != null && !editorPreview;
+    const targetW = frameRect ? frameRect.w : innerWidth;
+    const targetH = frameRect ? frameRect.h : innerHeight;
+    const baseX = scoped ? (frameRect.w / 2) : null;
+    const baseBottom = scoped ? 0 : null;
+    const width = Math.max(220, cfg.width|0);
+    const scopedWidth = Math.max(220, Math.min(width, Math.round(targetW * .92)));
+
+    if(scoped){
+      viewport.style.left = Math.round(frameRect.x) + 'px';
+      viewport.style.top = Math.round(frameRect.y) + 'px';
+      viewport.style.width = Math.round(frameRect.w) + 'px';
+      viewport.style.height = Math.round(frameRect.h) + 'px';
+      viewport.style.right = 'auto';
+      viewport.style.bottom = 'auto';
+    } else {
+      viewport.style.left = viewport.style.top = viewport.style.width = viewport.style.height = viewport.style.right = viewport.style.bottom = '';
+    }
+
+    el.radio.style.setProperty('--radio-x', scoped ? baseX + 'px' : clamp(cfg.frameX, 5, 95) + '%');
+    el.radio.style.setProperty('--radio-y', scoped ? Math.round(targetH * clamp(cfg.frameY, 0, 60) / 100) + 'px' : clamp(cfg.frameY, 0, 60) + 'vh');
+    el.radio.style.setProperty('--radio-width', scoped ? scopedWidth + 'px' : 'min(92vw, ' + width + 'px)');
+    if(scoped){
+      el.radio.style.setProperty('--radio-bottom', Math.round(baseBottom) + 'px');
+    } else {
+      el.radio.style.removeProperty('--radio-bottom');
+    }
     el.radio.style.setProperty('--radio-scale-x', String(Math.max(.2, Math.min(2.5, cfg.pngScaleX))));
     el.radio.style.setProperty('--radio-scale-y', String(Math.max(.2, Math.min(2.5, cfg.pngScaleY))));
     el.radio.style.setProperty('--scr-left', cfg.screenLeft + '%');
@@ -123,6 +192,8 @@ function createRadioHud(deps){
     el.radio.style.setProperty('--radio-img-z', String(imageLayer));
     el.radio.style.setProperty('--radio-screen-z', String(screenLayer));
     el.radio.style.setProperty('--radio-buttons-z', String(buttonHitLayer));
+    el.radio.style.setProperty('--radio-player-z', String(buttonHitLayer + 1));
+    syncPlayerHitboxes();
     if(!cfg.enabled && open && !editorPreview) toggleOpen(false);
   }
 
@@ -161,9 +232,10 @@ function createRadioHud(deps){
       const resize = e.target.classList.contains('radioEditHandle');
       const sx = e.clientX, sy = e.clientY;
       const start = Object.assign({}, cfg);
-      const radioRect = () => el.radio.getBoundingClientRect();
+      const getFrame = () => getFrameInfo();
       box.setPointerCapture(e.pointerId);
       const move = ev => {
+        const frame = getFrame();
         const dx = ev.clientX - sx;
         const dy = ev.clientY - sy;
         if(target === 'frame'){
@@ -171,12 +243,12 @@ function createRadioHud(deps){
             setConfig({width: clamp(start.width + dx * 2, 280, 1400)});
           } else {
             setConfig({
-              frameX: clamp(start.frameX + dx / innerWidth * 100, 5, 95),
-              frameY: clamp(start.frameY - dy / innerHeight * 100, 0, 60),
+              frameX: clamp(start.frameX + dx / Math.max(1, frame.w) * 100, 5, 95),
+              frameY: clamp(start.frameY - dy / Math.max(1, frame.h) * 100, 0, 60),
             });
           }
         } else {
-          const r = radioRect();
+          const r = el.radio.getBoundingClientRect();
           if(resize){
             setConfig({
               screenWidth: clamp(start.screenWidth + dx / Math.max(1, r.width) * 100, 10, 150),
@@ -326,10 +398,53 @@ function createRadioHud(deps){
   function prev(){ load(idx-1, true); }
   function togglePlay(){ audio.paused ? audio.play().catch(()=>{}) : audio.pause(); }
   function toggleShuffle(){ shuffle = !shuffle; el.shuf.classList.toggle('on', shuffle); popup(shuffle?'SHUFFLE ON':'SHUFFLE OFF','#4be3a0'); }
+  function controlFromPoint(x, y){
+    const buttons = [
+      {el: el.prev, action: prev},
+      {el: el.play, action: togglePlay},
+      {el: el.next, action: next},
+      {el: el.shuf, action: toggleShuffle},
+    ];
+    const pad = 8;
+    for(const b of buttons){
+      if(!b.el) continue;
+      const r = b.el.getBoundingClientRect();
+      if(x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return b;
+    }
+    return null;
+  }
+  function setPlayerControlHover(hit){
+    for(const b of [el.prev, el.play, el.next, el.shuf]){
+      if(b) b.classList.toggle('radio-hover', !!hit && hit.el === b);
+    }
+    viewport.classList.toggle('player-hover', !!hit);
+  }
+  function syncPlayerHitboxes(){
+    const radioRect = el.radio.getBoundingClientRect();
+    if(!radioRect.width || !radioRect.height) return;
+    const pairs = [
+      [playerHits.prev, el.prev],
+      [playerHits.play, el.play],
+      [playerHits.next, el.next],
+      [playerHits.shuffle, el.shuf],
+    ];
+    for(const pair of pairs){
+      const hit = pair[0];
+      const source = pair[1];
+      if(!hit || !source) continue;
+      const r = source.getBoundingClientRect();
+      hit.style.left = ((r.left - radioRect.left) / radioRect.width * 100) + '%';
+      hit.style.top = ((r.top - radioRect.top) / radioRect.height * 100) + '%';
+      hit.style.width = (r.width / radioRect.width * 100) + '%';
+      hit.style.height = (r.height / radioRect.height * 100) + '%';
+    }
+  }
   function toggleOpen(force){
     if(!cfg.enabled && !editorPreview && force !== false) return;
     open = force == null ? !open : !!force;
     el.radio.classList.toggle('open', open);
+    viewport.classList.toggle('interactive', open || editorPreview);
+    requestAnimationFrame(syncPlayerHitboxes);
     canvas.classList.toggle('slowmo', open && !editorPreview);
   }
   function begin(){ if(started) return; started = true; load(0, true); }
@@ -345,6 +460,44 @@ function createRadioHud(deps){
   el.prev.addEventListener('click', prev);
   el.next.addEventListener('click', next);
   el.shuf.addEventListener('click', toggleShuffle);
+  function bindPlayerHit(hit, visual, action){
+    hit.addEventListener('pointerenter', () => { if(visual) visual.classList.add('radio-hover'); });
+    hit.addEventListener('pointerleave', () => { if(visual) visual.classList.remove('radio-hover'); });
+    hit.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if(visual) visual.classList.remove('radio-hover');
+      action();
+    });
+  }
+  bindPlayerHit(playerHits.prev, el.prev, prev);
+  bindPlayerHit(playerHits.play, el.play, togglePlay);
+  bindPlayerHit(playerHits.next, el.next, next);
+  bindPlayerHit(playerHits.shuffle, el.shuf, toggleShuffle);
+  window.addEventListener('pointerdown', e => {
+    if(!(open || editorPreview) || e.button > 0) return;
+    const hit = controlFromPoint(e.clientX, e.clientY);
+    if(!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hit.action();
+  }, true);
+  window.addEventListener('pointermove', e => {
+    if(!(open || editorPreview)){
+      setPlayerControlHover(null);
+      return;
+    }
+    setPlayerControlHover(controlFromPoint(e.clientX, e.clientY));
+  }, true);
+  window.addEventListener('pointerup', () => setPlayerControlHover(null), true);
+  viewport.addEventListener('click', e => {
+    if(!(open || editorPreview) || (e.target && e.target.closest && e.target.closest('.rs-controls button'))) return;
+    const hit = controlFromPoint(e.clientX, e.clientY);
+    if(!hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hit.action();
+  }, true);
   el.tBar.addEventListener('click', e => {
     const r = el.tBar.getBoundingClientRect();
     if(isFinite(audio.duration)) audio.currentTime = (e.clientX - r.left)/r.width * audio.duration;
@@ -408,12 +561,14 @@ function createRadioHud(deps){
     artCtx.moveTo(cx, cy); artCtx.lineTo(cx+cw*.12, cy-A*.09); artCtx.lineTo(cx+cw*.42, cy-A*.13);
     artCtx.lineTo(cx+cw*.72, cy-A*.09); artCtx.lineTo(cx+cw, cy); artCtx.closePath(); artCtx.stroke();
     artCtx.shadowBlur = 0;
+    syncPlayerHitboxes();
   }
 
   applyConfig();
   return {toggleOpen, next, prev, togglePlay, toggleShuffle, updateHUD, begin, setVolume,
     setPlayerVol, setBass, getPlayerVol: () => playerVol, getBass: () => bass,
     isOpen: () => open, audio, config: cfg, setConfig, setEditorPreview,
+    setFrameRect,
     getTracks: options => library.list(options),
     addTracks,
     loadTrack: i => load(i, true),

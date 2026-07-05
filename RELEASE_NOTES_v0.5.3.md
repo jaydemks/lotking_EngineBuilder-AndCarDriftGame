@@ -1,0 +1,45 @@
+# Lot King Engine Builder v0.5.3 — Asset consistency + editor workflow fixes
+
+## v0.5.3 — Asset consistency + editor workflow fixes
+
+### Release Status
+
+- Status: in progress.
+- Tag target: `v0.5.3`.
+- Scope: stabilize shared project assets in the editor after the `v0.5.2` release, then archive a clean release note after verification.
+
+### Editor & Assets
+
+- Asset visibility is project-wide for non-primitive assets: imported GLB/glTF models are now collected as shared project assets and shown across loaded levels.
+- The active scene still keeps its own primitive-only quick list, so primitives are not duplicated across levels while shared assets remain reusable.
+- Imported models saved in the internal library (IndexedDB) are always surfaced in the `PROJECT ASSETS` panel and can be placed from any level.
+- Project asset collection now includes:
+  - scene-added non-primitive objects per level,
+  - player model references from scene/player blueprints,
+  - playable-level scene asset metadata used to rebuild the shared catalog.
+- Asset browser grouping has been corrected so shared entries are shown in the right section and stay visible after switching levels.
+- Asset deduplication is now key-based for shared entries, preventing accidental hiding caused by primitive-like names (`cone`, `box`, etc.) that can also be model filenames.
+- Transform gizmo behavior was restored in the viewport context path: right-clicking on gizmo axes now opens mode-switch options (Move, Rotate, Scale) without breaking selection/move flow.
+- Radio HUD now stays inside the rendered camera frame when the game uses an aspect-lock (16:9/21:9/…); the HUD/Radio tab position is now bound to the camera scoped rectangle and no longer appears in letterbox/black bar space when resizing the window.
+- Follow-up fix: in normal gameplay mode (without editor), the radio HUD is now constrained by the same scoped-frame path after CSS variable binding was aligned.
+- Added a fixed radio viewport mask for scoped gameplay frames: the gameplay HUD is positioned inside the rendered camera rectangle, while the radio tab animates inside a clipped container that matches the camera frame.
+- Final alignment fix: the crop now belongs to the fixed radio viewport container instead of the moving radio PNG, so the cut line stays locked to the aspect-ratio border while the radio enters/exits cleanly.
+- Restored radio HUD interaction after the viewport wrapper change: the radio viewport now accepts pointer events only while the radio is open or in editor preview, keeping Play/Pause/Next/Prev clickable without blocking gameplay when closed.
+- Fixed gameplay-only radio control clicks by making the decorative PNG frame transparent to pointer events, so Play/Pause/Next/Prev receive clicks even when the PNG layer is visually above the digital interface.
+- Added a coordinate-based fallback for the radio player controls so Prev/Play/Next/Shuffle still trigger in gameplay if a radio overlay layer receives the click instead of the button element.
+- Added dedicated invisible hit targets above the radio player controls, aligned to the real button rectangles, so gameplay clicks no longer depend on the underlying HUD layer stack.
+- Added a capture-phase runtime fallback for radio player controls so clicks are handled before the canvas/HUD stack can consume them in launch-track gameplay.
+- Restored hover feedback for the radio player controls by mirroring hitbox hover state onto the visible Prev/Play/Next/Shuffle buttons.
+- Restored pointer cursor and bright hover state in launch-track gameplay by mirroring global pointer position onto the visible radio player controls.
+
+### Stability and tooling notes
+
+- v0.5.2 release notes remain in `docs/releases/v0.5.2.md`.
+- Previous release notes remain in `docs/releases/v0.5.1.md` and `docs/releases/v0.5.0-beta.md`.
+- Keep release notes for versions as versioned markdown in `docs/releases/`.
+- Keep README version-neutral; version-specific changes belong in `docs/releases/`.
+
+### Open work for completion
+
+- Validate the final 0.5.3 list against all active levels and confirm shared assets match expected export behavior.
+- Archive this note as `docs/releases/v0.5.3.md` and continue next feature work in a new draft.

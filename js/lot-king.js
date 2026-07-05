@@ -1406,27 +1406,31 @@ function letterboxColor(){
 }
 // keep the game HUD confined to the camera's rendered rectangle so the on-screen
 // UI (score, legend, speedo…) never spills outside a letterboxed / cropped frame
-let lastHudRectKey = '';
 function syncHudRect(css){
   const hud = document.getElementById('hud');
   if(!hud) return;
   const portrait = css ? (css.h > css.w) : (innerHeight > innerWidth);
-  const key = (css ? (css.x + ',' + css.y + ',' + css.w + ',' + css.h) : 'full') + '|' + portrait;
-  if(key === lastHudRectKey) return;
-  lastHudRectKey = key;
-  const radio = document.getElementById('radio');
   if(css){
+    // Constrain HUD layout to the actual rendered camera rectangle.
+    // This keeps every HUD control anchored to the playable frame.
     hud.style.left = css.x + 'px'; hud.style.top = css.y + 'px';
     hud.style.width = css.w + 'px'; hud.style.height = css.h + 'px';
     hud.style.right = 'auto'; hud.style.bottom = 'auto';
-    if(radio){
-      radio.style.setProperty('--radio-x', (css.x + css.w / 2) + 'px');
-      radio.style.bottom = (innerHeight - (css.y + css.h)) + 'px';
-      radio.style.setProperty('--radio-width', 'min(' + Math.round(css.w * 0.92) + 'px, 880px)');
-    }
+
+    // Keep the HUD clip neutral now that it already sits inside the frame.
+    hud.style.setProperty('--ui-mask-top', '0px');
+    hud.style.setProperty('--ui-mask-right', '0px');
+    hud.style.setProperty('--ui-mask-bottom', '0px');
+    hud.style.setProperty('--ui-mask-left', '0px');
+
+    if(RADIO && RADIO.setFrameRect) RADIO.setFrameRect(css);
   } else {
     hud.style.left = hud.style.top = hud.style.width = hud.style.height = hud.style.right = hud.style.bottom = '';
-    if(radio){ radio.style.removeProperty('--radio-x'); radio.style.bottom = ''; radio.style.removeProperty('--radio-width'); }
+    hud.style.setProperty('--ui-mask-top', '0px');
+    hud.style.setProperty('--ui-mask-right', '0px');
+    hud.style.setProperty('--ui-mask-bottom', '0px');
+    hud.style.setProperty('--ui-mask-left', '0px');
+    if(RADIO && RADIO.setFrameRect) RADIO.setFrameRect(null);
   }
   // portrait / phone frame: drop the legend and let the input manager show touch
   document.body.classList.toggle('lk-portrait', portrait);

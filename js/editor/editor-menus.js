@@ -66,6 +66,14 @@ function create(deps){
         {label:'Delete all instances', icon:'🗑', action:() => deps.requestDeleteAssetInstances(a)},
       ];
     }
+    if(item.kind === 'project-asset'){
+      return [
+        {label:'Add to current level', icon:'＋', action:() => deps.placeAssetRef(item, deps.spawnPointAhead())},
+        ...(item.raw && item.raw.levelId ? [{
+          label:'Open source level', icon:'🗺', action:() => deps.loadLevel(item.raw.levelId, item.raw.levelName),
+        }] : []),
+      ];
+    }
     if(item.kind === 'player-blueprint'){
       const asset = item.raw;
       return [

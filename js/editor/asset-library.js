@@ -17,6 +17,7 @@ function create(opts){
     try {
       const raw = localStorage.getItem(ASSET_LIBRARY_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
+      if(Array.isArray(parsed)) return parsed;
       return parsed && Array.isArray(parsed.assets) ? parsed.assets : [];
     } catch(err){ console.warn('LotKing editor: asset library corrupta', err); return []; }
   }

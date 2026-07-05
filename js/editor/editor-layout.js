@@ -58,8 +58,10 @@ function create(deps){
   }
 
   addEventListener('resize', () => {
-    camE.aspect = innerWidth/innerHeight;
-    camE.updateProjectionMatrix();
+    if(camE && camE.aspect != null && camE.updateProjectionMatrix){
+      camE.aspect = innerWidth / innerHeight;
+      camE.updateProjectionMatrix();
+    }
     if(!ready) return;
     try {
       restoreFloatingPanels();

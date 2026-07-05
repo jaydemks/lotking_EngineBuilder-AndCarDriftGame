@@ -130,7 +130,24 @@
   }
 
   /* ---------- HUD ---------- */
-  #hud { position:fixed; inset:0; pointer-events:none; z-index:30; display:none; }
+  #hud {
+    position:fixed; inset:0; pointer-events:none; z-index:30; display:none;
+    --ui-mask-top: 0px;
+    --ui-mask-right: 0px;
+    --ui-mask-bottom: 0px;
+    --ui-mask-left: 0px;
+    clip-path: inset(var(--ui-mask-top) var(--ui-mask-right) var(--ui-mask-bottom) var(--ui-mask-left));
+    -webkit-clip-path: inset(var(--ui-mask-top) var(--ui-mask-right) var(--ui-mask-bottom) var(--ui-mask-left));
+    overflow:hidden;
+  }
+  #radioViewport {
+    position:fixed; inset:0; overflow:hidden; pointer-events:none; z-index:15;
+  }
+  #radioViewport.interactive { pointer-events:auto; }
+  #radioViewport.player-hover { cursor:pointer; }
+  #radioViewport.editor-preview {
+    overflow:visible; pointer-events:auto; z-index:120;
+  }
   #score {
     position:absolute; top:18px; left:50%; transform:translateX(-50%); text-align:center; color:#fff;
   }
@@ -298,7 +315,11 @@
     --radio-screen-z: 2;
     --radio-x: 50%;
     --radio-y: 2vh;
-    position:fixed; left:var(--radio-x); bottom:0; transform:translate(-50%, 105%);
+    --radio-open-offset: 5%;
+    position:absolute;
+    left:var(--radio-x);
+    bottom:var(--radio-bottom, 0px);
+    transform:translate(-50%, calc(100% + var(--radio-open-offset)));
     width:var(--radio-width); z-index:15; transition:transform .55s cubic-bezier(.2,.9,.25,1);
     pointer-events:none;
   }
@@ -331,6 +352,12 @@
   }
   /* cerchietti VOL− / VOL+ / BASS: z-index runtime sempre sopra PNG/screen per mantenere hit target cliccabili */
   #radioKnobs { position:absolute; inset:0; z-index:var(--radio-buttons-z,8); pointer-events:none; }
+  #radioPlayerHits { position:absolute; inset:0; z-index:var(--radio-player-z,20); pointer-events:none; }
+  .radioPlayerHit {
+    position:absolute; display:none; padding:0; border:0; border-radius:50%; background:transparent;
+    cursor:pointer; pointer-events:none;
+  }
+  #radio.open .radioPlayerHit, #radio.editor-preview .radioPlayerHit { display:block; pointer-events:auto; }
   .radioKnob {
     position:absolute; transform:translate(-50%,-50%);
     aspect-ratio:1/1; border-radius:50%; padding:0;
@@ -358,7 +385,7 @@
   }
   #radio.hud-edit-buttons .radioKnob .radioKnobHandle { display:block; }
   #radio img {
-    position:relative; z-index:var(--radio-img-z); width:100%; display:block; user-select:none; -webkit-user-drag:none;
+    position:relative; z-index:var(--radio-img-z); width:100%; display:block; user-select:none; -webkit-user-drag:none; pointer-events:none;
     transform:scale(var(--radio-scale-x), var(--radio-scale-y)); transform-origin:center bottom;
   }
   /* screen inside the PNG cutout.
@@ -396,9 +423,9 @@
   .rs-controls { display:flex; align-items:center; gap:6%; margin:auto 0; justify-content:center; }
   .rs-controls button {
     background:none; border:none; color:#e8ecf5; cursor:pointer; font-size:clamp(16px,2.6vw,26px);
-    transition:transform .12s, color .12s; line-height:1;
+    transition:transform .12s, color .12s; line-height:1; pointer-events:auto;
   }
-  .rs-controls button:hover { transform:scale(1.15); color:#4be3a0; }
+  .rs-controls button:hover, .rs-controls button.radio-hover { transform:scale(1.15); color:#4be3a0; }
   #btnPlay { border:2px solid #e8ecf5; border-radius:50%; width:clamp(34px,5.4vw,54px); height:clamp(34px,5.4vw,54px); }
   #btnShuffle.on { color:#4be3a0; text-shadow:0 0 8px #4be3a0; }
   .rs-progress { display:flex; align-items:center; gap:8px; font-size:clamp(9px,1.3vw,13px); color:#9aa3b8; }
