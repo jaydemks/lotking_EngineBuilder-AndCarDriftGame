@@ -82,6 +82,7 @@ let playerSetupInspector = null;
 let hudInspector = null;
 let environmentInspector = null;
 let projectIo = null;
+let inputSettings = null;
 let addActions = null;
 let historyManager = null;
 let sceneMenuActions = null;
@@ -334,6 +335,37 @@ projectIo = window.LK_EDITOR_PROJECT_IO && window.LK_EDITOR_PROJECT_IO.create({
   confirmEditorAction,
   reopenEditorAndReload,
   status,
+  applyInputConfig: cfg => {
+    if(inputSettings) inputSettings.setConfig(cfg);
+    if(GAME.input){
+      if(GAME.input.setOverrideEnabled) GAME.input.setOverrideEnabled(false);   // editor shows the pure project config
+      if(GAME.input.setConfig) GAME.input.setConfig(cfg);
+    }
+  },
+});
+const editorWM = window.LK_RUNTIME_WINDOW_MANAGER && window.LK_RUNTIME_WINDOW_MANAGER.create({storageKey: 'lotking.windows.editor.v1'});
+if(editorWM){
+  const prefsPanel = root.querySelector('.lk-prefs-panel');
+  if(prefsPanel){
+    const prefsAttach = editorWM.attach(prefsPanel, {id: 'lk-prefs', handle: '.lk-prefs-head', minWidth: 360, minHeight: 300});
+    const logo = root.querySelector('#lkLogoBtn');
+    // center/restore once the panel is actually visible (offsetWidth is 0 while hidden)
+    if(logo && prefsAttach) logo.addEventListener('click', () => setTimeout(() => { if(root.querySelector('#lkPrefsOverlay').classList.contains('open')) prefsAttach.restore(); }, 0));
+  }
+}
+// Viewport tab: letterbox / frame-background colour (per level, saved in the camera blueprint)
+(function wireViewportPrefs(){
+  const lb = root.querySelector('#lkPrefLetterbox');
+  if(!lb) return;
+  const camCfg = () => GAME.player && GAME.player.cameraCfg;
+  const syncLb = () => { const c = camCfg(); if(c) lb.value = (typeof c.letterboxColor === 'string' && /^#[0-9a-f]{6}$/i.test(c.letterboxColor)) ? c.letterboxColor : '#141518'; };
+  lb.addEventListener('input', () => { const c = camCfg(); if(c){ c.letterboxColor = lb.value; if(GAME.player.applyCameraCfg) GAME.player.applyCameraCfg(); markDirty(); } });
+  const logo = root.querySelector('#lkLogoBtn');
+  if(logo) logo.addEventListener('click', () => setTimeout(syncLb, 0));
+  syncLb();
+})();
+inputSettings = window.LK_EDITOR_INPUT_SETTINGS && window.LK_EDITOR_INPUT_SETTINGS.create({
+  body: $('#lkInputSettingsBody'), ED, GAME, status, markDirty, lang: editorLang, wm: editorWM,
 });
 function slugifyTrackName(name){ return projectIo.slugifyTrackName(name); }
 function setTrackMeta(meta){ return projectIo.setTrackMeta(meta); }
@@ -753,6 +785,7 @@ playerCameraInspector = window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR && window.LK_ED
   selectRow,
   sliderRow,
   checkRow,
+  colorRow,
   el,
 });
 playerLightsInspector = window.LK_EDITOR_PLAYER_LIGHTS_INSPECTOR && window.LK_EDITOR_PLAYER_LIGHTS_INSPECTOR.create({

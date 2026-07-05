@@ -411,3 +411,206 @@
   .rs-right { width:15%; text-align:right; display:flex; flex-direction:column; gap:1%; font-variant-numeric:tabular-nums; }
   .rs-right .lbl { font-size:clamp(7px,1vw,11px); color:#8b93a7; letter-spacing:1px; margin-top:4%; }
   .rs-right .val { font-size:clamp(12px,1.8vw,20px); font-weight:800; color:#fff; }
+
+  /* ---------- Controls settings tab (in-game) ---------- */
+  .lk-controls-body { display:flex; flex-direction:column; gap:14px; }
+  .lk-ctrl-block { border-top:1px solid rgba(255,255,255,.08); padding-top:12px; }
+  .lk-ctrl-block:first-child { border-top:none; padding-top:0; }
+  .lk-ctrl-h { font-size:12px; font-weight:800; letter-spacing:1px; color:#fff; margin-bottom:8px; }
+  .lk-ctrl-sub { font-size:10px; font-weight:800; letter-spacing:1px; color:#8b93a7; margin:8px 0 4px; text-transform:uppercase; }
+  .lk-ctrl-empty { font-size:11px; color:#8b93a7; }
+  .lk-ctrl-dev { display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; color:#dfe5f1; }
+  .lk-ctrl-dot { width:9px; height:9px; border-radius:50%; background:#4be3a0; flex:none; }
+  .lk-ctrl-dot.lk-dev-gamepad { background:#9db4ff; }
+  .lk-ctrl-dot.lk-dev-touch { background:#ffd166; }
+  .lk-ctrl-devname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lk-ctrl-tag { font-size:10px; font-weight:800; color:#07080c; background:#4be3a0; border-radius:5px; padding:1px 7px; }
+  .lk-ctrl-player, .lk-ctrl-bind, .lk-ctrl-dev { min-height:30px; }
+  .lk-ctrl-player, .lk-ctrl-bind { display:flex; align-items:center; gap:10px; padding:5px 0; }
+  .lk-ctrl-plabel, .lk-ctrl-bindname { flex:1; font-size:12px; color:#dfe5f1; }
+  .lk-ctrl-select {
+    height:32px; min-width:150px; border-radius:7px; border:1px solid rgba(255,255,255,.14);
+    background:#12161f; color:#dfe5f1; padding:0 10px;
+  }
+  .lk-ctrl-toggle { display:flex; align-items:center; gap:8px; color:#dfe5f1; font-size:12px; font-weight:700; }
+  .lk-ctrl-toggle input { width:16px; height:16px; accent-color:#4be3a0; }
+  .lk-ctrl-key {
+    min-width:96px; height:30px; border-radius:7px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05); color:#fff; font-weight:800; letter-spacing:1px; cursor:pointer;
+  }
+  .lk-ctrl-key:hover { border-color:#ffd166; }
+  .lk-ctrl-key.capturing { border-color:#4be3a0; color:#4be3a0; animation:lkCapPulse 1s ease-in-out infinite; }
+  @keyframes lkCapPulse { 0%,100%{opacity:1;} 50%{opacity:.55;} }
+  .lk-ctrl-note { font-size:11px; color:#8b93a7; padding:5px 0; }
+  .lk-ctrl-reset {
+    margin-top:10px; width:100%; height:34px; border-radius:7px; cursor:pointer;
+    border:1px solid rgba(239,71,111,.4); background:rgba(239,71,111,.12); color:#ff9db1; font-weight:800; letter-spacing:1px;
+  }
+  .lk-ctrl-reset:hover { background:rgba(239,71,111,.2); }
+
+  /* ---------- On-screen touch controls ---------- */
+  #lkTouchControls {
+    position:fixed; inset:auto 0 0 0; z-index:34; display:none;
+    justify-content:space-between; align-items:flex-end; gap:16px;
+    padding:0 20px 24px; pointer-events:none;
+  }
+  #lkTouchControls.on { display:flex; }
+  #lkTouchControls .lk-touch-steer, #lkTouchControls .lk-touch-btn { pointer-events:auto; touch-action:none; }
+  .lk-touch-steer {
+    width:min(42vw,320px); height:96px; border-radius:16px;
+    background:rgba(12,16,24,.5); border:1px solid rgba(255,255,255,.14);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; backdrop-filter:blur(4px);
+  }
+  .lk-touch-steer-track {
+    position:relative; width:82%; height:34px; border-radius:17px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
+  }
+  .lk-touch-steer-thumb {
+    position:absolute; left:50%; top:50%; width:44px; height:26px; margin:-13px 0 0 -22px; border-radius:13px;
+    background:linear-gradient(180deg,#ffd166,#ef476f); transition:transform .04s linear;
+  }
+  .lk-touch-hint { font-size:10px; font-weight:800; letter-spacing:2px; color:#9aa3b8; }
+  .lk-touch-pedals { display:flex; align-items:flex-end; gap:12px; }
+  .lk-touch-btn {
+    width:74px; height:74px; border-radius:50%; border:1px solid rgba(255,255,255,.16);
+    background:rgba(12,16,24,.55); color:#fff; font-weight:800; letter-spacing:1px; text-transform:uppercase;
+    font-size:11px; cursor:pointer; backdrop-filter:blur(4px);
+  }
+  .lk-touch-btn.on { transform:scale(.94); }
+  .lk-touch-gas { border-color:rgba(75,227,160,.5); color:#4be3a0; }
+  .lk-touch-gas.on { background:rgba(75,227,160,.25); }
+  .lk-touch-brake { border-color:rgba(239,71,111,.5); color:#ff9db1; }
+  .lk-touch-brake.on { background:rgba(239,71,111,.25); }
+  .lk-touch-hb { width:60px; height:60px; font-size:10px; border-color:rgba(255,209,102,.5); color:#ffd166; }
+  .lk-touch-hb.on { background:rgba(255,209,102,.22); }
+
+  /* ================= Window manager ================= */
+  .lk-win-layer { position:fixed; inset:0; z-index:3999; pointer-events:none; }
+  .lk-win, .lk-movable { pointer-events:auto; }
+  .lk-win {
+    position:fixed; display:none; flex-direction:column; min-width:300px; min-height:200px;
+    background:linear-gradient(180deg,#141924,#0d1017); border:1px solid rgba(255,255,255,.14);
+    border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,.55); overflow:hidden; color:#dfe5f1;
+  }
+  .lk-win.open { display:flex; }
+  .lk-win.dragging, .lk-movable.dragging { opacity:.96; }
+  .lk-win-head {
+    display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:move;
+    padding:10px 12px; background:rgba(255,255,255,.05); border-bottom:1px solid rgba(255,255,255,.09);
+    user-select:none; touch-action:none;
+  }
+  .lk-win-title { font-size:12px; font-weight:800; letter-spacing:1.5px; color:#fff; text-transform:uppercase; }
+  .lk-win-close {
+    width:26px; height:26px; border-radius:6px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05); color:#dfe5f1; cursor:pointer; font-size:16px; line-height:1;
+  }
+  .lk-win-close:hover { border-color:#ef476f; color:#ff9db1; }
+  .lk-win-body { flex:1; overflow:auto; padding:14px; }
+  .lk-win-resize {
+    position:absolute; right:2px; bottom:2px; width:16px; height:16px; cursor:nwse-resize; touch-action:none;
+    background:linear-gradient(135deg,transparent 50%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.28) 62%,transparent 62%);
+  }
+
+  /* ================= Mapping overlay ================= */
+  .lk-map { display:flex; flex-direction:column; gap:12px; height:100%; }
+  .lk-map-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .lk-map-ctx { font-size:11px; color:#9aa3b8; font-weight:700; letter-spacing:.5px; display:flex; align-items:center; gap:6px; }
+  .lk-map-ctxsel, .lk-map-instsel {
+    height:30px; border-radius:7px; border:1px solid rgba(255,255,255,.14); background:#12161f; color:#dfe5f1; padding:0 8px;
+  }
+  .lk-map-tabs { display:flex; gap:6px; }
+  .lk-map-tab {
+    height:30px; padding:0 14px; border-radius:7px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.04); color:#9aa3b8; cursor:pointer; font-weight:800; letter-spacing:1px;
+  }
+  .lk-map-tab.on { color:#fff; background:rgba(120,150,255,.16); border-color:#5a74b8; box-shadow:inset 0 0 0 1px rgba(120,150,255,.25); }
+  .lk-map-instrow { display:flex; align-items:center; gap:8px; }
+  .lk-map-inst-add, .lk-map-inst-rm {
+    height:30px; padding:0 10px; border-radius:7px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05); color:#dfe5f1; cursor:pointer; font-weight:700;
+  }
+  .lk-map-inst-add:hover { border-color:#4be3a0; color:#4be3a0; }
+  .lk-map-stage { display:flex; align-items:center; justify-content:center; padding:10px; background:rgba(0,0,0,.22); border-radius:10px; border:1px solid rgba(255,255,255,.06); min-height:120px; }
+  .lk-map-actions { display:flex; flex-direction:column; gap:4px; }
+  .lk-map-arow { display:flex; align-items:center; gap:10px; padding:5px 4px; border-radius:7px; }
+  .lk-map-arow.conflict { background:rgba(239,71,111,.12); }
+  .lk-map-adot { width:10px; height:10px; border-radius:3px; flex:none; }
+  .lk-map-aname { flex:1; font-size:12px; color:#dfe5f1; }
+  .lk-map-chip {
+    min-width:92px; height:30px; padding:0 12px; border-radius:7px; border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.05); color:#fff; font-weight:800; letter-spacing:1px; cursor:pointer;
+  }
+  .lk-map-chip:hover { border-color:#ffd166; }
+  .lk-map-chip.capturing { border-color:#4be3a0; color:#4be3a0; animation:lkCapPulse 1s ease-in-out infinite; }
+  .lk-map-note, .lk-map-hint { font-size:11px; color:#8b93a7; }
+  .lk-map-hint { margin-top:auto; padding-top:6px; border-top:1px solid rgba(255,255,255,.07); }
+
+  /* ================= Device visuals ================= */
+  .lk-dv { --dv:transparent; }
+  .lk-dv-keyboard { display:flex; align-items:flex-start; gap:16px; }
+  .lk-dv-kb-main, .lk-dv-kb-arrows { display:flex; flex-direction:column; gap:5px; }
+  .lk-dv-kb-row { display:grid; grid-auto-flow:column; grid-auto-columns:34px; gap:5px; }
+  .lk-dv-key {
+    position:relative; height:34px; min-width:34px; border-radius:7px; cursor:pointer;
+    border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05); color:#cfd6e4;
+    font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  .lk-dv-key.ghost { border:none; background:transparent; cursor:default; }
+  .lk-dv-key.bound { border-color:var(--dv); box-shadow:inset 0 0 0 1px var(--dv), 0 0 10px -3px var(--dv); color:#fff; }
+  .lk-dv-key.conflict { border-color:#ef476f; box-shadow:inset 0 0 0 1px #ef476f; }
+  .lk-dv-key.active { background:var(--dv); color:#0b0e14; transform:translateY(1px); }
+  .lk-dv-keytag {
+    position:absolute; bottom:-8px; left:50%; transform:translateX(-50%); font-size:7px; letter-spacing:.5px;
+    color:var(--dv); font-weight:800; text-transform:uppercase; white-space:nowrap; pointer-events:none;
+  }
+  .lk-dv-gamepad { padding:8px; }
+  .lk-dv-gp-body {
+    position:relative; width:300px; height:190px; border-radius:60px/50px;
+    background:radial-gradient(circle at 50% 30%, #232a38, #12161f); border:1px solid rgba(255,255,255,.14);
+  }
+  .lk-dv-gp-btn {
+    position:absolute; transform:translate(-50%,-50%); width:30px; height:30px; border-radius:50%; cursor:pointer; padding:0;
+    border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06); color:#cfd6e4; font-size:10px; font-weight:800;
+  }
+  .lk-dv-gp-btn.bound { border-color:var(--dv); box-shadow:0 0 10px -2px var(--dv), inset 0 0 0 1px var(--dv); color:#fff; }
+  .lk-dv-gp-btn.conflict { border-color:#ef476f; }
+  .lk-dv-gp-btn.active { background:var(--dv); color:#0b0e14; }
+  .lk-dv-gp-lbl { pointer-events:none; }
+  .lk-dv-gp-tag {
+    position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:1px; font-size:7px;
+    color:var(--dv); font-weight:800; text-transform:uppercase; white-space:nowrap; pointer-events:none;
+  }
+  .lk-dv-gp-stick {
+    position:absolute; transform:translate(-50%,-50%); width:46px; height:46px; border-radius:50%; cursor:pointer; padding:0;
+    border:1px solid rgba(255,255,255,.2); background:radial-gradient(circle,#2a3245,#171c27);
+  }
+  .lk-dv-gp-stick.bound { border-color:var(--dv); box-shadow:0 0 12px -2px var(--dv); }
+  .lk-dv-gp-stickdot { position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%; background:var(--dv); }
+  .lk-dv-touch { display:flex; align-items:center; justify-content:space-between; gap:20px; width:300px; }
+  .lk-dv-touch-pad {
+    width:150px; height:64px; border-radius:12px; border:1px dashed rgba(255,255,255,.2);
+    display:flex; align-items:center; justify-content:center; color:#8b93a7; font-size:10px; font-weight:800; letter-spacing:2px;
+  }
+  .lk-dv-touch-btns { display:flex; gap:8px; align-items:center; }
+  .lk-dv-touch-b { width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:800; text-transform:uppercase; border:1px solid rgba(255,255,255,.18); }
+  .lk-dv-touch-b.ga { color:#4be3a0; border-color:rgba(75,227,160,.5); }
+  .lk-dv-touch-b.br { color:#ff9db1; border-color:rgba(239,71,111,.5); }
+  .lk-dv-touch-b.hb { color:#ffd166; border-color:rgba(255,209,102,.5); width:44px; height:44px; }
+
+  /* extra control-tab buttons — neutral engine style (works in game + editor) */
+  .lk-ctrl-map, .lk-is-map {
+    margin-top:6px; width:100%; height:34px; border-radius:7px; cursor:pointer; font-weight:700; letter-spacing:.5px;
+    border:1px solid rgba(120,150,255,.35); background:rgba(120,150,255,.10); color:#cfe0ff; transition:all .12s;
+  }
+  .lk-ctrl-map:hover, .lk-is-map:hover { background:rgba(120,150,255,.18); border-color:rgba(120,150,255,.55); }
+  .lk-ctrl-dev.off { opacity:.5; }
+  .lk-ctrl-tag.off { background:#3a4152; color:#aab; }
+  .lk-is-add { margin-top:8px; height:32px; width:100%; border-radius:6px; cursor:pointer; border:1px dashed rgba(255,255,255,.2); background:rgba(255,255,255,.03); color:#9db4ff; font-weight:600; transition:all .12s; }
+  .lk-is-add:hover { border-color:rgba(157,180,255,.5); background:rgba(157,180,255,.08); }
+  .lk-is-rm, .lk-map-inst-rm { color:#ff9db1; }
+
+  /* in-game controls hint */
+  .lk-ctrl-hint { font-size:11px; color:#ffb454; padding:6px 0 2px; line-height:1.35; }
+
+  /* portrait / phone frame: hide the controls legend (touch UI takes over) */
+  body.lk-portrait #legend { display:none !important; }

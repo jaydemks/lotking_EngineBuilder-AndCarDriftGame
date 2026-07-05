@@ -777,10 +777,11 @@ function updateCarCannon(dt){
   if(PHYS.staticsSignature !== colliderSignature()) rebuildPhysicsStatics();
 
   const body = PHYS.carBody;
-  const up = keys['w']||keys['arrowup'], down = keys['s']||keys['arrowdown'];
-  const left = keys['a']||keys['arrowleft'], rightK = keys['d']||keys['arrowright'];
-  handbrake = !!keys[' '];
-  const steerTarget = (left?1:0) - (rightK?1:0);
+  const drive = readDriveInput();
+  const throttleAmt = drive.throttle, brakeAmt = drive.brake;
+  const up = throttleAmt > 0.05, down = brakeAmt > 0.05;
+  handbrake = drive.handbrake;
+  const steerTarget = clamp(drive.steer, -1, 1);
   const steerRate = DRIVE.steerResponse * (steerTarget === 0 || steerTarget * P.steer < 0 ? 1.6 : 1);
   P.steer += (steerTarget - P.steer) * Math.min(1, dt*steerRate);
 
@@ -807,13 +808,13 @@ function updateCarCannon(dt){
 
   let ax = -CFG.drag * vx;
   let driveA = 0, brakeA = 0, muRl = CFG.muR;
-  const engine = updateEngineModel(vx, up ? 1 : 0, isDrifting || handbrake || Math.abs(vy) > 2.0, dt);
+  const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || Math.abs(vy) > 2.0, dt);
   ENGINE.reverseActive = false;
   if(handbrake){
     muRl *= CFG.hbMuR;
     if(speed > .3) ax -= Math.sign(vx) * muRl * gR * 1.1;
   } else if(up){
-    driveA = CFG.accel * engine.torque01 * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
+    driveA = CFG.accel * engine.torque01 * throttleAmt * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
     driveA = Math.min(driveA, CFG.muR * gR * DRIVE.wheelspin);
     ax += driveA;
   }
@@ -821,14 +822,14 @@ function updateCarCannon(dt){
     const alreadyReversing = vx < -.35;
     const reverseAllowed = alreadyReversing || speedTot < REVERSE_ENTRY_SPEED;
     if(!reverseAllowed){
-      brakeA = CFG.brake * (speedTot > 7 ? 1 : .85);
+      brakeA = CFG.brake * brakeAmt * (speedTot > 7 ? 1 : .85);
       ax -= Math.sign(vx || 1) * brakeA;
-      if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * .35;
+      if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * .35;
     }
     else {
       ENGINE.reverseActive = true;
-      updateEngineModel(vx, 0.55, false, dt);
-      ax -= CFG.revAccel * (1 + vx / 12);
+      updateEngineModel(vx, 0.55 * brakeAmt, false, dt);
+      ax -= CFG.revAccel * brakeAmt * (1 + vx / 12);
     }
   }
 
@@ -907,10 +908,11 @@ function updateCar(dt){
   if(cannonState) return cannonState;
 
   // input
-  const up = keys['w']||keys['arrowup'], down = keys['s']||keys['arrowdown'];
-  const left = keys['a']||keys['arrowleft'], rightK = keys['d']||keys['arrowright'];
-  handbrake = !!keys[' '];
-  const steerTarget = (left?1:0) - (rightK?1:0);
+  const drive = readDriveInput();
+  const throttleAmt = drive.throttle, brakeAmt = drive.brake;
+  const up = throttleAmt > 0.05, down = brakeAmt > 0.05;
+  handbrake = drive.handbrake;
+  const steerTarget = clamp(drive.steer, -1, 1);
   // wheel returns to center faster than it turns in (feels crisper mid-drift)
   const steerRate = DRIVE.steerResponse * (steerTarget === 0 || steerTarget * P.steer < 0 ? 1.6 : 1);
   P.steer += (steerTarget - P.steer) * Math.min(1, dt*steerRate);
@@ -949,14 +951,14 @@ function updateCar(dt){
     let ax = -CFG.drag * vx;
     let muRl = CFG.muR;                       // rear lateral μ, eaten by throttle/handbrake
     let driveA = 0;
-    const engine = updateEngineModel(vx, up ? 1 : 0, isDrifting || handbrake || Math.abs(vy) > 2.0, h);
+    const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || Math.abs(vy) > 2.0, h);
     ENGINE.reverseActive = false;
     if(handbrake){
       // rear wheels locked: kinetic friction opposes motion, no drive
       muRl *= CFG.hbMuR;
       if(sp > .3) ax -= Math.sign(vx) * muRl * gR * .9;
     } else if(up){
-      driveA = CFG.accel * engine.torque01 * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
+      driveA = CFG.accel * engine.torque01 * throttleAmt * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
       driveA = Math.min(driveA, CFG.muR * gR * DRIVE.wheelspin);   // traction limit (+ wheelspin margin)
       ax += driveA;
     }
@@ -964,12 +966,12 @@ function updateCar(dt){
       const alreadyReversing = vx < -.35;
       const reverseAllowed = alreadyReversing || speedTot < REVERSE_ENTRY_SPEED;
       if(!reverseAllowed){
-        const bA = CFG.brake;
+        const bA = CFG.brake * brakeAmt;
         ax -= Math.sign(vx || 1) * bA;   // split kept for the friction circle below
-        if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * .35;
+        if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * .35;
       } else {
         ENGINE.reverseActive = true;
-        ax -= CFG.revAccel * (1 + vx / 12);
+        ax -= CFG.revAccel * brakeAmt * (1 + vx / 12);
       }
     }
 
@@ -1397,9 +1399,42 @@ function setCameraConfig(patch, reset){
   if(reset || (patch.mode && patch.mode !== previousMode)) resetCameraState();
   camSnapNext = true;
 }
+const LETTERBOX_COLOR = new THREE.Color(0x141518);
+function letterboxColor(){
+  if(CAM_CFG.letterboxColor){ try { LETTERBOX_COLOR.set(CAM_CFG.letterboxColor); } catch(err){} }
+  return LETTERBOX_COLOR;
+}
+// keep the game HUD confined to the camera's rendered rectangle so the on-screen
+// UI (score, legend, speedo…) never spills outside a letterboxed / cropped frame
+let lastHudRectKey = '';
+function syncHudRect(css){
+  const hud = document.getElementById('hud');
+  if(!hud) return;
+  const portrait = css ? (css.h > css.w) : (innerHeight > innerWidth);
+  const key = (css ? (css.x + ',' + css.y + ',' + css.w + ',' + css.h) : 'full') + '|' + portrait;
+  if(key === lastHudRectKey) return;
+  lastHudRectKey = key;
+  const radio = document.getElementById('radio');
+  if(css){
+    hud.style.left = css.x + 'px'; hud.style.top = css.y + 'px';
+    hud.style.width = css.w + 'px'; hud.style.height = css.h + 'px';
+    hud.style.right = 'auto'; hud.style.bottom = 'auto';
+    if(radio){
+      radio.style.setProperty('--radio-x', (css.x + css.w / 2) + 'px');
+      radio.style.bottom = (innerHeight - (css.y + css.h)) + 'px';
+      radio.style.setProperty('--radio-width', 'min(' + Math.round(css.w * 0.92) + 'px, 880px)');
+    }
+  } else {
+    hud.style.left = hud.style.top = hud.style.width = hud.style.height = hud.style.right = hud.style.bottom = '';
+    if(radio){ radio.style.removeProperty('--radio-x'); radio.style.bottom = ''; radio.style.removeProperty('--radio-width'); }
+  }
+  // portrait / phone frame: drop the legend and let the input manager show touch
+  document.body.classList.toggle('lk-portrait', portrait);
+  if(GAME.input && GAME.input.setPortrait) GAME.input.setPortrait(portrait);
+}
 function renderPlayerCamera(targetRect){
   const area = targetRect || {x:0, y:0, w:innerWidth, h:innerHeight};
-  PLAYER_CAMERA.renderScoped({
+  const rect = PLAYER_CAMERA.renderScoped({
     config: CAM_CFG,
     renderer,
     camera,
@@ -1408,7 +1443,7 @@ function renderPlayerCamera(targetRect){
     offsetX: area.x || 0,
     offsetY: area.y || 0,
     clip: !!targetRect,
-    clearColor: scene.background && scene.background.isColor ? scene.background : scene.fog.color,
+    clearColor: letterboxColor(),
     render: rect => {
       if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled))){
         if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
@@ -1419,6 +1454,16 @@ function renderPlayerCamera(targetRect){
       }
     },
   });
+  // confine the HUD to the actual rendered frame (letterbox / editor viewport).
+  // renderer rects use WebGL bottom-left origin; convert to CSS top-left for the DOM.
+  const clipped = rect.scoped || !!targetRect;
+  if(clipped){
+    const cssX = (area.x || 0) + rect.x;
+    const cssTop = innerHeight - ((area.y || 0) + rect.y + rect.h);
+    syncHudRect({x: cssX, y: cssTop, w: rect.w, h: rect.h});
+  } else {
+    syncHudRect(null);
+  }
 }
 canvas.addEventListener('pointerdown', e => {
   if((GAME.state.editorActive && !GAME.state.editorPreview) || e.button > 0) return;
@@ -1616,6 +1661,69 @@ addEventListener('keyup', e => {
   keys[e.key.toLowerCase()] = false;
 });
 
+// ------------------------------------------------ input manager (keyboard / gamepad / touch)
+// Abstract driving actions resolved per player from the active device.
+// Project rules (allowed devices, default bindings) come from meta.input;
+// the player's in-game remaps layer on top. See js/runtime/input/*.
+const INPUT = window.LK_RUNTIME_INPUT_MANAGER ? window.LK_RUNTIME_INPUT_MANAGER.create({}) : null;
+GAME.input = INPUT;
+let lastResetHeld = false;
+
+function readDriveInput(){
+  if(INPUT) return INPUT.player(0).drive();
+  // fallback if the input modules failed to load: legacy keyboard
+  return {
+    steer: ((keys['a']||keys['arrowleft']) ? 1 : 0) - ((keys['d']||keys['arrowright']) ? 1 : 0),
+    throttle: (keys['w']||keys['arrowup']) ? 1 : 0,
+    brake: (keys['s']||keys['arrowdown']) ? 1 : 0,
+    handbrake: !!keys[' '],
+    reset: false,
+  };
+}
+function checkResetEdge(){
+  if(!INPUT) return;
+  const held = !!INPUT.player(0).drive().reset;
+  if(held && !lastResetHeld) resetCar();
+  lastResetHeld = held;
+}
+function applyProjectInputConfig(){
+  if(!INPUT) return;
+  let cfg = null;
+  try {
+    const store = window.LK_STORE;
+    const project = store && store.loadProject ? store.loadProject() : null;
+    cfg = project && project.meta ? project.meta.input : null;
+  } catch(err){}
+  if(INPUT.setOverrideEnabled) INPUT.setOverrideEnabled(true);   // game applies player remaps (editor turned this off)
+  INPUT.setConfig(cfg);
+}
+let MAPPING = null;
+if(INPUT){
+  if(window.LK_RUNTIME_TOUCH_CONTROLS){
+    window.LK_RUNTIME_TOUCH_CONTROLS.create({manager: INPUT, mount: document.getElementById('hud') || document.body});
+  }
+  // draggable/resizable Mapping window shared by the in-game Controls menu
+  if(window.LK_RUNTIME_WINDOW_MANAGER && window.LK_RUNTIME_MAPPING_OVERLAY){
+    const WM = window.LK_RUNTIME_WINDOW_MANAGER.create({storageKey: 'lotking.windows.game.v1'});
+    const session = {
+      getConfig: () => INPUT.getConfig(),
+      setContext: id => INPUT.setActiveContext(id),
+      remap: (deviceId, action, binding) => INPUT.remap(deviceId, action, binding),
+      addInstance: type => INPUT.addInstance(type),
+      removeInstance: id => INPUT.removeInstance(id),
+      onChange: fn => INPUT.onChange(fn),
+      liveKeyboardDown: code => INPUT.liveKeyboardDown(code),
+      liveGamepad: idx => INPUT.liveGamepad(idx),
+    };
+    MAPPING = window.LK_RUNTIME_MAPPING_OVERLAY.create({wm: WM, session, lang: () => 'it', windowId: 'lk-mapping-game'});
+    GAME.input.openMapping = () => MAPPING && MAPPING.open();
+  }
+  if(window.LK_RUNTIME_INPUT_MENU){
+    window.LK_RUNTIME_INPUT_MENU.create({manager: INPUT, body: document.getElementById('lkControlsBody'), lang: 'it', openMapping: () => MAPPING && MAPPING.open()});
+  }
+  applyProjectInputConfig();
+}
+
 function resetCar(){
   P.pos.set(SPAWN.x, 0, SPAWN.z); P.heading = SPAWN.heading; P.vel.set(0,0,0);
   P.yawRate = 0; P.steer = 0;
@@ -1736,6 +1844,7 @@ function launchLevel(levelId){
       }
     }
   }
+  applyProjectInputConfig();   // pick up this level's meta.input before play
   if(GAME_FLOW) GAME_FLOW.launchLevel(levelId);
 }
 
@@ -2090,8 +2199,10 @@ function stepGameplayFrame(dt, shouldRender){
 
 function loop(now){
   requestAnimationFrame(loop);
+  if(INPUT) INPUT.update();              // poll gamepads / refresh device assignments each frame
   let dt = (now - prevT)/1000; prevT = now;
   if(dt > .05) dt = .05;                 // clamp: no physics explosions on tab-back
+  if(SESSION.isStarted() || GAME.state.editorPreview) checkResetEdge();
   if(GAME.hooks.frameOverride){ GAME.hooks.frameOverride(dt); return; }   // editor takes over
   if(!SESSION.isStarted()){ renderPlayerCamera(); return; }
   stepGameplayFrame(dt, true);

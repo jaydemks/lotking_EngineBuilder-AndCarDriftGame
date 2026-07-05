@@ -13,6 +13,7 @@ function create(deps){
   const selectRow = deps.selectRow;
   const sliderRow = deps.sliderRow;
   const checkRow = deps.checkRow;
+  const colorRow = deps.colorRow;
   const el = deps.el;
 
   function normalizeCameraConfig(cam){
@@ -55,6 +56,9 @@ function create(deps){
       {value:'1:1', label:'1:1 square'},
       {value:'9:16', label:'9:16 vertical'},
     ], v => setCam({aspect:v})).root);
+    // fill outside the camera frame (letterbox / crop) — dark grey by default
+    const lbHex = parseInt(String(cam.letterboxColor || '#141518').replace('#', ''), 16) || 0x141518;
+    if(colorRow) sc.body.appendChild(colorRow('Frame background', lbHex, v => setCam({letterboxColor: '#' + ('000000' + (v >>> 0).toString(16)).slice(-6)})).root);
     sc.body.appendChild(sliderRow('Base FOV', cam.fov, 40, 100, 1, v => setCam({fov:v})).root);
     sc.body.appendChild(sliderRow('Speed FOV gain', cam.fovSpeedGain, 0, .5, .01, v => setCam({fovSpeedGain:v})).root);
     sc.body.appendChild(sliderRow('Free zoom min', cam.minDist, 2, 12, .5, v => setCam({minDist:v})).root);

@@ -1027,3 +1027,48 @@ body.editor-hud-hidden #lkQuickAudio { display:none; }
 #lkEditor.lk-light .lk-levels-title, #lkEditor.lk-light .lk-prefs-title { color:#b07d00; }
 #lkEditor.lk-light .lk-prefs-tabs button { background:#eef1f6; color:#7c8698; border-color:#c3ccd9; }
 #lkEditor.lk-light .lk-prefs-tabs button.on { color:#1c2636; border-color:#b07d00; background:#fff; }
+
+/* ---------- Editor input settings (project controls) ---------- */
+.lk-input-settings { display:flex; flex-direction:column; gap:14px; }
+.lk-is-block { border-top:1px solid rgba(255,255,255,.08); padding-top:12px; }
+.lk-is-block:first-child { border-top:none; padding-top:0; }
+.lk-is-h { font-size:12px; font-weight:800; letter-spacing:1px; color:#fff; margin-bottom:8px; }
+.lk-is-sub { font-size:10px; font-weight:800; letter-spacing:1px; color:#8b93a7; text-transform:uppercase; margin:8px 0 4px; }
+.lk-is-toggle { display:flex; align-items:center; gap:8px; color:#dfe5f1; font-size:12px; font-weight:600; padding:4px 0; }
+.lk-is-toggle input { width:16px; height:16px; accent-color:#4be3a0; }
+.lk-is-row, .lk-is-bind { display:flex; align-items:center; gap:10px; padding:5px 0; }
+.lk-is-plabel, .lk-is-bindname { flex:1; font-size:12px; color:#dfe5f1; }
+.lk-is-select {
+  height:32px; min-width:150px; border-radius:7px; border:1px solid rgba(255,255,255,.14);
+  background:#12161f; color:#dfe5f1; padding:0 10px;
+}
+.lk-is-key {
+  min-width:96px; height:30px; border-radius:7px; border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.05); color:#fff; font-weight:800; letter-spacing:1px; cursor:pointer;
+}
+.lk-is-key:hover { border-color:#ffd166; }
+.lk-is-key.capturing { border-color:#4be3a0; color:#4be3a0; }
+.lk-is-note { font-size:11px; color:#8b93a7; padding:5px 0; }
+.lk-is-reset {
+  margin-top:10px; width:100%; height:34px; border-radius:7px; cursor:pointer;
+  border:1px solid rgba(239,71,111,.4); background:rgba(239,71,111,.12); color:#ff9db1; font-weight:800; letter-spacing:1px;
+}
+.lk-is-reset:hover { background:rgba(239,71,111,.2); }
+
+/* Settings overlay made draggable/resizable by the window manager */
+.lk-prefs-panel.lk-movable { position:fixed; margin:0; max-height:none; }
+#lkPrefsOverlay { align-items:flex-start; justify-content:flex-start; }
+.lk-input-settings .lk-is-map { margin-top:6px; }
+
+/* input settings — live connected-devices list */
+.lk-is-dev { display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; color:#8b93a7; }
+.lk-is-dev.on { color:#dfe5f1; }
+.lk-is-dot { width:9px; height:9px; border-radius:50%; flex:none; background:#3a4152; }
+.lk-is-dev.on .lk-is-dot.lk-dev-keyboard { background:#4be3a0; }
+.lk-is-dev.on .lk-is-dot.lk-dev-gamepad { background:#9db4ff; }
+.lk-is-dev.on .lk-is-dot.lk-dev-touch { background:#ffd166; }
+.lk-is-devname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lk-is-devstate { font-size:10px; font-weight:800; letter-spacing:1px; text-transform:uppercase; color:#6f7a91; }
+.lk-is-dev.on .lk-is-devstate { color:#4be3a0; }
+
+.lk-prefs-color input[type=color] { width:44px; height:28px; border:1px solid rgba(255,255,255,.14); border-radius:6px; background:none; cursor:pointer; padding:2px; }

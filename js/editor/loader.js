@@ -10,6 +10,14 @@ let loading = null;
 const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.58, 'loading editor camera tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js'],
   [.72, 'loading transform tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js'],
+  // runtime input/UI modules — loaded here too so the editor works even if the
+  // host page HTML was cached before these were added (skipped if already present)
+  [.73, 'loading window manager', 'js/runtime/ui/window-manager.js'],
+  [.735, 'loading input actions', 'js/runtime/input/input-actions.js'],
+  [.74, 'loading input devices', 'js/runtime/input/input-devices.js'],
+  [.745, 'loading input manager', 'js/runtime/input/input-manager.js'],
+  [.75, 'loading device visuals', 'js/runtime/input/device-visuals.js'],
+  [.755, 'loading mapping overlay', 'js/runtime/input/mapping-overlay.js'],
   [.795, 'loading editor core', 'js/editor/editor-core.js'],
   [.797, 'loading editor layout', 'js/editor/editor-layout.js'],
   [.80, 'loading editor viewport tools', 'js/editor/viewport-picking.js'],
@@ -41,6 +49,7 @@ const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.929952, 'loading selection manager', 'js/editor/selection-manager.js'],
   [.929955, 'loading history manager', 'js/editor/history-manager.js'],
   [.92996, 'loading project io', 'js/editor/project-io.js'],
+  [.929961, 'loading input settings', 'js/editor/input-settings.js'],
   [.929965, 'loading add actions', 'js/editor/add-actions.js'],
   [.929967, 'loading scene menu actions', 'js/editor/scene-menu-actions.js'],
   [.92997, 'loading inspector ui', 'js/editor/inspector-ui.js'],

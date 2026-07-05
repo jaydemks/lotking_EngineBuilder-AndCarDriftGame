@@ -21,6 +21,8 @@ function create(deps){
   const confirmEditorAction = deps.confirmEditorAction;
   const reopenEditorAndReload = deps.reopenEditorAndReload;
   const status = deps.status;
+  const applyInputConfig = deps.applyInputConfig || function(){};
+  const ACT = window.LK_RUNTIME_INPUT_ACTIONS;
 
   function slugifyTrackName(name){
     return (name || 'track').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'track';
@@ -33,10 +35,15 @@ function create(deps){
     const input = $('#lkTrackName');
     if(input) input.value = ED.trackName;
     if(GAME.levels && GAME.levels.setEditorTrack) GAME.levels.setEditorTrack({id:ED.trackId, name:ED.trackName});
+    // per-project input config (allowed devices, default bindings, players)
+    ED.inputConfig = ACT ? ACT.normalizeConfig(meta.input) : (meta.input || null);
+    applyInputConfig(ED.inputConfig);
   }
 
   function currentTrackMeta(){
-    return {trackId: ED.trackId || slugifyTrackName(ED.trackName), trackName: ED.trackName || 'Parking Lot'};
+    const meta = {trackId: ED.trackId || slugifyTrackName(ED.trackName), trackName: ED.trackName || 'Parking Lot'};
+    if(ED.inputConfig) meta.input = ACT ? ACT.normalizeConfig(ED.inputConfig) : ED.inputConfig;
+    return meta;
   }
 
   function loadTrackMeta(){

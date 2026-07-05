@@ -19,6 +19,7 @@ const CLEAR_RESTORE_COLOR = new THREE.Color();
 function createConfig(){
   return {
     aspect: 'auto',
+    letterboxColor: '#141518',   // fill outside the camera frame (dark grey by default)
     mode: 'free',
     fov: 62,
     fovSpeedGain: .16,
