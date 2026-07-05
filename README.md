@@ -20,13 +20,16 @@ No build step, no install. One HTML file, plain JavaScript, and a local static s
 
 **Tweak the HUD.** The radio/sound HUD is editable in place: move and scale the frame PNG and the digital interface, position the clickable volume/bass buttons over your own artwork, and it all persists with the project.
 
-## Current Status
+## Documentation and release notes
 
-Current working milestone: **0.5.1**.
+The README is intentionally kept stable so it does not need to be rewritten for every version.
 
-This release closes the main Engine Editor refactor pass after the first Git-ready beta baseline. The editor has been split into focused modules, the playable export flow has been broken into smaller pieces, and the Sound Designer now has separate template and form-control modules.
+Version-specific status, completed work, known issues, and roadmap notes live in the project docs and are updated together with each release:
 
-Recently restored and hardened editor areas include transform gizmos, viewport camera movement, menu music controls, loading/progress overlays, settings tabs, pinned sidebar icons, quick audio positioning, top toolbar actions, playable ZIP export, and Sound Designer loading.
+- `docs/releases/` - archived release notes for completed milestones.
+- `docs/ARCHITECTURE.md` - high-level editor/runtime architecture notes.
+- `docs/RUNTIME_MODULES.md` - runtime module map and responsibilities.
+- `Release_Notes_v*.md` - release-preparation notes when a new version is being finalized.
 
 ## Project layout
 
@@ -36,6 +39,7 @@ Recently restored and hardened editor areas include transform gizmos, viewport c
 - `js/editor/` — the Engine Editor UI, the lazy loader, and the Sound Designer overlay.
 - `js/engine/scene-store.js` — persistence: level library, project (LKEP) export/import, asset blobs, player blueprints, sound sets.
 - `css/` — game and editor styling.
+- `docs/` — architecture notes, runtime module notes, and versioned release history.
 - `models/`, `media/`, `musics/` — bundled assets (car models, HUD art, engine samples, music).
 
 ## Large Assets
@@ -79,6 +83,6 @@ http://localhost:8000/drift-parking-lot.html
 
 Opening the HTML file directly (`file://`) partially works, but a local server is the supported way: models, audio samples and browser storage all behave correctly there.
 
-## Where it's going
+## Roadmap
 
-The current released version is **0.5.1**, on the road to **1.0.0 Stable Beta**. The next working release notes live in `RELEASE_NOTES.md`; archived release notes live under `docs/releases/`, including `docs/releases/v0.5.1.md` for the completed refactor release.
+The project is moving toward a future **1.0.0 Stable Beta**. The detailed roadmap is tracked through the active release notes and the archived milestone notes in `docs/releases/`, so GitHub's main README can stay focused on what the project is and how to run it.
