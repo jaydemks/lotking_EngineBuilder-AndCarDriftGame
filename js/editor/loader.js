@@ -160,7 +160,10 @@ function openEditor(){
   const state = window.LOT_KING && window.LOT_KING.state;
   if(actions && actions.unloadLevel && state && (state.started || state.levelLoaded || state.editorPreview)) actions.unloadLevel();
   if(actions && actions.prepareEditorLevel) actions.prepareEditorLevel();
-  ensureEditor().then(editor => editor.enter()).catch(()=>{});
+  ensureEditor().then(editor => editor.enter()).catch(() => {
+    const overlay = document.getElementById('overlay');
+    if(overlay) overlay.classList.remove('hidden');
+  });
 }
 
 const btn = document.getElementById('editorBtn');

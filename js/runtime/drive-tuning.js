@@ -31,6 +31,7 @@ function create(options){
     cfg.maxSpeed = baseCfg.maxSpeed * (1 + maxSpeed * .45);
     cfg.brake = baseCfg.brake * clamp(1 + brake * .55, 0.55, 1.65);
     drive.brakeBias = clamp(baseDrive.brakeBias + brake * .06, 0.5, 0.72);
+    drive.brakeDriveLock = clamp((baseDrive.brakeDriveLock == null ? 1 : baseDrive.brakeDriveLock) * (1 + brake * .38), 0.55, 1.65);
     drive.wheelspin = clamp(baseDrive.wheelspin * (1 + torque * .32), 1.2, 2.8);
 
     cfg.steerMax = baseCfg.steerMax * clamp(1 + steer * .35, 0.65, 1.45);

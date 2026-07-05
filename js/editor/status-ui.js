@@ -48,8 +48,11 @@ function create(opts){
     work.classList.add('open', 'lk-status-' + (state || 'loading'));
     t.textContent = title || 'Processo in corso';
     s.textContent = step || '';
-    const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+    const numericPct = Number(pct);
+    const clamped = Math.max(0, Math.min(100, Number.isFinite(numericPct) ? numericPct : 0));
     p.textContent = clamped ? (Math.round(clamped) + '%') : '';
+    f.style.display = 'block';
+    f.style.height = '100%';
     f.style.width = clamped + '%';
   }
 

@@ -1,18 +1,21 @@
-# Lot King Engine Builder & Car Drift Game Architecture
+# LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture after the editor refactor work and the v0.5.2 input-system pass.
+This document describes the current project architecture after the editor/runtime split and v0.5.4 playable-export pass.
 
-The project is still intentionally simple at the platform level: one browser page, plain JavaScript, no bundler, and a static-server workflow. The internal structure, however, is now split into a runtime, an editor, a persistence layer, shared UI/input helpers, and versioned release documentation.
+The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, shared UI/input helpers, playable export pipeline, and versioned release documentation.
 
 ## High-Level Shape
 
-- `drift-parking-lot.html` is the browser entry point. It loads the runtime, shared styles, runtime modules, the store, and the editor loader.
+- `index.html` is the landing/menu entrypoint. It shows the project menu, owns landing music/mute controls, and can embed gameplay as a seamless frame.
+- `gameplay.html` is the playable runtime entrypoint. It loads gameplay/runtime code without loading editor UI modules.
+- `engine_editor.html` is the standalone editor entrypoint. It loads the full runtime/editor DOM needed by editor preview, HUD editing, radio, settings, and the Sound Designer.
+- `drift-parking-lot.html` remains as a compatibility redirect to `index.html`.
 - `js/lot-king.js` is the runtime composition root. It creates `window.LOT_KING`, wires the runtime modules together, owns the main render/update loop, and keeps the public bridge stable for the editor.
 - `js/runtime/` contains focused gameplay/runtime modules: assets, loading, world state, world generation, player camera, physics, audio, sky/weather, HUD, menus, input, track/session flow, and model handling.
 - `js/runtime/input/` contains the multi-device input stack introduced in v0.5.2: action schema, physical device sources, per-player assignment, in-game controls menu, visual mapping overlay, and touch controls.
 - `js/runtime/ui/` contains runtime/editor-shared UI utilities, currently the floating window manager used by the mapping overlay and movable editor settings panels.
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
-- `js/editor/loader.js` lazy-loads the editor and its dependencies only when the user opens the Engine Editor.
+- `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface.
 - `js/editor/` contains the modular Engine Editor: core state, layout, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, playable export, Sound Designer, input settings, and preview/runtime handoff.
 - `css/lot-king.css` styles runtime UI, HUD, menus, touch controls, mapping windows, and shared overlays.
 - `css/editor.css` styles the Engine Editor, inspector panels, editor settings, asset dock, outliner, Sound Designer, and editor-specific overlays.
@@ -95,21 +98,18 @@ Editor-side input:
 - The editor disables runtime user overrides while authoring so Preview reflects the pure project config.
 - The same mapping overlay is opened from editor settings and writes project defaults instead of player overrides.
 
-## Editor Loading Model
+## Entry Point and Loading Model
 
-The editor is lazy-loaded through `js/editor/loader.js`. The runtime stays playable without loading OrbitControls, TransformControls, editor CSS, or the large editor module set.
+The project no longer treats a single HTML page as both the menu, gameplay, and editor surface.
 
-The loader:
+Current loading responsibilities:
 
-- waits for runtime/store readiness;
-- loads `css/editor.css`;
-- loads OrbitControls and TransformControls from the Three.js examples CDN;
-- loads runtime shared modules needed by the editor, such as input actions and the window manager;
-- loads editor modules in a fixed staged order;
-- initializes `window.LOT_KING.editor`;
-- supports reopening the editor after level-switch reloads through sessionStorage.
+- `index.html` loads the landing/menu UI and keeps menu music alive while transitioning into embedded gameplay.
+- `gameplay.html` loads the gameplay runtime, settings, HUD, radio, audio, track catalog, scene store, and runtime modules needed to play.
+- `engine_editor.html` loads the editor-specific DOM and module stack so editor preview works with the same runtime systems while remaining isolated from normal gameplay.
+- `drift-parking-lot.html` redirects old links to the new landing page.
 
-The staged loader is now part of the architecture. New editor modules should be added to `EDITOR_SCRIPT_STAGES` in dependency order.
+The runtime should stay playable without loading editor CSS or `js/editor/*` modules. The editor can still use the staged loader/module ordering internally, but the architectural boundary is now page-level separation first.
 
 ## Engine Editor Architecture
 
@@ -176,12 +176,14 @@ The v0.5.2 camera/HUD work confines HUD and radio panels to the actual rendered 
 
 ## Playable Export
 
-Playable ZIP export is no longer one large editor block.
+Playable ZIP export builds a gameplay-only package. It should include the runtime page, runtime scripts/styles, selected level projects, and referenced assets, but not the standalone editor.
 
 - `playable-export.js` coordinates the flow.
-- `playable-export-level-picker.js` handles selecting which level/project to package.
+- `playable-export-level-picker.js` handles selecting which level/project set to package and which level starts first.
 - `playable-export-assets.js` normalizes referenced project assets and blob-backed files.
 - `playable-export-zip.js` builds the export payload.
+
+The ZIP bootstrap writes the selected package into browser storage, then launches `gameplay.html`. Exported gameplay should show only the levels intentionally included in the package. Embedded Sound Designer engine sound sets are carried with levels so playable builds can match editor vehicle audio.
 
 This flow is separate from editor project export/import, which remains in `project-io.js` and `scene-store.js`.
 

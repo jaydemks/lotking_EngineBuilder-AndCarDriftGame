@@ -20,7 +20,6 @@ function create(options){
   const opts = options || {};
   const tracks = (opts.tracks || DEFAULT_TRACKS).map(t => Object.assign({}, t));
   let current = null;
-  const overlay = opts.overlay;
   const levelSelect = opts.levelSelect;
   const levelCards = opts.levelCards;
   const loadText = opts.loadText;
@@ -64,15 +63,13 @@ function create(options){
 
   function show(){
     render();
-    if(overlay) overlay.classList.add('choosing-level');
     if(levelSelect) levelSelect.setAttribute('aria-hidden', 'false');
     if(loadText) loadText.textContent = tracks.length ? 'select track' : 'no tracks available';
   }
 
   function hide(resetText){
-    if(overlay) overlay.classList.remove('choosing-level');
     if(levelSelect) levelSelect.setAttribute('aria-hidden', 'true');
-    if(resetText && loadText) loadText.textContent = 'choose track or editor';
+    if(resetText && loadText) loadText.textContent = 'choose track';
   }
 
   function prepareEditor(){

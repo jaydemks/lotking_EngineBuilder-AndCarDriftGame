@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LOT KING ENGINE EDITOR</title>
+  <link rel="stylesheet" href="css/lot-king.css">
+</head>
+<body>
+  <audio id="menuMusicAudio" preload="auto" loop>
+    <source src="musics/menu/Num0%20%20JustWait.mp3" type="audio/mpeg">
+  </audio>
+
+  <div id="menuLayer">
+    <div id="overlay" class="menu-preloading">
+      <h1>LOT KING ENGINE EDITOR</h1>
+      <div class="sub">Parking-lot drift challenge</div>
+      <div id="menuMain" class="menu-main">
+        <button id="playBtn" type="button">▶ PLAY GAME</button>
+        <button id="editorBtn" title="Open the engine editor" type="button">⚙ ENGINE EDITOR</button>
+      </div>
+      <div id="loadBarWrap"><div id="loadBar"></div></div>
+      <div id="loadTxt"></div>
+    </div>
+  </div>
+
+  <div id="gameplayHost" aria-hidden="true">
+    <iframe id="gameplayFrame" title="LOT KING Gameplay" src="about:blank"></iframe>
+  </div>
+
+  <footer id="landingSignature" aria-label="Project signature">
+    <div class="landing-signature-main">
+      <span>LOT KING ENGINE EDITOR</span>
+      <span class="landing-version">v0.5.4 WIP</span>
+      <a href="https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame" target="_blank" rel="noopener noreferrer" title="Open public GitHub repository">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.2c0 3.62 2.29 6.69 5.47 7.77.4.08.55-.18.55-.4v-1.4c-2.23.5-2.7-1.1-2.7-1.1-.36-.95-.89-1.2-.89-1.2-.73-.51.06-.5.06-.5.8.06 1.23.85 1.23.85.72 1.27 1.89.9 2.35.69.07-.53.28-.9.51-1.1-1.78-.21-3.64-.91-3.64-4.04 0-.9.31-1.63.82-2.2-.08-.21-.36-1.05.08-2.18 0 0 .67-.22 2.2.84A7.48 7.48 0 0 1 8 3.96c.68 0 1.36.09 2 .28 1.53-1.06 2.2-.84 2.2-.84.44 1.13.16 1.97.08 2.18.51.57.82 1.3.82 2.2 0 3.14-1.87 3.83-3.65 4.03.29.26.54.76.54 1.53v2.27c0 .22.15.48.55.4A8.18 8.18 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z"/>
+        </svg>
+        <span>GitHub</span>
+      </a>
+    </div>
+    <button id="landingMusicMute" type="button" aria-pressed="false">MUSIC ON</button>
+  </footer>
+
+  <script>
+    (function(){
+      'use strict';
+      var playBtn = document.getElementById('playBtn');
+      var editorBtn = document.getElementById('editorBtn');
+      var frame = document.getElementById('gameplayFrame');
+      var menuMusic = document.getElementById('menuMusicAudio');
+      var musicMuteBtn = document.getElementById('landingMusicMute');
+      var started = false;
+      var fadeTimer = null;
+      var playPromise = null;
+
+      function syncMusicButton(){
+        if(!musicMuteBtn || !menuMusic) return;
+        var off = menuMusic.muted || menuMusic.paused;
+        musicMuteBtn.textContent = off ? 'MUSIC OFF' : 'MUSIC ON';
+        musicMuteBtn.setAttribute('aria-pressed', menuMusic.muted ? 'true' : 'false');
+        musicMuteBtn.classList.toggle('off', off);
+      }
+
+      function startLandingMusic(){
+        if(!menuMusic) return Promise.resolve();
+        if(playPromise) return playPromise;
+        if(started) return Promise.resolve();
+        started = true;
+        menuMusic.volume = 0.55;
+        playPromise = menuMusic.play().catch(function(){
+          started = false;
+          playPromise = null;
+        }).then(function(){
+          syncMusicButton();
+        });
+        return playPromise;
+      }
+
+      function fadeLandingMusic(duration){
+        if(!menuMusic || menuMusic.paused) return Promise.resolve();
+        if(fadeTimer) clearInterval(fadeTimer);
+        var ms = duration || 900;
+        var startVolume = menuMusic.volume;
+        var startTime = performance.now();
+        return new Promise(function(resolve){
+          fadeTimer = setInterval(function(){
+            var t = Math.min(1, (performance.now() - startTime) / ms);
+            menuMusic.volume = startVolume * (1 - t);
+            if(t >= 1){
+              clearInterval(fadeTimer);
+              fadeTimer = null;
+              menuMusic.pause();
+              menuMusic.volume = 0.55;
+              started = false;
+              playPromise = null;
+              syncMusicButton();
+              resolve();
+            }
+          }, 30);
+        });
+      }
+
+      function openGameplay(){
+        if(!frame) return;
+        frame.onload = function(){
+          document.body.classList.add('showing-gameplay');
+          document.body.classList.remove('menu-leaving');
+          frame.onload = null;
+        };
+        frame.src = 'gameplay.html?embedded=1';
+      }
+
+      function closeGameplay(){
+        if(!document.body.classList.contains('showing-gameplay')) return;
+        document.body.classList.remove('showing-gameplay');
+        document.body.classList.add('menu-leaving');
+        setTimeout(function(){
+          frame.src = 'about:blank';
+          document.body.classList.remove('menu-leaving');
+        }, 220);
+      }
+
+      playBtn && playBtn.addEventListener('click', function(){
+        openGameplay();
+      });
+      editorBtn && editorBtn.addEventListener('click', function(){
+        startLandingMusic().then(function(){
+          return fadeLandingMusic(900);
+        }).then(function(){
+          location.href = 'engine_editor.html';
+        });
+      });
+
+      document.addEventListener('pointerdown', function(event){
+        if(event.target && event.target.closest && event.target.closest('#playBtn, #landingSignature')) return;
+        startLandingMusic();
+      }, {once:true});
+
+      if(musicMuteBtn && menuMusic){
+        musicMuteBtn.addEventListener('click', function(){
+          menuMusic.muted = !menuMusic.muted;
+          if(!menuMusic.muted && menuMusic.paused) startLandingMusic();
+          syncMusicButton();
+        });
+        syncMusicButton();
+      }
+
+      window.addEventListener('message', function(event){
+        if(event.origin && event.origin !== 'null' && event.origin !== location.origin) return;
+        if(!event.data) return;
+        if(event.data.type === 'lot-king:return-menu') closeGameplay();
+        if(event.data.type === 'lot-king:fade-menu-music') fadeLandingMusic(1200);
+      });
+
+      setTimeout(function(){
+        var overlay = document.getElementById('overlay');
+        if(overlay) overlay.classList.remove('menu-preloading');
+      }, 300);
+    })();
+  </script>
+</body>
+</html>

@@ -27,7 +27,7 @@ function create(deps){
     slugifyTrackName,
     buildPlayableBootstrapHtml,
   });
-  const PLAYABLE_ZIP_RUNTIME_TEMPLATE = playableExportZip ? playableExportZip.RUNTIME_TEMPLATE : 'drift-parking-lot.html';
+  const PLAYABLE_ZIP_RUNTIME_TEMPLATE = playableExportZip ? playableExportZip.RUNTIME_TEMPLATE : 'gameplay.html';
 
   function safeJsonForInlineScript(value){
     return JSON.stringify(value)
@@ -47,8 +47,8 @@ function create(deps){
     return {
       format: 'LKEP',
       version: src.version || 1,
-      game: src.game || 'Lot King Engine Builder & Car Drift Game',
-      name: src.name || 'Lot King Engine Builder Editor Project',
+      game: src.game || 'LOT KING ENGINE EDITOR & Car Drift Game',
+      name: src.name || 'LOT KING ENGINE EDITOR Project',
       savedAt: src.savedAt || new Date().toISOString(),
       meta: Object.assign({}, meta, {trackId, trackName}),
       scene: src.scene || src,
@@ -152,10 +152,10 @@ function create(deps){
     return {
       format: 'LKPKG',
       version: 1,
-      game: 'Lot King Engine Builder & Car Drift Game',
+      game: 'LOT KING ENGINE EDITOR & Car Drift Game',
       createdAt: now,
       exportMode: 'playable-track',
-      runtime: runtimePath || 'drift-parking-lot.html',
+      runtime: runtimePath || 'gameplay.html',
       activeId: activeProject ? activeProject.id : (levels[0] ? levels[0].id : null),
       warnings: warnings,
       levels,
@@ -172,10 +172,10 @@ function create(deps){
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LOT KING ENGINE BUILDER — Playable Track</title>
+    <title>LOT KING ENGINE EDITOR — Playable Track</title>
   </head>
   <body>
-  <p>Loading playable Lot King Engine Builder level...</p>
+  <p>Loading playable LOT KING ENGINE EDITOR level...</p>
   <script>
   (function(){
     'use strict';
@@ -277,7 +277,7 @@ function create(deps){
   function exportPlayableProject(project, projectName){
     const progressToken = beginStatusWork('Export playable HTML', 'Preparazione pacchetto', 'loading');
     updateStatusWork(progressToken, 12, 'Costruzione bundle', 'loading');
-    Promise.resolve().then(() => buildPlayableBundle(project, 'drift-parking-lot.html', projectName)).then(bundle => {
+    Promise.resolve().then(() => buildPlayableBundle(project, 'gameplay.html', projectName)).then(bundle => {
       updateStatusWork(progressToken, 60, 'Creazione documento HTML', 'loading');
       const level = bundle.levels[0];
       const html = buildPlayableHtml(bundle);

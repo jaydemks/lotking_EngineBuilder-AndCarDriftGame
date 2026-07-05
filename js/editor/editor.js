@@ -394,6 +394,7 @@ assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
   replaceObjectWithFile,
   placeAssetRef,
   status,
+  openMenu,
 });
 function acceptEditorFileDrag(e){ return assetDnd.acceptEditorFileDrag(e); }
 function acceptAssetBrowserDrag(e){ return assetDnd.acceptAssetBrowserDrag(e); }
@@ -991,10 +992,6 @@ function stopPlayPreview(){ return editorRuntime.stopPlayPreview(); }
 function exitEditor(toPlay){ return editorRuntime.exitEditor(toPlay); }
 function editorFrame(dt){ return editorRuntime.editorFrame(dt); }
 function syncGamePreviewCamera(){ return editorRuntime.syncGamePreviewCamera(); }
-
-// ------------------------------------------------ menu button (start screen)
-const menuBtn = document.getElementById('editorBtn');
-if(menuBtn) menuBtn.addEventListener('click', enterEditor);
 
 addEventListener('lotking:radiohudchange', e => {
   if(!(ED.active && ED.special === 'hud')) return;

@@ -54,6 +54,51 @@ function create(deps){
     return ok ? hit.entity : null;
   }
 
+  function objectLabel(o){
+    if(!o) return 'object';
+    return (o.userData && (o.userData.editorName || o.userData.name || o.userData.id)) || o.name || 'object';
+  }
+
+  function clonePoint(point){
+    return point && point.clone ? point.clone() : point;
+  }
+
+  function openViewportDropChoice(e, opts){
+    const target = opts && opts.target;
+    const point = clonePoint(opts && opts.point);
+    const asset = opts && opts.asset;
+    const files = opts && opts.files ? Array.from(opts.files) : [];
+    const replaceName = objectLabel(target);
+    const items = [
+      {
+        label:'Put here',
+        icon:'📍',
+        action:() => {
+          deps.clearReplaceDropHelper();
+          if(asset){
+            deps.placeAssetRef(asset, point);
+            return;
+          }
+          if(files.length) deps.importAssetFiles(files, {placePoint: point});
+        },
+      },
+      {
+        label:'Replace with ' + replaceName,
+        icon:'📦',
+        action:() => {
+          deps.clearReplaceDropHelper();
+          if(asset && asset.kind === 'imported-glb'){
+            deps.replaceSelectedWithAsset(asset.raw, target);
+            return;
+          }
+          if(files.length) deps.replaceObjectWithFile(target, files[0]);
+        },
+      },
+    ];
+    if(deps.openMenu) deps.openMenu(items, e.clientX + 8, e.clientY + 8);
+    else items[0].action();
+  }
+
   function bindReplaceDropTarget(el, target){
     if(!el || !target) return;
     const clear = () => {
@@ -142,8 +187,11 @@ function create(deps){
           return;
         }
         if(replaceTargetNow && asset.kind === 'imported-glb'){
-          deps.clearReplaceDropHelper();
-          deps.replaceSelectedWithAsset(asset.raw, replaceTargetNow);
+          openViewportDropChoice(e, {
+            target: replaceTargetNow,
+            asset,
+            point: deps.groundPointAt(e.clientX, e.clientY),
+          });
           return;
         }
         deps.clearReplaceDropHelper();
@@ -163,9 +211,11 @@ function create(deps){
         return;
       }
       if(replaceTargetNow){
-        const f = files[0];
-        deps.clearReplaceDropHelper();
-        deps.replaceObjectWithFile(replaceTargetNow, f);
+        openViewportDropChoice(e, {
+          target: replaceTargetNow,
+          files,
+          point: deps.groundPointAt(e.clientX, e.clientY),
+        });
         return;
       }
       deps.clearReplaceDropHelper();

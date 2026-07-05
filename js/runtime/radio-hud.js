@@ -398,6 +398,21 @@ function createRadioHud(deps){
   function prev(){ load(idx-1, true); }
   function togglePlay(){ audio.paused ? audio.play().catch(()=>{}) : audio.pause(); }
   function toggleShuffle(){ shuffle = !shuffle; el.shuf.classList.toggle('on', shuffle); popup(shuffle?'SHUFFLE ON':'SHUFFLE OFF','#4be3a0'); }
+  let suppressPlayerClickUntil = 0;
+  function suppressPlayerClick(){
+    suppressPlayerClickUntil = performance.now() + 320;
+  }
+  function isPlayerClickSuppressed(){
+    return performance.now() < suppressPlayerClickUntil;
+  }
+  function consumeSuppressedPlayerClick(e){
+    if(!isPlayerClickSuppressed()) return false;
+    if(e){
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    return true;
+  }
   function controlFromPoint(x, y){
     const buttons = [
       {el: el.prev, action: prev},
@@ -456,16 +471,17 @@ function createRadioHud(deps){
   function setVolume(v){ extVol = clamp(v, 0, 2); applyVolume(); }
   audio.addEventListener('ended', next);
 
-  el.play.addEventListener('click', togglePlay);
-  el.prev.addEventListener('click', prev);
-  el.next.addEventListener('click', next);
-  el.shuf.addEventListener('click', toggleShuffle);
+  el.play.addEventListener('click', e => { if(consumeSuppressedPlayerClick(e)) return; togglePlay(); });
+  el.prev.addEventListener('click', e => { if(consumeSuppressedPlayerClick(e)) return; prev(); });
+  el.next.addEventListener('click', e => { if(consumeSuppressedPlayerClick(e)) return; next(); });
+  el.shuf.addEventListener('click', e => { if(consumeSuppressedPlayerClick(e)) return; toggleShuffle(); });
   function bindPlayerHit(hit, visual, action){
     hit.addEventListener('pointerenter', () => { if(visual) visual.classList.add('radio-hover'); });
     hit.addEventListener('pointerleave', () => { if(visual) visual.classList.remove('radio-hover'); });
     hit.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
+      if(consumeSuppressedPlayerClick(e)) return;
       if(visual) visual.classList.remove('radio-hover');
       action();
     });
@@ -480,6 +496,7 @@ function createRadioHud(deps){
     if(!hit) return;
     e.preventDefault();
     e.stopPropagation();
+    suppressPlayerClick();
     hit.action();
   }, true);
   window.addEventListener('pointermove', e => {
@@ -492,10 +509,12 @@ function createRadioHud(deps){
   window.addEventListener('pointerup', () => setPlayerControlHover(null), true);
   viewport.addEventListener('click', e => {
     if(!(open || editorPreview) || (e.target && e.target.closest && e.target.closest('.rs-controls button'))) return;
+    if(consumeSuppressedPlayerClick(e)) return;
     const hit = controlFromPoint(e.clientX, e.clientY);
     if(!hit) return;
     e.preventDefault();
     e.stopPropagation();
+    suppressPlayerClick();
     hit.action();
   }, true);
   el.tBar.addEventListener('click', e => {
@@ -509,6 +528,7 @@ function createRadioHud(deps){
   function updateHUD(dt, rpm01, throttle){
     const t = telemetry ? telemetry() : {};
     el.play.textContent = audio.paused ? '▶' : '⏸';
+    el.shuf.classList.toggle('on', shuffle);
     el.tCur.textContent = fmt(audio.currentTime);
     el.tTot.textContent = '/ ' + fmt(audio.duration);
     el.tFill.style.width = (isFinite(audio.duration) && audio.duration>0 ? audio.currentTime/audio.duration*100 : 0) + '%';

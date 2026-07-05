@@ -24,7 +24,7 @@ function create(deps){
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js', local: 'vendor/BokehShader.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js', local: 'vendor/BokehPass.js'},
   ];
-  const RUNTIME_TEMPLATE = 'drift-parking-lot.html';
+  const RUNTIME_TEMPLATE = 'gameplay.html';
   const STATIC_FILES = [
     'css/lot-king.css',
     'js/lot-king.js',
@@ -78,7 +78,7 @@ function create(deps){
   }
 
   function normalizeExportPath(path){
-    return (path || '').replace(/^\.\/+/, '');
+    return (path || '').replace(/^\.\/+/, '').replace(/[?#].*$/, '');
   }
 
   function isRelativePlayableAssetPath(path){
@@ -87,6 +87,14 @@ function create(deps){
       !/^data:/.test(path) &&
       !/^blob:/.test(path) &&
       (path.indexOf('models/') === 0 || path.indexOf('media/') === 0 || path.indexOf('musics/') === 0);
+  }
+
+  function isEditorOnlyExportPath(path){
+    const p = normalizeExportPath(path);
+    return p === 'engine_editor.html' ||
+      p === 'index.html' ||
+      p === 'css/editor.css' ||
+      p.indexOf('js/editor/') === 0;
   }
 
   function collectAssetPathsFromObject(node, bag, seen){
@@ -124,7 +132,7 @@ function create(deps){
     while((m = re.exec(html))){
       const raw = normalizeExportPath(m[1] || '');
       if(!raw || raw === RUNTIME_TEMPLATE) continue;
-      if(raw.startsWith('js/editor/loader.js')) continue;
+      if(isEditorOnlyExportPath(raw)) continue;
       if(isRelativePlayableAssetPath(raw) || raw.startsWith('js/') || raw.startsWith('css/')){
         refs.add(raw);
       }
@@ -134,7 +142,6 @@ function create(deps){
 
   function rewriteRuntimeHtmlForZip(html){
     let out = html;
-    out = out.replace(/<button[^>]+id=["']editorBtn["'][^>]*>[\s\S]*?<\/button>/gi, '');
     VENDOR_LIBS.forEach(item => {
       const quoted1 = `src="${item.remote}"`;
       const quoted2 = `src='${item.remote}'`;
@@ -145,7 +152,7 @@ function create(deps){
       out = out.replaceAll(href1, `href="${item.local}"`);
       out = out.replaceAll(href2, `href='${item.local}'`);
     });
-    return out.replace(/<script[^>]+src=["'][^"']*js\/editor\/loader\.js["'][^>]*><\/script>\s*/g, '');
+    return out;
   }
 
   async function addFileToZip(zip, sourcePath, targetPath, warnings, required){
@@ -182,9 +189,31 @@ function create(deps){
     let doneCount = 0;
     const done = () => Math.round((++doneCount / totalToPack) * 100);
     zip.file('index.html', buildPlayableBootstrapHtml(bundle));
+    zip.file('export-manifest.json', JSON.stringify({
+      format: 'LK_PLAYABLE_EXPORT_MANIFEST',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      runtime: RUNTIME_TEMPLATE,
+      activeId: bundle.activeId || null,
+      levels: (bundle.levels || []).map(level => ({
+        id: level.id,
+        name: level.name,
+        savedAt: level.savedAt || null,
+        primary: !!level.__lkExportPrimary,
+      })),
+      runtimeFiles: runtimeRefs.slice().sort(),
+      assetFiles: referencedAssets.slice().sort(),
+      excludedEditorOnly: ['engine_editor.html', 'index.html', 'css/editor.css', 'js/editor/*'],
+      warnings,
+    }, null, 2));
     zip.file('README.txt',
       [
-        'Lot King Engine Builder playable package',
+        'LOT KING ENGINE EDITOR playable package',
+        '',
+        'Contiene solo il runtime gameplay esportabile e i livelli selezionati.',
+        'Non include la pagina editor standalone.',
+        '',
+        'Verifica contenuto: export-manifest.json',
         '',
         'Windows: doppio click su play.bat',
         'Linux/macOS: eseguire bash play.sh',

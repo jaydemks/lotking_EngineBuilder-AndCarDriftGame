@@ -22,6 +22,7 @@ function create(deps){
   const camProxy = deps.camProxy;
   const camRigLine = deps.camRigLine;
   const $ = deps.$;
+  const overlay = document.getElementById('overlay');
 
   function enterEditor(){
     if(ED.active) return;
@@ -31,7 +32,10 @@ function create(deps){
     GAME.state.editorActive = true;
     GAME.hooks.frameOverride = editorFrame;
     root.classList.add('active');
-    document.getElementById('overlay').classList.add('hidden');
+    if(overlay){
+      overlay.classList.remove('menu-preloading');
+      overlay.classList.add('hidden');
+    }
     document.getElementById('hud').style.display = 'none';
 
     const car = GAME.player.car;
@@ -117,6 +121,10 @@ function create(deps){
   function exitEditor(toPlay){
     if(!ED.active) return;
     if(ED.playPreview) stopPlayPreview();
+    if(!toPlay && window.__LK_STANDALONE_EDITOR){
+      location.href = 'index.html';
+      return;
+    }
     ED.active = false;
     GAME.state.editorActive = false;
     GAME.hooks.frameOverride = null;
@@ -146,8 +154,7 @@ function create(deps){
     scene.remove(helperGroup);
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = false;
-
-    document.getElementById('overlay').classList.remove('hidden');
+    if(!toPlay && !GAME.state.started && overlay) overlay.classList.remove('hidden');
   }
 
   function editorFrame(dt){

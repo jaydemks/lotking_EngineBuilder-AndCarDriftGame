@@ -1,8 +1,22 @@
-# Lot King Engine Builder & Car Drift Game Runtime Modules
+# LOT KING ENGINE EDITOR & Car Drift Game Runtime Modules
 
 This document maps the current runtime and runtime-adjacent modules. It is meant to stay version-neutral; release-specific details belong in `docs/releases/` and active `Release_Notes_v*.md` files.
 
-The runtime still starts from `js/lot-king.js`, but most systems now live in focused modules that register `window.LK_RUNTIME_*` factories. The editor also reuses some runtime modules, especially input and floating-window helpers.
+The gameplay runtime still composes through `js/lot-king.js`, but the project now has separate HTML entrypoints for landing/menu, gameplay, and editor. Most systems live in focused modules that register `window.LK_RUNTIME_*` factories. The editor also reuses some runtime modules, especially input, audio/HUD, and floating-window helpers.
+
+## HTML Entrypoints
+
+- `index.html`
+  Landing/menu shell. Owns the main menu, landing music/mute control, project signature, and embedded gameplay frame transitions.
+
+- `gameplay.html`
+  Gameplay runtime page. Loads the runtime, HUD, settings, radio, audio, scene store, track catalog, and game flow without loading editor modules.
+
+- `engine_editor.html`
+  Standalone editor page. Loads the runtime/editor DOM and editor module stack required by editor preview, HUD editing, Sound Designer, asset management, and project export.
+
+- `drift-parking-lot.html`
+  Compatibility redirect to `index.html`.
 
 ## Composition Root
 
@@ -132,7 +146,7 @@ This file is runtime-adjacent rather than inside `js/runtime/`, but it is part o
 ## Editor Loader and Runtime-Shared Dependencies
 
 - `js/editor/loader.js`
-  Lazy-loads editor CSS, Three.js controls, runtime-shared input/window modules, and all editor modules in dependency order. Keeps gameplay startup lighter and supports reopen-after-reload editor flows.
+  Keeps editor module dependency ordering and staged loading responsibilities. The current primary editor surface is `engine_editor.html`, while gameplay remains separated in `gameplay.html` so playable/runtime pages do not need editor modules.
 
 The editor loader is included here because it controls when runtime-shared modules such as input actions, mapping overlay, and the window manager are available to editor code.
 
@@ -153,13 +167,13 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
   Coordinates playable ZIP export.
 
 - `js/editor/playable-export-level-picker.js`
-  Selects which saved level/project is exported.
+  Selects which saved levels/projects are exported and which selected level is primary.
 
 - `js/editor/playable-export-assets.js`
   Collects and normalizes referenced assets, including blob-backed imported models/audio.
 
 - `js/editor/playable-export-zip.js`
-  Builds the export payload for a playable package.
+  Builds the gameplay-only ZIP payload, runtime file list, asset list, manifest, local launch helpers, and editor-only exclusion guard.
 
 ## Sound Designer Modules
 

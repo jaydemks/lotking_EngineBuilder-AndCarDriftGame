@@ -59,7 +59,7 @@ function create(options){
     if(!loadText) return;
     const report = opts.getLoadReport ? opts.getLoadReport() : [];
     const fails = report.filter(r => String(r).includes('✗'));
-    if(opts.isFileMode && opts.isFileMode()) loadText.textContent = 'Apri da http://127.0.0.1:8000/drift-parking-lot.html per caricare i modelli locali';
+    if(opts.isFileMode && opts.isFileMode()) loadText.textContent = 'Apri da http://127.0.0.1:8000/gameplay.html per caricare i modelli locali';
     else if(opts.hasGltfLoader && !opts.hasGltfLoader()) loadText.textContent = '⚠ GLTFLoader non caricato (CDN bloccata) — auto procedurali';
     else if(fails.length) loadText.textContent = '⚠ non caricati: ' + fails.join(', ');
     else loadText.textContent = 'ready';
@@ -71,7 +71,7 @@ function create(options){
   }
 
   function setIdleText(label){
-    if(loadText) loadText.textContent = label || 'choose track or editor';
+    if(loadText) loadText.textContent = label || 'choose track';
   }
 
   function setBar(value){

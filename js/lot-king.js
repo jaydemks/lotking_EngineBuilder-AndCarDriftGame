@@ -538,6 +538,7 @@ const PLAYER_DATA_WIDGETS = window.LK_RUNTIME_PLAYER_DATA_WIDGETS.create({
 // - RWD: throttle usage eats rear lateral grip (friction circle) → power oversteer
 // - weight transfer front/rear modulates axle grip (lift-off oversteer on entry)
 // - handbrake locks the rear axle only (rear μ collapses) → drift entry
+// - service brake mainly eats front grip, so braking pushes wide instead of spinning like the handbrake.
 // Countersteer and slide-holding emerge naturally from the model.
 const SPAWN = {x: 0, z: 55, heading: Math.PI};   // editable from the engine editor
 const P = {
@@ -552,7 +553,7 @@ car.rotation.y = P.heading;
 const G_ACC = 9.81;
 const CFG = {
   // powertrain / brakes (accelerations, m/s²)
-  accel: 52, revAccel: 17, brake: 46, maxSpeed: 48,
+  accel: 52, revAccel: 17, brake: 16, maxSpeed: 48,
   drag: 0.18,                 // linear drag coef (1/s)
   // chassis
   axleF: 1.30, axleR: 1.30,   // CG → front / rear axle [m]
@@ -578,7 +579,8 @@ const CFG = {
 const BASE_CFG = Object.freeze({...CFG});
 const DRIVE = {
   steerResponse: 6.5,         // how fast the wheel turns toward the key input
-  brakeBias: 0.62,            // fraction of braking on the front axle
+  brakeBias: 0.62,            // longitudinal braking balance
+  brakeDriveLock: 1.0,        // service-brake front slip intensity
   wheelspin: 1.85,            // drive force allowed past rear grip (wheelspin margin)
 };
 const BASE_DRIVE = Object.freeze({...DRIVE});
@@ -746,7 +748,14 @@ let handbrake = false, driftAngle = 0, speedKmh = 0, isDrifting = false, lastLat
 let axPrev = 0;                 // longitudinal accel of the previous step (weight transfer)
 let lastSteerAngle = 0;         // actual front wheel angle (for the visual rig)
 const PHYS_STEP = 1/120;        // fixed physics substep
-const REVERSE_ENTRY_SPEED = 5 / 3.6; // 5 km/h: brake must slow the car before reverse can engage
+const REVERSE_STOP_SPEED = 3 / 3.6; // 3 km/h: automatic reverse only after the car is nearly stopped
+const REVERSE_BRAKE_DELAY = 0.5; // seconds: moving-to-reverse needs a short sustained braking phase
+const BRAKE_RAMP_TIME = 1.45; // seconds: pedal pressure builds progressively instead of snapping on
+let reverseEngageTimer = 0;
+let reverseNeedsEngageDelay = false;
+let reverseBrakeTimer = 0;
+let reverseGearLatched = false;
+let brakeHoldTimer = 0;
 const carRenderPos = new THREE.Vector3();
 let carRenderHeading = 0, carRenderPitch = 0, carRenderRoll = 0, carRenderSnap = true;
 
@@ -807,9 +816,12 @@ function updateCarCannon(dt){
   const gR = Math.max(1.5, G_ACC * CFG.axleF / L + dW);
 
   let ax = -CFG.drag * vx;
-  let driveA = 0, brakeA = 0, muRl = CFG.muR;
+  let driveA = 0, brakeA = 0, muRl = CFG.muR, muFl = CFG.muF;
   const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || Math.abs(vy) > 2.0, dt);
   ENGINE.reverseActive = false;
+  if(down && !up) brakeHoldTimer = Math.min(BRAKE_RAMP_TIME, brakeHoldTimer + dt);
+  else brakeHoldTimer = 0;
+  const brakeRamp = down ? (.22 + .78 * Math.pow(clamp(brakeHoldTimer / BRAKE_RAMP_TIME, 0, 1), 1.35)) : 0;
   if(handbrake){
     muRl *= CFG.hbMuR;
     if(speed > .3) ax -= Math.sign(vx) * muRl * gR * 1.1;
@@ -819,26 +831,52 @@ function updateCarCannon(dt){
     ax += driveA;
   }
   if(down){
-    const alreadyReversing = vx < -.35;
-    const reverseAllowed = alreadyReversing || speedTot < REVERSE_ENTRY_SPEED;
+    const alreadyReversing = reverseGearLatched;
+    const settledForReverse = speedTot < REVERSE_STOP_SPEED && Math.abs(vx) < REVERSE_STOP_SPEED && Math.abs(vy) < .16 && Math.abs(P.yawRate) < .28 && !handbrake;
+    if(alreadyReversing){
+      reverseEngageTimer = REVERSE_BRAKE_DELAY;
+      reverseBrakeTimer = REVERSE_BRAKE_DELAY;
+    } else if(!settledForReverse){
+      reverseNeedsEngageDelay = true;
+      reverseBrakeTimer = Math.min(REVERSE_BRAKE_DELAY, reverseBrakeTimer + dt);
+      reverseEngageTimer = 0;
+    } else if(reverseNeedsEngageDelay){
+      reverseBrakeTimer = Math.min(REVERSE_BRAKE_DELAY, reverseBrakeTimer + dt);
+      reverseEngageTimer = reverseBrakeTimer;
+    } else {
+      reverseEngageTimer = REVERSE_BRAKE_DELAY;
+      reverseBrakeTimer = REVERSE_BRAKE_DELAY;
+    }
+    const reverseAllowed = alreadyReversing || (settledForReverse && reverseEngageTimer >= REVERSE_BRAKE_DELAY);
     if(!reverseAllowed){
-      brakeA = CFG.brake * brakeAmt * (speedTot > 7 ? 1 : .85);
-      ax -= Math.sign(vx || 1) * brakeA;
-      if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * .35;
+      if(!settledForReverse){
+        brakeA = CFG.brake * brakeAmt * brakeRamp * (speedTot > 7 ? 1 : .85);
+        ax -= Math.sign(vx || 1) * brakeA;
+        if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * brakeRamp * .08;
+      }
     }
     else {
+      reverseNeedsEngageDelay = false;
+      reverseGearLatched = true;
       ENGINE.reverseActive = true;
       updateEngineModel(vx, 0.55 * brakeAmt, false, dt);
       ax -= CFG.revAccel * brakeAmt * (1 + vx / 12);
     }
+  } else {
+    reverseEngageTimer = 0;
+    reverseNeedsEngageDelay = false;
+    reverseBrakeTimer = 0;
+    reverseGearLatched = false;
   }
 
   const rearUse = handbrake ? 0 : Math.abs(driveA) / Math.max(.001, CFG.muR * gR);
   muRl *= Math.max(.22, 1 - CFG.powerOver * Math.pow(rearUse, 1.6));
-  let muFl = CFG.muF;
   if(brakeA){
-    muFl *= Math.max(.55, 1 - .35 * (brakeA * DRIVE.brakeBias) / Math.max(.001, CFG.muF * gF));
-    muRl *= Math.max(.5, 1 - .5 * (brakeA * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR));
+    const driveLock = (DRIVE.brakeDriveLock == null ? 1 : DRIVE.brakeDriveLock);
+    const frontUse = (brakeA * DRIVE.brakeBias * driveLock) / Math.max(.001, CFG.muF * gF);
+    const rearUseBrake = (brakeA * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR);
+    muFl *= Math.max(.42, 1 - .56 * frontUse);
+    muRl *= Math.max(.74, 1 - .16 * rearUseBrake);
   }
 
   const latScale = clamp(speedTot / 2.5, 0, 1);
@@ -949,12 +987,17 @@ function updateCar(dt){
 
     // ---- longitudinal (RWD, drive on the rear axle)
     let ax = -CFG.drag * vx;
-    let muRl = CFG.muR;                       // rear lateral μ, eaten by throttle/handbrake
+    let muRl = CFG.muR;                       // rear lateral μ, eaten by throttle/brake lock
+    let muFl = CFG.muF;
     let driveA = 0;
+    let brakeA = 0;
     const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || Math.abs(vy) > 2.0, h);
     ENGINE.reverseActive = false;
+    if(down && !up) brakeHoldTimer = Math.min(BRAKE_RAMP_TIME, brakeHoldTimer + h);
+    else brakeHoldTimer = 0;
+    const brakeRamp = down ? (.22 + .78 * Math.pow(clamp(brakeHoldTimer / BRAKE_RAMP_TIME, 0, 1), 1.35)) : 0;
     if(handbrake){
-      // rear wheels locked: kinetic friction opposes motion, no drive
+      // Handbrake locks the rear wheels: rear grip collapses and creates drift entry.
       muRl *= CFG.hbMuR;
       if(sp > .3) ax -= Math.sign(vx) * muRl * gR * .9;
     } else if(up){
@@ -963,24 +1006,52 @@ function updateCar(dt){
       ax += driveA;
     }
     if(down){
-      const alreadyReversing = vx < -.35;
-      const reverseAllowed = alreadyReversing || speedTot < REVERSE_ENTRY_SPEED;
-      if(!reverseAllowed){
-        const bA = CFG.brake * brakeAmt;
-        ax -= Math.sign(vx || 1) * bA;   // split kept for the friction circle below
-        if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * .35;
+      const alreadyReversing = reverseGearLatched;
+      const settledForReverse = speedTot < REVERSE_STOP_SPEED && Math.abs(vx) < REVERSE_STOP_SPEED && Math.abs(vy) < .16 && Math.abs(P.yawRate) < .28 && !handbrake;
+      if(alreadyReversing){
+        reverseEngageTimer = REVERSE_BRAKE_DELAY;
+        reverseBrakeTimer = REVERSE_BRAKE_DELAY;
+      } else if(!settledForReverse){
+        reverseNeedsEngageDelay = true;
+        reverseBrakeTimer = Math.min(REVERSE_BRAKE_DELAY, reverseBrakeTimer + h);
+        reverseEngageTimer = 0;
+      } else if(reverseNeedsEngageDelay){
+        reverseBrakeTimer = Math.min(REVERSE_BRAKE_DELAY, reverseBrakeTimer + h);
+        reverseEngageTimer = reverseBrakeTimer;
       } else {
+        reverseEngageTimer = REVERSE_BRAKE_DELAY;
+        reverseBrakeTimer = REVERSE_BRAKE_DELAY;
+      }
+      const reverseAllowed = alreadyReversing || (settledForReverse && reverseEngageTimer >= REVERSE_BRAKE_DELAY);
+      if(!reverseAllowed){
+        if(!settledForReverse){
+          brakeA = CFG.brake * brakeAmt * brakeRamp;
+          ax -= Math.sign(vx || 1) * brakeA;   // split kept for the friction circle below
+          if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * brakeRamp * .08;
+        }
+      } else {
+        reverseNeedsEngageDelay = false;
+        reverseGearLatched = true;
         ENGINE.reverseActive = true;
         ax -= CFG.revAccel * brakeAmt * (1 + vx / 12);
       }
+    } else {
+      reverseEngageTimer = 0;
+      reverseNeedsEngageDelay = false;
+      reverseBrakeTimer = 0;
+      reverseGearLatched = false;
     }
 
     // ---- friction circle: longitudinal usage reduces lateral grip
     const rearUse = handbrake ? 0 : Math.abs(driveA) / Math.max(.001, CFG.muR * gR);
     muRl *= Math.max(.22, 1 - CFG.powerOver * Math.pow(rearUse, 1.6));
-    let muFl = CFG.muF;
-    if(down && vx > 0.5) muFl *= Math.max(.55, 1 - .35 * (CFG.brake * DRIVE.brakeBias) / Math.max(.001, CFG.muF * gF));
-    if(down && vx > 0.5) muRl *= Math.max(.5, 1 - .5 * (CFG.brake * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR));
+    if(brakeA && vx > 0.5){
+      const driveLock = (DRIVE.brakeDriveLock == null ? 1 : DRIVE.brakeDriveLock);
+      const frontUse = (brakeA * DRIVE.brakeBias * driveLock) / Math.max(.001, CFG.muF * gF);
+      const rearUseBrake = (brakeA * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR);
+      muFl *= Math.max(.42, 1 - .56 * frontUse);
+      muRl *= Math.max(.74, 1 - .16 * rearUseBrake);
+    }
 
     // ---- lateral tire forces (per unit mass), tanh saturation ≈ simplified Pacejka
     const latScale = clamp(speedTot / 2.5, 0, 1);   // no lateral forces when parked
@@ -1731,7 +1802,7 @@ if(INPUT){
 function resetCar(){
   P.pos.set(SPAWN.x, 0, SPAWN.z); P.heading = SPAWN.heading; P.vel.set(0,0,0);
   P.yawRate = 0; P.steer = 0;
-  axPrev = 0; lastSteerAngle = 0; isDrifting = false; handbrake = false;
+  axPrev = 0; lastSteerAngle = 0; isDrifting = false; handbrake = false; reverseEngageTimer = 0; reverseNeedsEngageDelay = false; reverseBrakeTimer = 0; reverseGearLatched = false; brakeHoldTimer = 0;
   resetEngine();
   if(PHYS.carBody) syncCarBodyToPlayer();
   carRenderPos.copy(P.pos);
@@ -1785,8 +1856,26 @@ const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
 // slow-motion state (radio open → super slow-mo)
 const TS = {cur:1, get target(){ return RADIO.isOpen() ? 0.1 : 1; }};
 
+const IS_EMBEDDED_GAMEPLAY = !!window.__LK_EMBEDDED_GAMEPLAY;
+function createNoopMenuMusic(){
+  return {
+    audio: null,
+    bindAutoStart: function(){},
+    bindButton: function(){},
+    syncButton: function(){},
+    setVolume: function(){},
+    getTracks: function(){ return []; },
+    addTracks: function(){ return []; },
+    loadTrack: function(){},
+    play: function(){ return Promise.resolve(); },
+    pause: function(){},
+    fadeOut: function(){ return Promise.resolve(); },
+    toggle: function(){ return Promise.resolve(); },
+  };
+}
+
 // menu music (loops on the start screen; starts at first interaction - browser policy)
-const MENU_MUSIC = window.LK_RUNTIME_MENU_MUSIC.create({
+const MENU_MUSIC = IS_EMBEDDED_GAMEPLAY ? createNoopMenuMusic() : window.LK_RUNTIME_MENU_MUSIC.create({
   tracks: [
     {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Menu default'},
   ],
@@ -1826,7 +1915,7 @@ function enterGameplayMode(){ if(GAME_FLOW) GAME_FLOW.enterGameplayMode(); }
 function beginGameplaySession(editorPreview){ if(GAME_FLOW) GAME_FLOW.beginGameplaySession(editorPreview); }
 function stopEditorPreview(){ if(GAME_FLOW) GAME_FLOW.stopEditorPreview(); }
 function backToMainMenu(){ if(GAME_FLOW) GAME_FLOW.backToMainMenu(); }
-function startGame(){ if(GAME_FLOW) GAME_FLOW.startGame(); }
+function startGame(){ if(GAME_FLOW) { GAME_FLOW.startGame(); } }
 function startEditorPreview(){ if(GAME_FLOW) GAME_FLOW.startEditorPreview(); }
 function launchLevel(levelId){
   // livelli della libreria editor: se serve, lo store attiva il livello
@@ -1865,7 +1954,7 @@ const LOADING = window.LK_RUNTIME_LOADING_FLOW.create({
   isFileMode: () => IS_FILE_MODE,
   hasGltfLoader: () => !!gltfLoader,
 });
-LOADING.setIdleText('choose track or editor');
+LOADING.setIdleText('choose track');
 LOADING.setBar(0);
 function preloadMenuShell(){
   if(!overlay) return;
@@ -1902,8 +1991,16 @@ function preloadMenuShell(){
   Promise.all(tasks).then(() => {
     setMenuProgress(100, 'menu ready');
     setTimeout(() => {
+      if(GAME.state.editorActive){
+        overlay.classList.remove('menu-preloading');
+        overlay.classList.remove('choosing-level');
+        overlay.classList.add('hidden');
+        return;
+      }
       overlay.classList.remove('menu-preloading');
-      LOADING.setIdleText('choose track or editor');
+      overlay.classList.remove('choosing-level');
+      overlay.classList.remove('hidden');
+      LOADING.setIdleText('choose track');
       LOADING.setBar(0);
     }, 280);
   });
@@ -1961,8 +2058,8 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   disposeRenderLists: () => {
     if(renderer && renderer.renderLists) renderer.renderLists.dispose();
   },
-  exitEditor: () => {
-    if(GAME.editor && GAME.editor.state && GAME.editor.state.active && GAME.editor.exit) GAME.editor.exit(false);
+  exitEditor: toPlay => {
+    if(GAME.editor && GAME.editor.state && GAME.editor.state.active && GAME.editor.exit) GAME.editor.exit(!!toPlay);
   },
   clearFrameOverride: () => { GAME.hooks.frameOverride = null; },
   setDragging: value => { dragging = !!value; },
@@ -2155,7 +2252,8 @@ function stepGameplayFrame(dt, shouldRender){
   // effects: sgommate laterali (drift/freno a mano) + slittamento longitudinale
   // (staccata violenta o wheelspin in accelerazione da fermo)
   const slide = Math.min(1, Math.abs(vR)/12);
-  const brakeSlip = (keys['s'] || keys['arrowdown']) && !ENGINE.reverseActive && speedKmh > 28;
+  const driveFx = readDriveInput();
+  const brakeSlip = driveFx.brake > .05 && !ENGINE.reverseActive && speedKmh > 28;
   const accelSlip = (ENGINE.throttle || 0) > .55 && !ENGINE.reverseActive &&
     speedKmh > 2 && speedKmh < 26 && (ENGINE.rpm01 || 0) > .4;
   const lateralSlip = (drifting || (handbrake && speedKmh > 15)) && speedKmh > 12;
@@ -2163,14 +2261,11 @@ function stepGameplayFrame(dt, shouldRender){
     const slipAmount = lateralSlip ? slide : (brakeSlip ? .35 : Math.min(1, .25 + (ENGINE.rpm01 || 0) * .5));
     const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
     const side = new THREE.Vector3(fwd.z,0,-fwd.x);
+    const mainAxleZ = -1.35;
     for(const s of [-1,1]){
-      const wp = P.pos.clone().addScaledVector(fwd,-1.35).addScaledVector(side, s*.92);
+      const wp = P.pos.clone().addScaledVector(fwd, mainAxleZ).addScaledVector(side, s*.92);
       if(Math.random() < .3 + slipAmount*.6) spawnSmoke(wp, slipAmount);
       spawnSkid(wp.x, wp.z, P.heading);
-      if(brakeSlip){   // in staccata bloccano anche le anteriori
-        const wf = P.pos.clone().addScaledVector(fwd, 1.25).addScaledVector(side, s*.92);
-        spawnSkid(wf.x, wf.z, P.heading);
-      }
     }
   }
   updateSmoke(sdt);

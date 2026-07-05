@@ -446,12 +446,12 @@ const SOUND_SETS = {
     // set arrivato da un LKEP importato: entra in libreria mantenendo l'id
     if(!set || !set.id) return null;
     const data = ensureSoundSets();
-    if(!data.sets.some(x => x.id === set.id)){
-      const copy = cloneData(set);
-      copy.savedAt = copy.savedAt || new Date().toISOString();
-      data.sets.push(copy);
-      writeSoundSets(data);
-    }
+    const copy = cloneData(set);
+    copy.savedAt = copy.savedAt || new Date().toISOString();
+    const i = data.sets.findIndex(x => x.id === set.id);
+    if(i >= 0) data.sets[i] = copy;
+    else data.sets.push(copy);
+    writeSoundSets(data);
     return set.id;
   },
 };

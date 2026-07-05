@@ -59,7 +59,7 @@ function create(options){
           console.info('LotKing: ' + file + ' caricato da ' + (scene.userData.assetUrl || opts.paths.model(file)));
         } else {
           const why = opts.isFileMode && opts.isFileMode()
-            ? 'apri il gioco da http://127.0.0.1:8000/drift-parking-lot.html, non da file://'
+            ? 'apri il gioco da http://127.0.0.1:8000/gameplay.html, non da file://'
             : 'file mancante/bloccato — vedi errori rete sopra';
           console.warn('LotKing: ' + file + ' NON caricato (' + why + ')');
         }

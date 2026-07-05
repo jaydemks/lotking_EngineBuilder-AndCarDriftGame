@@ -10,13 +10,25 @@ function create(options){
   const session = opts.session;
   const trackCatalog = opts.trackCatalog;
   const gameState = opts.gameState || {};
-  const overlay = opts.overlay;
   const loadText = opts.loadText;
   const hud = opts.hud;
+  const overlay = opts.overlay;
 
   function call(name){
     if(opts[name]) return opts[name].apply(null, Array.prototype.slice.call(arguments, 1));
     return undefined;
+  }
+
+  function showMenuOverlay(){
+    if(!overlay) return;
+    overlay.classList.remove('hidden');
+    overlay.classList.remove('choosing-level');
+  }
+
+  function hideMenuOverlay(){
+    if(!overlay) return;
+    overlay.classList.remove('choosing-level');
+    overlay.classList.add('hidden');
   }
 
   function setHudVisible(visible){
@@ -25,11 +37,15 @@ function create(options){
 
   function showLevelSelect(){
     if(session.isStarted() || session.isPending()) return;
+    if(loadText) loadText.textContent = TRACK_CATALOG_AVAILABLE_TEXT();
+    showMenuOverlay();
+    if(overlay) overlay.classList.add('choosing-level');
     trackCatalog.show();
   }
 
   function hideLevelSelect(){
     trackCatalog.hide(!session.isPending());
+    showMenuOverlay();
   }
 
   function unloadCurrentLevel(){
@@ -51,7 +67,7 @@ function create(options){
   }
 
   function enterGameplayMode(){
-    call('exitEditor');
+    call('exitEditor', true);
     gameState.editorActive = false;
     call('clearFrameOverride');
     gameState.paused = false;
@@ -85,6 +101,16 @@ function create(options){
     call('resetCar');
     call('disposePhysicsWorld');
     call('disposeRenderLists');
+    if(gameState.editorActive){
+      if(overlay){
+        overlay.classList.remove('menu-preloading');
+        overlay.classList.remove('choosing-level');
+        overlay.classList.add('hidden');
+      }
+    } else {
+      showMenuOverlay();
+      if(loadText) loadText.textContent = 'choose track';
+    }
   }
 
   function backToMainMenu(){
@@ -92,10 +118,15 @@ function create(options){
     gameState.paused = false;
     call('clearInput');
     setHudVisible(false);
-    if(overlay) overlay.classList.remove('hidden');
     hideLevelSelect();
+    showMenuOverlay();
+    if(loadText && !session.isPending()) loadText.textContent = 'choose track';
     call('setMenuBusy', false);
     call('playMenuMusic');
+  }
+
+  function TRACK_CATALOG_AVAILABLE_TEXT(){
+    return trackCatalog.available().length ? 'select track' : 'no tracks available';
   }
 
   function runtimeFailed(label){
@@ -120,11 +151,12 @@ function create(options){
         session.markStopped();
         gameState.levelLoaded = false;
         runtimeFailed('track loading failed');
+        showLevelSelect();
       });
       return;
     }
+    hideMenuOverlay();
     enterGameplayMode();
-    if(overlay) overlay.classList.add('hidden');
     beginGameplaySession(false);
   }
 
@@ -139,7 +171,7 @@ function create(options){
       }).catch(() => runtimeFailed('track preview failed'));
       return;
     }
-    if(overlay) overlay.classList.add('hidden');
+    hideMenuOverlay();
     const currentLevel = trackCatalog.current();
     if(loadText) loadText.textContent = currentLevel ? 'previewing track: ' + currentLevel.name : 'previewing track';
     beginGameplaySession(true);

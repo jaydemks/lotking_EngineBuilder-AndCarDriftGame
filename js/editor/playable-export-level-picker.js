@@ -32,6 +32,15 @@ function create(deps){
     if(primaryDefault) selected.add(primaryDefault);
     let primaryId = primaryDefault;
 
+    function readStoredLevelProject(levelId){
+      try {
+        const raw = localStorage.getItem('lotking.level.' + String(levelId || '').trim());
+        return raw ? JSON.parse(raw) : null;
+      } catch(err){
+        return null;
+      }
+    }
+
     const oldInput = overlay.querySelector('.lk-confirm-input');
     if(oldInput) oldInput.remove();
     const oldPicker = overlay.querySelector('.lk-playable-level-picker');
@@ -60,6 +69,7 @@ function create(deps){
     const rows = [];
 
     const updateCounters = () => {
+      for(const r of buildRows) r.cb.checked = selected.has(String(r.id));
       const totalChecked = rows.filter(r => r.checked).length;
       const allChecked = totalChecked === rows.length;
       toggle.textContent = allChecked ? 'Deseleziona tutto' : 'Seleziona tutto';
@@ -73,7 +83,7 @@ function create(deps){
       }
     };
     const ensurePrimaryValid = () => {
-      const checked = buildRows.filter(r => r.cb.checked).map(r => String(r.id));
+      const checked = buildRows.filter(r => selected.has(String(r.id))).map(r => String(r.id));
       if(!checked.length){ primaryId = ''; return; }
       if(!checked.includes(primaryId)) primaryId = checked[0];
       for(const r of buildRows) r.radio.checked = String(r.id) === primaryId;
@@ -112,15 +122,14 @@ function create(deps){
       }
 
       cb.addEventListener('change', e => {
-        const multi = e && (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey);
-        if(cb.checked && !multi){
-          buildRows.forEach(other => { if(other.cb !== cb) other.cb.checked = false; });
-        }
+        if(cb.checked) selected.add(String(id));
+        else selected.delete(String(id));
         ensurePrimaryValid();
         updateCounters();
       });
       radio.addEventListener('change', () => {
         if(!cb.checked) cb.checked = true;
+        selected.add(String(id));
         primaryId = String(id);
         ensurePrimaryValid();
         updateCounters();
@@ -136,14 +145,18 @@ function create(deps){
 
     toggle.addEventListener('click', () => {
       const allChecked = rows.every(cb => cb.checked);
-      rows.forEach(cb => { cb.checked = !allChecked; });
+      selected.clear();
+      rows.forEach(cb => {
+        cb.checked = !allChecked;
+        if(cb.checked) selected.add(String(cb.value));
+      });
       ensurePrimaryValid();
       updateCounters();
     });
 
     const hint = document.createElement('div');
     hint.className = 'lk-playable-level-picker-hint';
-    hint.textContent = 'Spunta i livelli da mettere nel pacchetto. Click su una casella = selezione singola; Ctrl/Cmd = multi. Il pallino ▶ indica il livello di avvio.';
+    hint.textContent = 'Spunta tutti i livelli da mettere nel pacchetto. Il pallino ▶ indica quale parte per primo quando apri la build esportata.';
 
     controls.appendChild(toggle);
     controls.appendChild(selectCount);
@@ -170,7 +183,7 @@ function create(deps){
       };
       const yes = () => {
         ensurePrimaryValid();
-        const checkedIds = buildRows.filter(r => r.cb.checked).map(r => String(r.id).trim()).filter(Boolean);
+        const checkedIds = Array.from(selected).map(id => String(id).trim()).filter(Boolean);
         if(!checkedIds.length){
           status('⚠ Seleziona almeno un livello');
           return;
@@ -186,6 +199,7 @@ function create(deps){
           const isActiveLive = activeLevelId && String(levelId) === activeLevelId;
           let project = isActiveLive ? getCurrentPlayableProject() : (LV && LV.get ? LV.get(levelId) : null);
           if(!project && LV && LV.get) project = LV.get(levelId);
+          if(!project) project = readStoredLevelProject(levelId);
           if(!project){
             status('⚠ Livello non trovato: ' + levelId);
             continue;
