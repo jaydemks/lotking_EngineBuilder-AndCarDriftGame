@@ -131,7 +131,8 @@ function create(deps){
       GAME.systems.menuMusic.fadeOut(2400).then(deps.syncQuickAudio);
     }
     deps.syncQuickAudio();
-    $('#lkAssetsPanel').className = ED.viewMode;
+    $('#lkOutliner').className = ED.sceneViewMode || 'list';
+    $('#lkAssetsPanel').className = ED.assetsViewMode || 'grid';
     if(GAME.player.updateLights) GAME.player.updateLights();
     if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
     if(GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
@@ -162,6 +163,7 @@ function create(deps){
     deps.status('Warm-up preview...');
     requestAnimationFrame(() => {
       if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview();
+      if(GAME.player.updateLights) GAME.player.updateLights();
       setPlayPreview(true);
       deps.status('Play preview running — Esc to stop');
     });

@@ -268,6 +268,8 @@ body:has(#lkEditor.active) #levelSelect {
   display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; cursor:pointer;
   border:1px solid transparent;
 }
+#lkOutliner.list .lk-link-arrow { width:12px; flex:none; text-align:center; color:#8b94a8; user-select:none; }
+#lkOutliner.grid .lk-link-arrow { display:none; }
 #lkOutliner.list .lk-item:hover { background:#1b2333; }
 #lkOutliner.list .lk-thumb {
   width:30px; height:30px; flex:none; border-radius:4px; background-color:#0f131c;
@@ -284,6 +286,7 @@ body:has(#lkEditor.active) #levelSelect {
 #lkOutliner .lk-item.hidden-e { opacity:.42; }
 #lkOutliner .lk-item.replace-ok { outline:2px solid rgba(75,227,160,.9); outline-offset:-2px; background:rgba(75,227,160,.12); }
 #lkOutliner .lk-item.replace-bad { outline:2px solid rgba(255,85,102,.9); outline-offset:-2px; background:rgba(255,85,102,.1); }
+#lkOutliner .lk-item.link-drop-ok { outline:2px solid rgba(75,227,160,.9); outline-offset:-2px; background:rgba(75,227,160,.12); }
 .lk-folder-row {
   display:flex; align-items:center; gap:7px; min-height:28px; margin:2px 0;
   border:1px solid rgba(255,255,255,.06); border-left:3px solid var(--folder-color, #4be3a0);
@@ -836,6 +839,8 @@ body:has(#lkEditor.active) #levelSelect {
 .lk-row label { flex:none; width:92px; font-size:13px; color:#8b93a7; }
 .lk-row input[type="number"] { flex:1; min-width:0; height:25px; background:#12161f; color:#dfe5f1;
   border:1px solid #2b3446; border-radius:4px; padding:0 6px; font-size:13px; }
+.lk-row textarea { flex:1; min-width:0; min-height:86px; resize:vertical; background:#12161f; color:#dfe5f1;
+  border:1px solid #2b3446; border-radius:4px; padding:6px; font:13px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .lk-row input[type="color"] { flex:none; width:44px; height:25px; padding:1px; background:#12161f;
   border:1px solid #2b3446; border-radius:4px; cursor:pointer; }
 .lk-row input[type="range"] { flex:1; accent-color:#4a6da8; }

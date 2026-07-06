@@ -33,6 +33,10 @@ function create(deps){
       {label:'Effetto', icon:'✨', sub: Object.keys(STORE.EFFECT_PRESETS).map(k => (
         {label: k[0].toUpperCase()+k.slice(1), icon:'✨', action:() => deps.addEffect(k, P)}
       ))},
+      {label:'Testo', icon:'T', sub: [
+        {label:'Text 2D', icon:'T', action:() => deps.addText('2d', P)},
+        {label:'Text 3D', icon:'T', action:() => deps.addText('3d', P)},
+      ]},
       {sep:true},
       {label:'Importa modello GLB…', icon:'📦', action:() => deps.openGlbImportAt(P)},
     ];

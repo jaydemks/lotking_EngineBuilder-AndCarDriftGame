@@ -8,10 +8,29 @@
 function create(deps){
   deps = deps || {};
   const el = deps.el;
+  const SECTION_STORE_KEY = 'lotking.editor.inspectorSections.v1';
+
+  function readSectionState(){
+    try { return JSON.parse(localStorage.getItem(SECTION_STORE_KEY) || '{}') || {}; }
+    catch(err){ return {}; }
+  }
+
+  function writeSectionState(state){
+    try { localStorage.setItem(SECTION_STORE_KEY, JSON.stringify(state || {})); }
+    catch(err){}
+  }
 
   function section(title, open){
-    const s = el('<div class="lk-sec' + (open === false ? ' closed' : '') + '"><div class="lk-sec-h">' + title + '</div><div class="lk-sec-b"></div></div>');
-    s.querySelector('.lk-sec-h').addEventListener('click', () => s.classList.toggle('closed'));
+    const saved = readSectionState();
+    const hasSaved = Object.prototype.hasOwnProperty.call(saved, title);
+    const isOpen = hasSaved ? !!saved[title] : open === true;
+    const s = el('<div class="lk-sec' + (isOpen ? '' : ' closed') + '"><div class="lk-sec-h">' + title + '</div><div class="lk-sec-b"></div></div>');
+    s.querySelector('.lk-sec-h').addEventListener('click', () => {
+      s.classList.toggle('closed');
+      const next = readSectionState();
+      next[title] = !s.classList.contains('closed');
+      writeSectionState(next);
+    });
     return {root: s, body: s.querySelector('.lk-sec-b')};
   }
 

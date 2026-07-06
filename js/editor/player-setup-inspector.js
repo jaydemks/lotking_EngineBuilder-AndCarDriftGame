@@ -24,7 +24,19 @@ function create(deps){
   function buildDrivingTuning(box){
     const sg = section('GUIDA (SETUP)', false);
     const tun = GAME.player.tuning.values;
-    const tRow = (key, label, min, max) => sliderRow(label, tun[key], min, max, 1, v => {
+    const applyPreset = (name, label) => {
+      const preset = GAME.player.tuning.presets && GAME.player.tuning.presets[name];
+      if(!preset) return;
+      GAME.player.setTuning({...preset});
+      markDirty();
+      if(status) status('Preset guida: ' + label);
+      buildInspector();
+    };
+    sg.body.appendChild(btnRow([
+      {label:'Race mode', action:() => applyPreset('race', 'Race mode')},
+      {label:'Drift mode', action:() => applyPreset('drift', 'Drift mode')},
+    ]));
+    const tRow = (key, label, min, max) => sliderRow(label, tun[key] == null ? 0 : tun[key], min, max, 1, v => {
       const patch = {}; patch[key] = v;
       GAME.player.setTuning(patch); markDirty();
     }).root;
@@ -39,6 +51,12 @@ function create(deps){
     sg.body.appendChild(tRow('steer', 'Sterzo', -10, 10));
     sg.body.appendChild(tRow('brake', 'Frenata', -10, 10));
     sg.body.appendChild(tRow('grip', 'Aderenza', -10, 10));
+    sg.body.appendChild(tRow('suspension', 'Sospensioni (rigidità)', -10, 10));
+    sg.body.appendChild(tRow('damping', 'Sospensioni (damping)', -10, 10));
+    sg.body.appendChild(tRow('travel', 'Escursione sospensioni', -10, 10));
+    sg.body.appendChild(tRow('ride', 'Assetto ruote', -10, 10));
+    sg.body.appendChild(tRow('roll', 'Rollio telaio', -10, 10));
+    sg.body.appendChild(tFloatRow('chassisLift', 'Chassis lift (m)', -0.35, 0.9, .01, 0));
     sg.body.appendChild(tFloatRow('reverseDelay', 'Ritardo retro (s)', 0, 2, .05, .5));
     box.appendChild(sg.root);
   }

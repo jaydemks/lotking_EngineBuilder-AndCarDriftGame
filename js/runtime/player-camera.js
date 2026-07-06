@@ -19,6 +19,7 @@ const CLEAR_RESTORE_COLOR = new THREE.Color();
 function createConfig(){
   return {
     aspect: 'auto',
+    gameAutoAspect: false,
     letterboxColor: '#141518',   // fill outside the camera frame (dark grey by default)
     mode: 'free',
     fov: 62,
@@ -43,6 +44,7 @@ function createConfig(){
 }
 
 function aspectValue(cfg, width, height){
+  if(cfg.gameAutoAspect) return width / height;
   if(height > width) return ASPECTS['9:16'];
   return ASPECTS[cfg.aspect] || (width / height);
 }
@@ -52,7 +54,7 @@ function renderRect(cfg, width, height){
   const screenAspect = width / height;
   let w = width;
   let h = height;
-  const scopedAspect = ASPECTS[cfg.aspect] || (height > width ? ASPECTS['9:16'] : null);
+  const scopedAspect = cfg.gameAutoAspect ? null : (ASPECTS[cfg.aspect] || (height > width ? ASPECTS['9:16'] : null));
   if(scopedAspect){
     if(screenAspect > aspect) w = Math.round(height * aspect);
     else h = Math.round(width / aspect);

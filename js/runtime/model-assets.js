@@ -214,9 +214,35 @@ function create(deps){
       }
     }
 
+    // per-wheel suspension travel: offsets are [FL,FR,RL,RR]-ordered metres
+    // along car-up, indices matching the physics wheel layout (x<0 first)
+    function ensureSuspBase(it){
+      if(it.suspBase) return;
+      const node = it.pivot || it.spinGroup;
+      const wp = new THREE.Vector3(); node.getWorldPosition(wp);
+      const lp = car.worldToLocal(wp.clone());
+      it.suspIndex = (it.front ? 0 : 2) + (lp.x < 0 ? 0 : 1);
+      it.suspBase = node.position.clone();
+      const pq = new THREE.Quaternion(); node.parent.getWorldQuaternion(pq).invert();
+      const cq = new THREE.Quaternion(); car.getWorldQuaternion(cq);
+      it.suspUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cq).applyQuaternion(pq).normalize();
+      const ps = new THREE.Vector3(); node.parent.getWorldScale(ps);
+      it.suspScale = 1 / Math.max(.05, Math.abs(ps.y) || 1);
+    }
+    function setSuspension(offsets){
+      if(!offsets) return;
+      for(const it of items){
+        const node = it.pivot || it.spinGroup;
+        if(!node || !node.parent) continue;
+        ensureSuspBase(it);
+        node.position.copy(it.suspBase).addScaledVector(it.suspUp, (offsets[it.suspIndex] || 0) * it.suspScale);
+      }
+    }
+
     return {
       build,
       drive,
+      setSuspension,
       clear: () => { items = []; },
       active: () => items.length > 0,
     };

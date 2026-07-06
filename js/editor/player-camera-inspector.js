@@ -18,6 +18,7 @@ function create(deps){
 
   function normalizeCameraConfig(cam){
     cam.mode = cam.mode || 'free';
+    cam.gameAutoAspect = !!cam.gameAutoAspect;
     cam.arcadeDistance = cam.arcadeDistance == null ? 9 : cam.arcadeDistance;
     cam.arcadeHeight = cam.arcadeHeight == null ? 3.1 : cam.arcadeHeight;
     cam.arcadeLag = cam.arcadeLag == null ? 5.8 : cam.arcadeLag;
@@ -56,6 +57,7 @@ function create(deps){
       {value:'1:1', label:'1:1 square'},
       {value:'9:16', label:'9:16 vertical'},
     ], v => setCam({aspect:v})).root);
+    sc.body.appendChild(checkRow('Auto aspect in game', !!cam.gameAutoAspect, v => setCam({gameAutoAspect:v})).root);
     // fill outside the camera frame (letterbox / crop) — dark grey by default
     const lbHex = parseInt(String(cam.letterboxColor || '#141518').replace('#', ''), 16) || 0x141518;
     if(colorRow) sc.body.appendChild(colorRow('Frame background', lbHex, v => setCam({letterboxColor: '#' + ('000000' + (v >>> 0).toString(16)).slice(-6)})).root);

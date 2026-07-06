@@ -100,6 +100,35 @@ function create(deps){
     finishAdd(obj);
   }
 
+  function addText(kind, at){
+    const id = STORE.nextId();
+    const textKind = kind === '3d' ? '3d' : '2d';
+    const textProps = {
+      text:textKind === '3d' ? '3D Text' : '2D Text',
+      width:4.8,
+      height:1.6,
+      fontSize:96,
+      fontFamily:'Arial',
+      weight:'900',
+      align:'center',
+      valign:'middle',
+      lineHeight:1.15,
+      padding:.12,
+      size:1,
+      depth:textKind === '3d' ? .18 : .02,
+    };
+    const obj = STORE.createText(textKind, textProps);
+    const entry = {id, kind:'text', textKind, name:textKind === '3d' ? 'Text 3D' : 'Text 2D', collide:false,
+      props:Object.assign({}, obj.userData.textProps),
+      asset:{key:'text:' + textKind, name:textKind === '3d' ? 'Text 3D' : 'Text 2D', source:'Editor text'},
+      t:{p:[at.x, textKind === '3d' ? 1.2 : 2.2, at.z], r:[0,0,0], s:[1,1,1], v:true}};
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = 'text:' + textKind;
+    obj.userData.assetName = entry.asset.name;
+    obj.userData.assetSource = entry.asset.source;
+    finishAdd(obj);
+  }
+
   function finishAdd(obj){
     pushHistory({
       label: 'Add ' + (obj.userData.editorName || 'Entity'),
@@ -162,7 +191,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addLight, addEffect, addText, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

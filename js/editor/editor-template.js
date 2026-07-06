@@ -61,16 +61,16 @@ function create(){
         <option value="all">All</option><option value="mesh">Meshes</option><option value="light">Lights</option>
         <option value="effect">Effects</option><option value="added">Added</option><option value="builtin">Built-in</option>
       </select>
-      <button id="lkViewGrid" class="on" type="button" title="Grid view">G</button>
-      <button id="lkViewList" type="button" title="List view">L</button>
-      <button id="lkSceneFolder" type="button" title="New scene folder">+F</button>
+      <button id="lkViewGrid" type="button" title="Grid view">▦</button>
+      <button id="lkViewList" class="on" type="button" title="List view">☰</button>
+      <button id="lkSceneFolder" type="button" title="New scene folder">📁</button>
     </div>
     <div id="lkPinned">
       <div class="lk-pin" data-special="env"><span class="lk-pin-ic">🌍</span><span class="lk-pin-label">Environment</span></div>
       <div class="lk-pin" data-special="player"><span class="lk-pin-ic">🚗</span><span class="lk-pin-label">player_car (Logic)</span></div>
       <div class="lk-pin" data-special="hud"><span class="lk-pin-ic">▣</span><span class="lk-pin-label">HUD / Radio TAB</span></div>
     </div>
-    <div id="lkOutliner" class="grid"></div>
+    <div id="lkOutliner" class="list"></div>
   </aside>
   <aside id="lkRight">
     <div id="lkRightResize" class="lk-resize-handle"></div>

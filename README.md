@@ -42,9 +42,11 @@ The current direction is:
 - **Playable ZIP Export** for publishing a game build without shipping the editor.
 - **Default content** based on bundled/free/self-made assets so the editor opens with a usable starter project.
 
-Recent `v0.5.5` work added a lot of editor/runtime foundation: player model replacement, asset properties previews, selectable collider dummies, standalone collision boxes, per-object physics mass/impact tuning, player-car collision editing, warm-up indicators for render/light changes, mobile UI improvements, high beams, burnout behavior, and early drive-surface/ramp support.
+Recent `v0.5.6` work closes a major player-car driving milestone: the vehicle now uses a stronger RaycastVehicle-style wheel/suspension setup, separate Race and Drift drive presets, default Drift mode, a new RPM/KM/H/gear/drive-type vehicle HUD, much softer service braking, stronger controllable countersteer, and a mid-range torque curve tuned for sustained drifting.
 
-Known active refinement area: inclined drive surfaces and advanced collision behavior are still being tuned. Custom rotated ramps and very steep surfaces work better than before, but the exact edge precision and directional behavior are not final yet.
+The same release also improves editor workflow around the Scene sidebar/outliner, player-car logic visibility, selected-object autofocus, text objects, warm-up feedback, auto-aspect runtime behavior, and player-car tuning controls.
+
+Known active refinement area: final vehicle feel tuning can continue in smaller passes, especially around high-speed drift control and edge cases on custom drive surfaces. The current direction remains arcade drift first.
 
 ## Documentation and release notes
 

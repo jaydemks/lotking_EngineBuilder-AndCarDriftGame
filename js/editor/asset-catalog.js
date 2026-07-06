@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerDataWidget:'◫'};
+const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerDataWidget:'◫'};
 
 function create(deps){
   deps = deps || {};
@@ -139,6 +139,7 @@ function create(deps){
     if(entry.asset && (entry.asset.dbKey || looksLikeGlbSource(entry.asset.source) || looksLikeGlbSource(entry.asset.src))) return 'glb';
     if(entry.kind === 'light') return 'light';
     if(entry.kind === 'effect') return 'effect';
+    if(entry.kind === 'text') return 'text';
     return 'other';
   }
 

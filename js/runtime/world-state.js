@@ -54,7 +54,8 @@ function create(options){
     let activeBoxes = 0, activeCircles = 0;
     const parts = [];
     for(const b of colliders.box){
-      if(!b || b.enabled === false || b.compoundRoot || b.physics || isDriveableSurfaceCollider(b)) continue;
+      // drive surfaces are real cannon statics now, so they count too
+      if(!b || b.enabled === false || b.compoundRoot || b.physics) continue;
       activeBoxes++;
       parts.push([b.x, b.y || 0, b.z, b.hx, b.hy || 0, b.hz, b.rotX || 0, b.rotY != null ? b.rotY : (b.rot || 0), b.rotZ || 0, colliderMass(b)].map(v => Math.round(v * 100)).join(','));
     }
@@ -118,15 +119,20 @@ function create(options){
       const e = new THREE.Euler(box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0, 'XYZ');
       return new THREE.Vector3(0, 1, 0).applyEuler(e).normalize();
     }
-    const rx = box.rotX || 0, rz = box.rotZ || 0;
-    const n = {x: Math.sin(rz), y: Math.cos(rx) * Math.cos(rz), z: -Math.sin(rx)};
+    // Rx(rx)·Ry(ry)·Rz(rz)·(0,1,0), same as THREE Euler order 'XYZ'
+    const rx = box.rotX || 0, ry = box.rotY != null ? box.rotY : (box.rot || 0), rz = box.rotZ || 0;
+    const n = {
+      x: -Math.sin(rz) * Math.cos(ry),
+      y: Math.cos(rx) * Math.cos(rz) - Math.sin(rx) * Math.sin(ry) * Math.sin(rz),
+      z: Math.sin(rx) * Math.cos(rz) + Math.cos(rx) * Math.sin(ry) * Math.sin(rz),
+    };
     const l = Math.hypot(n.x, n.y, n.z) || 1;
     n.x /= l; n.y /= l; n.z /= l;
     return n;
   }
 
   function driveSurfaceMinNormalY(){
-    return Math.cos(Math.PI * 36 / 180);
+    return Math.cos(Math.PI * 50 / 180);
   }
 
   function isDriveableSurfaceCollider(col){
@@ -135,38 +141,64 @@ function create(options){
     return !!(n && n.y >= driveSurfaceMinNormalY());
   }
 
-  function driveSurfaceHeightAt(box, x, z){
-    const n = driveSurfaceNormal(box);
-    if(!n || n.y < driveSurfaceMinNormalY()) return null;
-    const px = box.x + n.x * (box.hy || .5);
-    const py = (box.y || 0) + n.y * (box.hy || .5);
-    const pz = box.z + n.z * (box.hy || .5);
-    return py - (n.x * (x - px) + n.z * (z - pz)) / Math.max(.12, n.y);
+  let surfScratch = null;
+  function boxLocalPoint(box, x, y, z){
+    if(!window.THREE) return null;
+    const s = surfScratch || (surfScratch = {e: new THREE.Euler(), q: new THREE.Quaternion(), v: new THREE.Vector3()});
+    s.e.set(box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0, 'XYZ');
+    s.q.setFromEuler(s.e).invert();
+    return s.v.set(x - box.x, y - (box.y || 0), z - box.z).applyQuaternion(s.q);
   }
 
-  function canDriveThroughSurfaceCollider(box, player){
-    const y = driveSurfaceHeightAt(box, player && player.pos && player.pos.x, player && player.pos && player.pos.z);
+  // Height of the box top face at world (x,z), null when the vertical line
+  // misses the (fully rotated) face — avoids the plane extending past the box.
+  function driveSurfaceTopAt(box, x, z){
+    const n = driveSurfaceNormal(box);
+    if(!n || n.y < driveSurfaceMinNormalY()) return null;
+    const hy = box.hy || .5;
+    const px = box.x + n.x * hy;
+    const py = (box.y || 0) + n.y * hy;
+    const pz = box.z + n.z * hy;
+    const y = py - (n.x * (x - px) + n.z * (z - pz)) / Math.max(.12, n.y);
+    const l = boxLocalPoint(box, x, y, z);
+    if(l){
+      if(Math.abs(l.x) > (box.hx || 1) + .35 || Math.abs(l.z) > (box.hz || 1) + .35) return null;
+    } else {
+      const rot = Number(box.rotY != null ? box.rotY : box.rot) || 0;
+      const cos = Math.cos(-rot), sin = Math.sin(-rot);
+      const wx = x - box.x, wz = z - box.z;
+      if(Math.abs(wx * cos - wz * sin) > (box.hx || 1) + .35 || Math.abs(wx * sin + wz * cos) > (box.hz || 1) + .35) return null;
+    }
+    return {y, normal: n};
+  }
+
+  // Reachable when the surface height at the contact point (player position
+  // clamped inside the box footprint) is within a step of the player height.
+  function canDriveThroughSurfaceCollider(box, player, surfaceYAt){
+    if(!player || !player.pos) return false;
+    const rot = Number(box.rotY != null ? box.rotY : box.rot) || 0;
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    const wx = player.pos.x - box.x, wz = player.pos.z - box.z;
+    const hx = Math.max(.06, (box.hx || 1) - .05), hz = Math.max(.06, (box.hz || 1) - .05);
+    const lx = Math.max(-hx, Math.min(hx, wx * cr + wz * sr));
+    const lz = Math.max(-hz, Math.min(hz, -wx * sr + wz * cr));
+    const cx = box.x + lx * cr - lz * sr;
+    const cz = box.z + lx * sr + lz * cr;
+    let y = surfaceYAt ? surfaceYAt(cx, cz) : null;
+    if(y == null){
+      const top = driveSurfaceTopAt(box, cx, cz);
+      y = top ? top.y : null;
+    }
     if(y == null) return false;
-    return ((player.pos.y || 0) >= y - .38);
+    return ((player.pos.y || 0) >= y - .45);
   }
 
   function sampleDriveSurfaceAt(x, z){
     let best = null;
     for(const b of colliders.box || []){
       if(!b || b.enabled === false || !isDriveSurfaceCollider(b)) continue;
-      const rot = Number(b.rotY != null ? b.rotY : b.rot) || 0;
-      const cos = Math.cos(-rot), sin = Math.sin(-rot);
-      const wx = x - b.x, wz = z - b.z;
-      const lx = wx * cos - wz * sin;
-      const lz = wx * sin + wz * cos;
-      if(Math.abs(lx) > (b.hx || 1) + .35 || Math.abs(lz) > (b.hz || 1) + .35) continue;
-      const n = driveSurfaceNormal(b);
-      if(!n || n.y < driveSurfaceMinNormalY()) continue;
-      const px = b.x + n.x * (b.hy || .5);
-      const py = (b.y || 0) + n.y * (b.hy || .5);
-      const pz = b.z + n.z * (b.hy || .5);
-      const y = py - (n.x * (x - px) + n.z * (z - pz)) / Math.max(.12, n.y);
-      if(!best || y > best.y) best = {y, normal:n};
+      const top = driveSurfaceTopAt(b, x, z);
+      if(top && (!best || top.y > best.y)) best = top;
     }
     return best;
   }
@@ -325,12 +357,10 @@ function create(options){
     }
 
     for(const b of colliders.box){
-      if(b && (b.enabled === false || b.compoundRoot)) continue;
+      if(!b || b.enabled === false || b.compoundRoot) continue;
       const driveSurface = isDriveSurfaceCollider(b);
-      if(driveSurfaceBlockersOnly){
-        if(!driveSurface || isDriveableSurfaceCollider(b)) continue;
-      } else if(driveSurface && canDriveThroughSurfaceCollider(b, player)) continue;
-      if(onlyPhysics && !b.physics && !driveSurfaceBlockersOnly) continue;
+      if(driveSurfaceBlockersOnly && !driveSurface) continue;
+      if(onlyPhysics && !driveSurfaceBlockersOnly && (driveSurface || !b.physics)) continue;
       const rot = Number(b.rotY != null ? b.rotY : b.rot) || 0;
       const cos = Math.cos(-rot), sin = Math.sin(-rot);
       const wx = player.pos.x - b.x, wz = player.pos.z - b.z;
@@ -338,6 +368,8 @@ function create(options){
       const dz = wx * sin + wz * cos;
       const ox = (b.hx || 1) + R - Math.abs(dx), oz = (b.hz || 1) + R - Math.abs(dz);
       if(ox > 0 && oz > 0){
+        // drive surfaces stay solid until their top is actually reachable
+        if(driveSurface && isDriveableSurfaceCollider(b) && canDriveThroughSurfaceCollider(b, player, args.surfaceYAt)) continue;
         if(ox < oz){
           const s = Math.sign(dx) || 1;
           const nx = s * Math.cos(rot), nz = s * Math.sin(rot);

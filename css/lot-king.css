@@ -335,7 +335,7 @@ html,body {
   #driftPts { font-size:26px; font-weight:800; color:#ffd166; text-shadow:0 0 14px rgba(255,209,102,.6); }
   #driftMult { font-size:16px; font-weight:700; color:#ef476f; }
   #speedo {
-    position:absolute; right:26px; bottom:24px; text-align:right; color:#fff;
+    display:none; position:absolute; right:26px; bottom:24px; text-align:right; color:#fff;
   }
   #speedo .speedReadout { display:flex; align-items:flex-end; justify-content:flex-end; gap:14px; }
   #speedo .kmh { font-size:44px; font-weight:800; text-shadow:0 2px 10px rgba(0,0,0,.8); font-variant-numeric:tabular-nums; }
@@ -347,6 +347,46 @@ html,body {
   }
   #speedo .gearBox span { display:block; font-size:9px; font-weight:800; letter-spacing:2px; color:#9aa3b8; }
   #speedo .gearBox b { display:block; font-size:28px; line-height:1; color:#ffd166; font-variant-numeric:tabular-nums; text-shadow:0 0 12px rgba(255,209,102,.35); }
+  #vehicleHud {
+    position:absolute; right:24px; bottom:22px; width:258px; color:#f6fbff; text-align:right;
+    padding:13px 14px 12px; border-radius:16px; overflow:hidden;
+    background:
+      radial-gradient(circle at 88% 16%, rgba(75,227,160,.24), transparent 34%),
+      linear-gradient(145deg, rgba(10,14,23,.88), rgba(18,23,35,.74));
+    border:1px solid rgba(159,244,255,.22);
+    box-shadow:0 18px 42px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.14);
+    backdrop-filter:blur(8px);
+  }
+  #vehicleHud::before {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
+    transform:skewX(-18deg) translateX(-70%); opacity:.55;
+  }
+  #vehicleHud .vhTop { position:relative; display:grid; grid-template-columns:1fr 74px; gap:8px; align-items:stretch; }
+  #vehicleHud .vhMode, #vehicleHud .vhGear {
+    border-radius:10px; padding:8px 9px 7px; background:rgba(3,6,12,.48);
+    border:1px solid rgba(255,255,255,.11);
+  }
+  #vehicleHud span { display:block; font-size:9px; line-height:1; letter-spacing:1.8px; font-weight:900; color:#8fa1b9; }
+  #vehicleHud b { font-variant-numeric:tabular-nums; }
+  #driveTypeHud { display:block; margin-top:5px; font-size:16px; line-height:1; letter-spacing:1.2px; color:#ff4f89; text-shadow:0 0 18px rgba(255,79,137,.48); }
+  #vehicleHud.race #driveTypeHud { color:#4be3a0; text-shadow:0 0 18px rgba(75,227,160,.48); }
+  #vehicleHud.custom #driveTypeHud { color:#ffd166; text-shadow:0 0 18px rgba(255,209,102,.42); }
+  #gearHud2 { display:block; margin-top:3px; font-size:28px; line-height:.95; color:#ffd166; text-shadow:0 0 15px rgba(255,209,102,.4); }
+  #vehicleHud .vhSpeed { position:relative; display:flex; justify-content:flex-end; align-items:flex-end; gap:9px; margin:8px 0 6px; }
+  #vehicleHud .vhSpeed b { font-size:54px; line-height:.88; letter-spacing:-2px; text-shadow:0 8px 22px rgba(0,0,0,.72); }
+  #vehicleHud .vhSpeed span { padding-bottom:7px; color:#d4deee; }
+  #vehicleHud .vhRpmMeta { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+  #rpmHud { font-size:13px; color:#d4deee; letter-spacing:1px; }
+  #vehicleHud .vhRpmTrack {
+    height:8px; border-radius:999px; padding:1px; background:rgba(255,255,255,.10);
+    box-shadow:inset 0 1px 4px rgba(0,0,0,.65);
+  }
+  #vehicleHud .vhRpmTrack i {
+    display:block; height:100%; width:0%; border-radius:999px;
+    background:linear-gradient(90deg, #4be3a0, #ffd166 58%, #ff4f89);
+    box-shadow:0 0 16px rgba(255,79,137,.32);
+  }
   #hint { position:absolute; left:24px; bottom:22px; font-size:12px; color:#7d879e; letter-spacing:1px; line-height:1.7; }
   #popup {
     position:absolute; top:42%; left:50%; transform:translate(-50%,-50%) scale(.8); font-size:38px; font-weight:800;
@@ -392,6 +432,14 @@ html,body {
   .tuneHead { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; }
   .tuneTitle { font-size:12px; font-weight:800; letter-spacing:2px; color:#ffd166; }
   .tuneHint { font-size:10px; color:#7f8aa1; letter-spacing:1px; }
+  .tunePresetBar { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 10px; }
+  .tunePreset {
+    appearance:none; border:1px solid rgba(255,255,255,.14); border-radius:10px;
+    background:linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.035));
+    color:#dfe8ff; padding:8px 10px; font-size:11px; font-weight:900; letter-spacing:.8px;
+    cursor:pointer; transition:transform .12s ease, border-color .12s ease, color .12s ease;
+  }
+  .tunePreset:hover, .tunePreset.active { transform:translateY(-1px); border-color:#4be3a0; color:#4be3a0; }
   .tuneRow { padding:10px 0; border-top:1px solid rgba(255,255,255,.08); }
   .tuneMeta { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:start; margin-bottom:7px; }
   .tuneName { font-size:12px; font-weight:800; letter-spacing:1px; color:#fff; }

@@ -32,6 +32,22 @@ function create(deps){
     gizmo.detach();
   }
 
+  function revealSelectedInSceneOutliner(){
+    const o = ED.selected;
+    if(!o || !o.userData || !o.userData.editorId) return;
+    requestAnimationFrame(() => {
+      const box = document.getElementById('lkOutliner');
+      if(!box) return;
+      const id = o.userData.editorId;
+      const selector = '.lk-item[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : String(id).replace(/["\\\\]/g, '\\\\$&')) + '"]';
+      const row = box.querySelector(selector);
+      if(!row) return;
+      const rowHeight = row.getBoundingClientRect().height || 24;
+      const offset = Math.max(0, row.offsetTop - (box.clientHeight - rowHeight) / 2);
+      box.scrollTo({ top: offset, behavior: 'auto' });
+    });
+  }
+
   function selectObject(o){
     if(ED.selected === o && ED.special === null && !(ED.multiSelected && ED.multiSelected.length)) return;
     deps.clearHoverPickHelper();
@@ -45,6 +61,7 @@ function create(deps){
     deps.refreshSelectionHelpers();
     deps.buildInspector();
     deps.refreshOutliner();
+    revealSelectedInSceneOutliner();
   }
 
   function selectSpecial(kind){

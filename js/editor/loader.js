@@ -10,6 +10,8 @@ let loading = null;
 const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.58, 'loading editor camera tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js'],
   [.72, 'loading transform tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js'],
+  [.725, 'loading text font tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js'],
+  [.726, 'loading text geometry tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js'],
   // runtime input/UI modules — loaded here too so the editor works even if the
   // host page HTML was cached before these were added (skipped if already present)
   [.73, 'loading window manager', 'js/runtime/ui/window-manager.js'],

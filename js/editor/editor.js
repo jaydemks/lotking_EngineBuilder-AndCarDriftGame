@@ -439,19 +439,26 @@ function bindReplaceDropTarget(el, target){ return assetDnd.bindReplaceDropTarge
 function bindAssetDropZone(el){ return assetDnd.bindAssetDropZone(el); }
 function setAssetDragRef(ref){ return assetDnd.setAssetDragRef(ref); }
 function setLeftMode(mode){
-  ED.leftMode = 'scene';
-  $('#lkSceneTab').classList.add('on');
-  $('#lkAssetsPanel').className = ED.viewMode;
+  const m = mode === 'assets' ? 'assets' : 'scene';
+  ED.leftMode = m;
+  $('#lkSceneTab').classList.toggle('on', m === 'scene');
   refreshOutliner();
   refreshAssetsPanel();
 }
-function setViewMode(m){
-  ED.viewMode = m;
-  $('#lkViewGrid').classList.toggle('on', m === 'grid');
-  $('#lkViewList').classList.toggle('on', m === 'list');
-  $('#lkOutliner').className = m;
-  $('#lkAssetsPanel').className = m;
-  refreshAssetsPanel();
+function setViewMode(m, scope){
+  const mode = m === 'grid' ? 'grid' : 'list';
+  const target = scope === 'assets' ? 'assets' : 'scene';
+  if(target === 'assets'){
+    ED.assetsViewMode = mode;
+    $('#lkAssetsPanel').className = mode;
+    refreshAssetsPanel();
+    return;
+  }
+  ED.sceneViewMode = mode;
+  $('#lkViewGrid').classList.toggle('on', mode === 'grid');
+  $('#lkViewList').classList.toggle('on', mode === 'list');
+  $('#lkOutliner').className = mode;
+  refreshOutliner();
 }
 root.querySelectorAll('.lk-pin').forEach(p => {
   p.addEventListener('click', () => {
@@ -650,10 +657,12 @@ outliner = window.LK_EDITOR_OUTLINER && window.LK_EDITOR_OUTLINER.create({
   makeFolderRow,
   folderById,
   writeFolderState,
+  linkToParent,
   toggleVisible,
   requestDeleteEntity,
   bindReplaceDropTarget,
   selectObject,
+  selectPlayerCollider,
   focusSelected,
   openMenu,
   objectMenuItems,
@@ -702,7 +711,20 @@ function selectSimilarObjects(o){ return selectionManager.selectSimilarObjects(o
 function selectSpecial(kind){ return selectionManager.selectSpecial(kind); }
 function deselect(){ return selectionManager.deselect(); }
 function isPlayerCameraSelection(){ return selectionManager.isPlayerCameraSelection(); }
-function toggleVisible(o){ return selectionManager.toggleVisible(o); }
+function isLightLikeObject(o){
+  if(!o) return false;
+  if(o.isLight) return true;
+  if(o.userData){
+    if(o.userData.light) return true;
+    if(o.userData.editorType === 'playerLight') return true;
+  }
+  return false;
+}
+function toggleVisible(o){
+  if(!isLightLikeObject(o)) return selectionManager.toggleVisible(o);
+  requestEditorWarmup('Warm-up light...');
+  requestAnimationFrame(() => selectionManager.toggleVisible(o));
+}
 function setColliderEnabled(o, enabled){ return selectionManager.setColliderEnabled(o, enabled); }
 function performDeleteEntity(o){ return selectionManager.performDeleteEntity(o); }
 function requestDeleteEntity(o){ return selectionManager.requestDeleteEntity(o); }
@@ -753,6 +775,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   addPrimitive,
   addLight,
   addEffect,
+  addText,
   openGlbImportAt,
   setTool,
   selectObject,
@@ -816,6 +839,7 @@ addActions = window.LK_EDITOR_ADD_ACTIONS && window.LK_EDITOR_ADD_ACTIONS.create
 function addPrimitive(prim, at){ return addActions.addPrimitive(prim, at); }
 function addLight(kind, at){ return addActions.addLight(kind, at); }
 function addEffect(kind, at){ return addActions.addEffect(kind, at); }
+function addText(kind, at){ return addActions.addText(kind, at); }
 function finishAdd(obj){ return addActions.finishAdd(obj); }
 function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
 function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }

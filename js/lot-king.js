@@ -6,7 +6,7 @@
 'use strict';
 
 const GAME = window.LOT_KING = {
-  version: '0.2.0',
+  version: '0.5.6',
   assets: null,
   core: {},
   world: {},
@@ -213,7 +213,7 @@ function ensureExhaustRigs(){
     if(!playerExhaustRig.sources[i]) createExhaustSourceRig(i, PLAYER_EXHAUST_CFG.sources[i]);
   }
 }
-function updatePlayerLights(){ PLAYER_LIGHT_RIG.update(); }
+function updatePlayerLights(){ (PLAYER_LIGHT_RIG.syncTimeOfDay || PLAYER_LIGHT_RIG.update)(); }
 function setPlayerLightConfig(patch){ PLAYER_LIGHT_RIG.setConfig(patch); }
 function addPlayerAuxLight(preset){ return PLAYER_LIGHT_RIG.addAux(preset); }
 function applyPlayerExhaustConfig(){
@@ -300,7 +300,7 @@ car.rotation.y = P.heading;
 const G_ACC = 9.81;
 const CFG = {
   // powertrain / brakes (accelerations, m/s²)
-  accel: 52, revAccel: 17, brake: 16, maxSpeed: 48,
+  accel: 56, revAccel: 17, brake: 7.2, maxSpeed: 48,
   drag: 0.18,                 // linear drag coef (1/s)
   // chassis
   axleF: 1.30, axleR: 1.30,   // CG → front / rear axle [m]
@@ -311,7 +311,7 @@ const CFG = {
   stiffF: 6.5, stiffR: 7.5,   // slip-angle sharpness
   rearFalloff: 0.28,          // rear grip drop past the peak → slides sustain
   powerOver: 1.25,            // how much throttle usage eats rear lateral grip
-  hbMuR: 0.30,                // rear μ multiplier while handbrake is pulled
+  hbMuR: 0.42,                // rear μ multiplier while handbrake is pulled
   // steering
   steerMax: 0.60,             // rad at standstill
   steerHiSpeed: 0.34,         // fraction of steerMax kept at very high speed
@@ -326,15 +326,21 @@ const CFG = {
 const BASE_CFG = Object.freeze({...CFG});
 const DRIVE = {
   steerResponse: 6.5,         // how fast the wheel turns toward the key input
-  brakeBias: 0.62,            // longitudinal braking balance
-  brakeDriveLock: 1.0,        // service-brake front slip intensity
+  brakeBias: 0.56,            // longitudinal braking balance
+  brakeDriveLock: 0.82,       // service-brake front slip intensity
+  brakeWheelScale: 0.14,      // raycast wheel brake force scale (prevents stoppies)
+  handbrakeWheelScale: 0.18,  // rear lock force scale for drift entry, not instant spin
+  chassisLift: 0,
   wheelspin: 1.85,            // drive force allowed past rear grip (wheelspin margin)
+  driftDrive: 0.50,           // forward push retained while the rear is sliding
+  shiftOverrun: 0,            // extra limiter hold before upshift while drifting
   burnoutHold: 0.85,          // seconds: rear tires keep slipping after a standing burnout starts
   burnoutWheelspin: 2.65,     // rear drive force margin while the tires are intentionally spinning
   reverseDelay: 0.5,           // automatic reverse engagement delay after stopping [s]
 };
 const BASE_DRIVE = Object.freeze({...DRIVE});
 const PLAYER_COLLISION = {hx:0.92, hy:0.42, hz:1.85, offsetY:0.45, bodyY:0.55, radius:1.4};
+const BASE_PLAYER_COLLISION = Object.freeze({...PLAYER_COLLISION});
 const ENGINE = {
   gear: 1,
   rpm: 1100,
@@ -392,14 +398,14 @@ function updateEngineModel(vF, throttle, sliding, dt){
   let targetRpm = GEARBOX.idle + clamp(speed / top, 0, 1.25) * (GEARBOX.redline - GEARBOX.idle);
   if(throttle > .05){
     targetRpm += 650 * throttle;
-    if(sliding || speed < 8) targetRpm += 1250 * throttle;
+    if(sliding || speed < 8) targetRpm += (sliding ? 1650 : 1250) * throttle;
   }
   if(ENGINE.shiftTimer > 0) targetRpm *= .58;
   const slew = throttle > .05 ? 7.2 : 4.0;
   ENGINE.rpm += (targetRpm - ENGINE.rpm) * Math.min(1, dt * slew);
   if(throttle > .05 && ENGINE.rpm > GEARBOX.upshift && ENGINE.gear < GEARBOX.tops.length && ENGINE.shiftTimer <= 0){
     if(ENGINE.limiterTimer <= 0){
-      ENGINE.limiterTimer = GEARBOX.limiterHold;
+      ENGINE.limiterTimer = GEARBOX.limiterHold + (sliding ? (DRIVE.shiftOverrun || 0) : 0);
       ENGINE.limiterPulse = .18;
     } else if(ENGINE.limiterTimer < .08){
       ENGINE.gear++;
@@ -416,7 +422,9 @@ function updateEngineModel(vF, throttle, sliding, dt){
     ENGINE.rpm = GEARBOX.redline + Math.sin(performance.now() * .075) * 520;
   }
   const rev01 = clamp((ENGINE.rpm - GEARBOX.idle) / (GEARBOX.redline - GEARBOX.idle), 0, 1.12);
-  const curve = clamp(0.48 + Math.sin(clamp(rev01, 0, 1) * Math.PI) * .72 + rev01 * .25, .45, 1.35);
+  const lowTorque = clamp((ENGINE.rpm - 1200) / 500, 0, 1);
+  const midTorque = clamp((6700 - ENGINE.rpm) / 900, .28, 1);
+  const curve = clamp(.48 + lowTorque * 1.02 * midTorque + rev01 * .04, .36, 1.34);
   ENGINE.rpm01 = clamp(rev01, 0, 1.12);
   ENGINE.torque01 = curve * GEARBOX.torque[ENGINE.gear - 1] * (ENGINE.shiftTimer > 0 ? .25 : (ENGINE.limiterTimer > 0 ? .82 : 1));
   return ENGINE;
@@ -444,6 +452,11 @@ const DRIVE_TUNING = window.LK_RUNTIME_DRIVE_TUNING.create({
   baseConfig: BASE_CFG,
   drive: DRIVE,
   baseDrive: BASE_DRIVE,
+  suspension: PHYS.suspension,
+  onSuspensionChange: () => PHYS_WORLD.applySuspension(),
+  collision: PLAYER_COLLISION,
+  baseCollision: BASE_PLAYER_COLLISION,
+  onCollisionChange: () => { if(PHYS.world && rebuildPlayerPhysicsBody) rebuildPlayerPhysicsBody(); },
   clamp,
 });
 const setTuneOpen = DRIVE_TUNING.setOpen;
@@ -526,6 +539,7 @@ const SURFACE = {
   ray: new THREE.Raycaster(),
   down: new THREE.Vector3(0, -1, 0),
   normal: new THREE.Vector3(0, 1, 0),
+  wheelGrade: 0,
   y: 0,
   vy: 0,
   pitch: 0,
@@ -534,7 +548,7 @@ const SURFACE = {
   airborne: false,
 };
 const SURFACE_UP = new THREE.Vector3(0, 1, 0);
-const DRIVE_SURFACE_MAX_SLOPE_DEG = 36;
+const DRIVE_SURFACE_MAX_SLOPE_DEG = 50;
 const DRIVE_SURFACE_MIN_NORMAL_Y = Math.cos(THREE.MathUtils.degToRad(DRIVE_SURFACE_MAX_SLOPE_DEG));
 const SURFACE_TMP = {
   fwd: new THREE.Vector3(),
@@ -559,33 +573,62 @@ function isDriveSurfaceObject(obj){
   return false;
 }
 
+const surfaceRootsCache = {t: -1e9, list: []};
 function driveSurfaceRoots(){
-  if(!GAME || !GAME.world || !GAME.world.registry) return [];
-  return GAME.world.registry.filter(o => o && o.visible !== false && isDriveSurfaceObject(o));
+  const now = performance.now();
+  if(now - surfaceRootsCache.t > 250){
+    surfaceRootsCache.list = (GAME && GAME.world && GAME.world.registry)
+      ? GAME.world.registry.filter(o => o && o.visible !== false && isDriveSurfaceObject(o))
+      : [];
+    surfaceRootsCache.t = now;
+  }
+  return surfaceRootsCache.list;
 }
 
+// Raycast against the real meshes first (correct for wedges, mountains, tilted
+// boxes); the analytic collider-plane sample is only a fallback near edges.
 function sampleDriveSurface(x, z){
-  if(WORLD_STATE && WORLD_STATE.sampleDriveSurfaceAt){
-    const surface = WORLD_STATE.sampleDriveSurfaceAt(x, z);
-    if(surface && surface.y != null && surface.normal){
-      const n = surface.normal.clone ? surface.normal.clone() : new THREE.Vector3(surface.normal.x || 0, surface.normal.y || 1, surface.normal.z || 0);
-      if(n.y >= DRIVE_SURFACE_MIN_NORMAL_Y) return {y: surface.y, normal: n.normalize(), hit: true};
-    }
-  }
+  const toSurfaceSample = (y, n, hit) => {
+    if(!n || y == null) return null;
+    const normal = n.clone ? n.clone() : new THREE.Vector3(n.x || 0, n.y || 1, n.z || 0);
+    normal.normalize();
+    if(normal.lengthSq() < 0.001) return null;
+    return {y, normal, hit: hit !== false};
+  };
+  const collider = WORLD_STATE && WORLD_STATE.sampleDriveSurfaceAt
+    ? WORLD_STATE.sampleDriveSurfaceAt(x, z)
+    : null;
+  const colliderNormal = collider && collider.normal && collider.normal.y >= DRIVE_SURFACE_MIN_NORMAL_Y
+    ? collider.normal
+    : null;
+  const colliderSample = toSurfaceSample(collider && collider.y, colliderNormal, collider != null);
   const roots = driveSurfaceRoots();
-  SURFACE_TMP.origin.set(x, 18, z);
+  if(colliderSample) return colliderSample;
   if(roots.length){
+    SURFACE_TMP.origin.set(x, Math.max(18, (P.pos.y || 0) + 12), z);
     SURFACE.ray.set(SURFACE_TMP.origin, SURFACE.down);
-    SURFACE.ray.far = 42;
+    SURFACE.ray.far = SURFACE_TMP.origin.y + 24;
     const hits = SURFACE.ray.intersectObjects(roots, true);
+    let unreachable = null;
     for(const hit of hits){
       if(!hit || !hit.face) continue;
       const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
       if(n.y < DRIVE_SURFACE_MIN_NORMAL_Y) continue;
-      return {y: hit.point.y, normal: n, hit: true};
+      const mesh = toSurfaceSample(hit.point.y, n, true);
+      if(!mesh) continue;
+      if(mesh.normal && colliderSample && mesh.normal.dot(colliderSample.normal) < 0) continue;
+      // highest surface the car can actually stand on (skips decks overhead)
+      if(hit.point.y <= (P.pos.y || 0) + .9) return mesh;
+      unreachable = mesh;
     }
+    if(unreachable) return unreachable;
   }
   return {y: 0, normal: SURFACE_UP, hit: false};
+}
+
+function driveSurfaceYAt(x, z){
+  const s = sampleDriveSurface(x, z);
+  return s && s.hit ? s.y : null;
 }
 
 function updateVehicleSurface(dt){
@@ -595,12 +638,12 @@ function updateVehicleSurface(dt){
   const halfTrack = .92;
   const speed = P.vel.length();
   const maxStepUp = Math.min(.85, .46 + speed * .014);
-  const center = sampleDriveSurface(P.pos.x, P.pos.z);
   const filterStep = s => {
-    if(!s || s.y == null) return {y:0, normal:SURFACE_UP};
-    if(!SURFACE.airborne && s.y - SURFACE.y > maxStepUp) return {y:SURFACE.y, normal:SURFACE_UP};
+    if(!s || s.y == null) return {y:0, normal:SURFACE_UP, hit:false};
+    if(!SURFACE.airborne && s.y - SURFACE.y > maxStepUp) return {y:SURFACE.y, normal:SURFACE_UP, hit:false};
     return s;
   };
+  const center = filterStep(sampleDriveSurface(P.pos.x, P.pos.z));
   const stabilizeSample = s => {
     if(!center.hit || (s && s.hit)) return s;
     return {y: center.y, normal: center.normal, hit: false};
@@ -611,8 +654,10 @@ function updateVehicleSurface(dt){
     sampleDriveSurface(P.pos.x - fwd.x * halfWheelbase + side.x * halfTrack, P.pos.z - fwd.z * halfWheelbase + side.z * halfTrack),
     sampleDriveSurface(P.pos.x - fwd.x * halfWheelbase - side.x * halfTrack, P.pos.z - fwd.z * halfWheelbase - side.z * halfTrack),
   ];
-  const realHits = samples.filter(s => s && s.hit);
+  // step-filter BEFORE picking supports: walls/ledges above maxStepUp must not
+  // pull the car up, whatever direction it approaches from
   const wheelSamples = samples.map(stabilizeSample).map(filterStep);
+  const realHits = wheelSamples.filter(s => s.hit);
   const frontY = (wheelSamples[0].y + wheelSamples[1].y) * .5;
   const rearY = (wheelSamples[2].y + wheelSamples[3].y) * .5;
   const leftY = (wheelSamples[0].y + wheelSamples[2].y) * .5;
@@ -623,19 +668,24 @@ function updateVehicleSurface(dt){
     ? (realHits.reduce((sum, s) => sum + s.y, 0) + center.y * supportWeight) / supportCount
     : wheelSamples.reduce((sum, s) => sum + s.y, 0) / wheelSamples.length;
   const ahead = sampleDriveSurface(P.pos.x + fwd.x * halfWheelbase * 2.4, P.pos.z + fwd.z * halfWheelbase * 2.4);
+  const wheelGradeRaw = (frontY - rearY) / (halfWheelbase * 2);
   const avgNormal = SURFACE_TMP.normal.set(0, 0, 0);
   wheelSamples.forEach(s => avgNormal.add(s.normal));
   avgNormal.normalize();
   if(avgNormal.lengthSq() < .1) avgNormal.copy(SURFACE_UP);
+  SURFACE.wheelGrade = clamp(wheelGradeRaw, -0.55, 0.55);
 
   const drop = SURFACE.y - targetY;
-  const targetPitch = Math.atan2(frontY - rearY, halfWheelbase * 2);
+  const climb = Math.atan2(frontY - rearY, halfWheelbase * 2);
+  // positive rotation.x pitches the nose down, so climbing (front higher) needs
+  // the negated angle — this was inverted and made the car dive uphill
+  const targetPitch = -climb;
   const rampLipDrop = frontY - ahead.y;
-  const rampLaunch = targetPitch > .08 && rampLipDrop > .22 && speed > 6.5;
+  const rampLaunch = climb > .08 && rampLipDrop > .22 && speed > 6.5;
   if(!SURFACE.airborne && (drop > .32 || rampLaunch) && speed > 5.5){
     SURFACE.airborne = true;
     SURFACE.vy = rampLaunch
-      ? Math.max(2.2, Math.min(8.5, speed * (.14 + Math.min(.22, targetPitch * .45))))
+      ? Math.max(2.2, Math.min(8.5, speed * (.14 + Math.min(.22, climb * .45))))
       : Math.max(1.4, Math.min(6.5, speed * .12));
   }
   if(SURFACE.airborne){
@@ -661,16 +711,15 @@ function updateVehicleSurface(dt){
 
 function applyDriveSurfaceGrade(dt){
   if(SURFACE.airborne || !SURFACE.normal) return;
-  const n = SURFACE.normal;
-  const slope = Math.max(0, 1 - n.y);
-  if(slope < .018) return;
-  const downhillX = n.x;
-  const downhillZ = n.z;
-  const len = Math.hypot(downhillX, downhillZ);
-  if(len < .0001) return;
-  const force = G_ACC * n.y * (0.36 + slope * 1.15);
-  P.vel.x += downhillX * force * dt;
-  P.vel.z += downhillZ * force * dt;
+  const fwd = SURFACE_TMP.fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
+  const slope = SURFACE.wheelGrade || 0;
+  const grade = Math.abs(slope);
+  if(grade < .004) return;
+  const slopePower = 0.28 + grade * 1.85;
+  const force = G_ACC * grade * slopePower;
+  const dir = slope > 0 ? -1 : 1;
+  P.vel.x += fwd.x * force * dt * dir;
+  P.vel.z += fwd.z * force * dt * dir;
 }
 
 function applyPlayerVisual(vF, vR, steerAngle, up, down, dt){
@@ -695,11 +744,28 @@ function applyPlayerVisual(vF, vR, steerAngle, up, down, dt){
   RIG.drive(vF, dt, visSteer);
 }
 
+// cannon RaycastVehicle conventions (measured): negative engine force drives +Z
+const CANNON_FWD_SIGN = -1;
+const WHEEL_GRIP = 2.6;               // wheel frictionSlip at mu = 1
+const wheelSuspVis = [0, 0, 0, 0];    // smoothed per-wheel suspension offsets
+
+function wheelsOnGround(){
+  const v = PHYS.vehicle;
+  if(!v) return 0;
+  let n = 0;
+  for(const w of v.wheelInfos) if(w.isInContact) n++;
+  return n;
+}
+
 function updateCarCannon(dt){
   if(!initPhysicsWorld()) return null;
   if(PHYS.staticsSignature !== colliderSignature()) rebuildPhysicsStatics();
 
   const body = PHYS.carBody;
+  const vehicle = PHYS.vehicle;
+  if(!vehicle) return null;
+  const mass = body.mass || PHYS.mass;
+  const bodyY = PLAYER_COLLISION.bodyY == null ? .55 : PLAYER_COLLISION.bodyY;
   const drive = readDriveInput();
   const throttleAmt = drive.throttle, brakeAmt = drive.brake;
   const up = throttleAmt > 0.05, down = brakeAmt > 0.05;
@@ -711,26 +777,25 @@ function updateCarCannon(dt){
   P.heading = yawQuat(body.quaternion);
   const fwd = new THREE.Vector3(Math.sin(P.heading), 0, Math.cos(P.heading));
   const rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
-  const vel = new THREE.Vector3(body.velocity.x, 0, body.velocity.z);
-  let vx = vel.dot(fwd), vy = vel.dot(rightV);
+  let vx = body.velocity.x * fwd.x + body.velocity.z * fwd.z;
+  let vy = body.velocity.x * rightV.x + body.velocity.z * rightV.z;
   const r = body.angularVelocity.y;
   const speed = Math.abs(vx);
   const speedTot = Math.hypot(vx, vy);
+  const grounded = wheelsOnGround();
   const steerScale = CFG.steerHiSpeed + (1 - CFG.steerHiSpeed) * Math.exp(-speed / 20);
   const delta = P.steer * CFG.steerMax * steerScale;
   lastSteerAngle = delta;
 
   const L = CFG.axleF + CFG.axleR;
-  const dirSign = vx < -.05 ? -1 : 1;
-  const vxs = Math.max(speed, 2.0);
-  const alphaF = Math.atan2(vy + CFG.axleF * r, vxs) - delta * dirSign;
-  const alphaR = Math.atan2(vy - CFG.axleR * r, vxs);
-  const dW = clamp(CFG.cgHeight / L * axPrev, -G_ACC * .32, G_ACC * .32);
-  const gF = Math.max(1.5, G_ACC * CFG.axleR / L - dW);
-  const gR = Math.max(1.5, G_ACC * CFG.axleF / L + dW);
+  const gF = G_ACC * CFG.axleR / L;
+  const gR = G_ACC * CFG.axleF / L;
 
-  let ax = -CFG.drag * vx;
+  // ---- longitudinal state machines (same feel as the classic model);
+  // ax [m/s²] becomes engine force on the rear wheels, brakeA a wheel brake
+  let ax = -CFG.drag * vx * (isDrifting && up ? .35 : 1);
   let driveA = 0, brakeA = 0, muRl = CFG.muR, muFl = CFG.muF;
+  let handbrakeForce = 0;
   const burnout = updateBurnoutState(up, down, handbrake, speedTot, dt);
   const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, dt);
   ENGINE.reverseActive = false;
@@ -739,11 +804,26 @@ function updateCarCannon(dt){
   const brakeRamp = down ? (.22 + .78 * Math.pow(clamp(brakeHoldTimer / BRAKE_RAMP_TIME, 0, 1), 1.35)) : 0;
   if(handbrake){
     muRl *= CFG.hbMuR;
-    if(speed > .3) ax -= Math.sign(vx) * muRl * gR * 1.1;
+    handbrakeForce = mass * G_ACC * (DRIVE.handbrakeWheelScale == null ? .18 : DRIVE.handbrakeWheelScale);   // rear axle locked
   } else if(up){
     driveA = CFG.accel * engine.torque01 * throttleAmt * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
-    driveA = Math.min(driveA, CFG.muR * gR * (burnout > 0 ? DRIVE.burnoutWheelspin : DRIVE.wheelspin));
+    // traction cap: brief wheelspin off the line, then hooked up — the cannon
+    // wheels slide for real (killing grip AND drive) if we push far past it
+    const launch = Math.exp(-Math.max(0, vx) / 4);
+    const driveGrip = burnout > 0 ? DRIVE.burnoutWheelspin * .72 : DRIVE.wheelspin * (.78 + .38 * launch);
+    driveA = Math.min(driveA, CFG.muR * G_ACC * driveGrip);
+    const driveUse = Math.abs(driveA) / Math.max(.001, CFG.muR * G_ACC);
+    if(up && !handbrake){
+      const launchSlip = clamp((1 - clamp(speedTot / 15, 0, 1)) * Math.max(0, CFG.powerOver - .9) * driveUse * .13, 0, .26);
+      muRl *= clamp(1 - CFG.powerOver * .13 * driveUse - launchSlip, .30, 1);
+      muFl *= 1 + clamp(Math.abs(P.steer) * (.08 + Math.max(0, CFG.steerHiSpeed - BASE_CFG.steerHiSpeed) * .7), 0, .18);
+    }
     ax += burnout > 0 && down ? driveA * .12 : driveA;
+  }
+  if(isDrifting && up && driveA > 0){
+    const driftDrive = DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive;
+    const angle01 = clamp(Math.abs(vy) / Math.max(4, Math.abs(vx) + 2), 0, 1);
+    ax += driveA * driftDrive * (.34 + .56 * angle01);
   }
   if(burnout > 0){
     muRl *= Math.max(.12, 1 - .88 * burnout);
@@ -776,8 +856,7 @@ function updateCarCannon(dt){
     if(!reverseAllowed){
       if(!settledForReverse){
         brakeA = CFG.brake * brakeAmt * brakeRamp * (speedTot > 7 ? 1 : .85);
-        ax -= Math.sign(vx || 1) * brakeA;
-        if(Math.abs(vx) < .25 && speedTot > 2.2) ax -= CFG.brake * brakeAmt * brakeRamp * .08;
+        if(Math.abs(vx) < .25 && speedTot > 2.2) brakeA += CFG.brake * brakeAmt * brakeRamp * .08;
       }
     }
     else {
@@ -794,44 +873,69 @@ function updateCarCannon(dt){
     reverseGearLatched = false;
   }
 
-  const rearUse = handbrake ? 0 : Math.max(Math.abs(driveA) / Math.max(.001, CFG.muR * gR), burnout > 0 ? 1.08 * burnout : 0);
-  muRl *= Math.max(.22, 1 - CFG.powerOver * Math.pow(rearUse, 1.6));
+  // NOTE: no extra powerOver cut on frictionSlip — cannon's own friction
+  // circle already couples drive and lateral grip per wheel; stacking a cut
+  // on top made the car spin at full torque. Oversteer character comes from
+  // the muF/muR balance (tuning slider) plus the drift assists below.
   if(brakeA){
     const driveLock = (DRIVE.brakeDriveLock == null ? 1 : DRIVE.brakeDriveLock);
     const frontUse = (brakeA * DRIVE.brakeBias * driveLock) / Math.max(.001, CFG.muF * gF);
     const rearUseBrake = (brakeA * (1 - DRIVE.brakeBias)) / Math.max(.001, CFG.muR * gR);
-    muFl *= Math.max(.42, 1 - .56 * frontUse);
-    muRl *= Math.max(.74, 1 - .16 * rearUseBrake);
+    muFl *= Math.max(.6, 1 - .3 * frontUse);
+    muRl *= Math.max(.85, 1 - .1 * rearUseBrake);
   }
 
-  const latScale = clamp(speedTot / 2.5, 0, 1);
-  const rearPeak = Math.max(.35, 1 - CFG.rearFalloff * Math.min(1, Math.abs(alphaR) / .7));
-  const fyF = -muFl * gF * Math.tanh(CFG.stiffF * alphaF) * latScale;
-  const fyR = -muRl * gR * Math.tanh(CFG.stiffR * alphaR) * rearPeak * latScale;
-  const parkingBlend = !handbrake && speedTot > .2 && speedTot < 6 ? (1 - speedTot / 6) : 0;
-  const parkingYaw = (vx / L) * Math.tan(delta);
-  const yawAssist = (isDrifting ? P.steer * CFG.driftAssist * (vx < 0 ? -1 : 1) * 2.2 : 0)
-    + (parkingYaw - r) * parkingBlend * 3.2
-    - r * CFG.yawDamp;
-  if(isDrifting && up && Math.abs(vy) > .5){
-    const pull = clamp(CFG.driftThrottlePull * dt, 0, .06);
-    const hold = Math.sign(vy) * CFG.driftGasPush * dt;
-    body.velocity.x += rightV.x * (hold - vy * pull);
-    body.velocity.z += rightV.z * (hold - vy * pull);
+  // ---- map onto the raycast wheels: RWD engine force, braking, steering,
+  // per-wheel grip (the drift character lives in the frictionSlip modulation)
+  const rearForce = CANNON_FWD_SIGN * ax * mass * .5;
+  vehicle.applyEngineForce(rearForce, 2);
+  vehicle.applyEngineForce(rearForce, 3);
+  vehicle.setSteeringValue(delta, 0);
+  vehicle.setSteeringValue(delta, 1);
+  const brakeForce = mass * brakeA * (DRIVE.brakeWheelScale == null ? .36 : DRIVE.brakeWheelScale);
+  const frontBrake = brakeForce * DRIVE.brakeBias * .5;
+  const rearBrake = brakeForce * (1 - DRIVE.brakeBias) * .5 + handbrakeForce * .5;
+  vehicle.setBrake(frontBrake, 0);
+  vehicle.setBrake(frontBrake, 1);
+  vehicle.setBrake(rearBrake, 2);
+  vehicle.setBrake(rearBrake, 3);
+  vehicle.wheelInfos[0].frictionSlip = vehicle.wheelInfos[1].frictionSlip = WHEEL_GRIP * muFl;
+  vehicle.wheelInfos[2].frictionSlip = vehicle.wheelInfos[3].frictionSlip = WHEEL_GRIP * muRl;
+
+  // ---- arcade drift assists on top of the raycast model (wheels grounded)
+  if(grounded >= 2){
+    const parkingBlend = !handbrake && speedTot > .2 && speedTot < 6 ? (1 - speedTot / 6) : 0;
+    const parkingYaw = (vx / L) * Math.tan(delta);
+    const steerSoft = Math.sign(P.steer) * Math.pow(Math.abs(P.steer), 1.35);
+    const fastDrift = isDrifting ? clamp((speedTot - 18) / 22, 0, 1) : 0;
+    const yawAssist = (isDrifting ? steerSoft * CFG.driftAssist * (vx < 0 ? -1 : 1) * (2.05 - .55 * fastDrift) : 0)
+      + (parkingYaw - r) * parkingBlend * 3.2
+      - r * CFG.yawDamp * (1 + fastDrift * 1.65);
+    body.torque.y += yawAssist * mass * CFG.kSq;
+    if(isDrifting && up && Math.abs(vy) > .25){
+      const pull = clamp(CFG.driftThrottlePull * dt * (1 - throttleAmt * .45), 0, .06);
+      const hold = Math.sign(vy || P.steer || 1) * CFG.driftGasPush * dt * .78;
+      body.velocity.x += rightV.x * (hold - vy * pull);
+      body.velocity.z += rightV.z * (hold - vy * pull);
+      if(speedTot < CFG.maxSpeed * 1.04){
+        const push = (DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive) * throttleAmt * CFG.driftGasPush * dt * .88;
+        body.velocity.x += fwd.x * push;
+        body.velocity.z += fwd.z * push;
+      }
+    }
   }
-  const mass = body.mass || PHYS.mass;
-  const forceAt = (accel, dir, px, pz) => {
-    const force = cannonVec(dir.x * accel * mass, 0, dir.z * accel * mass);
-    const point = cannonVec(body.position.x + px, .55, body.position.z + pz);
-    body.applyForce(force, point);
-  };
-  forceAt(ax, fwd, 0, 0);
-  forceAt(fyF, rightV, fwd.x * CFG.axleF, fwd.z * CFG.axleF);
-  forceAt(fyR, rightV, -fwd.x * CFG.axleR, -fwd.z * CFG.axleR);
-  body.torque.y += yawAssist * mass * CFG.kSq;
 
   const beforeSpeed = Math.hypot(body.velocity.x, body.velocity.z);
   PHYS.world.step(PHYS_STEP, dt, 8);
+  if(brakeA > 0 && grounded >= 2){
+    const pitchDamp = clamp(dt * (4 + brakeAmt * 4), 0, .45);
+    body.angularVelocity.x *= 1 - pitchDamp;
+  }
+  if(handbrake || isDrifting){
+    const fastDrift = isDrifting ? clamp((speedTot - 18) / 22, 0, 1) : 0;
+    const yawLimit = ((isDrifting ? 3.4 : 2.4) + Math.abs(P.steer) * 2.6 + (up ? .7 : 0)) * (1 - fastDrift * .34);
+    body.angularVelocity.y = clamp(body.angularVelocity.y, -yawLimit, yawLimit);
+  }
   if(handbrake && speedTot < 1.05){
     const stop = Math.min(1, dt * 9);
     body.velocity.x *= 1 - stop;
@@ -843,23 +947,18 @@ function updateCarCannon(dt){
       body.angularVelocity.y = 0;
     }
   }
-  if(!up && !down && !handbrake && Math.abs(P.steer) < .04 && speedTot < .28){
+  if(grounded >= 3 && !up && !down && !handbrake && Math.abs(P.steer) < .04 && speedTot < .28){
     body.velocity.x = 0;
     body.velocity.z = 0;
     body.angularVelocity.y = 0;
   }
-  body.position.y = PLAYER_COLLISION.bodyY == null ? .55 : PLAYER_COLLISION.bodyY;
-  body.velocity.y = 0;
-  body.angularVelocity.x = 0;
-  body.angularVelocity.z = 0;
   P.heading = yawQuat(body.quaternion);
-  body.quaternion.setFromAxisAngle(cannonVec(0,1,0), P.heading);
   fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
   rightV.set(fwd.z, 0, -fwd.x);
   const afterSpeed = Math.hypot(body.velocity.x, body.velocity.z);
   if(beforeSpeed - afterSpeed > 3) PHYS.lastImpact = Math.max(PHYS.lastImpact, beforeSpeed - afterSpeed);
 
-  P.pos.set(body.position.x, 0, body.position.z);
+  P.pos.set(body.position.x, body.position.y - bodyY, body.position.z);
   P.vel.set(body.velocity.x, 0, body.velocity.z);
   P.yawRate = body.angularVelocity.y;
   const physicsImpact = WORLD_STATE.collideCar({
@@ -871,15 +970,11 @@ function updateCarCannon(dt){
       addPoints(col.hitScore, col.hitLabel || ('+' + col.hitScore));
     },
   });
-  const driveBlockImpact = WORLD_STATE.collideCar({
-    player: P,
-    radius: playerCollisionRadius(),
-    driveSurfaceBlockersOnly: true,
-  });
-  if(driveBlockImpact > 1.5) PHYS.lastImpact = Math.max(PHYS.lastImpact, driveBlockImpact);
   if(physicsImpact > 1.5) PHYS.lastImpact = Math.max(PHYS.lastImpact, physicsImpact);
-  body.position.set(P.pos.x, PLAYER_COLLISION.bodyY == null ? .55 : PLAYER_COLLISION.bodyY, P.pos.z);
-  body.velocity.set(P.vel.x, 0, P.vel.z);
+  body.position.x = P.pos.x;
+  body.position.z = P.pos.z;
+  body.velocity.x = P.vel.x;
+  body.velocity.z = P.vel.z;
   vx = P.vel.dot(fwd);
   vy = P.vel.dot(rightV);
   axPrev = ax;
@@ -898,12 +993,54 @@ function updateCarCannon(dt){
   lastLatG = Math.abs(P.yawRate * P.vel.length()) / G_ACC;
 
   if(PHYS.lastImpact > 1.5){ lastImpact = PHYS.lastImpact; onCrash(PHYS.lastImpact); PHYS.lastImpact = 0; }
+  if(body.position.y < -30) resetCar();
 
-  updateVehicleSurface(dt);
-  applyDriveSurfaceGrade(dt);
-  body.velocity.set(P.vel.x, 0, P.vel.z);
-  applyPlayerVisual(vx, vy, delta, up, down, dt);
+  applyPlayerVisualCannon(vx, vy, delta, dt);
   return {vF:vx, vR:vy, drifting};
+}
+
+const carRenderQuat = new THREE.Quaternion();
+const carVisTmpQ = new THREE.Quaternion();
+const carVisTmpV = new THREE.Vector3();
+function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
+  const body = PHYS.carBody, vehicle = PHYS.vehicle;
+  const chassisLift = DRIVE.chassisLift || 0;
+  const snap = carRenderSnap;
+  carRenderSnap = false;
+  const alpha = snap ? 1 : dampAlpha(24, dt);
+  carVisTmpQ.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+  if(snap) carRenderQuat.copy(carVisTmpQ);
+  else carRenderQuat.slerp(carVisTmpQ, alpha);
+  // the visual car origin sits at ground level under the chassis centre
+  const bodyY = PLAYER_COLLISION.bodyY == null ? .55 : PLAYER_COLLISION.bodyY;
+  carVisTmpV.set(0, -bodyY, 0).applyQuaternion(carRenderQuat);
+  carVisTmpV.x += body.position.x;
+  carVisTmpV.y += body.position.y;
+  carVisTmpV.z += body.position.z;
+  if(snap) carRenderPos.copy(carVisTmpV);
+  else carRenderPos.lerp(carVisTmpV, alpha);
+  carRenderHeading = P.heading;
+  car.position.copy(carRenderPos);
+  car.quaternion.copy(carRenderQuat);
+  carVisual.position.y = chassisLift;
+
+  // per-wheel suspension travel straight from the raycasts
+  const visSteer = steerAngle * 1.25;
+  for(let i = 0; i < wheels.length; i++){
+    const w = wheels[i];
+    const wi = vehicle.wheelInfos[i];
+    if(wi){
+      const compress = clamp(PHYS.suspension.restLength - wi.suspensionLength, -PHYS.suspension.travel, PHYS.suspension.travel);
+      wheelSuspVis[i] += (compress - wheelSuspVis[i]) * dampAlpha(18, dt);
+    }
+    w.spin += vF * dt / .38;
+    w.mesh.rotation.x = w.spin;
+    w.rim.rotation.x = w.spin;
+    if(w.front) w.pivot.rotation.y = visSteer;
+    w.pivot.position.y = .38 - chassisLift + (wheelSuspVis[i] || 0);
+  }
+  RIG.drive(vF, dt, visSteer);
+  if(RIG.setSuspension) RIG.setSuspension(wheelSuspVis.map(v => (v || 0) - chassisLift));
 }
 
 function updateCar(dt){
@@ -1119,6 +1256,7 @@ function handleCollisions(){
   WORLD_STATE.collideCar({
     player: P,
     radius: playerCollisionRadius(),
+    surfaceYAt: driveSurfaceYAt,
     onObjectHit: col => {
       SFX.thud(.25);
       addPoints(col.hitScore, col.hitLabel || ('+' + col.hitScore));
@@ -2336,7 +2474,25 @@ function stepGameplayFrame(dt, shouldRender){
 
   RADIO.updateHUD(dt, rpm01, throttle);
 
-  HUD.setSpeedGear(speedKmh, (ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1));
+  const gearLabel = (ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1);
+  const modeLabel = DRIVE_TUNING.getMode ? DRIVE_TUNING.getMode() : 'custom';
+  const vehicleHud = document.getElementById('vehicleHud');
+  if(vehicleHud){
+    const mode = String(modeLabel || 'custom').toLowerCase();
+    vehicleHud.classList.toggle('race', mode === 'race');
+    vehicleHud.classList.toggle('custom', mode !== 'race' && mode !== 'drift');
+    const kmh2 = document.getElementById('kmh2');
+    const gear2 = document.getElementById('gearHud2');
+    const rpmHud = document.getElementById('rpmHud');
+    const rpmBar = document.getElementById('rpmBar');
+    const driveType = document.getElementById('driveTypeHud');
+    if(kmh2) kmh2.textContent = String(Math.max(0, Math.round(speedKmh || 0)));
+    if(gear2) gear2.textContent = gearLabel;
+    if(rpmHud) rpmHud.textContent = String(Math.round(ENGINE.rpm || 0));
+    if(rpmBar) rpmBar.style.width = (clamp((ENGINE.rpm || 0) / GEARBOX.limiter, 0, 1) * 100).toFixed(1) + '%';
+    if(driveType) driveType.textContent = mode === 'race' ? 'RACE' : (mode === 'drift' ? 'DRIFT' : 'CUSTOM');
+  }
+  HUD.setSpeedGear(speedKmh, gearLabel);
   if(shouldRender) renderPlayerCamera();
 }
 

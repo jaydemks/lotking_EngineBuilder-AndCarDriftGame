@@ -180,6 +180,68 @@ function create(deps){
     }
     box.appendChild(sd.root);
 
+    if(o.userData.editorType === 'text'){
+      const tx = section('TEXT');
+      const props = Object.assign({
+        text:'Text', color:0xffffff, background:0x000000, opacity:0, size:1, width:4, height:1.4,
+        fontSize:96, fontFamily:'Arial', weight:'900', italic:false, align:'center', valign:'middle',
+        lineHeight:1.15, padding:.12, wrap:false, depth:.16, bevel:false,
+      }, o.userData.textProps || {});
+      o.userData.textProps = props;
+      const updateText = patch => {
+        Object.assign(props, patch || {});
+        o.userData.textProps = props;
+        if(o.userData.addedEntry) o.userData.addedEntry.props = Object.assign({}, props);
+        if(STORE.updateTextObject) STORE.updateTextObject(o);
+        markDirty();
+      };
+      const row = el('<div class="lk-row"><label>Text</label><textarea rows="5"></textarea></div>');
+      const input = row.querySelector('textarea');
+      input.value = props.text || '';
+      input.addEventListener('input', () => updateText({text:input.value}));
+      tx.body.appendChild(row);
+      tx.body.appendChild(colorRow('Color', props.color, v => updateText({color:v})).root);
+      tx.body.appendChild(colorRow('Background', props.background, v => updateText({background:v})).root);
+      tx.body.appendChild(sliderRow('Background alpha', props.opacity || 0, 0, 1, .01, v => updateText({opacity:v}), v => Math.round(v * 100) + '%').root);
+      tx.body.appendChild(sliderRow('Object size', props.size || 1, .2, 8, .05, v => updateText({size:v}), v => (+v).toFixed(2)).root);
+      tx.body.appendChild(sliderRow('Crop width', props.width || 4, .4, 24, .05, v => updateText({width:v}), v => (+v).toFixed(2) + 'm').root);
+      tx.body.appendChild(sliderRow('Crop height', props.height || 1.4, .2, 12, .05, v => updateText({height:v}), v => (+v).toFixed(2) + 'm').root);
+      tx.body.appendChild(sliderRow('Font size', props.fontSize || 96, 12, 220, 1, v => updateText({fontSize:Math.round(v)}), v => Math.round(v) + 'px').root);
+      const fontRow = el('<div class="lk-row"><label>Font</label><select><option value="Arial">Arial</option><option value="Georgia">Georgia</option><option value="Verdana">Verdana</option><option value="Tahoma">Tahoma</option><option value="Courier New">Courier New</option><option value="Impact">Impact</option></select></div>');
+      const fontSelect = fontRow.querySelector('select');
+      fontSelect.value = props.fontFamily || 'Arial';
+      fontSelect.addEventListener('change', () => updateText({fontFamily:fontSelect.value}));
+      tx.body.appendChild(fontRow);
+      const weightRow = el('<div class="lk-row"><label>Weight</label><select><option value="400">Regular</option><option value="700">Bold</option><option value="900">Black</option></select></div>');
+      const weightSelect = weightRow.querySelector('select');
+      weightSelect.value = String(props.weight || '900');
+      weightSelect.addEventListener('change', () => updateText({weight:weightSelect.value}));
+      tx.body.appendChild(weightRow);
+      tx.body.appendChild(checkRow('Italic', !!props.italic, v => updateText({italic:v})).root);
+      tx.body.appendChild(checkRow('Auto wrap', !!props.wrap, v => updateText({wrap:v})).root);
+      const alignRow = el('<div class="lk-row"><label>Align</label><select><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></div>');
+      const alignSelect = alignRow.querySelector('select');
+      alignSelect.value = props.align || 'center';
+      alignSelect.addEventListener('change', () => updateText({align:alignSelect.value}));
+      tx.body.appendChild(alignRow);
+      const valignRow = el('<div class="lk-row"><label>Vertical</label><select><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></div>');
+      const valignSelect = valignRow.querySelector('select');
+      valignSelect.value = props.valign || 'middle';
+      valignSelect.addEventListener('change', () => updateText({valign:valignSelect.value}));
+      tx.body.appendChild(valignRow);
+      tx.body.appendChild(sliderRow('Line height', props.lineHeight || 1.15, .7, 2.4, .01, v => updateText({lineHeight:v}), v => (+v).toFixed(2)).root);
+      tx.body.appendChild(sliderRow('Padding', props.padding || 0, 0, 2, .01, v => updateText({padding:v}), v => (+v).toFixed(2) + 'm').root);
+      if(o.userData.textKind === '3d'){
+        tx.body.appendChild(sliderRow('Depth', props.depth || .16, .01, 1.2, .01, v => updateText({depth:v}), v => (+v).toFixed(2) + 'm').root);
+        tx.body.appendChild(checkRow('Bevel', !!props.bevel, v => updateText({bevel:v})).root);
+      }
+      tx.body.appendChild(btnRow([{label:'Fit crop to lines', action:() => {
+        const lines = String(props.text || '').split(/\r\n|\r|\n/).length || 1;
+        updateText({height:Math.max(.35, lines * (props.fontSize || 96) / 120 * (props.lineHeight || 1.15) + (props.padding || 0) * 2)});
+      }}]));
+      box.appendChild(tx.root);
+    }
+
     if(o.userData.editorType === 'mesh'){
       const sc = section('PHYSICS');
       const c = o.userData && o.userData.collider;

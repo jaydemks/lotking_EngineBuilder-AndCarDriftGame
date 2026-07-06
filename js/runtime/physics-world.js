@@ -1,6 +1,7 @@
 /* =========================================================
    LOT KING - Cannon physics world adapter
-   Owns world creation, static collider rebuild, player body sync and teardown.
+   Owns world creation, static collider rebuild and the raycast-vehicle
+   player chassis (Sketchbook-style per-wheel suspension).
    ========================================================= */
 (function(){
 'use strict';
@@ -10,23 +11,34 @@ function create(options){
   const CANNONRef = opts.CANNONRef;
   const player = opts.playerState;
   const playerCollision = opts.playerCollision || {};
-  const constants = opts.constants || {};
   const colliders = opts.colliders || {};
   const worldState = opts.worldState;
+  const wheelLayout = opts.wheelLayout || [
+    {x: -.92, z: 1.35, front: true}, {x: .92, z: 1.35, front: true},
+    {x: -.92, z: -1.35, front: false}, {x: .92, z: -1.35, front: false},
+  ];
+  // Sketchbook-informed raycast suspension, adapted to a 1200 kg chassis
+  const suspension = Object.assign({
+    stiffness: 32, restLength: .34, travel: .28, radius: .38,
+    compression: 4.4, relaxation: 2.6, maxForce: 250000, rollInfluence: .22,
+  }, opts.suspension || {});
   const state = {
     available: !!CANNONRef,
     active: false,
     world: null,
     carBody: null,
+    vehicle: null,
     carMaterial: null,
     groundMaterial: null,
     staticBodies: [],
     mass: 1200,
     staticsSignature: '',
     lastImpact: 0,
+    suspension,
   };
 
   function cannonVec(x, y, z){ return new CANNONRef.Vec3(x, y, z); }
+  function bodyBaseY(){ return playerCollision.bodyY == null ? .55 : playerCollision.bodyY; }
 
   function colliderSignature(){
     return worldState.colliderSignature();
@@ -37,8 +49,8 @@ function create(options){
     const carBody = new CANNONRef.Body({
       mass: state.mass,
       material: state.carMaterial,
-      linearDamping: 0.04,
-      angularDamping: 0.48,
+      linearDamping: .01,
+      angularDamping: .4,
     });
     const carHalfX = playerCollision.hx == null ? 0.92 : playerCollision.hx;
     const carHalfY = playerCollision.hy == null ? 0.42 : playerCollision.hy;
@@ -46,23 +58,49 @@ function create(options){
     const carOffsetX = playerCollision.offsetX || 0;
     const carOffsetY = playerCollision.offsetY == null ? 0.45 : playerCollision.offsetY;
     const carOffsetZ = playerCollision.offsetZ || 0;
-    const carBodyY = playerCollision.bodyY == null ? 0.55 : playerCollision.bodyY;
     let shapeQuat = null;
     if(playerCollision.rotX || playerCollision.rotY || playerCollision.rotZ){
       shapeQuat = new CANNONRef.Quaternion();
       shapeQuat.setFromEuler(playerCollision.rotX || 0, playerCollision.rotY || 0, playerCollision.rotZ || 0, 'XYZ');
     }
     carBody.addShape(new CANNONRef.Box(cannonVec(carHalfX, carHalfY, carHalfZ)), cannonVec(carOffsetX, carOffsetY, carOffsetZ), shapeQuat);
-    carBody.position.set(player.pos.x, carBodyY, player.pos.z);
+    carBody.position.set(player.pos.x, (player.pos.y || 0) + bodyBaseY(), player.pos.z);
     carBody.quaternion.setFromAxisAngle(cannonVec(0,1,0), player.heading);
-    if(carBody.angularFactor) carBody.angularFactor.set(0, 1, 0);
-    if(carBody.linearFactor) carBody.linearFactor.set(1, 0, 1);
+    carBody.allowSleep = false;
     carBody.addEventListener('collide', e => {
-      const speed = e.contact && e.contact.getImpactVelocityAlongNormal ? Math.abs(e.contact.getImpactVelocityAlongNormal()) : 0;
+      const contact = e.contact;
+      const ny = contact && contact.ni ? Math.abs(contact.ni.y) : 0;
+      if(ny > .6) return;   // touching the ground / landing is not a crash
+      const speed = contact && contact.getImpactVelocityAlongNormal ? Math.abs(contact.getImpactVelocityAlongNormal()) : 0;
       state.lastImpact = Math.max(state.lastImpact, speed);
     });
     state.world.addBody(carBody);
     state.carBody = carBody;
+
+    const vehicle = new CANNONRef.RaycastVehicle({
+      chassisBody: carBody, indexRightAxis: 0, indexUpAxis: 1, indexForwardAxis: 2,
+    });
+    const connY = -bodyBaseY() + suspension.restLength + suspension.radius;
+    for(const w of wheelLayout){
+      vehicle.addWheel({
+        radius: w.radius || suspension.radius,
+        directionLocal: cannonVec(0, -1, 0),
+        axleLocal: cannonVec(-1, 0, 0),
+        suspensionStiffness: suspension.stiffness,
+        suspensionRestLength: suspension.restLength,
+        maxSuspensionTravel: suspension.travel,
+        maxSuspensionForce: suspension.maxForce,
+        dampingCompression: suspension.compression,
+        dampingRelaxation: suspension.relaxation,
+        frictionSlip: 1.9,
+        rollInfluence: suspension.rollInfluence,
+        chassisConnectionPointLocal: cannonVec(w.x, connY, w.z),
+        customSlidingRotationalSpeed: -30,
+        useCustomSlidingRotationalSpeed: true,
+      });
+    }
+    vehicle.addToWorld(state.world);
+    state.vehicle = vehicle;
     return carBody;
   }
 
@@ -76,8 +114,10 @@ function create(options){
     state.world = world;
     state.carMaterial = new CANNONRef.Material('player-car');
     state.groundMaterial = new CANNONRef.Material('asphalt');
+    // wheels get their grip from the raycast friction model; this only rules
+    // chassis scrapes against walls, so keep it slippery
     world.addContactMaterial(new CANNONRef.ContactMaterial(state.carMaterial, state.groundMaterial, {
-      friction: 0.35, restitution: 0.05, contactEquationStiffness: 1e7, contactEquationRelaxation: 4
+      friction: 0.08, restitution: 0.02, contactEquationStiffness: 1e7, contactEquationRelaxation: 4
     }));
 
     const groundBody = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
@@ -92,11 +132,98 @@ function create(options){
     return true;
   }
 
+  function removePlayer(){
+    if(!state.world) return;
+    if(state.vehicle && state.vehicle.removeFromWorld) state.vehicle.removeFromWorld(state.world);
+    else if(state.carBody) state.world.removeBody(state.carBody);
+    state.vehicle = null;
+    state.carBody = null;
+  }
+
   function rebuildPlayer(){
     if(!state.world) return;
-    if(state.carBody) state.world.removeBody(state.carBody);
-    state.carBody = null;
+    removePlayer();
     addPlayerBody();
+  }
+
+  function isDriveSurfaceCollider(col){
+    const owner = col && col.owner;
+    const ud = owner && owner.userData;
+    if(!ud) return false;
+    if(ud.driveSurface === true) return true;
+    const e = ud.addedEntry || {};
+    const prim = e.primitive || e.prim;
+    if(prim === 'ramp' || prim === 'plane') return true;
+    const text = String(ud.editorName || ud.assetName || owner.name || '').toLowerCase();
+    return /\b(ramp|curb|sidewalk|pavement|road|floor|ground|surface|asphalt|marciapiede|salita|rampa)\b/.test(text);
+  }
+
+  function ownerWorldTransform(owner){
+    if(!window.THREE || !owner || !owner.getWorldPosition) return null;
+    owner.updateMatrixWorld(true);
+    return {
+      p: owner.getWorldPosition(new THREE.Vector3()),
+      q: owner.getWorldQuaternion(new THREE.Quaternion()),
+      s: owner.getWorldScale(new THREE.Vector3()),
+    };
+  }
+
+  // editor 'ramp' primitive: extruded right triangle -> exact wedge collider
+  const WEDGE_VERTS = [[-3,0,-2],[3,0,-2],[3,2.2,-2],[-3,0,2],[3,0,2],[3,2.2,2]];
+  const WEDGE_FACES = [[0,2,1],[3,4,5],[0,1,4,3],[1,2,5,4],[0,3,5,2]];
+  function addWedge(owner){
+    if(!CANNONRef.ConvexPolyhedron) return false;
+    const t = ownerWorldTransform(owner);
+    if(!t) return false;
+    const sx = Math.abs(t.s.x || 1), sy = Math.abs(t.s.y || 1), sz = Math.abs(t.s.z || 1);
+    const verts = WEDGE_VERTS.map(v => cannonVec(v[0] * sx, v[1] * sy, v[2] * sz));
+    const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
+    body.addShape(new CANNONRef.ConvexPolyhedron(verts, WEDGE_FACES.map(f => f.slice())));
+    body.position.set(t.p.x, t.p.y, t.p.z);
+    body.quaternion.set(t.q.x, t.q.y, t.q.z, t.q.w);
+    state.world.addBody(body);
+    state.staticBodies.push(body);
+    return true;
+  }
+
+  // drive-surface models (mountains, sculpted tracks): exact triangle mesh so
+  // the wheel raycasts follow the real geometry
+  function addTrimesh(owner){
+    if(!CANNONRef.Trimesh || !window.THREE) return false;
+    owner.updateMatrixWorld(true);
+    const verts = [], indices = [];
+    const v = new THREE.Vector3();
+    owner.traverse(m => {
+      if(!m.isMesh || !m.geometry || (m.userData && m.userData.helperOnly)) return;
+      const pos = m.geometry.attributes && m.geometry.attributes.position;
+      if(!pos) return;
+      const base = verts.length / 3;
+      for(let i = 0; i < pos.count; i++){
+        v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        verts.push(v.x, v.y, v.z);
+      }
+      const idx = m.geometry.index;
+      if(idx) for(let i = 0; i < idx.count; i++) indices.push(base + idx.getX(i));
+      else for(let i = 0; i < pos.count; i++) indices.push(base + i);
+    });
+    if(!indices.length || verts.length > 300000) return false;
+    const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
+    body.addShape(new CANNONRef.Trimesh(verts, indices));
+    state.world.addBody(body);
+    state.staticBodies.push(body);
+    return true;
+  }
+
+  function staticShapeKind(col){
+    const owner = col && col.owner;
+    const ud = (owner && owner.userData) || {};
+    const e = ud.addedEntry || {};
+    const prim = e.primitive || e.prim;
+    if(prim === 'ramp') return 'wedge';
+    if(!isDriveSurfaceCollider(col) || prim === 'box' || prim === 'plane') return 'box';
+    // models, sculpted meshes or legacy entries without metadata: use the
+    // real triangle mesh so the wheel raycasts follow the actual geometry
+    return 'trimesh';
   }
 
   function rebuildStatics(){
@@ -112,31 +239,15 @@ function create(options){
       state.world.addBody(body);
       state.staticBodies.push(body);
     };
-    const isDriveSurfaceCollider = col => {
-      const owner = col && col.owner;
-      const ud = owner && owner.userData;
-      if(!ud) return false;
-      if(ud.driveSurface === true) return true;
-      const e = ud.addedEntry || {};
-      const prim = e.primitive || e.prim;
-      if(prim === 'ramp' || prim === 'plane') return true;
-      const text = String(ud.editorName || ud.assetName || owner.name || '').toLowerCase();
-      return /\b(ramp|curb|sidewalk|pavement|road|floor|ground|surface|asphalt|marciapiede|salita|rampa)\b/.test(text);
-    };
-    const driveSurfaceNormalY = col => {
-      if(!col) return 1;
-      if(window.THREE){
-        const e = new THREE.Euler(col.rotX || 0, col.rotY != null ? col.rotY : (col.rot || 0), col.rotZ || 0, 'XYZ');
-        return new THREE.Vector3(0, 1, 0).applyEuler(e).normalize().y;
-      }
-      const rx = col.rotX || 0;
-      const rz = col.rotZ || 0;
-      return Math.max(0, Math.min(1, Math.cos(rx) * Math.cos(rz)));
-    };
-    const driveSurfaceMinNormalY = Math.cos(Math.PI * 36 / 180);
-    const isDriveableSurfaceCollider = col => isDriveSurfaceCollider(col) && driveSurfaceNormalY(col) >= driveSurfaceMinNormalY;
+    const specialOwners = new Set();
     for(const box of colliders.box || []){
-      if(!box || box.enabled === false || box.compoundRoot || box.physics || isDriveableSurfaceCollider(box)) continue;
+      if(!box || box.enabled === false || box.compoundRoot || box.physics) continue;
+      const kind = staticShapeKind(box);
+      if(kind !== 'box' && box.owner){
+        if(specialOwners.has(box.owner)) continue;
+        specialOwners.add(box.owner);
+        if(kind === 'wedge' ? addWedge(box.owner) : addTrimesh(box.owner)) continue;
+      }
       addStaticBox(box.x, box.y != null ? box.y : Math.max(.1, box.hy || 1.1), box.z, box.hx || 1, box.hy || 1.1, box.hz || 1, box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0);
     }
     for(const circle of colliders.circle || []){
@@ -152,20 +263,42 @@ function create(options){
 
   function syncPlayer(){
     if(!state.carBody) return;
-    state.carBody.position.set(player.pos.x, playerCollision.bodyY == null ? .55 : playerCollision.bodyY, player.pos.z);
+    state.carBody.position.set(player.pos.x, (player.pos.y || 0) + bodyBaseY(), player.pos.z);
     state.carBody.velocity.set(player.vel.x, 0, player.vel.z);
     state.carBody.angularVelocity.set(0, player.yawRate || 0, 0);
     state.carBody.force.set(0,0,0);
     state.carBody.torque.set(0,0,0);
     state.carBody.quaternion.setFromAxisAngle(cannonVec(0,1,0), player.heading);
+    if(state.vehicle){
+      for(let i = 0; i < state.vehicle.wheelInfos.length; i++){
+        state.vehicle.applyEngineForce(0, i);
+        state.vehicle.setBrake(0, i);
+        state.vehicle.setSteeringValue(0, i);
+        state.vehicle.wheelInfos[i].suspensionLength = suspension.restLength;
+      }
+    }
+  }
+
+  // live-tune the raycast suspension on the existing wheels (no rebuild)
+  function applySuspension(patch){
+    if(patch) Object.assign(suspension, patch);
+    if(!state.vehicle) return;
+    for(const w of state.vehicle.wheelInfos){
+      w.suspensionStiffness = suspension.stiffness;
+      w.dampingCompression = suspension.compression;
+      w.dampingRelaxation = suspension.relaxation;
+      w.maxSuspensionTravel = suspension.travel;
+      w.rollInfluence = suspension.rollInfluence;
+      w.suspensionRestLength = suspension.restLength;
+    }
   }
 
   function dispose(){
     if(!state.world) return;
+    removePlayer();
     const bodies = state.world.bodies ? state.world.bodies.slice() : [];
     for(const body of bodies) state.world.removeBody(body);
     state.world = null;
-    state.carBody = null;
     state.carMaterial = null;
     state.groundMaterial = null;
     state.staticBodies.length = 0;
@@ -180,6 +313,7 @@ function create(options){
     rebuildStatics,
     syncPlayer,
     rebuildPlayer,
+    applySuspension,
     dispose,
     colliderSignature,
     cannonVec,

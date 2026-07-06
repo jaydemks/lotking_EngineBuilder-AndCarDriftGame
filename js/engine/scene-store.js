@@ -1191,6 +1191,186 @@ function createPrimitive(prim, props){
   return gp;
 }
 
+// ------------------------------------------------ factories: text
+const TEXT_FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/fonts/helvetiker_regular.typeface.json';
+let _textFont = null;
+let _textFontPromise = null;
+
+function normalizeTextProps(props){
+  return Object.assign({
+    text:'Text',
+    color:0xffffff,
+    background:0x000000,
+    opacity:0,
+    size:1,
+    width:4,
+    height:1.4,
+    fontSize:96,
+    fontFamily:'Arial',
+    weight:'900',
+    italic:false,
+    align:'center',
+    valign:'middle',
+    lineHeight:1.15,
+    padding:.12,
+    wrap:false,
+    depth:.16,
+    bevel:false,
+  }, props || {});
+}
+
+function colorCss(hex, alpha){
+  hex = hex == null ? 0xffffff : hex >>> 0;
+  if(alpha == null || alpha >= 1) return '#' + ('000000' + hex.toString(16)).slice(-6);
+  return 'rgba(' + ((hex >> 16) & 255) + ',' + ((hex >> 8) & 255) + ',' + (hex & 255) + ',' + Math.max(0, Math.min(1, alpha)) + ')';
+}
+
+function loadTextFont(){
+  if(_textFont) return Promise.resolve(_textFont);
+  if(_textFontPromise) return _textFontPromise;
+  if(!THREE.FontLoader) return Promise.reject(new Error('FontLoader unavailable'));
+  _textFontPromise = new Promise((resolve, reject) => {
+    new THREE.FontLoader().load(TEXT_FONT_URL, font => {
+      _textFont = font;
+      resolve(font);
+    }, undefined, reject);
+  });
+  return _textFontPromise;
+}
+
+function textLines(ctx, props, maxWidth){
+  const source = String(props.text || 'Text').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  if(!props.wrap) return source;
+  const out = [];
+  source.forEach(line => {
+    const words = line.split(/(\s+)/);
+    let cur = '';
+    words.forEach(part => {
+      const next = cur + part;
+      if(cur && ctx.measureText(next).width > maxWidth){
+        out.push(cur.trimEnd());
+        cur = part.trimStart();
+      } else cur = next;
+    });
+    out.push(cur);
+  });
+  return out.length ? out : [''];
+}
+
+function drawTextCanvas(canvas, props){
+  const ctx = canvas.getContext('2d');
+  const ratio = Math.max(.12, props.height / Math.max(.12, props.width));
+  canvas.width = 1024;
+  canvas.height = Math.max(128, Math.round(canvas.width * ratio));
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if(props.opacity > 0){
+    ctx.fillStyle = colorCss(props.background, props.opacity);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  const pad = Math.max(0, props.padding || 0) * canvas.width / Math.max(.1, props.width);
+  const fontStyle = props.italic ? 'italic ' : '';
+  ctx.font = fontStyle + (props.weight || '900') + ' ' + Math.max(8, props.fontSize || 96) + 'px ' + (props.fontFamily || 'Arial') + ', sans-serif';
+  ctx.fillStyle = colorCss(props.color);
+  ctx.textAlign = props.align || 'center';
+  ctx.textBaseline = 'top';
+  const maxWidth = Math.max(20, canvas.width - pad * 2);
+  const lines = textLines(ctx, props, maxWidth);
+  const lh = Math.max(8, (props.fontSize || 96) * (props.lineHeight || 1.15));
+  const totalH = lines.length * lh;
+  const x = props.align === 'left' ? pad : props.align === 'right' ? canvas.width - pad : canvas.width / 2;
+  let y = pad;
+  if(props.valign === 'middle') y = (canvas.height - totalH) / 2;
+  else if(props.valign === 'bottom') y = canvas.height - totalH - pad;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, canvas.width, canvas.height);
+  ctx.clip();
+  lines.forEach((line, i) => ctx.fillText(line, x, y + i * lh, maxWidth));
+  ctx.restore();
+}
+
+function buildTextPlane(gp, props){
+  const canvas = gp.userData.textCanvas || document.createElement('canvas');
+  drawTextCanvas(canvas, props);
+  const tex = gp.userData.textTexture || new THREE.CanvasTexture(canvas);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.needsUpdate = true;
+  const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, side:THREE.DoubleSide, depthWrite:false});
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(props.width, props.height), mat);
+  mesh.castShadow = false; mesh.receiveShadow = false;
+  gp.userData.textCanvas = canvas;
+  gp.userData.textTexture = tex;
+  gp.add(mesh);
+}
+
+function rebuildText3D(gp, props){
+  if(!_textFont || !THREE.TextGeometry) return false;
+  const mat = new THREE.MeshStandardMaterial({color:props.color, roughness:.58, metalness:.05});
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = (props.weight || '900') + ' ' + Math.max(8, props.fontSize || 96) + 'px ' + (props.fontFamily || 'Arial') + ', sans-serif';
+  const lines = textLines(ctx, props, Math.max(20, (props.width - props.padding * 2) * 220));
+  const size = Math.max(.05, (props.fontSize || 96) / 120);
+  const lh = size * (props.lineHeight || 1.15);
+  const maxLines = Math.max(1, Math.floor(props.height / Math.max(.05, lh)));
+  const shown = lines.slice(0, maxLines);
+  const totalH = shown.length * lh;
+  let top = props.valign === 'bottom' ? -props.height / 2 + totalH : props.valign === 'middle' ? totalH / 2 - lh : props.height / 2 - lh;
+  shown.forEach((line, i) => {
+    const geo = new THREE.TextGeometry(line || ' ', {
+      font:_textFont,
+      size,
+      height:Math.max(.01, props.depth || .16),
+      curveSegments:8,
+      bevelEnabled:!!props.bevel,
+      bevelThickness:.018,
+      bevelSize:.012,
+      bevelSegments:2,
+    });
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const w = bb ? (bb.max.x - bb.min.x) : 0;
+    let x = -props.width / 2 + (props.padding || 0);
+    if(props.align === 'center') x = -w / 2;
+    else if(props.align === 'right') x = props.width / 2 - (props.padding || 0) - w;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, top - i * lh, 0);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    gp.add(mesh);
+  });
+  return true;
+}
+
+function updateTextObject(gp){
+  if(!gp || !gp.userData) return gp;
+  const props = normalizeTextProps(gp.userData.textProps);
+  gp.userData.textProps = props;
+  gp.children.slice().forEach(child => {
+    gp.remove(child);
+    if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+    if(child.material){
+      const list = Array.isArray(child.material) ? child.material : [child.material];
+      list.forEach(mat => { if(mat && mat.dispose) mat.dispose(); });
+    }
+  });
+  gp.scale.setScalar(props.size || 1);
+  if(gp.userData.textKind === '3d'){
+    if(rebuildText3D(gp, props)) return gp;
+    buildTextPlane(gp, props);
+    loadTextFont().then(() => updateTextObject(gp)).catch(() => {});
+    return gp;
+  }
+  buildTextPlane(gp, props);
+  return gp;
+}
+
+function createText(kind, props){
+  const gp = new THREE.Group();
+  gp.userData.textKind = kind === '3d' ? '3d' : '2d';
+  gp.userData.textProps = normalizeTextProps(props);
+  return updateTextObject(gp);
+}
+
 // ------------------------------------------------ factories: lights
 function createLight(kind, props){
   props = props || {};
@@ -1350,6 +1530,7 @@ function loadGlbEntry(entry){
 function createFromEntry(entry, GAME){
   if(entry.kind === 'light') return Promise.resolve(createLight(entry.light, entry.props));
   if(entry.kind === 'effect') return Promise.resolve(createEmitter(entry.effect, entry.params));
+  if(entry.kind === 'text') return Promise.resolve(createText(entry.textKind || '2d', entry.props));
   if(entry.kind === 'glb') return loadGlbEntry(entry);
   if(entry.kind === 'clone'){
     const src = GAME && GAME.world.registry.find(o => o.userData.editorId === entry.srcId);
@@ -1364,6 +1545,7 @@ function createFromEntry(entry, GAME){
 }
 function entryType(entry, obj){
   if(entry.kind === 'clone') return (obj && (obj.isLight || obj.userData && obj.userData.light)) ? 'light' : 'mesh';
+  if(entry.kind === 'text') return 'text';
   return entry.kind === 'light' ? 'light' : entry.kind === 'effect' ? 'effect' : 'mesh';
 }
 
@@ -1620,6 +1802,7 @@ function collect(GAME){
       else e.physicsImpact = physicsImpactFrom(o.userData.physicsImpact);
       if(e.kind === 'light' && o.userData.light) e.props = lightProps(o.userData.light);
       else if(e.kind === 'effect') e.params = Object.assign({}, o.userData.effectParams);
+      else if(e.kind === 'text') e.props = Object.assign({}, o.userData.textProps || e.props || {});
       else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
       if(o.userData.assetKey) e.asset = Object.assign({}, e.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
       d.added.push(e);
@@ -1675,7 +1858,7 @@ window.LK_STORE = {
   load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject,
   tOf, applyT, syncCollider,
   lightProps, applyLightProps, applyMatProps,
-  createPrimitive, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
+  createPrimitive, createText, updateTextObject, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, collect, nextId,
   builtinIds: () => builtinIds.slice(),

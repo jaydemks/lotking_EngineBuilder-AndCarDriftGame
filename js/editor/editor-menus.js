@@ -93,8 +93,8 @@ function create(deps){
       {label:'Create scene folder/group', icon:'📁', action:() => deps.newFolder('scene')},
       {label:'Add', icon:'＋', sub:deps.addMenuItems(deps.spawnPointAhead())},
       {sep:true},
-      {label:'Grid view', icon:'▦', disabled:ED.viewMode === 'grid', action:() => deps.setViewMode('grid')},
-      {label:'List view', icon:'☰', disabled:ED.viewMode === 'list', action:() => deps.setViewMode('list')},
+      {label:'Grid view', icon:'▦', disabled:ED.sceneViewMode === 'grid', action:() => deps.setViewMode('grid', 'scene')},
+      {label:'List view', icon:'☰', disabled:ED.sceneViewMode === 'list', action:() => deps.setViewMode('list', 'scene')},
       {label:ED.gridOn ? 'Hide viewport grid' : 'Show viewport grid', icon:'▦', action:() => deps.setGrid(!ED.gridOn)},
       {sep:true},
       {label:'Deselect', icon:'✕', disabled:!ED.selected && !ED.special, action:deps.deselect},
@@ -119,8 +119,8 @@ function create(deps){
       {label:'Import GLB/GLTF assets', icon:'＋', action:() => $('#lkAssetInput').click()},
       {label:'Refresh assets', icon:'↻', action:() => { deps.refreshAssetsPanel(); deps.status('Asset library refreshed'); }},
       {sep:true},
-      {label:'Grid view', icon:'▦', disabled:ED.viewMode === 'grid', action:() => deps.setViewMode('grid')},
-      {label:'List view', icon:'☰', disabled:ED.viewMode === 'list', action:() => deps.setViewMode('list')},
+      {label:'Grid view', icon:'▦', disabled:ED.assetsViewMode === 'grid', action:() => deps.setViewMode('grid', 'assets')},
+      {label:'List view', icon:'☰', disabled:ED.assetsViewMode === 'list', action:() => deps.setViewMode('list', 'assets')},
       {label:'Filters', icon:'☑', sub:filterItems},
     ];
   }

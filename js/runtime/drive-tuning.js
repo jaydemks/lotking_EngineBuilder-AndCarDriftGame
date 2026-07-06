@@ -5,6 +5,17 @@
 (function(){
 'use strict';
 
+const PRESETS = Object.freeze({
+  race: Object.freeze({
+    torque:1, maxSpeed:2, oversteer:-1, handbrake:0, steer:4, brake:0, grip:1,
+    reverseDelay:.5, suspension:0, damping:0, travel:0, ride:0, roll:0, chassisLift:0,
+  }),
+  drift: Object.freeze({
+    torque:10, maxSpeed:2, oversteer:8, handbrake:2, steer:8, brake:-3, grip:-10,
+    reverseDelay:.45, suspension:-1, damping:0, travel:3, ride:-1, roll:-3, chassisLift:0,
+  }),
+});
+
 function create(options){
   const opts = options || {};
   const clamp = opts.clamp;
@@ -12,9 +23,31 @@ function create(options){
   const baseCfg = opts.baseConfig;
   const drive = opts.drive;
   const baseDrive = opts.baseDrive;
-  const values = Object.assign({torque:0, maxSpeed:0, oversteer:0, handbrake:0, steer:0, brake:0, grip:0, reverseDelay:.5}, opts.values || {});
+  const values = Object.assign({...PRESETS.drift}, opts.values || {});
+  const susp = opts.suspension || null;
+  const baseSusp = susp ? Object.freeze({...susp}) : null;
+  const collision = opts.collision || null;
+  const baseCollision = opts.baseCollision || null;
+  let lastCollisionLift = null;
   let setOpen = () => {};
   let toggle = () => {};
+  let activePreset = 'drift';
+
+  function detectPreset(){
+    for(const name of Object.keys(PRESETS)){
+      const preset = PRESETS[name];
+      const same = Object.keys(preset).every(key => Number(values[key] || 0) === Number(preset[key] || 0));
+      if(same) return name;
+    }
+    return 'custom';
+  }
+
+  function updatePresetButtons(){
+    activePreset = detectPreset();
+    document.querySelectorAll('[data-tune-preset]').forEach(button => {
+      button.classList.toggle('active', button.dataset.tunePreset === activePreset);
+    });
+  }
 
   function apply(nextValues){
     if(nextValues) Object.assign(values, nextValues);
@@ -25,18 +58,22 @@ function create(options){
     const steer = values.steer / 10;
     const brake = values.brake / 10;
     const grip = values.grip / 10;
+    const chassisLift = clamp(values.chassisLift == null ? 0 : Number(values.chassisLift), -0.35, 0.9);
     drive.reverseDelay = clamp(values.reverseDelay == null ? .5 : Number(values.reverseDelay), 0, 2);
 
-    cfg.accel = baseCfg.accel * (1 + torque * .75);
-    cfg.revAccel = baseCfg.revAccel * (1 + torque * .45);
+    cfg.accel = baseCfg.accel * (1 + torque * .95);
+    cfg.revAccel = baseCfg.revAccel * (1 + torque * .55);
     cfg.maxSpeed = baseCfg.maxSpeed * (1 + maxSpeed * .45);
-    cfg.brake = baseCfg.brake * clamp(1 + brake * .55, 0.55, 1.65);
-    drive.brakeBias = clamp(baseDrive.brakeBias + brake * .06, 0.5, 0.72);
-    drive.brakeDriveLock = clamp((baseDrive.brakeDriveLock == null ? 1 : baseDrive.brakeDriveLock) * (1 + brake * .38), 0.55, 1.65);
-    drive.wheelspin = clamp(baseDrive.wheelspin * (1 + torque * .32), 1.2, 2.8);
+    cfg.brake = baseCfg.brake * clamp(1 + brake * .28, 0.5, 1.15);
+    drive.brakeBias = clamp(baseDrive.brakeBias + brake * .035, 0.48, 0.62);
+    drive.brakeDriveLock = clamp((baseDrive.brakeDriveLock == null ? 1 : baseDrive.brakeDriveLock) * (1 + brake * .22), 0.45, 1.15);
+    drive.brakeWheelScale = clamp((baseDrive.brakeWheelScale == null ? .14 : baseDrive.brakeWheelScale) * (1 + brake * .18), .07, .22);
+    drive.wheelspin = clamp(baseDrive.wheelspin * (1 + torque * .55 + over * .10), 1.25, 3.5);
+    drive.driftDrive = clamp((baseDrive.driftDrive == null ? .5 : baseDrive.driftDrive) * (1 + torque * 1.05 + over * .48), .35, 1.65);
+    drive.shiftOverrun = clamp((Math.max(0, over) * .22) + (Math.max(0, torque) * .16), 0, .42);
 
-    cfg.steerMax = baseCfg.steerMax * clamp(1 + steer * .35, 0.65, 1.45);
-    cfg.steerHiSpeed = clamp(baseCfg.steerHiSpeed * (1 + steer * .30), 0.22, 0.55);
+    cfg.steerMax = baseCfg.steerMax * clamp(1 + steer * .38, 0.65, 1.5);
+    cfg.steerHiSpeed = clamp(baseCfg.steerHiSpeed * (1 + steer * .55), 0.24, 0.68);
     drive.steerResponse = clamp(baseDrive.steerResponse * (1 + steer * .45), 2.8, 10);
 
     const gScale = clamp(1 + grip * .32, 0.55, 1.5);
@@ -45,14 +82,47 @@ function create(options){
     cfg.stiffF = baseCfg.stiffF * clamp(1 + grip * .18, 0.7, 1.35);
     cfg.stiffR = baseCfg.stiffR * clamp(1 + grip * .18 - over * .10, 0.65, 1.4);
     cfg.rearFalloff = clamp(baseCfg.rearFalloff * (1 + over * .8), 0.06, 0.55);
-    cfg.powerOver = clamp(baseCfg.powerOver * (1 + over * .55 + torque * .15), 0.35, 1.6);
-    cfg.hbMuR = clamp(baseCfg.hbMuR * (1 - hand * .45), 0.12, 0.6);
-    cfg.driftAssist = clamp(baseCfg.driftAssist * (1 + over * .35 + steer * .2), 0.5, 1.9);
-    cfg.driftGasPush = clamp(baseCfg.driftGasPush * (1 + over * .45 + torque * .14), 0.8, 5.0);
-    cfg.driftThrottlePull = clamp(baseCfg.driftThrottlePull * (1 - over * .25 + torque * .08 + grip * .08), 0.35, 2.4);
+    cfg.powerOver = clamp(baseCfg.powerOver * (1 + over * .58 + torque * .18), 0.35, 2.0);
+    cfg.hbMuR = clamp(baseCfg.hbMuR * (1 - hand * .30), 0.24, 0.72);
+    drive.handbrakeWheelScale = clamp((baseDrive.handbrakeWheelScale == null ? .18 : baseDrive.handbrakeWheelScale) * (1 + hand * .35), .08, .26);
+    cfg.driftAssist = clamp(baseCfg.driftAssist * (1 + over * .42 + steer * .24), 0.5, 2.35);
+    cfg.driftGasPush = clamp(baseCfg.driftGasPush * (1 + over * .58 + torque * .18), 0.8, 6.2);
+    cfg.driftThrottlePull = clamp(baseCfg.driftThrottlePull * (1 - over * .36 + torque * .03 + grip * .08), 0.22, 2.4);
     cfg.yawDamp = clamp(baseCfg.yawDamp * (1 - over * .35), 0.25, 1.2);
-    cfg.driftEnterSlip = clamp(baseCfg.driftEnterSlip * (1 - over * .25 - Math.max(0, hand) * .15), 0.2, 0.5);
-    cfg.driftEnterVy = clamp(baseCfg.driftEnterVy * (1 - over * .25), 1.8, 4.6);
+    cfg.driftEnterSlip = clamp(baseCfg.driftEnterSlip * (1 - over * .42 - torque * .10 - Math.max(0, hand) * .12), 0.12, 0.5);
+    cfg.driftEnterVy = clamp(baseCfg.driftEnterVy * (1 - over * .42 - torque * .08), 0.85, 4.6);
+    cfg.driftMinSpeed = clamp(baseCfg.driftMinSpeed * (1 - over * .45 - torque * .18), 2.2, 10);
+
+    // raycast suspension: stiffness/damping and ride height + travel
+    if(susp){
+      const s = (values.suspension || 0) / 10;
+      const d = (values.damping || 0) / 10;
+      const t = (values.travel || 0) / 10;
+      const h = (values.ride || 0) / 10;
+      const r = (values.roll || 0) / 10;
+      susp.stiffness = baseSusp.stiffness * clamp(1 + s * .6, .45, 1.8);
+      susp.compression = baseSusp.compression * clamp(1 + d * .75, .35, 2.0);
+      susp.relaxation = baseSusp.relaxation * clamp(1 + d * .75, .35, 2.0);
+      susp.restLength = baseSusp.restLength * clamp(1 + h * .35, .6, 1.4);
+      susp.travel = baseSusp.travel * clamp(1 + t * .75 + h * .25, .45, 1.9);
+      susp.rollInfluence = clamp(baseSusp.rollInfluence * (1 + r * .8), .04, .42);
+      if(opts.onSuspensionChange) opts.onSuspensionChange();
+    }
+    drive.chassisLift = chassisLift;
+    if(collision && baseCollision && lastCollisionLift !== chassisLift){
+      collision.offsetY = clamp((baseCollision.offsetY == null ? .45 : baseCollision.offsetY) + chassisLift, -2, 4);
+      lastCollisionLift = chassisLift;
+      if(opts.onCollisionChange) opts.onCollisionChange();
+    }
+    updatePresetButtons();
+  }
+
+  function applyPreset(name){
+    const preset = PRESETS[name];
+    if(!preset) return false;
+    activePreset = name;
+    syncInputs({...preset});
+    return true;
   }
 
   function bind(){
@@ -75,8 +145,14 @@ function create(options){
         apply();
       };
       input.addEventListener('input', update);
-      update();
+      const value = values[input.dataset.tune];
+      if(value != null) input.value = value;
+      if(out) out.value = String(input.value);
     });
+    panel.querySelectorAll('[data-tune-preset]').forEach(button => {
+      button.addEventListener('click', () => applyPreset(button.dataset.tunePreset));
+    });
+    apply();
   }
 
   function syncInputs(nextValues){
@@ -89,18 +165,22 @@ function create(options){
       const out = document.querySelector('#tunePanel output[for="' + input.id + '"]');
       if(out) out.value = String(value);
     });
+    updatePresetButtons();
   }
 
   bind();
 
   return {
     values,
+    presets: PRESETS,
+    getMode: () => detectPreset(),
     apply,
+    applyPreset,
     setOpen: open => setOpen(open),
     toggle: () => toggle(),
     syncInputs,
   };
 }
 
-window.LK_RUNTIME_DRIVE_TUNING = Object.freeze({create});
+window.LK_RUNTIME_DRIVE_TUNING = Object.freeze({create, PRESETS});
 })();

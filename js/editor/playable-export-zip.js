@@ -16,6 +16,8 @@ function create(deps){
     {remote: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', local: 'vendor/three.min.js'},
     {remote: 'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js', local: 'vendor/cannon.min.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js', local: 'vendor/GLTFLoader.js'},
+    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js', local: 'vendor/FontLoader.js'},
+    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js', local: 'vendor/TextGeometry.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js', local: 'vendor/Lensflare.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js', local: 'vendor/EffectComposer.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js', local: 'vendor/RenderPass.js'},

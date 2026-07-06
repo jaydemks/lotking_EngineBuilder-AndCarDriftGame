@@ -64,6 +64,10 @@ function create(opts){
     return t < .24 || t > .70;
   }
 
+  function syncTimeOfDay(){
+    update();
+  }
+
   function makeGlowTexture(){
     const c = document.createElement('canvas'); c.width = c.height = 128;
     const g = c.getContext('2d');
@@ -333,6 +337,7 @@ function create(opts){
     setConfig,
     addAux,
     setHighBeams,
+    syncTimeOfDay,
     headlight: () => headlight,
   };
 }
