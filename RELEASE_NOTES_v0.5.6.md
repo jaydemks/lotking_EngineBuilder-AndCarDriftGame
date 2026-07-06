@@ -86,6 +86,13 @@
 - Kept playable export/runtime file lists aligned with newly added runtime modules and HUD/runtime dependencies.
 - Preserved existing editor and runtime APIs while renaming visible concepts around `player_car (Logic)` / `Player Car Logic`.
 
+### Documentation
+
+- Updated the project documentation to clarify the AI-assisted workflow more accurately.
+- Clarified that switching between Claude/Fable, Opus, Codex, and faster Codex variants is mainly driven by model strengths, cost, available context, rate limits, and task type, not simply by "lost context".
+- Documented the project as fully AI-assisted from concept through implementation, refactors, live testing, fixes, and continued iteration, with the project owner directing, testing, and deciding each step.
+- Expanded the credits/provenance note to make clear that some assets were owner-chosen while others were suggested or selected during AI-assisted implementation, and that a complete attribution/provenance audit is still needed.
+
 ### Notes
 
 - This release closes the first major RaycastVehicle drift-tuning milestone.
