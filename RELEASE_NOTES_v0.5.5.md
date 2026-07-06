@@ -1,10 +1,8 @@
-# LOT KING ENGINE EDITOR v0.5.5 — WIP
-
-## v0.5.5 — WIP
+## v0.5.5 — Collision, physics tooling + player car logic
 
 ### Release Status
 
-- Status: in progress.
+- Status: released.
 - Tag target: `v0.5.5`.
 - Scope: editor/runtime stabilization, collision and physics tooling, player car logic, asset workflow, mobile/runtime polish, and documentation refresh.
 
