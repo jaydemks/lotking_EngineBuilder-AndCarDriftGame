@@ -14,12 +14,18 @@ function create(options){
   const hud = opts.hud;
   const overlay = opts.overlay;
 
+  function editorActive(){
+    const editor = document.getElementById('lkEditor');
+    return !!(editor && editor.classList.contains('active'));
+  }
+
   function call(name){
     if(opts[name]) return opts[name].apply(null, Array.prototype.slice.call(arguments, 1));
     return undefined;
   }
 
   function showMenuOverlay(){
+    if(editorActive()) return;
     if(!overlay) return;
     overlay.classList.remove('hidden');
     overlay.classList.remove('choosing-level');
@@ -36,6 +42,7 @@ function create(options){
   }
 
   function showLevelSelect(){
+    if(editorActive()) return;
     if(session.isStarted() || session.isPending()) return;
     if(loadText) loadText.textContent = TRACK_CATALOG_AVAILABLE_TEXT();
     showMenuOverlay();
@@ -122,7 +129,7 @@ function create(options){
     showMenuOverlay();
     if(loadText && !session.isPending()) loadText.textContent = 'choose track';
     call('setMenuBusy', false);
-    call('playMenuMusic');
+    if(!editorActive()) call('playMenuMusic');
   }
 
   function TRACK_CATALOG_AVAILABLE_TEXT(){

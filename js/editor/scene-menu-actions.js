@@ -20,6 +20,9 @@ function create(deps){
     const prim = k => ({label: k[0].toUpperCase()+k.slice(1), icon:'▣', action: () => deps.addPrimitive(k, P)});
     return [
       {label:'Primitiva', icon:'▣', sub: ['box','sphere','cylinder','cone','plane','torus','ramp'].map(prim)},
+      {label:'Collision', icon:'▧', sub: [
+        {label:'Collision Box', icon:'▧', action:() => deps.addPrimitive('collisionBox', P)},
+      ]},
       {label:'Luce', icon:'💡', sub: [
         {label:'Point Light', icon:'💡', action:() => deps.addLight('point', P)},
         {label:'Spot Light', icon:'🔦', action:() => deps.addLight('spot', P)},
@@ -43,7 +46,12 @@ function create(deps){
         {label:'Rotate  E', icon:'⟳', action:() => { deps.selectObject(o); deps.setTool('rotate'); }},
         {label:'Scale  R', icon:'⤢', action:() => { deps.selectObject(o); deps.setTool('scale'); }},
       ]},
+      {label:'Select', icon:'◎', sub: [
+        {label:'Object', icon:'▣', action:() => deps.selectObject(o)},
+        {label:'Collider', icon:'▧', disabled:!(o.userData && o.userData.collider && o.userData.collider.ref), action:() => { deps.selectCollider ? deps.selectCollider(o) : deps.selectObject(o); deps.setTool('translate'); }},
+      ]},
       {label:'Focus', icon:'🔍', action: deps.focusSelected},
+      {label:'Select similar', icon:'☑', action:() => deps.selectSimilarObjects ? deps.selectSimilarObjects(o) : deps.selectObject(o)},
       {label:'Duplica', icon:'⧉', sub: [
         {label:'Duplica  Ctrl+D', icon:'⧉', action:() => deps.duplicateEntity(o)},
         {label:'Popola in fila x5', icon:'▦', action:() => duplicateLine(o, 5)},
@@ -82,9 +90,13 @@ function create(deps){
 
   function playerMenuItems(){
     return [
+      {label:'Select', icon:'◎', sub: [
+        {label:'Object', icon:'▣', action:() => deps.selectObject(GAME.player.car)},
+        {label:'Collider', icon:'▧', action:() => deps.selectPlayerCollider ? deps.selectPlayerCollider() : deps.selectObject(GAME.player.car)},
+      ]},
       {label:'Focus', icon:'🔍', action: deps.focusSelected},
-      {label:'Apri Blueprint Player', icon:'🚗', action:() => deps.buildInspector()},
-      {label:'Copy blueprint', icon:'◇', action: deps.copyPlayerBlueprintAsset},
+      {label:'Apri player_car Logic', icon:'🚗', action:() => deps.buildInspector()},
+      {label:'Copy car logic', icon:'◇', action: deps.copyPlayerBlueprintAsset},
       {label:'Replace GLB model...', icon:'📦', action:() => $('#lkPlayerModelInput').click()},
       {label:'Imposta spawn qui', icon:'📍', action: setSpawnHere},
     ];

@@ -23,7 +23,6 @@ function create(options){
   let assetsReady = false;
   let assetsLoading = null;
   let loadingMode = null;
-  let runtimeWarmed = false;
 
   function setLoadingPart(part, value, label){
     if(loading) loading.setPart(part, value, label);
@@ -83,6 +82,7 @@ function create(options){
           const model = opts.prepModel(src.clone(true), opts.modelSize.parkedLen, false);
           group.clear();
           group.add(model);
+          if(opts.syncCollider) opts.syncCollider(group);
           group.userData.assetKey = 'parked-car-glb-' + (variantIndex + 1);
           group.userData.assetName = 'Parked Car GLB ' + (variantIndex + 1);
           group.userData.assetSource = src.userData.assetUrl || ('models/car' + (variantIndex + 1) + '.glb');
@@ -93,18 +93,31 @@ function create(options){
           const model = opts.prepModel(coneScene.clone(true), opts.modelSize.coneHeight, true);
           cone.m.clear();
           cone.m.add(model);
+          if(opts.syncCollider) opts.syncCollider(cone.m);
         }
       }
     });
   }
 
+  function cloneData(value){
+    try { return JSON.parse(JSON.stringify(value)); } catch(err){ return null; }
+  }
+
+  function nextFrame(){
+    return new Promise(resolve => requestAnimationFrame(resolve));
+  }
+
+  function renderWarmFrame(){
+    if(!(opts.renderer && opts.scene && opts.camera)) return;
+    opts.renderer.compile(opts.scene, opts.camera);
+    if(opts.renderGameplayCamera) opts.renderGameplayCamera();
+    else opts.renderer.render(opts.scene, opts.camera);
+  }
+
   function warmRenderStep(label, fraction){
     setLoadingPart('warmup', fraction, label);
     if(opts.updatePlayerLights) opts.updatePlayerLights();
-    if(opts.renderer && opts.scene && opts.camera){
-      opts.renderer.compile(opts.scene, opts.camera);
-      opts.renderer.render(opts.scene, opts.camera);
-    }
+    renderWarmFrame();
   }
 
   function clearInput(){
@@ -112,44 +125,73 @@ function create(options){
   }
 
   function warmRuntimeAssets(){
-    if(runtimeWarmed){
-      setLoadingPart('warmup', 1, 'warming runtime');
-      return Promise.resolve();
-    }
     setLoadingPart('warmup', .05, 'warming runtime');
-    return new Promise(resolve => {
-      requestAnimationFrame(() => {
-        const oldKeys = Object.assign({}, keys);
-        const oldSpeed = opts.getSpeed ? opts.getSpeed() : 0;
-        const oldReverse = !!engine.reverseActive;
-        const oldEditor = !!gameState.editorActive;
-        try {
-          gameState.editorActive = false;
-          clearInput();
-          if(opts.setSpeed) opts.setSpeed(28);
-          engine.reverseActive = false;
-          warmRenderStep('warming lights', .25);
+    return nextFrame().then(nextFrame).then(() => {
+      const oldKeys = Object.assign({}, keys);
+      const oldSpeed = opts.getSpeed ? opts.getSpeed() : 0;
+      const oldReverse = !!engine.reverseActive;
+      const oldEditor = !!gameState.editorActive;
+      const oldLights = cloneData(opts.playerLights);
+      const oldStarted = !!gameState.started;
+      const warmAux = opts.playerLights && opts.playerLights.aux ? opts.playerLights.aux.map(() => ({enabled:true, condition:'always', glow:true, flare:true})) : null;
+      const restoreWarmupState = () => {
+        clearInput();
+        Object.assign(keys, oldKeys);
+        if(opts.setSpeed) opts.setSpeed(oldSpeed);
+        engine.reverseActive = oldReverse;
+        gameState.editorActive = oldEditor;
+        gameState.started = oldStarted;
+        if(oldLights && opts.setPlayerLights) opts.setPlayerLights(oldLights);
+        if(opts.setHighBeams) opts.setHighBeams(false);
+        if(opts.updatePlayerLights) opts.updatePlayerLights();
+      };
+      gameState.editorActive = false;
+      gameState.started = true;
+      clearInput();
+      if(opts.setSpeed) opts.setSpeed(28);
+      if(opts.setPlayerLights){
+        opts.setPlayerLights({
+          front:{enabled:true, auto:false, count:2, glow:true, bloom:true, flare:true},
+          rear:{enabled:true, glow:true, bloom:true, flare:true},
+          neon:{enabled:true, layout:'all', dummyVisible:true, intensity:Math.max(1.25, opts.playerLights && opts.playerLights.neon ? opts.playerLights.neon.intensity || 0 : 0)},
+          aux:warmAux || [{enabled:true, condition:'always', glow:true, flare:true}],
+          dummies:{visible:true},
+        });
+      }
+      engine.reverseActive = false;
+      warmRenderStep('warming camera and front lights', .18);
+      return nextFrame()
+        .then(() => {
           keys.s = true;
-          warmRenderStep('warming brake lights', .5);
+          warmRenderStep('warming brake lights and HUD', .36);
+          return nextFrame();
+        })
+        .then(() => {
           keys.s = false;
           engine.reverseActive = true;
-          warmRenderStep('warming reverse lights', .72);
+          warmRenderStep('warming reverse lights', .54);
+          return nextFrame();
+        })
+        .then(() => {
           engine.reverseActive = false;
           keys.a = true;
           keys.d = true;
-          warmRenderStep('warming auxiliary effects', .9);
-        } finally {
-          clearInput();
-          Object.assign(keys, oldKeys);
-          if(opts.setSpeed) opts.setSpeed(oldSpeed);
-          engine.reverseActive = oldReverse;
-          gameState.editorActive = oldEditor;
-          if(opts.updatePlayerLights) opts.updatePlayerLights();
-          runtimeWarmed = true;
-          setLoadingPart('warmup', 1, 'runtime warmed');
-          resolve();
-        }
-      });
+          warmRenderStep('warming auxiliary lights and neon', .72);
+          return nextFrame();
+        })
+        .then(() => {
+          if(opts.setHighBeams) opts.setHighBeams(true);
+          warmRenderStep('warming high beams and shaders', .88);
+          return nextFrame();
+        })
+        .then(() => {
+          if(opts.setHighBeams) opts.setHighBeams(false);
+          if(opts.warmupHook) opts.warmupHook({render: renderWarmFrame, setStage: setLoadingPart});
+          warmRenderStep('final render pipeline check', .96);
+        })
+        .then(() => { restoreWarmupState(); }, err => { restoreWarmupState(); throw err; });
+    }).then(() => {
+      setLoadingPart('warmup', 1, 'runtime warmed');
     });
   }
 

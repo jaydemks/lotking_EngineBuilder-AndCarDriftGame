@@ -17,11 +17,13 @@ Current main entrypoints:
 
 **Play.** Pick a track from the level select, start the engine and drift. Points for angle and speed, cones to kick around, a working gearbox with a limiter, slow-motion radio mode (TAB), day/night cycle, damage-free arcade physics that's easy to pick up.
 
-**Build levels.** The Engine Editor gives you a free-fly camera, selection and transform gizmos (move/rotate/scale with snapping), an outliner, an inspector, undo/redo, and context menus. You can add primitives, lights and particle effects, import your own GLB/GLTF models, and lay out a whole new track. Levels are real assets: create, save, save-as, rename, duplicate, delete, export to a `.lkep` file and import it back. Every level you save shows up as a playable card in the game's track selection screen.
+**Build levels.** The Engine Editor gives you a free-fly camera, selection and transform gizmos (move/rotate/scale with snapping), an outliner, an inspector, undo/redo, and context menus. You can add primitives, lights, particle effects, collision volumes and imported GLB/GLTF models, then lay out a whole new track. Levels are real assets: create, save, save-as, rename, duplicate, delete, export to a `.lkep` file and import it back. Every level you save shows up as a playable card in the game's track selection screen.
 
-**Manage assets.** The Assets tab collects everything reusable in one place: your levels, imported 3D models (stored in IndexedDB so big files survive reloads), scene assets, player blueprints and engine sound sets. Drag models straight into the viewport, filter by type, right-click for actions, and choose whether a dropped asset should be placed normally or replace the object under the cursor.
+**Manage assets.** The Assets tab collects everything reusable in one place: your levels, imported 3D models (stored in IndexedDB so big files survive reloads), scene assets, player car logic assets and engine sound sets. Drag models straight into the viewport, filter by type, right-click for actions, and choose whether a dropped asset should be placed normally or replace the object under the cursor.
 
-**Design your car.** The player vehicle is a blueprint: driving setup (torque, grip, oversteer, handbrake...), camera modes (arcade follow, cinematic drift, aspect ratios, DOF and color grading), vehicle lights and underglow neon, exhaust smoke/fire anchors, 3D data widgets floating next to the car. Blueprints can be copied, promoted to project default, and reused across levels.
+**Design your car.** The player vehicle is driven by `player_car (Logic)`: driving setup (torque, grip, oversteer, handbrake, reverse delay...), editable player collision, camera modes (arcade follow, cinematic drift, aspect ratios, DOF and color grading), vehicle lights and underglow neon, hold-to-flash high beams, exhaust smoke/fire anchors, and 3D data widgets floating next to the car. Car logic assets can be copied, promoted to project default, and reused across levels.
+
+**Tune collision and physics.** Scene objects can have static collision, editable collider dummies, simple or lightweight compound collider modes, physics mass, impact force, and drive-surface behavior. This is already useful for cones, props, walls, ramps and custom collision boxes. The vehicle driving feel is intentionally kept arcade-drift first, while the environment physics layer is still being refined.
 
 **Design your sound.** The Engine Sound Designer is an interactive illustration of the engine: an SVG tachometer where you drag your RPM loop samples along the arc (separate ON-throttle and OFF-throttle banks, crossfaded in real time), hotspots on the engine for turbo whine, blow-off, backfire, gear shifts, limiter and ignition, plus filters, sine modulation, reverb and a full tester (gas, auto-RPM, ramps) so you can hear everything before you drive. Every slot has a synthetic fallback, so the car always sounds like something even with zero samples loaded. Sound sets are assets too — build several and swap them per vehicle.
 
@@ -40,6 +42,10 @@ The current direction is:
 - **Playable ZIP Export** for publishing a game build without shipping the editor.
 - **Default content** based on bundled/free/self-made assets so the editor opens with a usable starter project.
 
+Recent `v0.5.5` work added a lot of editor/runtime foundation: player model replacement, asset properties previews, selectable collider dummies, standalone collision boxes, per-object physics mass/impact tuning, player-car collision editing, warm-up indicators for render/light changes, mobile UI improvements, high beams, burnout behavior, and early drive-surface/ramp support.
+
+Known active refinement area: inclined drive surfaces and advanced collision behavior are still being tuned. Custom rotated ramps and very steep surfaces work better than before, but the exact edge precision and directional behavior are not final yet.
+
 ## Documentation and release notes
 
 The README is intentionally kept stable so it does not need to be rewritten for every version.
@@ -57,10 +63,10 @@ Version-specific status, completed work, known issues, and roadmap notes live in
 - `gameplay.html` — gameplay runtime entrypoint.
 - `engine_editor.html` — standalone editor entrypoint.
 - `drift-parking-lot.html` — compatibility redirect to the landing page.
-- `js/lot-king.js` — the runtime bridge: game setup, main loop, and the `LOT_KING` API everything talks through.
-- `js/runtime/` — gameplay modules: world generation, physics, sky, audio, engine sound sets, cameras, HUD, track catalog, session flow, and so on.
+- `js/lot-king.js` — the runtime bridge: game setup, main loop, vehicle handling, and the `LOT_KING` API everything talks through.
+- `js/runtime/` — gameplay modules: world state, physics adapters, player light rig, sky, audio, engine sound sets, cameras, HUD, track catalog, session flow, and so on.
 - `js/editor/` — the Engine Editor UI, project/level tools, playable export pipeline, and the Sound Designer overlay.
-- `js/engine/scene-store.js` — persistence: level library, project (LKEP) export/import, asset blobs, player blueprints, sound sets.
+- `js/engine/scene-store.js` — persistence: level library, project (LKEP) export/import, asset blobs, player car logic assets, collider data, sound sets.
 - `css/` — game and editor styling.
 - `docs/` — architecture notes, runtime module notes, and versioned release history.
 - `models/`, `media/`, `musics/` — bundled assets (car models, HUD art, engine samples, music).

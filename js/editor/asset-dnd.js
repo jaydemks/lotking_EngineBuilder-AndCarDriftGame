@@ -8,8 +8,29 @@
 function create(deps){
   deps = deps || {};
   const ED = deps.ED;
-  const canvas = deps.canvas;
+  const GAME = deps.GAME || {};
+  const canvas = deps.canvas || (GAME.core && GAME.core.canvas) || (GAME.core && GAME.core.renderer && GAME.core.renderer.domElement) || null;
   let assetDragRef = null;
+
+  function playerRoot(){
+    return GAME.player && GAME.player.car ? GAME.player.car : null;
+  }
+
+  function isInsidePlayer(o){
+    const root = playerRoot();
+    if(!root || !o) return false;
+    for(let n = o; n; n = n.parent){
+      if(n === root) return true;
+    }
+    return false;
+  }
+
+  function normalizeDropTarget(o){
+    if(!o) return null;
+    if(o.userData && o.userData.editorType === 'player') return o;
+    if(isInsidePlayer(o)) return playerRoot();
+    return o;
+  }
 
   function acceptEditorFileDrag(e){
     if(!deps.hasExternalFileDrag(e)) return false;
@@ -28,7 +49,8 @@ function create(deps){
   }
 
   function canReplaceTarget(o){
-    return !!(o && o.userData && o.userData.editorType !== 'player' &&
+    o = normalizeDropTarget(o);
+    return !!(o && o.userData &&
       !['playerLight','playerEffect','playerDataWidget'].includes(o.userData.editorType));
   }
 
@@ -44,14 +66,11 @@ function create(deps){
     if(!hasModelAsset && !hasFile){ deps.clearReplaceDropHelper(); return null; }
     const hit = deps.pickAt(e.clientX, e.clientY);
     if(!hit || !hit.entity){ deps.clearReplaceDropHelper(); return null; }
-    let modelOk = hasFile;
-    if(hasModelAsset){
-      const asset = dragAssetModel(e);
-      modelOk = !!(asset && asset.kind === 'imported-glb');
-    }
-    const ok = modelOk && canReplaceTarget(hit.entity);
-    deps.setReplaceDropHelper(hit.entity, ok);
-    return ok ? hit.entity : null;
+    let modelOk = hasFile || hasModelAsset;
+    const target = normalizeDropTarget(hit.entity);
+    const ok = modelOk && canReplaceTarget(target);
+    deps.setReplaceDropHelper(target || hit.entity, ok);
+    return ok ? target : null;
   }
 
   function objectLabel(o){
@@ -64,11 +83,12 @@ function create(deps){
   }
 
   function openViewportDropChoice(e, opts){
-    const target = opts && opts.target;
+    const target = normalizeDropTarget(opts && opts.target);
     const point = clonePoint(opts && opts.point);
     const asset = opts && opts.asset;
     const files = opts && opts.files ? Array.from(opts.files) : [];
     const replaceName = objectLabel(target);
+    const playerTarget = target && target.userData && target.userData.editorType === 'player';
     const items = [
       {
         label:'Put here',
@@ -83,10 +103,18 @@ function create(deps){
         },
       },
       {
-        label:'Replace with ' + replaceName,
-        icon:'📦',
+        label: playerTarget ? 'Use as player model' : 'Replace with ' + replaceName,
+        icon: playerTarget ? '🚗' : '📦',
         action:() => {
           deps.clearReplaceDropHelper();
+          if(playerTarget){
+            if(asset && asset.kind === 'imported-glb' && deps.replacePlayerModelWithAsset){
+              deps.replacePlayerModelWithAsset(asset.raw);
+              return;
+            }
+            if(files.length && deps.replacePlayerModelWithFile) deps.replacePlayerModelWithFile(files[0]);
+            return;
+          }
           if(asset && asset.kind === 'imported-glb'){
             deps.replaceSelectedWithAsset(asset.raw, target);
             return;
@@ -110,7 +138,8 @@ function create(deps){
       const hasAsset = types.includes('application/x-lotking-asset');
       const hasFile = deps.hasExternalFileDrag(e);
       if(!hasAsset && !hasFile) return null;
-      const ok = canReplaceTarget(target) && (hasFile || !!dragAssetModel(e));
+      const realTarget = normalizeDropTarget(target);
+      const ok = canReplaceTarget(realTarget) && (hasFile || hasAsset || !!dragAssetModel(e));
       return {ok, hasAsset, hasFile};
     };
     el.addEventListener('dragover', e => {
@@ -135,7 +164,9 @@ function create(deps){
       }
       if(info.hasAsset){
         const asset = dragAssetModel(e);
-        if(asset) deps.replaceSelectedWithAsset(asset.raw, target);
+        const realTarget = normalizeDropTarget(target);
+        if(asset && realTarget.userData.editorType === 'player' && deps.replacePlayerModelWithAsset) deps.replacePlayerModelWithAsset(asset.raw);
+        else if(asset) deps.replaceSelectedWithAsset(asset.raw, realTarget);
         return;
       }
       const files = deps.supportedAssetFiles(e.dataTransfer.files);
@@ -143,7 +174,9 @@ function create(deps){
         deps.status('Drop one GLB/GLTF to replace this object');
         return;
       }
-      deps.replaceObjectWithFile(target, files[0]);
+      const realTarget = normalizeDropTarget(target);
+      if(realTarget.userData.editorType === 'player' && deps.replacePlayerModelWithFile) deps.replacePlayerModelWithFile(files[0]);
+      else deps.replaceObjectWithFile(realTarget, files[0]);
     });
   }
 
@@ -162,6 +195,7 @@ function create(deps){
   }
 
   function wireViewportDrop(){
+    if(!canvas || !canvas.addEventListener) return;
     canvas.addEventListener('dragover', e => {
       if(!ED.active || ED.playPreview) return;
       const target = updateViewportReplaceHint(e);

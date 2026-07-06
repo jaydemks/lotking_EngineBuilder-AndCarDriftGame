@@ -57,6 +57,17 @@ function create(deps){
   $('#lkGrid').addEventListener('click', () => {
     deps.setGrid(!ED.gridOn);
   });
+  const gridSize = $('#lkGridSize');
+  if(gridSize) gridSize.addEventListener('change', e => {
+    ED.gridSize = Math.max(20, +e.target.value || 240);
+    ED.gridInfinite = false;
+    if(deps.applyGridSize) deps.applyGridSize();
+  });
+  const gridInfinite = $('#lkGridInfinite');
+  if(gridInfinite) gridInfinite.addEventListener('click', () => {
+    ED.gridInfinite = !ED.gridInfinite;
+    if(deps.applyGridSize) deps.applyGridSize();
+  });
 
   $('#lkCamHelper').addEventListener('click', () => {
     ED.camHelperOn = !ED.camHelperOn;

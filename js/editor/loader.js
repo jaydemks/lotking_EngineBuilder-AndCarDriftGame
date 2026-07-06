@@ -43,6 +43,7 @@ const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.9298, 'loading side panel controls', 'js/editor/side-panels.js'],
   [.92985, 'loading editor menus', 'js/editor/editor-menus.js'],
   [.9299, 'loading asset panel helpers', 'js/editor/asset-panel.js'],
+  [.92991, 'loading asset properties', 'js/editor/asset-properties.js'],
   [.92992, 'loading asset catalog', 'js/editor/asset-catalog.js'],
   [.92993, 'loading asset drag and drop', 'js/editor/asset-dnd.js'],
   [.92995, 'loading scene outliner', 'js/editor/outliner.js'],

@@ -28,6 +28,7 @@ function create(deps){
   const STATIC_FILES = [
     'css/lot-king.css',
     'js/lot-king.js',
+    'js/runtime/player-light-rig.js',
     'js/engine/scene-store.js',
     'models/car1.glb',
     'models/car2.glb',

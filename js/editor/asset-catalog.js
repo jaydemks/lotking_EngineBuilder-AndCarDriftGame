@@ -224,6 +224,7 @@ function create(deps){
         raw: {entry: clone(entry), levelId: level && level.id, levelName: label},
         icon: entry.kind === 'glb' || type === 'glb' ? '📦' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : '▣',
         draggable:true,
+        badges: entry.rigged ? [{label:'Rigged', type:'rigged'}] : [],
       };
       item.defaultAction = () => placeProjectAsset(item.raw, deps.spawnPointAhead ? deps.spawnPointAhead() : null);
       item.actions = [
@@ -244,43 +245,6 @@ function create(deps){
       for(const entry of entries){
         addProjectAssetEntry(entry, level);
       }
-      if(scene && scene.player && scene.player.modelSrc){
-        addProjectAssetEntry({
-          id: 'player-model:' + normalizeLevelId(level.id),
-          kind: 'glb',
-          src: scene.player.modelSrc,
-          fit: 5,
-          name: 'Player Vehicle · ' + levelLabel(level),
-          collide: false,
-          asset: {key:'player-model:' + normalizeLevelId(level.id), name:'Player Vehicle', source:'Player Blueprint'},
-        }, level);
-      }
-    }
-    const defaultPlayer = STORE.playerBlueprints && STORE.playerBlueprints.default ? STORE.playerBlueprints.default() : deps.currentPlayerBlueprint && deps.currentPlayerBlueprint();
-    if(defaultPlayer && defaultPlayer.modelSrc){
-      addProjectAssetEntry({
-        id: 'player-model:base',
-        kind: 'glb',
-        src: defaultPlayer.modelSrc,
-        fit: 5,
-        name: 'Player Vehicle · Base Blueprint',
-        collide: false,
-        asset: {key:'player-model:base', name:'Player Vehicle', source:'Player Blueprint Base'},
-      }, {id:'base-blueprint', name:'Player Blueprint Base'});
-    }
-    if(STORE.playerBlueprints && STORE.playerBlueprints.list){
-      STORE.playerBlueprints.list().forEach(bp => {
-        if(!bp || !bp.player || !bp.player.modelSrc) return;
-        addProjectAssetEntry({
-          id: 'player-model:' + bp.id,
-          kind: 'glb',
-          src: bp.player.modelSrc,
-          fit: 5,
-          name: 'Player Vehicle · ' + (bp.name || 'Blueprint'),
-          collide: false,
-          asset: {key:'player-model:' + bp.id, name:'Player Vehicle', source:bp.name || 'Player Blueprint'},
-        }, {id:bp.id, name:bp.name || 'Player Blueprint'});
-      });
     }
     return Array.from(itemsByKey.values()).sort((a,b) => a.name.localeCompare(b.name));
   }
@@ -336,13 +300,13 @@ function create(deps){
     }
     if(ref.indexOf('project:') === 0){
       const item = collectProjectAssets().find(x => x.ref === ref);
-      return item ? {kind:'project-asset', ref, raw:item.raw, name:item.name, source:item.source, levelId:item.levelId, levelName:item.levelName} : null;
+      return item ? {kind:'project-asset', ref, raw:item.raw, name:item.name, source:item.source, levelId:item.levelId, levelName:item.levelName, badges:item.badges || []} : null;
     }
     if(ref.indexOf('blueprint:') === 0){
       const id = ref.slice(10);
       if(id === 'base'){
         const player = STORE.playerBlueprints && STORE.playerBlueprints.default() || deps.currentPlayerBlueprint();
-        return {kind:'player-blueprint', ref, id:'base', name:'Player Blueprint Base', base:true, raw:{id:'base', name:'Player Blueprint Base', player}};
+        return {kind:'player-blueprint', ref, id:'base', name:'player_car Logic Base', base:true, raw:{id:'base', name:'player_car Logic Base', player}};
       }
       const asset = STORE.playerBlueprints && STORE.playerBlueprints.list().find(x => x.id === id);
       return asset ? {kind:'player-blueprint', ref, id:asset.id, name:asset.name, raw:asset} : null;

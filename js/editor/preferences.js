@@ -62,7 +62,7 @@ function create(deps){
     ['#lkLevelsNew', 'text', {en:'＋ New level', it:'＋ Nuovo livello'}],
     ['#lkLevelsFromFile', 'text', {en:'⇧ Load from file…', it:'⇧ Carica da file…'}],
     ['#lkPinned .lk-pin[data-special="env"] .lk-pin-label', 'text', {en:'Environment', it:'Environment'}],
-    ['#lkPinned .lk-pin[data-special="player"] .lk-pin-label', 'text', {en:'Player (Blueprint)', it:'Player (Blueprint)'}],
+    ['#lkPinned .lk-pin[data-special="player"] .lk-pin-label', 'text', {en:'player_car (Logic)', it:'player_car (Logic)'}],
     ['#lkPinned .lk-pin[data-special="hud"] .lk-pin-label', 'text', {en:'HUD / Radio TAB', it:'HUD / Radio TAB'}],
   ];
 

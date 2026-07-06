@@ -28,6 +28,10 @@ function create(deps){
       const patch = {}; patch[key] = v;
       GAME.player.setTuning(patch); markDirty();
     }).root;
+    const tFloatRow = (key, label, min, max, step, fallback) => sliderRow(label, tun[key] == null ? fallback : tun[key], min, max, step, v => {
+      const patch = {}; patch[key] = v;
+      GAME.player.setTuning(patch); markDirty();
+    }, v => (+v).toFixed(2)).root;
     sg.body.appendChild(tRow('torque', 'Coppia', 0, 10));
     sg.body.appendChild(tRow('maxSpeed', 'Vel. massima', 0, 10));
     sg.body.appendChild(tRow('oversteer', 'Sovrasterzo', -10, 10));
@@ -35,6 +39,7 @@ function create(deps){
     sg.body.appendChild(tRow('steer', 'Sterzo', -10, 10));
     sg.body.appendChild(tRow('brake', 'Frenata', -10, 10));
     sg.body.appendChild(tRow('grip', 'Aderenza', -10, 10));
+    sg.body.appendChild(tFloatRow('reverseDelay', 'Ritardo retro (s)', 0, 2, .05, .5));
     box.appendChild(sg.root);
   }
 

@@ -31,6 +31,7 @@ const helperGroup = editorChrome.helperGroup;
 const grid = editorChrome.grid;
 const axes = editorChrome.axes;
 const gizmoProxy = editorChrome.gizmoProxy;
+const colliderProxy = editorChrome.colliderProxy;
 const zUpGizmoQuat = editorChrome.zUpGizmoQuat;
 let gizmoUsingZUpProxy = false;
 const camProxy = editorChrome.camProxy;
@@ -65,6 +66,7 @@ let sidePanels = null;
 let assetCatalog = null;
 let assetDnd = null;
 let assetPanel = null;
+let assetProperties = null;
 let outliner = null;
 let editorMenus = null;
 let inspectorUi = null;
@@ -95,14 +97,33 @@ function setLevelLoading(open, name, pct, step){ if(statusUi) statusUi.setLevelL
 function setAssetLoading(open, name, pct, step){ if(statusUi) statusUi.setAssetLoading(open, name, pct, step); }
 function confirmEditorAction(opts){ return dialogUi ? dialogUi.confirm(opts) : Promise.resolve(window.confirm((opts && opts.message) || 'Confirm?')); }
 function promptEditorAction(opts){ return dialogUi ? dialogUi.prompt(opts) : Promise.resolve(window.prompt((opts && opts.message) || 'Value:', (opts && opts.value) || '')); }
-function openMenu(items, x, y){ if(contextMenu) contextMenu.open(items, x, y); }
+function openMenu(items, x, y){
+  lockEditorTrackSelector();
+  if(contextMenu) contextMenu.open(items, x, y);
+}
 function closeMenu(){ if(contextMenu) contextMenu.close(); }
+function lockEditorTrackSelector(){
+  const overlay = $('#overlay');
+  const levelSelect = $('#levelSelect');
+  if(overlay) overlay.classList.remove('choosing-level');
+  if(levelSelect) levelSelect.setAttribute('aria-hidden', 'true');
+}
 
 function setGrid(on){
   ED.gridOn = !!on;
   grid.visible = ED.gridOn;
   syncToolbarState();
   status(ED.gridOn ? 'Grid on' : 'Grid off');
+}
+function applyGridSize(){
+  const size = ED.gridInfinite ? 5000 : Math.max(20, Number(ED.gridSize) || 240);
+  const scale = size / 240;
+  grid.scale.set(scale, scale, scale);
+  const input = $('#lkGridSize');
+  if(input) input.value = Math.round(ED.gridSize || 240);
+  const inf = $('#lkGridInfinite');
+  if(inf) inf.classList.toggle('on', !!ED.gridInfinite);
+  status(ED.gridInfinite ? 'Grid infinite-feel' : ('Grid size ' + Math.round(size)));
 }
 function restoreFloatingPanels(){ return editorLayout.restoreFloatingPanels(); }
 function panelWidth(side){ return editorLayout.panelWidth(side); }
@@ -111,7 +132,9 @@ function clampPanelPos(pos, w, h){ return editorLayout.clampPanelPos(pos, w, h);
 function clearHoverPickHelper(){ if(viewportPicking) viewportPicking.clearHover(); }
 window.LK_EDITOR_CORE.installCanvasViewportRectOverride(canvas, ED, editorViewportRect);
 visualHelpers = window.LK_EDITOR_VISUAL_HELPERS && window.LK_EDITOR_VISUAL_HELPERS.create({
-  THREE, ED, helperGroup,
+  THREE, GAME, ED, helperGroup,
+  registry: () => GAME.world.registry,
+  syncCollider: o => STORE.syncCollider(o),
   setViewportReplaceTarget: value => { viewportReplaceTarget = value; },
 });
 function clearReplaceDropHelper(){ return visualHelpers.clearReplaceDropHelper(); }
@@ -132,7 +155,7 @@ function syncOrbitAfterFly(){ return flyCamera.syncOrbitAfterFly(); }
 function flyEnd(e){ return flyCamera.flyEnd(e); }
 function flyUpdate(dt){ return flyCamera.flyUpdate(dt); }
 gizmoControls = window.LK_EDITOR_GIZMO_CONTROLS && window.LK_EDITOR_GIZMO_CONTROLS.create({
-  THREE, ED, root, $, scene, camE, renderer, gizmoProxy, zUpGizmoQuat, fly,
+  THREE, GAME, ED, root, $, scene, camE, renderer, canvas, gizmoProxy, colliderProxy, zUpGizmoQuat, fly,
   getGizmo: () => gizmo,
   setGizmo: value => { gizmo = value; },
   getOrbit: () => orbit,
@@ -143,6 +166,8 @@ gizmoControls = window.LK_EDITOR_GIZMO_CONTROLS && window.LK_EDITOR_GIZMO_CONTRO
   setGizmoSuppressSceneClick: value => { gizmoSuppressSceneClick = !!value; },
   beginTransformHistory,
   commitTransformHistory,
+  beginColliderHistory,
+  commitColliderHistory,
   onGizmoChange,
   flyUpdate,
   status,
@@ -167,6 +192,7 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   getCamRigHelper: getCameraRigHelper,
   getCamRigLine: () => camRigLine,
   syncToolbarState, transformControlsSpace, updateEditorAxesConvention, setGrid,
+  applyGridSize,
   openMenu, addMenuItems, spawnPointAhead, setTool, undo, redo, saveScene,
   newTrack, saveAsTrack, setLevelsOverlayOpen, importProjectFile,
   confirmEditorAction, exportProject, stopPlayPreview, startPlayPreview,
@@ -190,6 +216,7 @@ quickAudio = window.LK_EDITOR_QUICK_AUDIO && window.LK_EDITOR_QUICK_AUDIO.create
 statusUi = window.LK_EDITOR_STATUS_UI && window.LK_EDITOR_STATUS_UI.create({root});
 dialogUi = window.LK_EDITOR_DIALOGS && window.LK_EDITOR_DIALOGS.create({root});
 contextMenu = window.LK_EDITOR_CONTEXT_MENU && window.LK_EDITOR_CONTEXT_MENU.create({ctxEl: $('#lkCtx')});
+lockEditorTrackSelector();
 assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status});
 thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({THREE, active: () => ED.active && !ED.playPreview});
 editorLayout = window.LK_EDITOR_LAYOUT && window.LK_EDITOR_LAYOUT.create({
@@ -232,6 +259,8 @@ function placeImportedAsset(asset, at){ return assetImports ? assetImports.place
 function deleteImportedAsset(asset){ if(assetImports) assetImports.deleteImportedAsset(asset); }
 function replaceSelectedWithAsset(asset, target){ if(assetImports) assetImports.replaceSelectedWithAsset(asset, target); }
 function replaceObjectWithFile(target, file){ if(assetImports) assetImports.replaceObjectWithFile(target, file); }
+function replacePlayerModelWithAsset(asset){ if(assetImports) assetImports.replacePlayerModelWithAsset(asset); }
+function replacePlayerModelWithFile(file){ if(assetImports) assetImports.replacePlayerModelWithFile(file); }
 
 levelManager = window.LK_EDITOR_LEVEL_MANAGER && window.LK_EDITOR_LEVEL_MANAGER.create({
   GAME, STORE, ED, $, status, promptEditorAction, confirmEditorAction, beginStatusWork, updateStatusWork,
@@ -295,6 +324,7 @@ historyManager = window.LK_EDITOR_HISTORY_MANAGER && window.LK_EDITOR_HISTORY_MA
   attachGizmoToSelection,
   syncTransformFields,
   refreshOutliner,
+  refreshAssetsPanel,
   buildInspector,
   getGizmo: () => gizmo,
 });
@@ -313,6 +343,8 @@ function unlinkObject(child){ return historyManager.unlinkObject(child); }
 function beginTransformHistory(){ return historyManager.beginTransformHistory(); }
 function commitTransformHistory(label){ return historyManager.commitTransformHistory(label); }
 function withTransformHistory(label, fn){ return historyManager.withTransformHistory(label, fn); }
+function beginColliderHistory(o){ return historyManager.beginColliderHistory(o); }
+function commitColliderHistory(label){ return historyManager.commitColliderHistory(label); }
 function applyLastTransform(){ return historyManager.applyLastTransform(); }
 function hasLastTransformRepeat(){ return historyManager.hasLastTransformRepeat(); }
 function isHudHistorySuppress(){ return historyManager.isHudHistorySuppress(); }
@@ -379,7 +411,7 @@ function importProjectFile(file){ return projectIo.importProjectFile(file); }
 // ------------------------------------------------ outliner
 let viewportReplaceTarget = null;
 assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
-  ED, canvas, $,
+  GAME, ED, canvas, $,
   hasExternalFileDrag,
   getAssetByRef,
   clearReplaceDropHelper,
@@ -392,6 +424,8 @@ assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
   importAssetFiles,
   replaceSelectedWithAsset,
   replaceObjectWithFile,
+  replacePlayerModelWithAsset,
+  replacePlayerModelWithFile,
   placeAssetRef,
   status,
   openMenu,
@@ -519,6 +553,11 @@ function assetsPanelMenuItems(){
 }
 function requestDeleteAssetInstances(asset){ return assetCatalog.requestDeleteAssetInstances(asset); }
 function refreshAssetsPanel(){ return assetCatalog && assetCatalog.refreshAssetsPanel(); }
+assetProperties = window.LK_EDITOR_ASSET_PROPERTIES && window.LK_EDITOR_ASSET_PROPERTIES.create({
+  THREE,
+  resolveImportedAssetUrl,
+});
+function openAssetProperties(item){ if(assetProperties) assetProperties.open(item); }
 
 // ------------------------------------------------ thumbnails (lazy, cached)
 const thumbCache = {has: thumbnails.has, get: thumbnails.get, delete: thumbnails.remove};
@@ -539,6 +578,7 @@ editorMenus = window.LK_EDITOR_MENUS && window.LK_EDITOR_MENUS.create({
   placeAssetRef,
   spawnPointAhead,
   replaceSelectedWithAsset,
+  openAssetProperties,
   deleteImportedAsset,
   selectObject,
   setLeftMode,
@@ -623,7 +663,7 @@ outliner = window.LK_EDITOR_OUTLINER && window.LK_EDITOR_OUTLINER.create({
 
 // ------------------------------------------------ selection
 selectionManager = window.LK_EDITOR_SELECTION_MANAGER && window.LK_EDITOR_SELECTION_MANAGER.create({
-  THREE, GAME, STORE, ED, camE, thumbCache,
+  THREE, GAME, STORE, ED, camE, thumbCache, colliderProxy,
   clearHoverPickHelper,
   getGizmo: () => gizmo,
   setGizmoUsingZUpProxy: value => { gizmoUsingZUpProxy = !!value; },
@@ -642,6 +682,23 @@ selectionManager = window.LK_EDITOR_SELECTION_MANAGER && window.LK_EDITOR_SELECT
   syncTransformFields,
 });
 function selectObject(o){ return selectionManager.selectObject(o); }
+function selectCollider(o){ return selectionManager.selectCollider(o); }
+function selectPlayerCollider(){
+  clearHoverPickHelper();
+  ED.multiSelected = null;
+  ED.special = null;
+  ED.colliderEdit = false;
+  ED.playerColliderEdit = true;
+  ED.selected = GAME.player.car;
+  setTool('translate');
+  refreshSelectionHelpers();
+  updateSelectionAndDropHelpers();
+  buildInspector();
+  refreshOutliner();
+  status('player_car collider selected');
+}
+function selectMultiObjects(objects){ return selectionManager.selectMultiObjects(objects); }
+function selectSimilarObjects(o){ return selectionManager.selectSimilarObjects(o); }
 function selectSpecial(kind){ return selectionManager.selectSpecial(kind); }
 function deselect(){ return selectionManager.deselect(); }
 function isPlayerCameraSelection(){ return selectionManager.isPlayerCameraSelection(); }
@@ -653,6 +710,7 @@ function duplicateEntity(o, offset){ return selectionManager.duplicateEntity(o, 
 function cleanClone(o){ return selectionManager.cleanClone(o); }
 function focusSelected(){ return selectionManager.focusSelected(); }
 function onGizmoChange(){ return selectionManager.onGizmoChange(); }
+function setPhysicsEnabled(o, enabled){ return selectionManager.setPhysicsEnabled(o, enabled); }
 
 // ------------------------------------------------ picking + context menu on canvas
 function pickAt(clientX, clientY, opts){ return viewportPicking.pickAt(clientX, clientY, opts); }
@@ -660,7 +718,7 @@ function groundPointAt(clientX, clientY){ return viewportPicking.groundPointAt(c
 function spawnPointAhead(){ return viewportPicking.spawnPointAhead(); }
 function isGroundLikeEntity(o){ return viewportPicking.isGroundLikeEntity(o); }
 viewportEvents = window.LK_EDITOR_VIEWPORT_EVENTS && window.LK_EDITOR_VIEWPORT_EVENTS.create({
-  ED, canvas,
+  ED, GAME, canvas,
   clearHoverPickHelper,
   updateHover: e => viewportPicking.updateHover(e),
   flyStart,
@@ -698,6 +756,9 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   openGlbImportAt,
   setTool,
   selectObject,
+  selectCollider,
+  selectPlayerCollider,
+  selectSimilarObjects,
   focusSelected,
   duplicateEntity,
   hasLastTransformRepeat,
@@ -741,11 +802,13 @@ addActions = window.LK_EDITOR_ADD_ACTIONS && window.LK_EDITOR_ADD_ACTIONS.create
   markDirty,
   refreshOutliner,
   selectObject,
+  selectCollider,
   setTool,
   status,
   spawnPointAhead,
   importAssetFiles,
   replaceObjectWithFile,
+  replacePlayerModelWithFile,
   readFileAsDataURL,
   buildInspector,
   refreshAssetsPanel,
@@ -795,6 +858,7 @@ materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_E
   colorRow,
   sliderRow,
   textureDrop,
+  requestWarmup: label => requestEditorWarmup(label),
   btnRow,
   el,
 });
@@ -803,7 +867,7 @@ function applyMaterialPatch(o, patch){ return materialEditor.applyMaterialPatch(
 function musicLibrarySection(title, api){ return musicLibraryPanel.build(title, api); }
 function buildMaterialEditor(box, o){ return materialEditor.build(box, o); }
 
-const tf = {inputs: null};   // live transform inputs for sync during gizmo drag
+  const tf = {inputs: null};   // live transform inputs for sync during gizmo drag
 function syncTransformFields(){ if(inspectorController) inspectorController.syncTransformFields(); }
 objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_INSPECTOR.create({
   THREE,
@@ -814,6 +878,7 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   tf,
   el,
   section,
+  sliderRow,
   btnRow,
   checkRow,
   colorRow,
@@ -825,14 +890,18 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   focusSelected,
   beginTransformHistory,
   commitTransformHistory,
+  beginColliderHistory,
+  commitColliderHistory,
   resetTransform,
   syncTransformFields,
   onGizmoChange,
   setColliderEnabled,
+  setPhysicsEnabled,
   buildMaterialEditor,
   duplicateEntity,
   requestDeleteEntity,
   replaceSelectedGlb: beginReplaceObject,
+  requestWarmup: label => requestEditorWarmup(label),
 });
 playerCameraInspector = window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR && window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR.create({
   GAME,
@@ -858,6 +927,7 @@ playerLightsInspector = window.LK_EDITOR_PLAYER_LIGHTS_INSPECTOR && window.LK_ED
   sliderRow,
   selectRow,
   el,
+  requestWarmup: label => requestEditorWarmup(label),
 });
 playerAttachmentsInspector = window.LK_EDITOR_PLAYER_ATTACHMENTS_INSPECTOR && window.LK_EDITOR_PLAYER_ATTACHMENTS_INSPECTOR.create({
   GAME,
@@ -912,14 +982,21 @@ environmentInspector = window.LK_EDITOR_ENVIRONMENT_INSPECTOR && window.LK_EDITO
 });
 inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_INSPECTOR_CONTROLLER.create({
   THREE,
+  GAME,
   STORE,
   ED,
   tf,
   insp,
   el,
   section,
+  sliderRow,
   btnRow,
   status,
+  markDirty,
+  refreshOutliner,
+  setColliderEnabled,
+  setPhysicsEnabled,
+  checkRow,
   objectInspector,
   hudInspector,
   environmentInspector,
@@ -934,6 +1011,7 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
   onGizmoChange,
   beginTransformHistory,
   commitTransformHistory,
+  updateSelectionAndDropHelpers,
 });
 function buildInspector(){ return inspectorController.buildInspector(); }
 function openSoundDesigner(setId){ return inspectorController.openSoundDesigner(setId); }
@@ -951,6 +1029,7 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
   grid,
   axes,
   gizmoProxy,
+  colliderProxy,
   camProxy,
   camRigLine,
   $,
@@ -974,6 +1053,26 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
   clearHoverPickHelper,
   clearReplaceDropHelper,
   saveScene,
+  restorePreviewTransforms: () => {
+    const data = STORE.load && STORE.load();
+    if(!data) return;
+    const added = new Map();
+    (data.added || []).forEach(entry => { if(entry && entry.id) added.set(entry.id, entry); });
+    for(const o of GAME.world.registry){
+      if(!o || !o.userData) continue;
+      const id = o.userData.editorId;
+      if(o.userData.builtin && data.transforms && data.transforms[id]) STORE.applyT(o, data.transforms[id]);
+      else if(o.userData.addedEntry){
+        const oldEntry = added.get(o.userData.addedEntry.id);
+        if(oldEntry && oldEntry.t) STORE.applyT(o, oldEntry.t);
+      }
+      STORE.syncCollider(o);
+      if(o.userData.physicsVel) o.userData.physicsVel = null;
+      if(o.userData.physicsAng) o.userData.physicsAng = null;
+    }
+    refreshOutliner();
+    buildInspector();
+  },
   closeMenu,
   updateEditorControls,
   editorViewportRect,
@@ -992,6 +1091,9 @@ function stopPlayPreview(){ return editorRuntime.stopPlayPreview(); }
 function exitEditor(toPlay){ return editorRuntime.exitEditor(toPlay); }
 function editorFrame(dt){ return editorRuntime.editorFrame(dt); }
 function syncGamePreviewCamera(){ return editorRuntime.syncGamePreviewCamera(); }
+function requestEditorWarmup(label){
+  if(editorRuntime && editorRuntime.requestWarmup) editorRuntime.requestWarmup(label || 'Warm-up...');
+}
 
 addEventListener('lotking:radiohudchange', e => {
   if(!(ED.active && ED.special === 'hud')) return;
@@ -1001,6 +1103,6 @@ addEventListener('lotking:radiohudchange', e => {
   if(d.before && d.after) queueHudHistory(d.before, d.after, hudPatchLabel(d.patch));
 });
 
-GAME.editor = {enter: enterEditor, exit: exitEditor, state: ED};
+GAME.editor = {enter: enterEditor, exit: exitEditor, state: ED, requestWarmup: requestEditorWarmup};
 console.info('LotKing: engine editor ready');
 })();

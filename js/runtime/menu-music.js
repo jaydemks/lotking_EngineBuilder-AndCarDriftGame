@@ -17,6 +17,11 @@ function create(options){
   audio.loop = true;
   audio.volume = opts.volume == null ? .55 : opts.volume;
 
+  function editorActive(){
+    const editor = document.getElementById('lkEditor');
+    return !!(editor && editor.classList.contains('active'));
+  }
+
   function targetVolume(){
     return opts.getVolume ? Math.max(0, Math.min(1, Number(opts.getVolume()) || 0)) : (opts.volume == null ? .55 : opts.volume);
   }
@@ -40,6 +45,7 @@ function create(options){
   }
 
   function play(){
+    if(editorActive()) return Promise.resolve();
     stopFade();
     audio.volume = targetVolume();
     return audio.play().then(syncButton);
@@ -77,6 +83,7 @@ function create(options){
   }
 
   function toggle(){
+    if(editorActive()) return Promise.resolve();
     if(audio.paused){
       return audio.play()
         .then(() => {
@@ -104,6 +111,7 @@ function create(options){
     if(!overlay || autoStartBound) return;
     autoStartBound = true;
     overlay.addEventListener('pointerdown', () => {
+      if(editorActive()) return;
       if(!(isStarted && isStarted()) && audio.paused) play().catch(() => {});
     }, {once:true});
   }

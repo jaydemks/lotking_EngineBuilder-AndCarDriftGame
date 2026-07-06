@@ -21,24 +21,37 @@ function create(deps){
   function currentPlayerBlueprint(){
     return STORE.playerBlueprints && STORE.playerBlueprints.collect ? STORE.playerBlueprints.collect(GAME) : (STORE.collect(GAME).player || null);
   }
+  function loadBlueprintModel(bp){
+    if(!bp || !GAME.player.setModel) return;
+    if(!bp.modelSrc && !bp.modelDbKey) return;
+    const srcPromise = bp.modelDbKey && window.LK_ASSET_BLOBS
+      ? window.LK_ASSET_BLOBS.getUrl(bp.modelDbKey)
+      : Promise.resolve(bp.modelSrc);
+    srcPromise.then(src => STORE.loadGlbRaw(src).then(sceneRoot => {
+      GAME.player.setModel(sceneRoot);
+      GAME.player.car.userData.modelSrc = bp.modelSrc || null;
+      GAME.player.car.userData.modelDbKey = bp.modelDbKey || null;
+      GAME.player.car.userData.modelName = bp.modelName || null;
+    })).catch(err => status('Player model load failed: ' + err.message));
+  }
   async function copyPlayerBlueprintAsset(){
     const bp = currentPlayerBlueprint();
-    if(!bp){ status('Player blueprint non disponibile'); return; }
-    const name = await promptEditorAction({title:'Copy player blueprint', message:'Blueprint asset name:', value:'Player Blueprint ' + new Date().toLocaleTimeString(), okText:'Copy'});
+    if(!bp){ status('player_car Logic non disponibile'); return; }
+    const name = await promptEditorAction({title:'Copy player_car Logic', message:'Logic asset name:', value:'player_car Logic ' + new Date().toLocaleTimeString(), okText:'Copy'});
     if(!name || !name.trim()) return;
     const asset = STORE.playerBlueprints.saveAsset(name.trim(), bp, {
       makeDefault: true,
       source: {levelId: ED.trackId, levelName: ED.trackName, copiedFrom: 'scene-player'},
       controllerIndex: 0,
     });
-    if(!asset){ status('⚠ Blueprint non salvato'); return; }
+    if(!asset){ status('⚠ player_car Logic non salvato'); return; }
     applyPlayerBlueprintAsset(asset.player, {applySpawn:false, silent:true});
-    status('Blueprint copied, promoted to Base, and applied: ' + asset.name);
+    status('player_car Logic copied, promoted to Base, and applied: ' + asset.name);
     refreshAssetsPanel();
   }
   function applyPlayerBlueprintAsset(player, opts){
     const bp = player && JSON.parse(JSON.stringify(player));
-    if(!bp){ status('Blueprint non valido'); return; }
+    if(!bp){ status('player_car Logic non valido'); return; }
     const options = opts || {};
     if(bp.tuning && GAME.player.setTuning) GAME.player.setTuning(bp.tuning);
     if(bp.cam){
@@ -46,6 +59,7 @@ function create(deps){
       else { Object.assign(GAME.player.cameraCfg, bp.cam); GAME.player.applyCameraCfg(); }
     }
     if(bp.lights && GAME.player.setLights) GAME.player.setLights(bp.lights);
+    if(bp.collision && GAME.player.setCollision) GAME.player.setCollision(bp.collision);
     if(bp.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(bp.exhaust);
     if(bp.dataWidgets && GAME.player.setDataWidgets) GAME.player.setDataWidgets(bp.dataWidgets);
     if(bp.rigTransforms && STORE.playerBlueprints && STORE.playerBlueprints.applyRig) STORE.playerBlueprints.applyRig(GAME, bp);
@@ -59,35 +73,30 @@ function create(deps){
       GAME.player.physics.heading = GAME.player.spawn.heading;
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
-    if(bp.modelSrc && GAME.player.setModel){
-      STORE.loadGlbRaw(bp.modelSrc).then(sceneRoot => {
-        GAME.player.setModel(sceneRoot);
-        GAME.player.car.userData.modelSrc = bp.modelSrc;
-      }).catch(err => status('Player model load failed: ' + err.message));
-    }
+    loadBlueprintModel(bp);
     markDirty();
     refreshOutliner();
     buildInspector();
-    if(!options.silent) status('Player blueprint applied');
+    if(!options.silent) status('player_car Logic applied');
   }
   function setDefaultPlayerBlueprintAsset(asset){
     if(!asset || !asset.player || !STORE.playerBlueprints) return;
     STORE.playerBlueprints.setDefault(asset.player, {blueprintId: asset.id, blueprintName: asset.name});
     applyPlayerBlueprintAsset(asset.player, {applySpawn:false, silent:true});
-    status('Promoted to Player Blueprint Base: ' + asset.name);
+    status('Promoted to player_car Logic Base: ' + asset.name);
     refreshAssetsPanel();
   }
   function deletePlayerBlueprintAsset(asset){
     if(!asset || !STORE.playerBlueprints) return;
     confirmEditorAction({
-      title: 'Delete player blueprint?',
-      message: 'Delete copied blueprint "' + asset.name + '"? This does not delete the player in the scene.',
-      okText: 'Delete blueprint',
+      title: 'Delete player_car Logic?',
+      message: 'Delete copied player_car Logic "' + asset.name + '"? This does not delete the player in the scene.',
+      okText: 'Delete logic',
     }).then(ok => {
       if(!ok) return;
       STORE.playerBlueprints.deleteAsset(asset.id);
       refreshAssetsPanel();
-      status('Player blueprint deleted');
+      status('player_car Logic deleted');
     });
   }
 

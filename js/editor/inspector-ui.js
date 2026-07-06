@@ -24,13 +24,75 @@ function create(deps){
   }
 
   function sliderRow(label, value, min, max, step, oninput, fmt){
-    const r = el('<div class="lk-row lk-slider"><label>' + label + '</label><input type="range"><output></output></div>');
-    const i = r.querySelector('input'), o = r.querySelector('output');
+    const r = el('<div class="lk-row lk-slider"><label>' + label + '</label><input type="range"><input class="lk-slider-value" type="number" title="Exact value / manual override"><output></output></div>');
+    const i = r.querySelector('input[type="range"]'), n = r.querySelector('.lk-slider-value'), o = r.querySelector('output');
     i.min = min; i.max = max; i.step = step; i.value = value;
-    const show = v => o.textContent = fmt ? fmt(v) : (+v).toFixed(step < .01 ? 4 : 2).replace(/\.?0+$/, '');
+    n.step = step;
+    n.value = value;
+    const baseStep = Number(step) || .01;
+    const fineStep = Math.min(baseStep, baseStep >= .1 ? .01 : .001);
+    let dragValue = Number(value);
+    let dragPointer = null;
+    let dragActive = false;
+    const clampValue = v => Math.max(Number(min), Math.min(Number(max), v));
+    const show = v => {
+      const shown = fmt ? fmt(v) : (+v).toFixed(step < .01 ? 4 : 2).replace(/\.?0+$/, '');
+      o.textContent = shown;
+      if(document.activeElement !== n) n.value = Number.isFinite(Number(v)) ? (+v).toFixed(step < .01 ? 4 : 3).replace(/\.?0+$/, '') : v;
+    };
+    const applyStepMode = fine => {
+      const s = fine ? fineStep : baseStep;
+      i.step = s;
+      n.step = s;
+    };
     show(value);
-    i.addEventListener('input', () => { const v = parseFloat(i.value); show(v); oninput(v); });
-    return {root: r, input: i};
+    i.addEventListener('pointerdown', e => {
+      r.dispatchEvent(new CustomEvent('lk-slider-edit-start'));
+      applyStepMode(!!e.shiftKey);
+      dragActive = true;
+      dragPointer = e.clientX;
+      dragValue = Number(i.value);
+      if(i.setPointerCapture) i.setPointerCapture(e.pointerId);
+    });
+    i.addEventListener('pointermove', e => {
+      if(!dragActive || dragPointer == null) return;
+      const w = Math.max(80, i.getBoundingClientRect().width || 160);
+      const range = Number(max) - Number(min);
+      const slow = e.shiftKey ? .12 : .32;
+      const v = clampValue(dragValue + ((e.clientX - dragPointer) / w) * range * slow);
+      i.value = v;
+      show(v);
+      oninput(v);
+    });
+    i.addEventListener('keydown', e => applyStepMode(!!e.shiftKey));
+    i.addEventListener('keyup', e => applyStepMode(!!e.shiftKey));
+    i.addEventListener('pointerup', e => {
+      dragActive = false;
+      dragPointer = null;
+      dragValue = Number(i.value);
+      if(i.releasePointerCapture) try { i.releasePointerCapture(e.pointerId); } catch(err){}
+      applyStepMode(false);
+      r.dispatchEvent(new CustomEvent('lk-slider-edit-end'));
+    });
+    i.addEventListener('blur', () => { if(dragActive) r.dispatchEvent(new CustomEvent('lk-slider-edit-end')); dragActive = false; dragPointer = null; applyStepMode(false); });
+    i.addEventListener('input', e => {
+      if(dragActive) return;
+      applyStepMode(!!e.shiftKey);
+      const v = parseFloat(i.value);
+      show(v);
+      oninput(v);
+    });
+    n.addEventListener('input', () => {
+      const v = parseFloat(n.value);
+      if(!Number.isFinite(v)) return;
+      if(v >= Number(min) && v <= Number(max)) i.value = v;
+      show(v);
+      oninput(v);
+    });
+    n.addEventListener('focus', () => r.dispatchEvent(new CustomEvent('lk-slider-edit-start')));
+    n.addEventListener('change', () => r.dispatchEvent(new CustomEvent('lk-slider-edit-end')));
+    n.addEventListener('blur', () => r.dispatchEvent(new CustomEvent('lk-slider-edit-end')));
+    return {root: r, input: i, valueInput: n, output: o};
   }
 
   function colorRow(label, hex, oninput){
@@ -46,7 +108,7 @@ function create(deps){
     const i = r.querySelector('input');
     i.checked = !!checked;
     i.addEventListener('change', () => oninput(i.checked));
-    return {root: r};
+    return {root: r, input: i};
   }
 
   function btnRow(defs){

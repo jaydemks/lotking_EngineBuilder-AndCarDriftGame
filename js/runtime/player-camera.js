@@ -43,6 +43,7 @@ function createConfig(){
 }
 
 function aspectValue(cfg, width, height){
+  if(height > width) return ASPECTS['9:16'];
   return ASPECTS[cfg.aspect] || (width / height);
 }
 
@@ -51,7 +52,8 @@ function renderRect(cfg, width, height){
   const screenAspect = width / height;
   let w = width;
   let h = height;
-  if(ASPECTS[cfg.aspect]){
+  const scopedAspect = ASPECTS[cfg.aspect] || (height > width ? ASPECTS['9:16'] : null);
+  if(scopedAspect){
     if(screenAspect > aspect) w = Math.round(height * aspect);
     else h = Math.round(width / aspect);
   }
@@ -61,7 +63,7 @@ function renderRect(cfg, width, height){
     w,
     h,
     aspect,
-    scoped: !!ASPECTS[cfg.aspect],
+    scoped: !!scopedAspect,
   };
 }
 

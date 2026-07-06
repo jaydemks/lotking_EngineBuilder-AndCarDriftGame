@@ -124,6 +124,7 @@ html,body {
     transition:opacity .6s ease; color:#e8ecf5;
   }
   #overlay.hidden { opacity:0; pointer-events:none; }
+  #overlay.loading { z-index:80; backdrop-filter:blur(7px); }
   #overlay.menu-preloading .menu-main,
   #overlay.menu-preloading .level-select { opacity:0; pointer-events:none; transform:translateY(10px); }
   #overlay.menu-preloading #loadBarWrap,
@@ -814,3 +815,45 @@ html,body {
 
   /* portrait / phone frame: hide the controls legend (touch UI takes over) */
   body.lk-portrait #legend { display:none !important; }
+  body.lk-portrait #lkTouchControls {
+    gap:10px;
+    padding:0 max(10px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    align-items:flex-end;
+  }
+  body.lk-portrait .lk-touch-steer {
+    width:clamp(132px,38vw,190px);
+    height:82px;
+    border-radius:14px;
+  }
+  body.lk-portrait .lk-touch-steer-track { height:30px; }
+  body.lk-portrait .lk-touch-steer-thumb { width:38px; height:24px; margin:-12px 0 0 -19px; }
+  body.lk-portrait .lk-touch-pedals {
+    display:grid;
+    grid-template-columns:54px 64px;
+    grid-template-rows:54px 54px;
+    grid-template-areas:
+      "hb gas"
+      "brake gas";
+    gap:8px;
+    align-items:stretch;
+  }
+  body.lk-portrait .lk-touch-btn {
+    width:auto;
+    height:auto;
+    min-width:54px;
+    min-height:54px;
+    font-size:9px;
+  }
+  body.lk-portrait .lk-touch-gas { grid-area:gas; border-radius:24px; }
+  body.lk-portrait .lk-touch-brake { grid-area:brake; }
+  body.lk-portrait .lk-touch-hb { grid-area:hb; width:auto; height:auto; font-size:8px; }
+  @media (max-width: 360px) and (orientation: portrait){
+    body.lk-portrait #lkTouchControls { padding-left:6px; padding-right:6px; gap:6px; }
+    body.lk-portrait .lk-touch-steer { width:126px; height:74px; }
+    body.lk-portrait .lk-touch-pedals {
+      grid-template-columns:48px 58px;
+      grid-template-rows:48px 48px;
+      gap:6px;
+    }
+    body.lk-portrait .lk-touch-btn { min-width:48px; min-height:48px; letter-spacing:.3px; }
+  }

@@ -11,7 +11,7 @@ The project is still intentionally simple at the platform level: plain JavaScrip
 - `engine_editor.html` is the standalone editor entrypoint. It loads the full runtime/editor DOM needed by editor preview, HUD editing, radio, settings, and the Sound Designer.
 - `drift-parking-lot.html` remains as a compatibility redirect to `index.html`.
 - `js/lot-king.js` is the runtime composition root. It creates `window.LOT_KING`, wires the runtime modules together, owns the main render/update loop, and keeps the public bridge stable for the editor.
-- `js/runtime/` contains focused gameplay/runtime modules: assets, loading, world state, world generation, player camera, physics, audio, sky/weather, HUD, menus, input, track/session flow, and model handling.
+- `js/runtime/` contains focused gameplay/runtime modules: assets, loading, world state, world generation, player camera, player light rig, physics, audio, sky/weather, HUD, menus, input, track/session flow, and model handling.
 - `js/runtime/input/` contains the multi-device input stack introduced in v0.5.2: action schema, physical device sources, per-player assignment, in-game controls menu, visual mapping overlay, and touch controls.
 - `js/runtime/ui/` contains runtime/editor-shared UI utilities, currently the floating window manager used by the mapping overlay and movable editor settings panels.
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
@@ -210,7 +210,7 @@ The mapping overlay uses this manager in both game and editor contexts.
 - renderer/bootstrap setup and global runtime object creation;
 - main loop coordination;
 - player driving step and fallback keyboard input path;
-- player lights/exhaust glue around runtime/editor hooks;
+- player exhaust glue around runtime/editor hooks;
 - runtime module creation order;
 - level launch and editor-preview glue where multiple systems meet.
 

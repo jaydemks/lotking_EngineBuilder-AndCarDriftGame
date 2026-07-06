@@ -54,6 +54,13 @@ function create(opts){
     return Promise.reject(new Error('asset source missing'));
   }
 
+  function defaultColliderForAsset(asset){
+    if(asset && asset.defaultCollider != null) return !!asset.defaultCollider;
+    const text = ((asset && (asset.name || asset.source || asset.key)) || '').toLowerCase();
+    if(/\b(map|track|level|ground|floor|road|asphalt|parking[- ]?lot|terrain)\b/.test(text)) return false;
+    return true;
+  }
+
   function upsert(file, data){
     const info = data || {};
     const list = load();
@@ -68,6 +75,7 @@ function create(opts){
       size: file.size || 0,
       src: info.src || null,
       dbKey: info.dbKey || null,
+      rigged: !!(info.rigged || (existing && existing.rigged)),
       fit: 5,
       importedAt: new Date().toISOString(),
     };
@@ -85,7 +93,7 @@ function create(opts){
       dbKey: asset.dbKey || null,
       fit: asset.fit || 5,
       name: asset.name,
-      collide: !!asset.defaultCollider,
+      collide: defaultColliderForAsset(asset),
       asset: {key: asset.key, dbKey: asset.dbKey || null, name: asset.name, source: asset.source || 'Imported asset'},
       t: {p:[at.x, 0, at.z], r:[0,0,0], s:[1,1,1], v:true},
     };

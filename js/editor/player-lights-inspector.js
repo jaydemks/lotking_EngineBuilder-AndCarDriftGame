@@ -20,18 +20,20 @@ function create(deps){
   const sliderRow = deps.sliderRow;
   const selectRow = deps.selectRow;
   const el = deps.el;
+  const requestWarmup = deps.requestWarmup || function(){};
 
   function build(box){
     if(!GAME.player.lights || !GAME.player.setLights) return;
     const sh = section('LUCI VEICOLO', false);
     const lights = GAME.player.lights;
-    const upd = patch => { GAME.player.setLights(patch); markDirty(); };
+    const upd = patch => { GAME.player.setLights(patch); requestWarmup('Warm-up lights...'); markDirty(); };
     sh.body.appendChild(el('<div class="lk-hint">Fari anteriori spot e luci posteriori reattive per posizione, freno e retromarcia.</div>'));
     sh.body.appendChild(checkRow('Mostra dummy luci', lights.dummies && lights.dummies.visible, v => { upd({dummies:{visible:v}}); refreshOutliner(); }).root);
     const addVehicleLight = preset => {
       if(!GAME.player.addLight) return;
       const anchor = GAME.player.addLight(preset);
       GAME.player.setLights({dummies:{visible:true}});
+      requestWarmup('Warm-up light...');
       markDirty();
       refreshOutliner();
       if(anchor){

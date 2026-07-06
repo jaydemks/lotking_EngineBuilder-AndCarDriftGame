@@ -9,6 +9,7 @@ function create(options){
   const opts = options || {};
   const CANNONRef = opts.CANNONRef;
   const player = opts.playerState;
+  const playerCollision = opts.playerCollision || {};
   const constants = opts.constants || {};
   const colliders = opts.colliders || {};
   const worldState = opts.worldState;
@@ -31,6 +32,40 @@ function create(options){
     return worldState.colliderSignature();
   }
 
+  function addPlayerBody(){
+    if(!state.world) return null;
+    const carBody = new CANNONRef.Body({
+      mass: state.mass,
+      material: state.carMaterial,
+      linearDamping: 0.04,
+      angularDamping: 0.48,
+    });
+    const carHalfX = playerCollision.hx == null ? 0.92 : playerCollision.hx;
+    const carHalfY = playerCollision.hy == null ? 0.42 : playerCollision.hy;
+    const carHalfZ = playerCollision.hz == null ? 1.85 : playerCollision.hz;
+    const carOffsetX = playerCollision.offsetX || 0;
+    const carOffsetY = playerCollision.offsetY == null ? 0.45 : playerCollision.offsetY;
+    const carOffsetZ = playerCollision.offsetZ || 0;
+    const carBodyY = playerCollision.bodyY == null ? 0.55 : playerCollision.bodyY;
+    let shapeQuat = null;
+    if(playerCollision.rotX || playerCollision.rotY || playerCollision.rotZ){
+      shapeQuat = new CANNONRef.Quaternion();
+      shapeQuat.setFromEuler(playerCollision.rotX || 0, playerCollision.rotY || 0, playerCollision.rotZ || 0, 'XYZ');
+    }
+    carBody.addShape(new CANNONRef.Box(cannonVec(carHalfX, carHalfY, carHalfZ)), cannonVec(carOffsetX, carOffsetY, carOffsetZ), shapeQuat);
+    carBody.position.set(player.pos.x, carBodyY, player.pos.z);
+    carBody.quaternion.setFromAxisAngle(cannonVec(0,1,0), player.heading);
+    if(carBody.angularFactor) carBody.angularFactor.set(0, 1, 0);
+    if(carBody.linearFactor) carBody.linearFactor.set(1, 0, 1);
+    carBody.addEventListener('collide', e => {
+      const speed = e.contact && e.contact.getImpactVelocityAlongNormal ? Math.abs(e.contact.getImpactVelocityAlongNormal()) : 0;
+      state.lastImpact = Math.max(state.lastImpact, speed);
+    });
+    state.world.addBody(carBody);
+    state.carBody = carBody;
+    return carBody;
+  }
+
   function init(){
     if(!state.available || state.world) return !!state.world;
     const world = new CANNONRef.World();
@@ -51,26 +86,17 @@ function create(options){
     world.addBody(groundBody);
     state.staticBodies.push(groundBody);
 
-    const carBody = new CANNONRef.Body({
-      mass: state.mass,
-      material: state.carMaterial,
-      linearDamping: 0.04,
-      angularDamping: 0.48,
-    });
-    carBody.addShape(new CANNONRef.Box(cannonVec(0.92, 0.42, 1.85)), cannonVec(0, .45, 0));
-    carBody.position.set(player.pos.x, .55, player.pos.z);
-    carBody.quaternion.setFromAxisAngle(cannonVec(0,1,0), player.heading);
-    if(carBody.angularFactor) carBody.angularFactor.set(0, 1, 0);
-    if(carBody.linearFactor) carBody.linearFactor.set(1, 0, 1);
-    carBody.addEventListener('collide', e => {
-      const speed = e.contact && e.contact.getImpactVelocityAlongNormal ? Math.abs(e.contact.getImpactVelocityAlongNormal()) : 0;
-      state.lastImpact = Math.max(state.lastImpact, speed);
-    });
-    world.addBody(carBody);
-    state.carBody = carBody;
+    addPlayerBody();
     state.active = true;
     rebuildStatics();
     return true;
+  }
+
+  function rebuildPlayer(){
+    if(!state.world) return;
+    if(state.carBody) state.world.removeBody(state.carBody);
+    state.carBody = null;
+    addPlayerBody();
   }
 
   function rebuildStatics(){
@@ -78,22 +104,43 @@ function create(options){
     for(const body of state.staticBodies.slice(1)) state.world.removeBody(body);
     state.staticBodies.length = 1;
 
-    const addStaticBox = (x, z, hx, hz, h) => {
+    const addStaticBox = (x, y, z, hx, hy, hz, rotX, rotY, rotZ) => {
       const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
-      body.addShape(new CANNONRef.Box(cannonVec(hx, h * .5, hz)));
-      body.position.set(x, h * .5, z);
+      body.addShape(new CANNONRef.Box(cannonVec(hx, hy, hz)));
+      body.position.set(x, y, z);
+      if(rotX || rotY || rotZ) body.quaternion.setFromEuler(rotX || 0, rotY || 0, rotZ || 0, 'XYZ');
       state.world.addBody(body);
       state.staticBodies.push(body);
     };
-    const lot = constants.LOT;
-    const wallH = constants.WALL_H;
-    const wallT = 1.2;
-    addStaticBox(0, lot + wallT * .5, lot + wallT, wallT * .5, wallH);
-    addStaticBox(0, -lot - wallT * .5, lot + wallT, wallT * .5, wallH);
-    addStaticBox(lot + wallT * .5, 0, wallT * .5, lot + wallT, wallH);
-    addStaticBox(-lot - wallT * .5, 0, wallT * .5, lot + wallT, wallH);
-    for(const box of colliders.box || []) addStaticBox(box.x, box.z, box.hx, box.hz, 2.2);
+    const isDriveSurfaceCollider = col => {
+      const owner = col && col.owner;
+      const ud = owner && owner.userData;
+      if(!ud) return false;
+      if(ud.driveSurface === true) return true;
+      const e = ud.addedEntry || {};
+      const prim = e.primitive || e.prim;
+      if(prim === 'ramp' || prim === 'plane') return true;
+      const text = String(ud.editorName || ud.assetName || owner.name || '').toLowerCase();
+      return /\b(ramp|curb|sidewalk|pavement|road|floor|ground|surface|asphalt|marciapiede|salita|rampa)\b/.test(text);
+    };
+    const driveSurfaceNormalY = col => {
+      if(!col) return 1;
+      if(window.THREE){
+        const e = new THREE.Euler(col.rotX || 0, col.rotY != null ? col.rotY : (col.rot || 0), col.rotZ || 0, 'XYZ');
+        return new THREE.Vector3(0, 1, 0).applyEuler(e).normalize().y;
+      }
+      const rx = col.rotX || 0;
+      const rz = col.rotZ || 0;
+      return Math.max(0, Math.min(1, Math.cos(rx) * Math.cos(rz)));
+    };
+    const driveSurfaceMinNormalY = Math.cos(Math.PI * 36 / 180);
+    const isDriveableSurfaceCollider = col => isDriveSurfaceCollider(col) && driveSurfaceNormalY(col) >= driveSurfaceMinNormalY;
+    for(const box of colliders.box || []){
+      if(!box || box.enabled === false || box.compoundRoot || box.physics || isDriveableSurfaceCollider(box)) continue;
+      addStaticBox(box.x, box.y != null ? box.y : Math.max(.1, box.hy || 1.1), box.z, box.hx || 1, box.hy || 1.1, box.hz || 1, box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0);
+    }
     for(const circle of colliders.circle || []){
+      if(!circle || circle.enabled === false || circle.physics || isDriveSurfaceCollider(circle)) continue;
       const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
       body.addShape(new CANNONRef.Sphere(circle.r));
       body.position.set(circle.x, circle.r, circle.z);
@@ -105,7 +152,7 @@ function create(options){
 
   function syncPlayer(){
     if(!state.carBody) return;
-    state.carBody.position.set(player.pos.x, .55, player.pos.z);
+    state.carBody.position.set(player.pos.x, playerCollision.bodyY == null ? .55 : playerCollision.bodyY, player.pos.z);
     state.carBody.velocity.set(player.vel.x, 0, player.vel.z);
     state.carBody.angularVelocity.set(0, player.yawRate || 0, 0);
     state.carBody.force.set(0,0,0);
@@ -132,6 +179,7 @@ function create(options){
     init,
     rebuildStatics,
     syncPlayer,
+    rebuildPlayer,
     dispose,
     colliderSignature,
     cannonVec,

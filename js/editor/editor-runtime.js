@@ -19,10 +19,65 @@ function create(deps){
   const grid = deps.grid;
   const axes = deps.axes;
   const gizmoProxy = deps.gizmoProxy;
+  const colliderProxy = deps.colliderProxy;
   const camProxy = deps.camProxy;
   const camRigLine = deps.camRigLine;
   const $ = deps.$;
   const overlay = document.getElementById('overlay');
+  const levelSelect = document.getElementById('levelSelect');
+  let previewWarmupTimer = 0;
+  let previewWarmupSeq = 0;
+
+  function requestWarmup(label, opts){
+    opts = opts || {};
+    const seq = ++previewWarmupSeq;
+    let box = root.querySelector('.lk-preview-warmup');
+    if(!box){
+      box = document.createElement('div');
+      box.className = 'lk-preview-warmup';
+      root.appendChild(box);
+    }
+    box.textContent = label || 'Warm-up...';
+    box.classList.add('on');
+    const started = performance.now();
+    const minMs = opts.minMs == null ? 420 : opts.minMs;
+    const maxMs = opts.maxMs == null ? 1400 : opts.maxMs;
+    const finish = () => {
+      const left = Math.max(0, minMs - (performance.now() - started));
+      clearTimeout(previewWarmupTimer);
+      previewWarmupTimer = setTimeout(() => {
+        if(seq === previewWarmupSeq) box.classList.remove('on');
+      }, left);
+    };
+    clearTimeout(previewWarmupTimer);
+    previewWarmupTimer = setTimeout(() => {
+      if(seq === previewWarmupSeq) box.classList.remove('on');
+    }, maxMs);
+    if(renderer && renderer.compileAsync && scene && gameCam){
+      Promise.resolve(renderer.compileAsync(scene, gameCam)).then(finish, finish);
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    }
+  }
+
+  function showPreviewWarmup(){
+    requestWarmup('Warm-up...', {minMs:900, maxMs:1600});
+  }
+
+  function setEditorLightHandlesVisible(visible){
+    if(!GAME.world || !GAME.world.registry) return;
+    GAME.world.registry.forEach(o => {
+      if(!o || !(o.userData && o.userData.light) || !o.traverse) return;
+      o.traverse(n => {
+        if(!(n.userData && n.userData.editorLightHandle)) return;
+        n.visible = true;
+        if(n.material){
+          n.material.opacity = visible ? .42 : 0;
+          n.material.needsUpdate = true;
+        }
+      });
+    });
+  }
 
   function enterEditor(){
     if(ED.active) return;
@@ -30,12 +85,15 @@ function create(deps){
     deps.ensureControls();
     ED.active = true;
     GAME.state.editorActive = true;
+    setEditorLightHandlesVisible(true);
     GAME.hooks.frameOverride = editorFrame;
     root.classList.add('active');
     if(overlay){
       overlay.classList.remove('menu-preloading');
+      overlay.classList.remove('choosing-level');
       overlay.classList.add('hidden');
     }
+    if(levelSelect) levelSelect.setAttribute('aria-hidden', 'true');
     document.getElementById('hud').style.display = 'none';
 
     const car = GAME.player.car;
@@ -50,7 +108,7 @@ function create(deps){
     }
 
     scene.add(helperGroup);
-    helperGroup.add(grid, axes, gizmoProxy);
+    helperGroup.add(grid, axes, gizmoProxy, colliderProxy);
     const rigHelper = deps.ensureCameraRigHelper();
     let camHelper = deps.getCamHelper();
     if(!camHelper){
@@ -99,15 +157,20 @@ function create(deps){
 
   function startPlayPreview(){
     if(!deps.saveScene()) return;
-    if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview();
-    setPlayPreview(true);
     deps.closeMenu();
-    deps.status('Play preview running — Esc to stop');
+    showPreviewWarmup();
+    deps.status('Warm-up preview...');
+    requestAnimationFrame(() => {
+      if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview();
+      setPlayPreview(true);
+      deps.status('Play preview running — Esc to stop');
+    });
   }
 
   function stopPlayPreview(){
     if(GAME.actions.stopEditorPreview) GAME.actions.stopEditorPreview();
     setPlayPreview(false);
+    if(deps.restorePreviewTransforms) deps.restorePreviewTransforms();
     const orbit = deps.getOrbit();
     if(orbit){
       orbit.enabled = true;
@@ -127,6 +190,7 @@ function create(deps){
     }
     ED.active = false;
     GAME.state.editorActive = false;
+    setEditorLightHandlesVisible(false);
     GAME.hooks.frameOverride = null;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
     if(GAME.player.updateLights) GAME.player.updateLights();
@@ -145,7 +209,7 @@ function create(deps){
       gizmo.detach();
     }
     scene.remove(gizmo);
-    helperGroup.remove(grid, axes, gizmoProxy);
+    helperGroup.remove(grid, axes, gizmoProxy, colliderProxy);
     const camHelper = deps.getCamHelper();
     if(camHelper) helperGroup.remove(camHelper);
     const rigHelper = deps.getCameraRigHelper();
@@ -324,6 +388,7 @@ function create(deps){
     exitEditor,
     editorFrame,
     syncGamePreviewCamera,
+    requestWarmup,
   });
 }
 

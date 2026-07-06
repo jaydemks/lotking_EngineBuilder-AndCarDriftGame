@@ -24,6 +24,13 @@ function create(deps){
   const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return Promise.resolve(asset && asset.src); };
   const upsertImportedAsset = deps.upsertImportedAsset || function(){ return null; };
   const createGlbEntryFromAsset = deps.createGlbEntryFromAsset || function(){ return {}; };
+  function entityPhysicsMass(target){
+    const stored = target && target.userData ? Number(target.userData.physicsMass) : NaN;
+    if(Number.isFinite(stored) && stored > 0) return stored;
+    const colliderMass = target && target.userData && target.userData.collider && target.userData.collider.ref && target.userData.collider.ref.mass;
+    const coll = Number(colliderMass);
+    return Number.isFinite(coll) && coll > 0 ? coll : null;
+  }
 
   function readFileAsDataURL(f){
     return new Promise((res, rej) => {
@@ -70,6 +77,16 @@ function create(deps){
         status('Asset removed from library');
       }
     });
+  }
+  function markImportedAssetRigged(asset){
+    if(!asset || !asset.id) return;
+    const list = assetLibraryLoad();
+    const found = list.find(a => a.id === asset.id || a.key === asset.key);
+    if(!found) return;
+    found.rigged = true;
+    found.usedAsPlayerModel = true;
+    found.playerModelAt = new Date().toISOString();
+    assetLibrarySave(list);
   }
   function importAssetFiles(files, opts){
     const list = supportedAssetFiles(files);
@@ -129,8 +146,12 @@ function create(deps){
   }
   function replaceSelectedWithAsset(asset, targetOverride){
     const target = targetOverride || deps.selected && deps.selected();
-    if(!asset || !target || target.userData.editorType === 'player'){
+    if(!asset || !target){
       status('Select a scene object to replace');
+      return;
+    }
+    if(target.userData.editorType === 'player'){
+      replacePlayerModelWithAsset(asset);
       return;
     }
     setAssetLoading(true, asset.name, 20, 'Loading replacement');
@@ -142,6 +163,8 @@ function create(deps){
       const entry = createGlbEntryFromAsset(asset, at);
       entry.t = STORE.tOf(obj);
       entry.collide = !!target.userData.collider;
+      entry.physics = !!(target.userData.physicsEnabled || (target.userData.collider && target.userData.collider.ref && target.userData.collider.ref.physics));
+      entry.physicsMass = entityPhysicsMass(target);
       performDeleteEntity(target);
       STORE.registerAdded(GAME, obj, entry);
       finishAdd(obj);
@@ -154,6 +177,10 @@ function create(deps){
   }
   function replaceObjectWithFile(target, file){
     if(!target || !file) return;
+    if(target.userData && target.userData.editorType === 'player'){
+      replacePlayerModelWithFile(file);
+      return;
+    }
     setAssetLoading(true, file.name, 12, 'Importing replacement');
     readFileAsDataURL(file).then(src => STORE.loadGlb(src, 5).then(obj => {
       const asset = upsertImportedAsset(file, {src});
@@ -162,6 +189,8 @@ function create(deps){
         id, kind:'glb', src, fit:5,
         name:file.name.replace(/\.(glb|gltf)$/i,''),
         collide:!!target.userData.collider,
+        physics: !!(target.userData.physicsEnabled || (target.userData.collider && target.userData.collider.ref && target.userData.collider.ref.physics)),
+        physicsMass: entityPhysicsMass(target),
         asset: asset ? {key:asset.key, name:asset.name, source:asset.source} : undefined,
       };
       obj.position.copy(target.position);
@@ -181,6 +210,69 @@ function create(deps){
     });
   }
 
+  function applyPlayerModelSource(src, label, meta){
+    const info = meta || {};
+    return STORE.loadGlbRaw(src).then(sceneRoot => {
+      GAME.player.setModel(sceneRoot);
+      GAME.player.car.userData.modelSrc = info.modelSrc || src;
+      GAME.player.car.userData.modelDbKey = info.modelDbKey || null;
+      GAME.player.car.userData.modelName = label || null;
+      GAME.player.car.userData.assetName = label || GAME.player.car.userData.assetName;
+      GAME.player.car.userData.assetSource = label || GAME.player.car.userData.assetSource;
+      refreshAssetsPanel();
+      status('Modello player sostituito' + (label ? ': ' + label : ''));
+      return sceneRoot;
+    });
+  }
+
+  function replacePlayerModelWithAsset(asset){
+    if(!asset){ status('Asset player non valido'); return; }
+    setAssetLoading(true, asset.name || 'Player model', 20, 'Loading player model');
+    resolveImportedAssetUrl(asset).then(src => {
+      setAssetLoading(true, asset.name || 'Player model', 72, 'Applying player model');
+      markImportedAssetRigged(asset);
+      return applyPlayerModelSource(src, asset.name || asset.source || 'imported player model', {
+        modelSrc: asset.src || null,
+        modelDbKey: asset.dbKey || null,
+      });
+    }).then(() => {
+      setAssetLoading(true, asset.name || 'Player model', 100, 'Player model replaced');
+      setTimeout(() => setAssetLoading(false), 300);
+    }).catch(err => {
+      setAssetLoading(false);
+      status('Player model replace failed: ' + err.message);
+    });
+  }
+
+  function replacePlayerModelWithFile(file){
+    if(!file){ status('File player non valido'); return; }
+    setAssetLoading(true, file.name, 12, 'Importing player model');
+    const key = assetKeyFromFile(file);
+    const dbKey = assetDbKeyFromFile(file, key);
+    const put = window.LK_ASSET_BLOBS
+      ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
+      : readFileAsDataURL(file).then(src => ({src}));
+    put.then(sourceInfo => {
+      const asset = upsertImportedAsset(file, sourceInfo);
+      if(asset) markImportedAssetRigged(asset);
+      const srcPromise = sourceInfo.dbKey && window.LK_ASSET_BLOBS
+        ? window.LK_ASSET_BLOBS.getUrl(sourceInfo.dbKey)
+        : Promise.resolve(sourceInfo.src);
+      setAssetLoading(true, file.name, 72, 'Applying player model');
+      return srcPromise.then(src => applyPlayerModelSource(src, file.name, {
+        modelSrc: sourceInfo.src || null,
+        modelDbKey: sourceInfo.dbKey || null,
+      })).then(() => asset);
+    }).then(asset => {
+      if(asset) refreshAssetsPanel();
+      setAssetLoading(true, file.name, 100, 'Player model replaced');
+      setTimeout(() => setAssetLoading(false), 300);
+    }).catch(err => {
+      setAssetLoading(false);
+      status('Player model replace failed: ' + err.message);
+    });
+  }
+
   return Object.freeze({
     readFileAsDataURL,
     hasExternalFileDrag,
@@ -190,6 +282,8 @@ function create(deps){
     importAssetFiles,
     replaceSelectedWithAsset,
     replaceObjectWithFile,
+    replacePlayerModelWithAsset,
+    replacePlayerModelWithFile,
   });
 }
 

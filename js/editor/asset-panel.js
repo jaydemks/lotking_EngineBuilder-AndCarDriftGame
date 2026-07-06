@@ -28,6 +28,12 @@ function create(deps){
     thumb.className = 'lk-asset-thumb';
     if(item.thumbUrl) thumb.style.backgroundImage = 'url(' + item.thumbUrl + ')';
     else thumb.textContent = item.icon || '▣';
+    (item.badges || []).forEach(badge => {
+      const tag = documentRef.createElement('span');
+      tag.className = 'lk-asset-badge lk-asset-badge-' + String(badge.type || 'info');
+      tag.textContent = badge.label || badge;
+      thumb.appendChild(tag);
+    });
 
     if(item.thumbObject){
       const sid = item.thumbObject.userData.editorId;
@@ -125,7 +131,7 @@ function create(deps){
       box.appendChild(deps.el('<div class="lk-empty">No assets visible.<br>Change filters or import GLB/GLTF files.</div>'));
     }
     deps.setStatusRight(
-      (counts.blueprints ? counts.blueprints + ' blueprints · ' : '') +
+      (counts.blueprints ? counts.blueprints + ' car logic · ' : '') +
       (counts.levels ? counts.levels + ' levels · ' : '') +
       (counts.imported ? counts.imported + ' imported · ' : '') +
       (counts.projectAssets ? counts.projectAssets + ' project assets · ' : '') +
@@ -137,9 +143,10 @@ function create(deps){
     return deps.assetLibraryLoad().map(asset => {
       const mb = asset.size ? ' · ' + (asset.size / 1e6).toFixed(1) + ' MB' : '';
       const item = {
-        kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.name || 'Imported Asset',
+        kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.source || asset.name || 'Imported Asset',
         sub:'imported glb · ' + (asset.source || asset.key) + mb,
         source:asset.source || asset.key, icon:'📦', draggable:true,
+        badges: asset.rigged ? [{label:'Rigged', type:'rigged'}] : [],
       };
       const refItem = () => ({kind:'imported-glb', ref:item.ref, id:asset.id, name:asset.name, raw:asset});
       item.defaultAction = () => deps.placeAssetRef(refItem(), deps.spawnPointAhead());
@@ -203,26 +210,30 @@ function create(deps){
       const basePlayer = STORE.playerBlueprints.default() || deps.currentPlayerBlueprint();
       items.push({
         kind:'player-blueprint', ref:'blueprint:base', id:'base',
-        name:'Player Blueprint Base',
+        name:'player_car Logic Base',
         sub:'special · required · used by new levels · controller index 0',
         source:'Project default', icon:'🚗', filterType:'blueprint', active:true, draggable:false,
+        raw:{id:'base', name:'player_car Logic Base', player:basePlayer, base:true},
+        base:true,
+        badges: basePlayer && (basePlayer.modelDbKey || basePlayer.modelSrc) ? [{label:'Rigged', type:'rigged'}] : [{label:'Base', type:'base'}],
         defaultAction:() => deps.applyPlayerBlueprintAsset(basePlayer, {applySpawn:false}),
         actions:[
           {label:'Apply', title:'Apply to scene player', fn:() => deps.applyPlayerBlueprintAsset(basePlayer, {applySpawn:false})},
-          {label:'Copy', title:'Copy current scene player as a new blueprint asset', fn:deps.copyPlayerBlueprintAsset},
+          {label:'Copy', title:'Copy current scene player_car logic as a reusable asset', fn:deps.copyPlayerBlueprintAsset},
         ],
       });
       STORE.playerBlueprints.list().forEach(asset => items.push({
         kind:'player-blueprint', ref:'blueprint:' + asset.id, id:asset.id,
-        name:asset.name || 'Player Blueprint Copy',
-        sub:'copied blueprint · controller index ' + (asset.controllerIndex == null ? 0 : asset.controllerIndex),
-        source:asset.source && asset.source.levelName || 'Copied blueprint',
+        name:asset.name || 'player_car Logic Copy',
+        sub:'copied car logic · controller index ' + (asset.controllerIndex == null ? 0 : asset.controllerIndex),
+        source:asset.source && asset.source.levelName || 'Copied car logic',
         icon:'🚙', filterType:'blueprint', draggable:false,
+        badges: asset.player && (asset.player.modelDbKey || asset.player.modelSrc) ? [{label:'Rigged', type:'rigged'}] : [],
         defaultAction:() => deps.applyPlayerBlueprintAsset(asset.player, {applySpawn:false}),
         actions:[
           {label:'Apply', title:'Apply to scene player', fn:() => deps.applyPlayerBlueprintAsset(asset.player, {applySpawn:false})},
-          {label:'★', title:'Promote to Base blueprint', fn:() => deps.setDefaultPlayerBlueprintAsset(asset)},
-          {label:'×', title:'Delete copied blueprint', fn:() => deps.deletePlayerBlueprintAsset(asset)},
+          {label:'★', title:'Promote to Base car logic', fn:() => deps.setDefaultPlayerBlueprintAsset(asset)},
+          {label:'×', title:'Delete copied car logic', fn:() => deps.deletePlayerBlueprintAsset(asset)},
         ],
       }));
     }
@@ -271,7 +282,7 @@ function create(deps){
     const allFolderedItems = [];
 
     const blueprints = blueprintItems(q);
-    addGroup(box, 'PLAYER BLUEPRINTS', blueprints);
+    addGroup(box, 'PLAYER CAR LOGIC', blueprints);
     allFolderedItems.push(...blueprints);
 
     const sounds = soundSetItems(q);

@@ -23,18 +23,46 @@ function create(deps){
   const spawnPointAhead = deps.spawnPointAhead;
   const importAssetFiles = deps.importAssetFiles;
   const replaceObjectWithFile = deps.replaceObjectWithFile;
+  const replacePlayerModelWithFile = deps.replacePlayerModelWithFile || function(){};
   const readFileAsDataURL = deps.readFileAsDataURL;
   const buildInspector = deps.buildInspector;
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
+  const requestWarmup = label => {
+    if(GAME && GAME.editor && GAME.editor.requestWarmup) GAME.editor.requestWarmup(label || 'Warm-up lights...');
+  };
+  const revealLightHandle = obj => {
+    if(!obj || !obj.traverse) return;
+    obj.traverse(n => {
+      if(!(n.userData && n.userData.editorLightHandle) || !n.material) return;
+      n.visible = true;
+      n.material.opacity = .42;
+      n.material.needsUpdate = true;
+    });
+  };
 
   let pendingGlbPoint = null;
   let replaceTarget = null;
 
   function addPrimitive(prim, at){
     const id = STORE.nextId();
-    const obj = STORE.createPrimitive(prim);
-    const entry = {id, kind:'primitive', prim, name: prim[0].toUpperCase()+prim.slice(1), collide: prim !== 'plane',
-      asset:{key:'primitive:' + prim, name:'Primitive ' + prim[0].toUpperCase() + prim.slice(1), source:'Editor primitive'},
+    const colliderOnly = prim === 'collisionBox';
+    const realPrim = colliderOnly ? 'box' : prim;
+    const obj = STORE.createPrimitive(realPrim);
+    if(colliderOnly){
+      obj.traverse(n => {
+        if(!n.isMesh || !n.material) return;
+        n.material = new THREE.MeshBasicMaterial({color:0x4be3a0, wireframe:true, transparent:true, opacity:.28, depthTest:false});
+        n.renderOrder = 997;
+      });
+      obj.userData.colliderOnly = true;
+    }
+    const entry = {id, kind:'primitive', prim: realPrim, name: colliderOnly ? 'Collision Box' : prim[0].toUpperCase()+prim.slice(1), collide: colliderOnly || prim !== 'plane',
+      colliderOnly,
+      physics: prim === 'cone',
+      physicsMass: prim === 'cone' ? .005 : undefined,
+      physicsImpact: prim === 'cone' ? .18 : undefined,
+      driveSurface: prim === 'ramp' || prim === 'plane',
+      asset:{key: colliderOnly ? 'collision:box' : 'primitive:' + prim, name: colliderOnly ? 'Collision Box' : 'Primitive ' + prim[0].toUpperCase() + prim.slice(1), source: colliderOnly ? 'Editor collision' : 'Editor primitive'},
       t:{p:[at.x, 0, at.z], r:[0,0,0], s:[1,1,1], v:true}};
     STORE.registerAdded(GAME, obj, entry);
     obj.userData.assetKey = 'primitive:' + prim;
@@ -55,6 +83,8 @@ function create(deps){
     obj.userData.assetName = kind[0].toUpperCase() + kind.slice(1) + ' Light';
     obj.userData.assetSource = 'Editor light';
     finishAdd(obj);
+    revealLightHandle(obj);
+    requestWarmup('Warm-up light...');
   }
 
   function addEffect(kind, at){
@@ -123,14 +153,9 @@ function create(deps){
         const f = e.target.files && e.target.files[0];
         e.target.value = '';
         if(!f) return;
-        readFileAsDataURL(f).then(src => {
-          new THREE.GLTFLoader().load(src, g => {
-            GAME.player.setModel(g.scene);
-            GAME.player.car.userData.modelSrc = src;
-            markDirty(); buildInspector();
-            status(f.size > 4.5e6 ? '⚠ Modello grande: il salvataggio permanente può fallire' : 'Modello player sostituito');
-          }, undefined, () => status('Model loading failed'));
-        });
+        replacePlayerModelWithFile(f);
+        markDirty();
+        buildInspector();
       });
     }
   }

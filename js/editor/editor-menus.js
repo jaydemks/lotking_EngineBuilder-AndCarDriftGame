@@ -52,6 +52,7 @@ function create(deps){
       return [
         {label:'Add to level', icon:'＋', action:() => deps.placeAssetRef(item, deps.spawnPointAhead())},
         {label:'Replace selected scene object', icon:'📦', disabled:!ED.selected || ED.selected.userData.editorType === 'player', action:() => deps.replaceSelectedWithAsset(asset)},
+        {label:'Properties', icon:'ⓘ', action:() => deps.openAssetProperties(item)},
         {sep:true},
         {label:'Delete imported asset', icon:'🗑', action:() => deps.deleteImportedAsset(asset)},
       ];
@@ -77,10 +78,11 @@ function create(deps){
     if(item.kind === 'player-blueprint'){
       const asset = item.raw;
       return [
-        {label:'Apply to scene player', icon:'🚗', action:() => deps.applyPlayerBlueprintAsset(asset.player, {applySpawn:false})},
-        {label:'Promote to Base blueprint', icon:'★', action:() => deps.setDefaultPlayerBlueprintAsset(asset)},
+        {label:'Apply to scene player', icon:'🚗', action:() => deps.applyPlayerBlueprintAsset(asset.player || asset, {applySpawn:false})},
+        {label:'Properties', icon:'ⓘ', action:() => deps.openAssetProperties(item)},
+        {label:'Promote to Base car logic', icon:'★', disabled:!!item.base, action:() => deps.setDefaultPlayerBlueprintAsset(asset)},
         {sep:true},
-        {label:'Delete copied blueprint', icon:'🗑', disabled:!!item.base, action:() => deps.deletePlayerBlueprintAsset(asset)},
+        {label:'Delete copied car logic', icon:'🗑', disabled:!!item.base, action:() => deps.deletePlayerBlueprintAsset(asset)},
       ];
     }
     return [];

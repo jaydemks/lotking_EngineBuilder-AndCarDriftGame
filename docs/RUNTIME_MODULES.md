@@ -65,6 +65,9 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 - `js/runtime/player-model.js`
   Player GLB assignment, current model access, model flip support, drag/drop replacement support, and runtime model state.
 
+- `js/runtime/player-light-rig.js`
+  Vehicle-mounted lighting only: front headlights, rear/brake/reverse lights, auxiliary vehicle lights, neon, high beams, warm light slots, and the player-light bridge used by the editor inspector.
+
 - `js/runtime/player-camera.js`
   Player camera defaults, cinematic aspect-ratio math, scoped viewport rendering, player-camera frame rects, letterbox/crop handling, and HUD frame coordination.
 
@@ -196,7 +199,7 @@ The long-term direction is still gradual extraction. Current responsibilities th
 - main loop coordination;
 - runtime module creation order;
 - player driving step and legacy keyboard fallback;
-- player lights/exhaust glue;
+- player exhaust glue;
 - editor/game bridge wiring;
 - applying project input config before play;
 - high-level level launch and preview glue where multiple systems meet.

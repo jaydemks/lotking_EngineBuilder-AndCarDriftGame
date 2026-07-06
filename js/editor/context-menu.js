@@ -33,6 +33,7 @@ function create(deps){
   function open(items, x, y){
     if(!ctxEl) return;
     close();
+    if(!Array.isArray(items) || !items.some(it => it && !it.sep)) return;
     const m = document.createElement('div');
     m.className = 'lk-menu';
     buildMenuItems(m, items);

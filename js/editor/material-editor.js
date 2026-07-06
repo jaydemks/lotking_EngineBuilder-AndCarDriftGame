@@ -20,6 +20,7 @@ function create(deps){
   const textureDrop = deps.textureDrop;
   const btnRow = deps.btnRow;
   const el = deps.el;
+  const requestWarmup = deps.requestWarmup || function(){};
 
   function getFirstMaterial(o){
     let mat = null;
@@ -34,6 +35,7 @@ function create(deps){
   function applyMaterialPatch(o, patch){
     STORE.applyMatProps(o, patch);
     thumbCache.delete(o.userData.editorId);
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'castShadow')) requestWarmup(patch.castShadow ? 'Warm-up shadows...' : 'Warm-up render...');
     markDirty();
     refreshOutliner();
   }

@@ -13,6 +13,8 @@ function createState(){
     snap: false,
     snapMove: 1, snapRot: 15, snapScale: .1,
     gridOn: true,
+    gridSize: 240,
+    gridInfinite: false,
     camHelperOn: true,
     pipOn: true,
     pipW: 840,
@@ -21,6 +23,8 @@ function createState(){
     quickAudioPos: null,
     quickMusicIndex: -1,
     selected: null,
+    colliderEdit: false,
+    playerColliderEdit: false,
     special: null,
     dirty: false,
     viewMode: 'grid',
@@ -57,6 +61,8 @@ function createChrome(deps){
   grid.material.opacity = .48;
   const axes = new THREE.AxesHelper(8);
   const gizmoProxy = new THREE.Group();
+  const colliderProxy = new THREE.Group();
+  colliderProxy.name = 'LK Collider Transform Proxy';
   const zUpGizmoQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
   const camProxy = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, .1, 1000);
   const camRigLine = new THREE.Line(
@@ -72,6 +78,7 @@ function createChrome(deps){
     grid,
     axes,
     gizmoProxy,
+    colliderProxy,
     zUpGizmoQuat,
     camProxy,
     camRigLine,
@@ -80,6 +87,7 @@ function createChrome(deps){
 }
 
 function installCanvasViewportRectOverride(canvas, ED, getViewportRect){
+  if(!canvas || !canvas.getBoundingClientRect) return;
   const originalCanvasRect = canvas.getBoundingClientRect.bind(canvas);
   canvas.getBoundingClientRect = function(){
     if(ED && ED.active && !ED.playPreview){

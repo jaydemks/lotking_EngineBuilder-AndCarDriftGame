@@ -33,7 +33,6 @@ function create(deps){
   let enabled = true;
   let touchOn = false;                    // is the on-screen touch UI currently shown
   let portrait = false;                   // is the rendered game frame portrait
-  const PHONE = detectPhone();
   let assignments = [];                  // player index -> device instance id
   const manualAssign = {};               // player index -> forced instance id
   let activeDeviceId = null;             // last device Player 1 actually used (auto-assign)
@@ -66,16 +65,19 @@ function create(deps){
   // ------------------------------------------------ touch visibility
   function detectPhone(){
     const ua = (navigator.userAgent || '');
-    if(/Mobi|Android|iPhone|iPod|Windows Phone|IEMobile/i.test(ua)) return true;
+    if(/Mobi|Android|iPhone|iPod|iPad|Windows Phone|IEMobile/i.test(ua)) return true;
     const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-    return !!(coarse && (navigator.maxTouchPoints || 0) > 0 && Math.min(window.innerWidth, window.innerHeight) < 820);
+    const noHover = window.matchMedia && window.matchMedia('(hover: none)').matches;
+    const touchPoints = navigator.maxTouchPoints || navigator.msMaxTouchPoints || 0;
+    const compactScreen = Math.min(window.innerWidth, window.innerHeight) < 920;
+    return !!(touchPoints > 0 && (coarse || noHover || compactScreen));
   }
   function computeTouchOn(){
     if(!allowed('touch')) return false;
     const mode = config.touchMode || 'auto';
     if(mode === 'on') return true;
     if(mode === 'off') return false;
-    return PHONE || portrait;          // auto: phones always, others when portrait
+    return detectPhone() || portrait;          // auto: phones always, others when portrait
   }
   function recomputeTouch(){
     const next = computeTouchOn();
@@ -322,7 +324,7 @@ function create(deps){
       autoAssign: config.autoAssign,
       touchEnabled: touchOn,
       touchMode: config.touchMode,
-      isPhone: PHONE,
+      isPhone: detectPhone(),
       portrait,
       players: assignments.map((id, i) => ({
         index: i,

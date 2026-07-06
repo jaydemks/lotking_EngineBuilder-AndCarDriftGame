@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-const DEFAULT_WEIGHTS = {models:.62, project:.16, warmup:.16, editor:.06};
+const DEFAULT_WEIGHTS = {models:.54, project:.16, warmup:.24, editor:.06};
 
 function create(options){
   const opts = options || {};

@@ -8,7 +8,8 @@
 function create(deps){
   deps = deps || {};
   const ED = deps.ED;
-  const canvas = deps.canvas;
+  const GAME = deps.GAME || window.LOT_KING || {};
+  const canvas = deps.canvas || (GAME.core && GAME.core.canvas) || (GAME.core && GAME.core.renderer && GAME.core.renderer.domElement) || null;
   let downX = 0;
   let downY = 0;
   let downBtn = -1;
@@ -20,6 +21,8 @@ function create(deps){
     }
     deps.updateHover(e);
   }
+
+  if(!canvas || !canvas.addEventListener) return Object.freeze({});
 
   canvas.addEventListener('pointerdown', e => {
     if(!ED.active || ED.playPreview || ED.levelsOpen) return;

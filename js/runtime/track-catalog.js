@@ -62,6 +62,7 @@ function create(options){
   }
 
   function show(){
+    if(document.body && document.body.classList && document.getElementById('lkEditor') && document.getElementById('lkEditor').classList.contains('active')) return;
     render();
     if(levelSelect) levelSelect.setAttribute('aria-hidden', 'false');
     if(loadText) loadText.textContent = tracks.length ? 'select track' : 'no tracks available';

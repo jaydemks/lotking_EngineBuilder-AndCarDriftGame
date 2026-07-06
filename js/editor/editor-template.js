@@ -29,6 +29,10 @@ function create(){
       </span>
     </div>
     <button id="lkGrid" class="on" type="button" title="Toggle grid">▦ Grid</button>
+    <span class="lk-gridbox">
+      <input id="lkGridSize" type="number" min="20" step="20" value="240" title="Grid size">
+      <button id="lkGridInfinite" type="button" title="Huge/infinite-feel grid">∞</button>
+    </span>
     <button id="lkCamHelper" class="on" type="button" title="Toggle camera helpers">🎥 Cam</button>
     <button id="lkPipToggle" class="on" type="button" title="Toggle player camera preview">❐ Preview</button>
     <button id="lkAddMenu" type="button" title="Add object">+ Add ▾</button>
@@ -63,7 +67,7 @@ function create(){
     </div>
     <div id="lkPinned">
       <div class="lk-pin" data-special="env"><span class="lk-pin-ic">🌍</span><span class="lk-pin-label">Environment</span></div>
-      <div class="lk-pin" data-special="player"><span class="lk-pin-ic">🚗</span><span class="lk-pin-label">Player (Blueprint)</span></div>
+      <div class="lk-pin" data-special="player"><span class="lk-pin-ic">🚗</span><span class="lk-pin-label">player_car (Logic)</span></div>
       <div class="lk-pin" data-special="hud"><span class="lk-pin-ic">▣</span><span class="lk-pin-label">HUD / Radio TAB</span></div>
     </div>
     <div id="lkOutliner" class="grid"></div>
@@ -82,7 +86,7 @@ function create(){
       <button id="lkAssetFolder" type="button">Folder</button>
       <button id="lkAssetRefresh" type="button">Refresh</button>
       <span id="lkAssetsFilters">
-        <label><input data-asset-filter="blueprint" type="checkbox" checked> blueprint</label>
+        <label><input data-asset-filter="blueprint" type="checkbox" checked> player car logic</label>
         <label><input data-asset-filter="sound" type="checkbox" checked> sound</label>
         <label><input data-asset-filter="levels" type="checkbox" checked> levels</label>
         <label><input data-asset-filter="glb" type="checkbox" checked> glb</label>

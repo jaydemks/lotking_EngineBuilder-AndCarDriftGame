@@ -13,6 +13,7 @@ function create(deps){
   const ED = deps.ED;
   const camE = deps.camE;
   const thumbCache = deps.thumbCache;
+  const colliderProxy = deps.colliderProxy;
 
   function isBlueprintPart(o){
     return !o || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
@@ -32,9 +33,12 @@ function create(deps){
   }
 
   function selectObject(o){
-    if(ED.selected === o && ED.special === null) return;
+    if(ED.selected === o && ED.special === null && !(ED.multiSelected && ED.multiSelected.length)) return;
     deps.clearHoverPickHelper();
+    ED.multiSelected = null;
     ED.special = null;
+    ED.colliderEdit = false;
+    ED.playerColliderEdit = false;
     ED.selected = o;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
     syncSelectedGizmo(o);
@@ -45,6 +49,9 @@ function create(deps){
 
   function selectSpecial(kind){
     deps.clearHoverPickHelper();
+    ED.multiSelected = null;
+    ED.colliderEdit = false;
+    ED.playerColliderEdit = false;
     ED.selected = null;
     ED.special = kind;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(kind === 'hud');
@@ -59,7 +66,78 @@ function create(deps){
   }
 
   function deselect(){
+    ED.multiSelected = null;
+    ED.colliderEdit = false;
+    ED.playerColliderEdit = false;
     selectObject(null);
+  }
+
+  function selectCollider(o){
+    if(!o || !(o.userData && o.userData.collider && o.userData.collider.ref)) return selectObject(o);
+    deps.clearHoverPickHelper();
+    ED.multiSelected = null;
+    ED.special = null;
+    ED.playerColliderEdit = false;
+    ED.selected = o;
+    ED.colliderEdit = true;
+    if(ED.tool === 'select') ED.tool = 'translate';
+    if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
+    syncSelectedGizmo(o);
+    deps.refreshSelectionHelpers();
+    deps.buildInspector();
+    deps.refreshOutliner();
+    deps.status('Collider edit: ' + (o.userData.editorName || 'object'));
+  }
+
+  function similarityKey(o){
+    if(!o || !o.userData) return '';
+    const ud = o.userData;
+    if(ud.assetKey) return 'asset:' + ud.assetKey;
+    if(ud.addedEntry && ud.addedEntry.asset && ud.addedEntry.asset.key) return 'asset:' + ud.addedEntry.asset.key;
+    if(ud.assetSource) return 'asset-src:' + ud.assetSource;
+    if(ud.addedEntry && ud.addedEntry.asset && ud.addedEntry.asset.source) return 'asset-src:' + ud.addedEntry.asset.source;
+    if(ud.assetName) return 'asset-name:' + String(ud.assetName).toLowerCase();
+    if(ud.addedEntry && ud.addedEntry.asset && ud.addedEntry.asset.name) return 'asset-name:' + String(ud.addedEntry.asset.name).toLowerCase();
+    if(ud.addedEntry && ud.addedEntry.primitive) return 'prim:' + ud.addedEntry.primitive;
+    if(ud.isCone || String(ud.editorName || o.name || '').toLowerCase().includes('cone')) return 'kind:cone';
+    if(ud.addedEntry && ud.addedEntry.kind) return 'kind:' + ud.addedEntry.kind;
+    let geometryType = '';
+    if(o.traverse){
+      o.traverse(n => {
+        if(!geometryType && n && n.isMesh && n.geometry && n.geometry.type) geometryType = n.geometry.type;
+      });
+    }
+    if(geometryType) return 'geo:' + geometryType;
+    const rawName = String(ud.editorName || o.name || '').toLowerCase()
+      .replace(/\s+copy\b/g, '')
+      .replace(/[\s._-]*\d+$/g, '')
+      .trim();
+    return (ud.editorType || 'object') + ':' + rawName;
+  }
+
+  function selectMultiObjects(objects){
+    const list = (objects || []).filter(o => o && !isBlueprintPart(o));
+    const unique = [];
+    list.forEach(o => { if(!unique.includes(o)) unique.push(o); });
+    if(!unique.length) return;
+    deps.clearHoverPickHelper();
+    ED.special = null;
+    ED.selected = unique[0];
+    ED.multiSelected = unique.length > 1 ? unique : null;
+    if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
+    syncSelectedGizmo(ED.selected);
+    deps.refreshSelectionHelpers();
+    deps.buildInspector();
+    deps.refreshOutliner();
+    deps.status(unique.length > 1 ? ('Selected ' + unique.length + ' similar objects') : 'Selected object');
+  }
+
+  function selectSimilarObjects(o){
+    const key = similarityKey(o);
+    if(!key) return selectObject(o);
+    const matches = GAME.world.registry.filter(item => item && item.userData && similarityKey(item) === key && !isBlueprintPart(item));
+    const list = [o].concat(matches.filter(item => item !== o));
+    selectMultiObjects(list.length ? list : [o]);
   }
 
   function isPlayerCameraSelection(){
@@ -81,24 +159,196 @@ function create(deps){
   function setColliderEnabled(o, enabled){
     if(!o || o.userData.editorType !== 'mesh') return;
     const old = o.userData.collider || null;
-    if(enabled && !old){
-      const col = {x:0, z:0, hx:1, hz:1};
-      GAME.world.colliders.box.push(col);
-      o.userData.collider = {kind:'box', ref:col};
+    const storedMass = Number(o.userData.physicsMass);
+    const storedImpact = Number(o.userData.physicsImpact);
+    const oldRefMass = old && old.ref && old.ref.mass;
+    const oldRefImpact = old && old.ref && old.ref.impact;
+    const defaultMass = Number.isFinite(storedMass) && storedMass > 0 ? storedMass
+      : Number.isFinite(Number(oldRefMass)) && Number(oldRefMass) > 0 ? Number(oldRefMass) : 1;
+    const defaultImpact = Number.isFinite(storedImpact) ? Math.max(0, Math.min(1, storedImpact))
+      : Number.isFinite(Number(oldRefImpact)) ? Math.max(0, Math.min(1, Number(oldRefImpact))) : .25;
+    const oldKind = old && old.kind ? old.kind : 'box';
+    const asKind = kind => kind === 'circle' ? 'circle' : 'box';
+    const ensureRefInWorld = (kind, ref) => {
+      if(!ref) return;
+      const k = asKind(kind);
+      const list = k === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
+      if(!list.includes(ref)) list.push(ref);
+    };
+
+    const createCollider = kind => {
+      const kindKey = asKind(kind);
+      const base = kindKey === 'circle'
+        ? {x:0, z:0, r:1, mass: defaultMass, impact: defaultImpact, physics: false, enabled: true, owner: o}
+        : {x:0, z:0, hx:1, hz:1, mass: defaultMass, impact: defaultImpact, physics: false, enabled: true, owner: o};
+      if(kindKey !== 'circle') base._boxList = GAME.world.colliders.box;
+      if(kindKey === 'circle') GAME.world.colliders.circle.push(base);
+      else GAME.world.colliders.box.push(base);
+      o.userData.collider = {kind: kindKey, ref: base};
+      o.userData.physicsMass = defaultMass;
+      o.userData.physicsImpact = defaultImpact;
+      o.userData.physicsEnabled = false;
       if(o.userData.addedEntry) o.userData.addedEntry.collide = true;
+      if(o.userData.addedEntry) o.userData.addedEntry.physics = false;
+      if(o.userData.addedEntry) o.userData.addedEntry.physicsMass = defaultMass;
+      if(o.userData.addedEntry) o.userData.addedEntry.physicsImpact = defaultImpact;
       STORE.syncCollider(o);
-    } else if(!enabled && old){
-      const arr = old.kind === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
-      const i = old.ref ? arr.indexOf(old.ref) : -1;
-      if(i >= 0) arr.splice(i, 1);
-      o.userData.collider = null;
-      if(o.userData.addedEntry) o.userData.addedEntry.collide = false;
+      return base;
+    };
+
+    if(enabled){
+      if(old && old.ref){
+        if(old.ref.physics) old.ref.physics = false;
+        if(old.ref.mass == null) old.ref.mass = defaultMass;
+        if(old.ref.impact == null) old.ref.impact = defaultImpact;
+        old.ref.enabled = true;
+        if(old.ref) old.ref.physics = false;
+        old.ref.owner = o;
+        ensureRefInWorld(old.kind || oldKind, old.ref);
+        o.userData.physicsMass = old.ref.mass;
+        o.userData.physicsImpact = old.ref.impact;
+      } else {
+        createCollider(oldKind);
+      }
+      o.userData.physicsEnabled = false;
+      if(o.userData.addedEntry){
+        o.userData.addedEntry.physics = false;
+        o.userData.addedEntry.collide = true;
+        o.userData.addedEntry.physicsMass = o.userData.physicsMass;
+        o.userData.addedEntry.physicsImpact = o.userData.physicsImpact;
+      }
+      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      STORE.syncCollider(o);
+      deps.markDirty();
+      deps.buildInspector();
+      deps.refreshOutliner();
+      deps.status('Collider enabled');
+      return;
     }
+
+    if(!enabled && old){
+      if(old.ref){
+        if(old.ref.mass != null) o.userData.physicsMass = old.ref.mass;
+        else o.userData.physicsMass = defaultMass;
+        if(old.ref.impact != null) o.userData.physicsImpact = old.ref.impact;
+        else o.userData.physicsImpact = defaultImpact;
+        old.ref.enabled = false;
+        old.ref.physics = false;
+      }
+      if(o.userData.addedEntry){
+        o.userData.addedEntry.physics = false;
+        o.userData.addedEntry.physicsMass = o.userData.physicsMass;
+        o.userData.addedEntry.physicsImpact = o.userData.physicsImpact;
+        o.userData.addedEntry.collide = false;
+      }
+      o.userData.physicsEnabled = false;
+      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      deps.markDirty();
+      deps.buildInspector();
+      deps.refreshOutliner();
+      deps.status('Collider disabled');
+      return;
+    }
+
     if(GAME.systems.physics) GAME.systems.physics.rebuild();
     deps.markDirty();
     deps.buildInspector();
     deps.refreshOutliner();
-    deps.status(enabled ? 'Collider enabled' : 'Collider disabled');
+    deps.status('Collider state unchanged');
+  }
+
+  function setPhysicsEnabled(o, enabled){
+    if(!o || o.userData.editorType !== 'mesh') return;
+    const old = o.userData.collider || null;
+    const storedMass = Number(o.userData.physicsMass);
+    const storedImpact = Number(o.userData.physicsImpact);
+    const oldRefMass = old && old.ref && old.ref.mass;
+    const oldRefImpact = old && old.ref && old.ref.impact;
+    const defaultMass = Number.isFinite(storedMass) && storedMass > 0 ? storedMass
+      : Number.isFinite(Number(oldRefMass)) && Number(oldRefMass) > 0 ? Number(oldRefMass) : 1;
+    const defaultImpact = Number.isFinite(storedImpact) ? Math.max(0, Math.min(1, storedImpact))
+      : Number.isFinite(Number(oldRefImpact)) ? Math.max(0, Math.min(1, Number(oldRefImpact))) : .25;
+    const oldKind = old && old.kind ? old.kind : 'box';
+    const asKind = kind => kind === 'circle' ? 'circle' : 'box';
+    const ensureRefInWorld = (kind, ref) => {
+      if(!ref) return;
+      const k = asKind(kind);
+      const list = k === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
+      if(!list.includes(ref)) list.push(ref);
+    };
+    const createCollider = kind => {
+      const kindKey = asKind(kind);
+      const base = kindKey === 'circle'
+        ? {x:0, z:0, r:1, mass: defaultMass, impact: defaultImpact, physics: true, enabled: true, owner: o}
+        : {x:0, z:0, hx:1, hz:1, mass: defaultMass, impact: defaultImpact, physics: true, enabled: true, owner: o};
+      if(kindKey !== 'circle') base._boxList = GAME.world.colliders.box;
+      if(kindKey === 'circle') GAME.world.colliders.circle.push(base);
+      else GAME.world.colliders.box.push(base);
+      o.userData.collider = {kind: kindKey, ref: base};
+      o.userData.physicsMass = defaultMass;
+      o.userData.physicsImpact = defaultImpact;
+      o.userData.physicsEnabled = true;
+      if(o.userData.addedEntry){
+        o.userData.addedEntry.physics = true;
+        o.userData.addedEntry.physicsMass = defaultMass;
+        o.userData.addedEntry.physicsImpact = defaultImpact;
+        o.userData.addedEntry.collide = true;
+      }
+      STORE.syncCollider(o);
+      return base;
+    };
+
+    if(enabled){
+      if(old && old.ref){
+        old.ref.physics = true;
+        old.ref.enabled = true;
+        old.ref.owner = o;
+        if(old.ref.mass == null) old.ref.mass = defaultMass;
+        if(old.ref.impact == null) old.ref.impact = defaultImpact;
+        o.userData.physicsMass = old.ref.mass;
+        o.userData.physicsImpact = old.ref.impact;
+        o.userData.physicsEnabled = true;
+        ensureRefInWorld(old.kind || oldKind, old.ref);
+        if(o.userData.addedEntry){
+          o.userData.addedEntry.physics = true;
+          o.userData.addedEntry.physicsMass = o.userData.physicsMass;
+          o.userData.addedEntry.physicsImpact = o.userData.physicsImpact;
+          o.userData.addedEntry.collide = true;
+        }
+      } else {
+        createCollider(oldKind);
+      }
+      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      deps.markDirty();
+      deps.buildInspector();
+      deps.refreshOutliner();
+      deps.status('Physics enabled');
+      return;
+    }
+
+    if(old && old.ref){
+      old.ref.physics = false;
+      old.ref.enabled = true;
+      o.userData.physicsEnabled = false;
+      if(o.userData.addedEntry) o.userData.addedEntry.physics = false;
+      o.userData.physicsMass = old.ref.mass || defaultMass;
+      o.userData.physicsImpact = old.ref.impact == null ? defaultImpact : old.ref.impact;
+      if(o.userData.addedEntry) o.userData.addedEntry.physicsMass = o.userData.physicsMass;
+      if(o.userData.addedEntry) o.userData.addedEntry.physicsImpact = o.userData.physicsImpact;
+      if(o.userData.addedEntry) o.userData.addedEntry.collide = true;
+      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      deps.markDirty();
+      deps.buildInspector();
+      deps.refreshOutliner();
+      deps.status('Physics disabled');
+      return;
+    }
+
+    o.userData.physicsEnabled = false;
+    if(o.userData.addedEntry) o.userData.addedEntry.physics = false;
+    if(GAME.systems.physics) GAME.systems.physics.rebuild();
+    deps.markDirty();
+    deps.status('Physics state unchanged');
   }
 
   function performDeleteEntity(o){
@@ -190,6 +440,57 @@ function create(deps){
   function onGizmoChange(){
     const o = ED.selected;
     if(!o) return;
+    if(ED.playerColliderEdit && colliderProxy && GAME.player && GAME.player.car === o && GAME.player.collision){
+      const base = colliderProxy.userData.colliderBase || {};
+      const yaw = o.rotation ? (o.rotation.y || 0) : 0;
+      const wx = colliderProxy.position.x - o.position.x;
+      const wz = colliderProxy.position.z - o.position.z;
+      const cos = Math.cos(yaw), sin = Math.sin(yaw);
+      const offsetX = wx * cos - wz * sin;
+      const offsetZ = wx * sin + wz * cos;
+      const bodyY = GAME.player.collision.bodyY == null ? .55 : GAME.player.collision.bodyY;
+      const patch = {
+        hx: Math.max(.05, (base.hx || .92) * Math.abs(colliderProxy.scale.x || 1)),
+        hy: Math.max(.05, (base.hy || .42) * Math.abs(colliderProxy.scale.y || 1)),
+        hz: Math.max(.05, (base.hz || 1.85) * Math.abs(colliderProxy.scale.z || 1)),
+        offsetX,
+        offsetY: colliderProxy.position.y - bodyY,
+        offsetZ,
+        rotX: colliderProxy.rotation.x || 0,
+        rotY: (colliderProxy.rotation.y || 0) - yaw,
+        rotZ: colliderProxy.rotation.z || 0,
+      };
+      if(GAME.player.setCollision) GAME.player.setCollision(patch);
+      else Object.assign(GAME.player.collision, patch);
+      deps.markDirty();
+      deps.syncTransformFields();
+      return;
+    }
+    if(ED.colliderEdit && colliderProxy && o.userData && o.userData.collider && o.userData.collider.ref){
+      const box = new THREE.Box3().setFromObject(o);
+      const center = box.isEmpty() ? o.position.clone() : box.getCenter(new THREE.Vector3());
+      const shape = o.userData.colliderShape || (o.userData.colliderShape = {});
+      const base = colliderProxy.userData.colliderBase || {};
+      shape.offsetX = colliderProxy.position.x - center.x;
+      shape.offsetY = colliderProxy.position.y - center.y;
+      shape.offsetZ = colliderProxy.position.z - center.z;
+      shape.hy = Math.max(.05, (base.hy || .5) * Math.abs(colliderProxy.scale.y || 1));
+      if(o.userData.collider.kind === 'circle'){
+        shape.r = Math.max(.05, (base.r || 1) * Math.max(Math.abs(colliderProxy.scale.x || 1), Math.abs(colliderProxy.scale.z || 1)));
+      } else {
+        shape.hx = Math.max(.05, (base.hx || 1) * Math.abs(colliderProxy.scale.x || 1));
+        shape.hz = Math.max(.05, (base.hz || 1) * Math.abs(colliderProxy.scale.z || 1));
+        shape.rotX = colliderProxy.rotation.x || 0;
+        shape.rotY = colliderProxy.rotation.y || 0;
+        shape.rotZ = colliderProxy.rotation.z || 0;
+        shape.rot = shape.rotY;
+      }
+      if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
+      STORE.syncCollider(o);
+      if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+      deps.markDirty();
+      return;
+    }
     deps.applyZUpProxyToSelected();
     if(o.userData.editorType === 'player'){
       GAME.player.physics.pos.copy(o.position);
@@ -208,11 +509,15 @@ function create(deps){
 
   return Object.freeze({
     selectObject,
+    selectCollider,
+    selectMultiObjects,
+    selectSimilarObjects,
     selectSpecial,
     deselect,
     isPlayerCameraSelection,
     toggleVisible,
     setColliderEnabled,
+    setPhysicsEnabled,
     performDeleteEntity,
     requestDeleteEntity,
     duplicateEntity,

@@ -12,7 +12,7 @@ function create(options){
   const baseCfg = opts.baseConfig;
   const drive = opts.drive;
   const baseDrive = opts.baseDrive;
-  const values = Object.assign({torque:0, maxSpeed:0, oversteer:0, handbrake:0, steer:0, brake:0, grip:0}, opts.values || {});
+  const values = Object.assign({torque:0, maxSpeed:0, oversteer:0, handbrake:0, steer:0, brake:0, grip:0, reverseDelay:.5}, opts.values || {});
   let setOpen = () => {};
   let toggle = () => {};
 
@@ -25,6 +25,7 @@ function create(options){
     const steer = values.steer / 10;
     const brake = values.brake / 10;
     const grip = values.grip / 10;
+    drive.reverseDelay = clamp(values.reverseDelay == null ? .5 : Number(values.reverseDelay), 0, 2);
 
     cfg.accel = baseCfg.accel * (1 + torque * .75);
     cfg.revAccel = baseCfg.revAccel * (1 + torque * .45);

@@ -132,6 +132,86 @@ function cloneData(value){
 function normalizeName(s){
   return String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
+function objectLocalVisualBox(obj){
+  if(!obj || !window.THREE) return null;
+  obj.updateMatrixWorld(true);
+  const rootInverse = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const localBox = new THREE.Box3();
+  const points = [
+    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
+    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
+  ];
+  if(obj.traverse){
+    obj.traverse(node => {
+      if(!node || !node.isMesh || !node.geometry) return;
+      if(node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle)) return;
+      if(!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+      const bb = node.geometry.boundingBox;
+      if(!bb || bb.isEmpty()) return;
+      const min = bb.min, max = bb.max;
+      points[0].set(min.x, min.y, min.z);
+      points[1].set(max.x, min.y, min.z);
+      points[2].set(min.x, max.y, min.z);
+      points[3].set(max.x, max.y, min.z);
+      points[4].set(min.x, min.y, max.z);
+      points[5].set(max.x, min.y, max.z);
+      points[6].set(min.x, max.y, max.z);
+      points[7].set(max.x, max.y, max.z);
+      points.forEach(p => localBox.expandByPoint(p.applyMatrix4(node.matrixWorld).applyMatrix4(rootInverse)));
+    });
+  }
+  if(!localBox.isEmpty()) return {box: localBox, world: false};
+  const worldBox = new THREE.Box3().setFromObject(obj);
+  return worldBox.isEmpty() ? null : {box: worldBox, world: true};
+}
+function objectLocalMeshBoxes(obj){
+  if(!obj || !window.THREE) return [];
+  obj.updateMatrixWorld(true);
+  const rootInverse = new THREE.Matrix4().copy(obj.matrixWorld).invert();
+  const boxes = [];
+  const points = [
+    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
+    new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(),
+  ];
+  if(!obj.traverse) return boxes;
+  obj.traverse(node => {
+    if(!node || !node.isMesh || !node.geometry) return;
+    if(node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle)) return;
+    if(!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+    const bb = node.geometry.boundingBox;
+    if(!bb || bb.isEmpty()) return;
+    const localBox = new THREE.Box3();
+    const min = bb.min, max = bb.max;
+    points[0].set(min.x, min.y, min.z);
+    points[1].set(max.x, min.y, min.z);
+    points[2].set(min.x, max.y, min.z);
+    points[3].set(max.x, max.y, min.z);
+    points[4].set(min.x, min.y, max.z);
+    points[5].set(max.x, min.y, max.z);
+    points[6].set(min.x, max.y, max.z);
+    points[7].set(max.x, max.y, max.z);
+    points.forEach(p => localBox.expandByPoint(p.applyMatrix4(node.matrixWorld).applyMatrix4(rootInverse)));
+    if(!localBox.isEmpty()) boxes.push(localBox);
+  });
+  return boxes;
+}
+function colliderBoxList(ref){
+  if(ref && ref._boxList) return ref._boxList;
+  const game = window.LOT_KING;
+  return game && game.world && game.world.colliders ? game.world.colliders.box : null;
+}
+function removeCompoundColliderParts(ref){
+  if(!ref || !ref.parts) return;
+  const list = colliderBoxList(ref);
+  if(list){
+    ref.parts.forEach(part => {
+      const i = list.indexOf(part);
+      if(i >= 0) list.splice(i, 1);
+    });
+  }
+  ref.parts = [];
+  ref.compoundRoot = false;
+}
 
 // ------------------------------------------------ level library (multi-livello, stile Unreal)
 // KEY resta lo "slot attivo" applicato al boot; la libreria tiene un progetto
@@ -464,9 +544,12 @@ function collectPlayerBlueprint(GAME){
     lights: cloneData(GAME.player.lights || {}),
     dataWidgets: cloneData(GAME.player.dataWidgets || {}),
     exhaust: cloneData(GAME.player.exhaust || {}),
+    collision: cloneData(GAME.player.collision || {}),
   };
   if(GAME.player.spawn) player.spawn = cloneData(GAME.player.spawn);
   if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
+  if(GAME.player.car && GAME.player.car.userData.modelDbKey) player.modelDbKey = GAME.player.car.userData.modelDbKey;
+  if(GAME.player.car && GAME.player.car.userData.modelName) player.modelName = GAME.player.car.userData.modelName;
   player.rigTransforms = collectPlayerRigTransforms(GAME);
   // engine sound set: id + copia completa (cosi' l'export LKEP e' autosufficiente)
   if(GAME.player.engineAudio && GAME.player.engineAudio.setId){
@@ -520,7 +603,7 @@ function savePlayerBlueprintAsset(name, player, opts){
   const id = options.id || ('pb_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7));
   const asset = {
     id,
-    name: name || 'Player Blueprint',
+    name: name || 'player_car Logic',
     kind: 'player-blueprint',
     player: cloneData(player),
     source,
@@ -626,6 +709,7 @@ function playerTemplateFromLevelLibrary(GAME){
       lights: cloneData(GAME.player.lights || {}),
       dataWidgets: cloneData(GAME.player.dataWidgets || {}),
       exhaust: cloneData(GAME.player.exhaust || {}),
+      collision: cloneData(GAME.player.collision || {}),
     };
     if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
   }
@@ -868,14 +952,123 @@ function applyParentLink(obj, GAME){
 function syncCollider(obj){
   const col = obj.userData.collider;
   if(!col || !col.ref) return;
+  col.ref.owner = obj;
   obj.updateMatrixWorld(true);
-  const box = new THREE.Box3().setFromObject(obj);
-  if(box.isEmpty()) return;
+  if(col.ref.enabled === false){
+    removeCompoundColliderParts(col.ref);
+    return;
+  }
+  const bounds = objectLocalVisualBox(obj);
+  if(!bounds) return;
+  const box = bounds.box;
   const c = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  col.ref.x = c.x; col.ref.z = c.z;
-  if(col.kind === 'circle') col.ref.r = Math.max(size.x, size.z) / 2;
-  else { col.ref.hx = size.x / 2; col.ref.hz = size.z / 2; }
+  if(!bounds.world){
+    const worldScale = obj.getWorldScale(new THREE.Vector3());
+    size.set(
+      size.x * Math.abs(worldScale.x || 1),
+      size.y * Math.abs(worldScale.y || 1),
+      size.z * Math.abs(worldScale.z || 1)
+    );
+  }
+  const wc = bounds.world ? c : obj.localToWorld(c.clone());
+  const shape = obj.userData.colliderShape || {};
+  const offX = Number(shape.offsetX);
+  const offY = Number(shape.offsetY);
+  const offZ = Number(shape.offsetZ);
+  col.ref.x = wc.x + (Number.isFinite(offX) ? offX : 0);
+  col.ref.y = wc.y + (Number.isFinite(offY) ? offY : 0);
+  col.ref.z = wc.z + (Number.isFinite(offZ) ? offZ : 0);
+  const mode = shape.mode === 'complex' ? 'complex' : 'simple';
+  if(col.kind === 'circle'){
+    removeCompoundColliderParts(col.ref);
+    const r = Number(shape.r);
+    col.ref.r = Number.isFinite(r) && r > 0 ? r : Math.max(size.x, size.z) / 2;
+    const hy = Number(shape.hy);
+    col.ref.hy = Number.isFinite(hy) && hy > 0 ? hy : Math.max(.1, size.y / 2);
+    const rotX = Number(shape.rotX);
+    const rotY = Number(shape.rotY != null ? shape.rotY : shape.rot);
+    const rotZ = Number(shape.rotZ);
+    col.ref.rotX = Number.isFinite(rotX) ? rotX : obj.rotation.x;
+    col.ref.rotY = Number.isFinite(rotY) ? rotY : obj.rotation.y;
+    col.ref.rotZ = Number.isFinite(rotZ) ? rotZ : obj.rotation.z;
+    col.ref.rot = col.ref.rotY;
+  } else {
+    const hx = Number(shape.hx);
+    const hy = Number(shape.hy);
+    const hz = Number(shape.hz);
+    col.ref.hx = Number.isFinite(hx) && hx > 0 ? hx : size.x / 2;
+    col.ref.hy = Number.isFinite(hy) && hy > 0 ? hy : Math.max(.1, size.y / 2);
+    col.ref.hz = Number.isFinite(hz) && hz > 0 ? hz : size.z / 2;
+    const rotX = Number(shape.rotX);
+    const rotY = Number(shape.rotY != null ? shape.rotY : shape.rot);
+    const rotZ = Number(shape.rotZ);
+    col.ref.rotX = Number.isFinite(rotX) ? rotX : obj.rotation.x;
+    col.ref.rotY = Number.isFinite(rotY) ? rotY : obj.rotation.y;
+    col.ref.rotZ = Number.isFinite(rotZ) ? rotZ : obj.rotation.z;
+    col.ref.rot = col.ref.rotY;
+    if(mode === 'complex'){
+      const list = colliderBoxList(col.ref);
+      const meshBoxes = objectLocalMeshBoxes(obj).filter(partBox => {
+        const s = partBox.getSize(new THREE.Vector3());
+        return s.x > .03 && s.y > .03 && s.z > .03;
+      }).slice(0, 24);
+      if(list && meshBoxes.length > 1){
+        const worldScale = obj.getWorldScale(new THREE.Vector3());
+        col.ref.compoundRoot = true;
+        col.ref.parts = col.ref.parts || [];
+        meshBoxes.forEach((partBox, i) => {
+          const pc = partBox.getCenter(new THREE.Vector3());
+          const ps = partBox.getSize(new THREE.Vector3());
+          ps.set(ps.x * Math.abs(worldScale.x || 1), ps.y * Math.abs(worldScale.y || 1), ps.z * Math.abs(worldScale.z || 1));
+          const pw = obj.localToWorld(pc.clone());
+          const part = col.ref.parts[i] || {
+            owner: obj,
+            parentRef: col.ref,
+            compoundPart: true,
+            _boxList: list,
+          };
+          part.owner = obj;
+          part.parentRef = col.ref;
+          part.compoundPart = true;
+          part._boxList = list;
+          part.enabled = col.ref.enabled !== false;
+          part.physics = !!col.ref.physics;
+          part.mass = col.ref.mass;
+          part.impact = col.ref.impact;
+          part.x = pw.x + (Number.isFinite(offX) ? offX : 0);
+          part.y = pw.y + (Number.isFinite(offY) ? offY : 0);
+          part.z = pw.z + (Number.isFinite(offZ) ? offZ : 0);
+          part.hx = Math.max(.05, ps.x / 2);
+          part.hy = Math.max(.05, ps.y / 2);
+          part.hz = Math.max(.05, ps.z / 2);
+          part.rotX = col.ref.rotX;
+          part.rotY = col.ref.rotY;
+          part.rotZ = col.ref.rotZ;
+          part.rot = col.ref.rotY;
+          if(!col.ref.parts[i]) col.ref.parts[i] = part;
+          if(!list.includes(part)) list.push(part);
+        });
+        while(col.ref.parts.length > meshBoxes.length){
+          const extra = col.ref.parts.pop();
+          const idx = list.indexOf(extra);
+          if(idx >= 0) list.splice(idx, 1);
+        }
+      } else {
+        removeCompoundColliderParts(col.ref);
+      }
+    } else {
+      removeCompoundColliderParts(col.ref);
+    }
+  }
+}
+function physicsMassFrom(value){
+  const raw = Number(value);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
+}
+function physicsImpactFrom(value){
+  const raw = Number(value);
+  return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0.25;
 }
 
 // ------------------------------------------------ light props
@@ -991,6 +1184,10 @@ function createPrimitive(prim, props){
   const gp = new THREE.Group();
   m.position.y = prim === 'plane' ? 0.01 : (prim === 'ramp' ? 0 : 1);
   gp.add(m);
+  if(prim === 'cone'){
+    gp.userData.isCone = true;
+    gp.userData.coneResetRotation = [0, 0, 0];
+  }
   return gp;
 }
 
@@ -1001,6 +1198,21 @@ function createLight(kind, props){
   const intensity = props.intensity != null ? props.intensity : 1;
   const gp = new THREE.Group();
   let l;
+  const makeHandle = () => {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffd166,
+      wireframe: true,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+    });
+    const handle = new THREE.Mesh(new THREE.SphereGeometry(.65, 16, 8), mat);
+    handle.name = 'Editor Light Pick Handle';
+    handle.userData.editorLightHandle = true;
+    handle.userData.nonExportable = true;
+    handle.renderOrder = 999;
+    return handle;
+  };
   if(kind === 'spot'){
     l = new THREE.SpotLight(color, intensity,
       props.distance != null ? props.distance : 40,
@@ -1025,6 +1237,7 @@ function createLight(kind, props){
   }
   applyLightProps(l, props);
   gp.add(l);
+  gp.add(makeHandle());
   gp.userData.lightKind = kind;
   gp.userData.light = l;
   return gp;
@@ -1162,16 +1375,43 @@ function registerAdded(GAME, obj, entry){
     obj.userData.assetName = entry.asset.name;
     obj.userData.assetSource = entry.asset.source;
   }
+  const entryMass = entry && entry.physicsMass;
+  const defaultMass = physicsMassFrom(entryMass);
+  const defaultImpact = physicsImpactFrom(entry && entry.physicsImpact);
+  obj.userData.physicsMass = defaultMass;
+  obj.userData.physicsImpact = defaultImpact;
+  if(entry && entry.driveSurface != null) obj.userData.driveSurface = !!entry.driveSurface;
+  if(entry && entry.colliderShape) obj.userData.colliderShape = cloneData(entry.colliderShape);
+  if(entry && entry.colliderOnly){
+    obj.userData.colliderOnly = true;
+    obj.traverse(n => {
+      if(!n.isMesh) return;
+      n.material = new THREE.MeshBasicMaterial({color:0x4be3a0, wireframe:true, transparent:true, opacity:.28, depthTest:false});
+      n.renderOrder = 997;
+    });
+  }
+  const wantPhysics = !!(entry && entry.physics);
   let colliderOpt = null;
-  if(entry.collide){
-    const col = {x:0, z:0, hx:1, hz:1};
+  const hasCollider = !!(entry && (entry.collide || wantPhysics));
+  if(hasCollider){
+    const col = {x:0, z:0, hx:1, hz:1, mass: defaultMass, impact: defaultImpact, owner: obj};
+    col._boxList = GAME.world.colliders.box;
+    col.enabled = true;
+    col.physics = !!wantPhysics;
     GAME.world.colliders.box.push(col);
     colliderOpt = {kind:'box', ref:col};
+  }
+  obj.userData.physicsEnabled = !!wantPhysics;
+  if(obj.userData.addedEntry){
+    obj.userData.addedEntry.physics = obj.userData.physicsEnabled;
+    if(!wantPhysics && obj.userData.addedEntry.physics === undefined){
+      obj.userData.addedEntry.physics = false;
+    }
   }
   GAME.world.register(obj, entry.name || entry.kind, entryType(entry, obj), {id: entry.id, builtin: false, collider: colliderOpt});
   GAME.core.scene.add(obj);
   applyT(obj, entry.t);
-  if(entry.collide) syncCollider(obj);
+  if(hasCollider) syncCollider(obj);
   return obj;
 }
 
@@ -1203,6 +1443,7 @@ function apply(GAME){
   // Vehicle light config can create extra built-in light anchors; do it before
   // transform replay so custom Aux 3/4/... offsets have real targets.
   if(data.player && data.player.lights && GAME.player.setLights) GAME.player.setLights(data.player.lights);
+  if(data.player && data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
   if(data.player && data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
 
   const byId = {};
@@ -1213,6 +1454,7 @@ function apply(GAME){
     const o = byId[id];
     if(!o) continue;
     applyT(o, data.transforms[id]);
+    if(data.props && data.props[id] && data.props[id].colliderShape) o.userData.colliderShape = cloneData(data.props[id].colliderShape);
     syncCollider(o);
   }
   for(const id in data.transforms){
@@ -1224,8 +1466,10 @@ function apply(GAME){
     const o = byId[id];
     if(!o) continue;
     const light = o.isLight ? o : o.userData.light;
-    if(light) applyLightProps(light, data.props[id]);
-    else applyMatProps(o, data.props[id]);
+    const props = Object.assign({}, data.props[id]);
+    delete props.colliderShape;
+    if(light) applyLightProps(light, props);
+    else applyMatProps(o, props);
   }
   // deletions
   for(const id of data.deleted || []){
@@ -1281,9 +1525,17 @@ function apply(GAME){
       GAME.player.car.rotation.y = GAME.player.physics.heading;
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
-    if(data.player.modelSrc){
-      const p = loadGlbRaw(data.player.modelSrc)
-        .then(s => { GAME.player.setModel(s); GAME.player.car.userData.modelSrc = data.player.modelSrc; })
+    if(data.player.modelSrc || data.player.modelDbKey){
+      const srcPromise = data.player.modelDbKey && window.LK_ASSET_BLOBS
+        ? window.LK_ASSET_BLOBS.getUrl(data.player.modelDbKey)
+        : Promise.resolve(data.player.modelSrc);
+      const p = srcPromise.then(src => loadGlbRaw(src)
+        .then(s => {
+          GAME.player.setModel(s);
+          GAME.player.car.userData.modelSrc = data.player.modelSrc || null;
+          GAME.player.car.userData.modelDbKey = data.player.modelDbKey || null;
+          GAME.player.car.userData.modelName = data.player.modelName || null;
+        }))
         .catch(err => console.warn('LotKing store: modello player non ricaricato', err));
       pending.push(p);
     }
@@ -1296,6 +1548,7 @@ function apply(GAME){
     }
     if(data.player.tuning) GAME.player.setTuning(data.player.tuning);
     if(data.player.lights && GAME.player.setLights) GAME.player.setLights(data.player.lights);
+    if(data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
     if(data.player.dataWidgets && GAME.player.setDataWidgets) GAME.player.setDataWidgets(data.player.dataWidgets);
     if(data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
     applyPlayerRigTransforms(GAME, data.player);
@@ -1328,21 +1581,43 @@ let _sessionCounter = 1;
 function collect(GAME){
   const d = blank();
   const old = load();
+  const freezeRuntimeTransforms = !!(GAME && GAME.state && GAME.state.editorPreview);
+  const oldAddedById = new Map();
+  if(freezeRuntimeTransforms && old && Array.isArray(old.added)){
+    old.added.forEach(entry => { if(entry && entry.id) oldAddedById.set(entry.id, entry); });
+  }
   d.counter = Math.max(old ? old.counter || 0 : 0, _sessionCounter);
   const liveBuiltin = new Set();
   for(const o of GAME.world.registry){
     const id = o.userData.editorId;
     if(o.userData.builtin){
       liveBuiltin.add(id);
-      d.transforms[id] = tOf(o);
+      d.transforms[id] = freezeRuntimeTransforms && old && old.transforms && old.transforms[id] ? cloneData(old.transforms[id]) : tOf(o);
       const light = o.isLight ? o : null;
       if(light) d.props[id] = lightProps(light);
       else if(o.userData.matProps) d.props[id] = Object.assign({}, o.userData.matProps);
+      if(o.userData.colliderShape) d.props[id] = Object.assign({}, d.props[id] || {}, {colliderShape: cloneData(o.userData.colliderShape)});
     } else if(o.userData.addedEntry){
       const e = o.userData.addedEntry;
-      e.t = tOf(o);
+      const oldEntry = freezeRuntimeTransforms ? oldAddedById.get(e.id) : null;
+      e.t = oldEntry && oldEntry.t ? cloneData(oldEntry.t) : tOf(o);
       e.name = o.userData.editorName;
-      e.collide = !!(o.userData.collider && o.userData.collider.ref);
+      const colliderRef = o.userData.collider && o.userData.collider.ref ? o.userData.collider.ref : null;
+      const isPhysics = !!(colliderRef && colliderRef.physics);
+      const hasCollider = !!(colliderRef && colliderRef.enabled !== false);
+      const hasPhysics = !!(o.userData.physicsEnabled || isPhysics);
+      e.physics = !!hasPhysics;
+      e.collide = !!hasCollider;
+      if(o.userData.colliderOnly) e.colliderOnly = true;
+      if(o.userData.driveSurface != null) e.driveSurface = !!o.userData.driveSurface;
+      if(o.userData.colliderShape) e.colliderShape = cloneData(o.userData.colliderShape);
+      if(colliderRef && colliderRef.mass != null){
+        e.physicsMass = physicsMassFrom(o.userData.collider.ref.mass);
+      } else {
+        e.physicsMass = physicsMassFrom(o.userData.physicsMass);
+      }
+      if(colliderRef && colliderRef.impact != null) e.physicsImpact = physicsImpactFrom(colliderRef.impact);
+      else e.physicsImpact = physicsImpactFrom(o.userData.physicsImpact);
       if(e.kind === 'light' && o.userData.light) e.props = lightProps(o.userData.light);
       else if(e.kind === 'effect') e.params = Object.assign({}, o.userData.effectParams);
       else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);

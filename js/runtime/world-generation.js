@@ -187,9 +187,13 @@ function create(deps){
       const s = new THREE.Mesh(new THREE.CylinderGeometry(.26,.3,.14,10), coneStripe);
       s.position.y = .5; gp.add(s);
       gp.position.set(x, 0, z);
+      gp.userData.isCone = true;
+      gp.userData.coneResetRotation = [0, 0, 0];
       scene.add(gp);
       cones.push({m:gp, vel:new THREE.Vector3(), ang:new THREE.Vector3(), hit:false});
-      tagEntity(gp, 'Cone ' + cones.length, 'mesh');
+      const col = {x, z, r:.45, mass:.005, impact:.18, enabled:true, physics:true, owner:gp, hitScore:50, hitLabel:'CONE! +50', coneLike:true};
+      colliders.circle.push(col);
+      tagEntity(gp, 'Cone ' + cones.length, 'mesh', {collider:{kind:'circle', ref:col}});
     }
     for(let i=0;i<10;i++) cone(-26 + i*6, 14);
     for(let i=0;i<10;i++) cone(-26 + i*6, -14);

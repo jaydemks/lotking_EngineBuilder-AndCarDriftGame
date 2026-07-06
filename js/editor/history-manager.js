@@ -19,6 +19,7 @@ function create(deps){
   const attachGizmoToSelection = deps.attachGizmoToSelection;
   const syncTransformFields = deps.syncTransformFields;
   const refreshOutliner = deps.refreshOutliner;
+  const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
   const buildInspector = deps.buildInspector;
   const getGizmo = deps.getGizmo;
 
@@ -26,6 +27,7 @@ function create(deps){
   const redoStack = [];
   let transformBefore = null;
   let lastTransformRepeat = null;
+  let colliderBefore = null;
   let hudHistoryPending = null;
   let hudHistoryTimer = null;
   let hudHistorySuppress = false;
@@ -64,6 +66,8 @@ function create(deps){
     redoStack.push(cmd);
     historyChanged();
     markDirty();
+    refreshOutliner();
+    refreshAssetsPanel();
     status('Undo: ' + cmd.label);
   }
 
@@ -75,6 +79,8 @@ function create(deps){
     undoStack.push(cmd);
     historyChanged();
     markDirty();
+    refreshOutliner();
+    refreshAssetsPanel();
     status('Redo: ' + cmd.label);
   }
 
@@ -138,6 +144,8 @@ function create(deps){
       const col = o.userData.collider;
       const isBuiltin = !!o.userData.builtin && !o.userData.addedEntry;
       if(col && col.ref){
+        col.ref.owner = o;
+        col.ref.enabled = col.ref.enabled !== false;
         const arr = col.kind === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
         if(!arr.includes(col.ref)) arr.push(col.ref);
       }
@@ -149,6 +157,10 @@ function create(deps){
     }
     if(!o.parent) scene.add(o);
     STORE.syncCollider(o);
+    if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+    deps.refreshSelectionHelpers();
+    refreshOutliner();
+    refreshAssetsPanel();
   }
 
   function removeEntity(o){
@@ -156,6 +168,10 @@ function create(deps){
     GAME.world.unregister(o);
     if(o.parent) o.parent.remove(o);
     if(ED.selected === o) selectObject(null);
+    if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+    deps.refreshSelectionHelpers();
+    refreshOutliner();
+    refreshAssetsPanel();
   }
 
   function applyTransform(o, t){
@@ -247,6 +263,80 @@ function create(deps){
     });
   }
 
+  function colliderSnapshot(o){
+    if(!o || !o.userData) return null;
+    const ref = o.userData.collider && o.userData.collider.ref;
+    return {
+      shape: o.userData.colliderShape ? JSON.parse(JSON.stringify(o.userData.colliderShape)) : null,
+      physicsMass: o.userData.physicsMass,
+      physicsImpact: o.userData.physicsImpact,
+      physicsEnabled: !!o.userData.physicsEnabled,
+      ref: ref ? {
+        enabled: ref.enabled !== false,
+        physics: !!ref.physics,
+        mass: ref.mass,
+        impact: ref.impact,
+        x: ref.x,
+        y: ref.y,
+        z: ref.z,
+        hx: ref.hx,
+        hy: ref.hy,
+        hz: ref.hz,
+        r: ref.r,
+        rotX: ref.rotX,
+        rotY: ref.rotY,
+        rotZ: ref.rotZ,
+        rot: ref.rot,
+      } : null,
+    };
+  }
+
+  function applyColliderSnapshot(o, snap){
+    if(!o || !snap) return;
+    if(snap.shape) o.userData.colliderShape = JSON.parse(JSON.stringify(snap.shape));
+    else delete o.userData.colliderShape;
+    o.userData.physicsMass = snap.physicsMass;
+    o.userData.physicsImpact = snap.physicsImpact;
+    o.userData.physicsEnabled = !!snap.physicsEnabled;
+    const ref = o.userData.collider && o.userData.collider.ref;
+    if(ref && snap.ref){
+      Object.assign(ref, snap.ref);
+      ref.owner = o;
+    }
+    if(o.userData.addedEntry){
+      if(snap.shape) o.userData.addedEntry.colliderShape = JSON.parse(JSON.stringify(snap.shape));
+      else delete o.userData.addedEntry.colliderShape;
+      o.userData.addedEntry.physicsMass = snap.physicsMass;
+      o.userData.addedEntry.physicsImpact = snap.physicsImpact;
+      o.userData.addedEntry.physics = !!snap.physicsEnabled;
+      o.userData.addedEntry.collide = !!(snap.ref && snap.ref.enabled);
+    }
+    STORE.syncCollider(o);
+    if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+    refreshSelectionHelpers();
+    buildInspector();
+    refreshOutliner();
+    markDirty();
+  }
+
+  function beginColliderHistory(o){
+    colliderBefore = o ? {obj:o, snap:colliderSnapshot(o)} : null;
+  }
+
+  function commitColliderHistory(label){
+    if(!colliderBefore || !colliderBefore.obj) return;
+    const obj = colliderBefore.obj;
+    const before = colliderBefore.snap;
+    const after = colliderSnapshot(obj);
+    colliderBefore = null;
+    if(sameT(before, after)) return;
+    pushHistory({
+      label: label || 'Collider edit',
+      undo: () => applyColliderSnapshot(obj, before),
+      redo: () => applyColliderSnapshot(obj, after),
+    });
+  }
+
   function applyLastTransform(){
     const obj = ED.selected;
     if(!obj || !lastTransformRepeat){ status('No transform to repeat'); return; }
@@ -293,6 +383,8 @@ function create(deps){
     beginTransformHistory,
     commitTransformHistory,
     withTransformHistory,
+    beginColliderHistory,
+    commitColliderHistory,
     applyLastTransform,
     hasLastTransformRepeat,
     isHudHistorySuppress,
