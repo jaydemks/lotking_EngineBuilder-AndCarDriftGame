@@ -17,6 +17,7 @@ function create(deps){
   const refreshOutliner = deps.refreshOutliner || function(){};
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
   const buildInspector = deps.buildInspector || function(){};
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function currentPlayerBlueprint(){
     return STORE.playerBlueprints && STORE.playerBlueprints.collect ? STORE.playerBlueprints.collect(GAME) : (STORE.collect(GAME).player || null);
@@ -36,7 +37,7 @@ function create(deps){
   }
   async function copyPlayerBlueprintAsset(){
     const bp = currentPlayerBlueprint();
-    if(!bp){ status('player_car Logic non disponibile'); return; }
+    if(!bp){ status(tr('player_car Logic unavailable', 'player_car Logic non disponibile')); return; }
     const name = await promptEditorAction({title:'Copy player_car Logic', message:'Logic asset name:', value:'player_car Logic ' + new Date().toLocaleTimeString(), okText:'Copy'});
     if(!name || !name.trim()) return;
     const asset = STORE.playerBlueprints.saveAsset(name.trim(), bp, {
@@ -44,14 +45,14 @@ function create(deps){
       source: {levelId: ED.trackId, levelName: ED.trackName, copiedFrom: 'scene-player'},
       controllerIndex: 0,
     });
-    if(!asset){ status('⚠ player_car Logic non salvato'); return; }
+    if(!asset){ status(tr('⚠ player_car Logic not saved', '⚠ player_car Logic non salvato')); return; }
     applyPlayerBlueprintAsset(asset.player, {applySpawn:false, silent:true});
     status('player_car Logic copied, promoted to Base, and applied: ' + asset.name);
     refreshAssetsPanel();
   }
   function applyPlayerBlueprintAsset(player, opts){
     const bp = player && JSON.parse(JSON.stringify(player));
-    if(!bp){ status('player_car Logic non valido'); return; }
+    if(!bp){ status(tr('Invalid player_car Logic', 'player_car Logic non valido')); return; }
     const options = opts || {};
     if(bp.tuning && GAME.player.setTuning) GAME.player.setTuning(bp.tuning);
     if(bp.cam){

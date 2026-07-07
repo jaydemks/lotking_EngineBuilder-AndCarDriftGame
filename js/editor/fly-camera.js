@@ -12,12 +12,46 @@ function create(deps){
   const camE = deps.camE;
   const canvas = deps.canvas;
   const ED = deps.ED;
+  function activeCamera(){
+    return deps.getActiveCamera ? (deps.getActiveCamera() || camE) : camE;
+  }
+  function activeRig(){
+    return deps.getActiveCameraRig ? deps.getActiveCameraRig() : null;
+  }
+  function notifyRigChanged(rig){
+    if(deps.onActiveCameraRigChange) deps.onActiveCameraRigChange(rig);
+  }
+  function worldQuaternion(object){
+    const q = new THREE.Quaternion();
+    if(object && object.getWorldQuaternion) object.getWorldQuaternion(q);
+    else if(object && object.quaternion) q.copy(object.quaternion);
+    return q;
+  }
+  function setCameraLikeForward(object, forward){
+    const z = forward.clone().normalize().negate();
+    const up = new THREE.Vector3(0, 1, 0);
+    let x = new THREE.Vector3().crossVectors(up, z).normalize();
+    if(x.lengthSq() < .0001) x = new THREE.Vector3(1, 0, 0);
+    const y = new THREE.Vector3().crossVectors(z, x).normalize();
+    const m = new THREE.Matrix4().makeBasis(x, y, z);
+    const q = new THREE.Quaternion().setFromRotationMatrix(m);
+    if(object.parent && object.parent.isObject3D){
+      const parentQ = new THREE.Quaternion();
+      object.parent.getWorldQuaternion(parentQ);
+      q.premultiply(parentQ.invert());
+    }
+    object.quaternion.copy(q);
+  }
 
-  function flyStart(e){
+  function flyStart(e, opts){
+    opts = opts || {};
     fly.rmb = true;
+    fly.button = opts.button == null ? e.button : opts.button;
+    fly.rotateOnly = !!opts.rotateOnly;
     fly.moved = 0;
     fly.lastX = e.clientX;
     fly.lastY = e.clientY;
+    fly.orthoPan = !!(activeCamera() && activeCamera().isOrthographicCamera);
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = false;
     try { canvas.setPointerCapture(e.pointerId); } catch(err){}
@@ -28,7 +62,13 @@ function create(deps){
     const dx = e.clientX - fly.lastX;
     const dy = e.clientY - fly.lastY;
     fly.lastX = e.clientX; fly.lastY = e.clientY; fly.moved += Math.abs(dx) + Math.abs(dy);
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camE.quaternion).normalize();
+    if(fly.orthoPan && deps.panActiveViewport){
+      deps.panActiveViewport(dx, dy);
+      return;
+    }
+    const cam = activeCamera();
+    const rig = activeRig();
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuaternion(cam)).normalize();
     const yaw = -dx * .004;
     const pitch = -dy * .004;
     fwd.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
@@ -37,13 +77,25 @@ function create(deps){
     const maxPitch = .985;
     fwd.y = Math.max(-maxPitch, Math.min(maxPitch, fwd.y));
     fwd.normalize();
-    camE.up.set(0, 1, 0);
-    camE.lookAt(camE.position.clone().add(fwd));
+    const pos = new THREE.Vector3();
+    cam.getWorldPosition(pos);
+    if(rig && rig !== cam){
+      rig.up.set(0, 1, 0);
+      setCameraLikeForward(rig, fwd);
+      rig.updateMatrixWorld(true);
+      notifyRigChanged(rig);
+    } else {
+      cam.up.set(0, 1, 0);
+      cam.lookAt(cam.position.clone().add(fwd));
+    }
   }
 
   function syncOrbitAfterFly(){
     const orbit = deps.getOrbit();
     if(!orbit) return;
+    if(fly.orthoPan) return;
+    const active = activeCamera();
+    if(active !== camE) return;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camE.quaternion).normalize();
     const target = camE.position.clone().addScaledVector(fwd, 12);
     camE.up.set(0, 1, 0);
@@ -55,14 +107,19 @@ function create(deps){
 
   function flyEnd(e){
     fly.rmb = false;
+    fly.orthoPan = false;
+    fly.rotateOnly = false;
+    fly.button = null;
     if(e && e.pointerId != null){ try { canvas.releasePointerCapture(e.pointerId); } catch(err){} }
     syncOrbitAfterFly();
     const orbit = deps.getOrbit();
-    if(orbit) orbit.enabled = ED.active && !ED.playPreview;
+    if(orbit) orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : (ED.active && !ED.playPreview);
   }
 
   function flyUpdate(dt){
     if(!fly.rmb) return;
+    if(fly.orthoPan) return;
+    if(fly.rotateOnly) return;
     const speed = (fly.keys.shift ? fly.speed * 2.4 : fly.speed) * Math.max(.001, dt || .016);
     const dir = new THREE.Vector3();
     if(fly.keys.w) dir.z -= 1;
@@ -72,8 +129,22 @@ function create(deps){
     if(fly.keys.e) dir.y += 1;
     if(fly.keys.q) dir.y -= 1;
     if(dir.lengthSq()){
-      dir.normalize().multiplyScalar(speed).applyQuaternion(camE.quaternion);
-      camE.position.add(dir);
+      const cam = activeCamera();
+      dir.normalize().multiplyScalar(speed).applyQuaternion(worldQuaternion(cam));
+      const rig = activeRig();
+      if(rig && rig !== cam){
+        const delta = dir.clone();
+        if(rig.parent && rig.parent.isObject3D){
+          const parentQuat = new THREE.Quaternion();
+          rig.parent.getWorldQuaternion(parentQuat);
+          delta.applyQuaternion(parentQuat.invert());
+        }
+        rig.position.add(delta);
+        rig.updateMatrixWorld(true);
+        notifyRigChanged(rig);
+      } else {
+        cam.position.add(dir);
+      }
     }
   }
 

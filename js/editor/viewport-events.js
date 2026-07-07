@@ -19,6 +19,10 @@ function create(deps){
       deps.clearHoverPickHelper();
       return;
     }
+    if(deps.isLiveMaterialSelectionActive && deps.isLiveMaterialSelectionActive()){
+      deps.updateLiveMaterialSelection(e);
+      return;
+    }
     deps.updateHover(e);
   }
 
@@ -26,10 +30,14 @@ function create(deps){
 
   canvas.addEventListener('pointerdown', e => {
     if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
+    if(deps.setActiveViewportAt) deps.setActiveViewportAt(e.clientX, e.clientY);
     downX = e.clientX; downY = e.clientY; downBtn = e.button;
     deps.clearHoverPickHelper();
     if(e.button === 2) deps.flyStart(e);
-  });
+    else if(e.button === 0 && deps.isActiveViewportCameraDriven && deps.isActiveViewportCameraDriven()){
+      deps.flyStart(e, {button:0, rotateOnly:true});
+    }
+  }, true);
 
   addEventListener('pointermove', e => {
     if(ED.active && !ED.playPreview && !ED.levelsOpen && !ED.projectsOpen){
@@ -43,10 +51,14 @@ function create(deps){
     const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
     const wasFlying = deps.isFlyActive() && deps.flyMoved() > 6;
     const suppressSceneClick = deps.shouldSuppressSceneClick();
-    if(e.button === 2) deps.flyEnd(e);
+    if(deps.isFlyActive()) deps.flyEnd(e);
     if(e.target !== canvas) return;
     if(e.button === 0 && downBtn === 0 && dist < 5){
       if(suppressSceneClick) return;
+      if(deps.isLiveMaterialSelectionActive && deps.isLiveMaterialSelectionActive()){
+        deps.commitLiveMaterialSelection(e);
+        return;
+      }
       const hit = deps.pickAt(e.clientX, e.clientY);
       if(hit) deps.selectObject(hit.entity);
       else deps.deselect();
@@ -88,6 +100,7 @@ function create(deps){
     if(ED.active && !ED.playPreview){
       e.preventDefault();
       if(deps.isFlyActive()) deps.adjustFlySpeed(e.deltaY);
+      else if(deps.zoomActiveViewport) deps.zoomActiveViewport(e.deltaY, e.clientX, e.clientY);
     }
   }, {passive:false});
 

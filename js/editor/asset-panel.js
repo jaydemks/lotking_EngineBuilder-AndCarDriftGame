@@ -9,6 +9,7 @@ function create(deps){
   deps = deps || {};
   const ED = deps.ED;
   const documentRef = deps.document || document;
+  const tr = (en, it) => deps.GAME && deps.GAME.i18n && deps.GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function button(label, title, fn){
     const b = documentRef.createElement('button');
@@ -193,14 +194,14 @@ function create(deps){
       source:s.id, icon:'🔊', filterType:'sound', active:s.id === assignedSoundSet, draggable:false,
       defaultAction:() => deps.openSoundDesigner(s.id),
       actions:[
-        {label:'🎛', title:'Apri nel Sound Designer', fn:() => deps.openSoundDesigner(s.id)},
-        {label:'🚗', title:'Assegna al veicolo player', fn:() => {
+        {label:'🎛', title:tr('Open in Sound Designer', 'Apri nel Sound Designer'), fn:() => deps.openSoundDesigner(s.id)},
+        {label:'🚗', title:tr('Assign to player vehicle', 'Assegna al veicolo player'), fn:() => {
           GAME.player.setEngineSound(s.id); deps.markDirty(); deps.refreshAssetsPanel();
-          deps.status('Sound set "' + s.name + '" assegnato al veicolo');
+          deps.status(tr('Sound set "', 'Sound set "') + s.name + tr('" assigned to vehicle', '" assegnato al veicolo'));
         }},
-        {label:'⧉', title:'Duplica', fn:() => { STORE.soundSets.duplicate(s.id); deps.refreshAssetsPanel(); }},
-        {label:'×', title:'Elimina', fn:() => {
-          deps.confirmEditorAction({title:'Delete sound set?', message:'Eliminare il sound set "' + s.name + '"?', okText:'Delete'}).then(ok => {
+        {label:'⧉', title:tr('Duplicate', 'Duplica'), fn:() => { STORE.soundSets.duplicate(s.id); deps.refreshAssetsPanel(); }},
+        {label:'×', title:tr('Delete', 'Elimina'), fn:() => {
+          deps.confirmEditorAction({title:'Delete sound set?', message:tr('Delete sound set "', 'Eliminare il sound set "') + s.name + '"?', okText:tr('Delete', 'Elimina')}).then(ok => {
             if(!ok) return;
             STORE.soundSets.remove(s.id);
             if(assignedSoundSet === s.id){ GAME.player.setEngineSound(null); deps.markDirty(); }

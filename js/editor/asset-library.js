@@ -12,6 +12,7 @@ function create(opts){
   opts = opts || {};
   const store = opts.store;
   const status = typeof opts.status === 'function' ? opts.status : () => {};
+  const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   function load(){
     try {
@@ -27,7 +28,7 @@ function create(opts){
       localStorage.setItem(ASSET_LIBRARY_KEY, JSON.stringify({version:1, assets:list}));
       return true;
     } catch(err){
-      status('⚠ Asset library save failed: browser storage non disponibile');
+      status(tr('⚠ Asset library save failed: browser storage unavailable', '⚠ Asset library save failed: browser storage non disponibile'));
       return false;
     }
   }
@@ -131,6 +132,12 @@ function create(opts){
         depthBias:.012,
         doubleSide:true,
         animated:/\.gif$/i.test(asset.source || '') || /gif/i.test(asset.mime || ''),
+        materialModel:'unlit',
+        roughness:.65,
+        metalness:0,
+        specular:.35,
+        emissive:0x000000,
+        emissiveIntensity:0,
       },
       asset:{key: asset.key, dbKey: asset.dbKey || null, name: asset.name, source: asset.source || 'Imported texture'},
       t:{p:[at.x, .025, at.z], r:[-Math.PI/2,0,0], s:[1,1,1], v:true},

@@ -18,6 +18,7 @@ function create(deps){
   const btnRow = deps.btnRow;
   const checkRow = deps.checkRow;
   const colorRow = deps.colorRow;
+  const selectRow = deps.selectRow;
   const sliderRow = deps.sliderRow;
   const entityIcon = deps.entityIcon;
   const markDirty = deps.markDirty;
@@ -37,6 +38,8 @@ function create(deps){
   const replaceSelectedGlb = deps.replaceSelectedGlb;
   const requestWarmup = deps.requestWarmup || function(){};
   const importTextureFile = deps.importTextureFile || function(){ return Promise.resolve(null); };
+  const assetLibraryLoad = deps.assetLibraryLoad || function(){ return []; };
+  const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return asset && asset.src ? Promise.resolve(asset.src) : Promise.reject(new Error('asset source missing')); };
   const beginColliderHistory = deps.beginColliderHistory || function(){};
   const commitColliderHistory = deps.commitColliderHistory || function(){};
 
@@ -44,7 +47,7 @@ function create(deps){
     const parent = o && o.parent && o.parent !== scene ? o.parent : null;
     const parentName = parent ? (parent.userData.editorName || parent.name || parent.userData.editorId || 'parent') : 'Scene';
     const inputSpace = parent ? 'LOCAL' : 'GLOBAL';
-    const origin = o && o.userData.builtin ? 'Originale' : 'Aggiunto';
+    const origin = o && o.userData.builtin ? 'Original' : 'Added';
     return {parent, parentName, inputSpace, origin};
   }
 
@@ -111,7 +114,7 @@ function create(deps){
   function build(box, o){
     const lang = GAME && GAME.i18n && GAME.i18n.lang === 'it' ? 'it' : 'en';
     const tr = (en, it) => lang === 'it' ? (it || en) : en;
-    const head = el('<div class="lk-head"><span class="lk-head-ic">' + entityIcon(o) + '</span><input class="lk-head-name"><span class="lk-head-id">' + o.userData.editorId + (o.userData.builtin ? ' · originale' : ' · aggiunto') + '</span></div>');
+    const head = el('<div class="lk-head"><span class="lk-head-ic">' + entityIcon(o) + '</span><input class="lk-head-name"><span class="lk-head-id">' + o.userData.editorId + (o.userData.builtin ? ' · ' + tr('original', 'originale') : ' · ' + tr('added', 'aggiunto')) + '</span></div>');
     const nameI = head.querySelector('input');
     nameI.value = o.userData.editorName || '';
     nameI.addEventListener('change', () => { o.userData.editorName = nameI.value; markDirty(); refreshOutliner(); });
@@ -120,7 +123,7 @@ function create(deps){
       o.userData.editorType === 'playerSkid' || o.userData.editorType === 'playerDataWidget'){
       box.appendChild(btnRow([
         {label:'← player_car Logic', action:() => selectObject(GAME.player.car)},
-        {label:'Focus componente', action: focusSelected},
+        {label:tr('Focus component', 'Focus componente'), action: focusSelected},
       ]));
       box.appendChild(el('<div class="lk-hint">This component belongs to the player vehicle. Go back to player_car Logic to edit global settings, presets and sources.</div>'));
     }
@@ -129,13 +132,13 @@ function create(deps){
       box.appendChild(el('<div class="lk-hint">Linked parent: ' + (parent ? (parent.userData.editorName || parent.userData.editorId) : o.userData.linkParentId) + '</div>'));
     }
 
-    const st = section('TRASFORMAZIONE');
+    const st = section(tr('TRANSFORM', 'TRASFORMAZIONE'));
     const ctx = transformContextInfo(o);
     const wt = worldTransformSummary(o);
     st.body.appendChild(el(
       '<div class="lk-transform-context">' +
         '<span>' + ctx.origin + '</span>' +
-        '<span>Campi ' + ctx.inputSpace + '</span>' +
+        '<span>' + tr('Fields', 'Campi') + ' ' + ctx.inputSpace + '</span>' +
         '<span>Gizmo ' + transformSpaceText() + '</span>' +
       '</div>'
     ));
@@ -158,8 +161,8 @@ function create(deps){
       st.body.appendChild(row);
       return ins;
     };
-    const pI = mk('Posizione', 'p', ax => o.position[ax], (ax,v) => o.position[ax] = v);
-    const rI = mk('Rotazione°', 'r', ax => THREE.MathUtils.radToDeg(o.rotation[ax]), (ax,v) => o.rotation[ax] = THREE.MathUtils.degToRad(v), true);
+    const pI = mk(tr('Position', 'Posizione'), 'p', ax => o.position[ax], (ax,v) => o.position[ax] = v);
+    const rI = mk(tr('Rotation°', 'Rotazione°'), 'r', ax => THREE.MathUtils.radToDeg(o.rotation[ax]), (ax,v) => o.rotation[ax] = THREE.MathUtils.degToRad(v), true);
     let uniform = false;
     const sI = mk('Scale', 's', ax => o.scale[ax], (ax,v) => {
       if(uniform) o.scale.set(v,v,v); else o.scale[ax] = v;
@@ -170,12 +173,12 @@ function create(deps){
     st.body.appendChild(btnRow([{label:'↺ Reset', action:() => { resetTransform(o); syncTransformFields(); }}]));
     box.appendChild(st.root);
 
-    const sd = section('VISIBILITÀ');
-    sd.body.appendChild(checkRow('Visibile', o.visible, v => { o.visible = v; markDirty(); refreshOutliner(); }).root);
+    const sd = section(tr('VISIBILITY', 'VISIBILITA'));
+    sd.body.appendChild(checkRow(tr('Visible', 'Visibile'), o.visible, v => { o.visible = v; markDirty(); refreshOutliner(); }).root);
     if(o.userData.editorType === 'mesh'){
       let anyCast = false;
       o.traverse(n => { if(n.isMesh && n.castShadow) anyCast = true; });
-      sd.body.appendChild(checkRow('Proietta ombre', anyCast, v => {
+      sd.body.appendChild(checkRow(tr('Cast shadows', 'Proietta ombre'), anyCast, v => {
         o.traverse(n => { if(n.isMesh) n.castShadow = v; });
         o.userData.matProps = Object.assign({}, o.userData.matProps, {castShadow: v});
         requestWarmup(v ? 'Warm-up shadows...' : 'Warm-up render...');
@@ -183,6 +186,118 @@ function create(deps){
       }).root);
     }
     box.appendChild(sd.root);
+
+    const sceneCameraOptions = () => {
+      const opts = [{value:'', label:'None'}];
+      GAME.world.registry.forEach(item => {
+        if(item && item.userData && item.userData.editorType === 'camera'){
+          opts.push({value:item.userData.editorId, label:item.userData.editorName || item.userData.editorId});
+        }
+      });
+      return opts;
+    };
+
+    if(o.userData.editorType === 'camera'){
+      const camSec = section('SCENE CAMERA');
+      const props = Object.assign({fov:50, near:.05, far:800, helperSize:1.2, preview:true}, o.userData.cameraProps || {});
+      o.userData.cameraProps = props;
+      const updateCamera = patch => {
+        Object.assign(props, patch || {});
+        o.userData.cameraProps = props;
+        if(o.userData.addedEntry) o.userData.addedEntry.props = Object.assign({}, props);
+        if(STORE.updateSceneCameraObject) STORE.updateSceneCameraObject(o, props);
+        markDirty();
+      };
+      camSec.body.appendChild(sliderRow('FOV', props.fov || 50, 10, 140, 1, v => updateCamera({fov:Math.round(v)}), v => Math.round(v) + '°').root);
+      camSec.body.appendChild(sliderRow('Near clip', props.near || .05, .01, 5, .01, v => updateCamera({near:Math.max(.01, v)}), v => (+v).toFixed(2) + 'm').root);
+      camSec.body.appendChild(sliderRow('Far clip', props.far || 800, 10, 3000, 10, v => updateCamera({far:Math.max(10, v)}), v => Math.round(v) + 'm').root);
+      camSec.body.appendChild(sliderRow('Helper size', props.helperSize || 1.2, .25, 8, .05, v => updateCamera({helperSize:v}), v => (+v).toFixed(2) + 'm').root);
+      camSec.body.appendChild(checkRow('Show helper', props.preview !== false, v => updateCamera({preview:v})).root);
+      camSec.body.appendChild(btnRow([{label:'Use in quad view B', action:() => { ED.viewportSlots[1] = 'cam:' + o.userData.editorId; markDirty(); }}]));
+      box.appendChild(camSec.root);
+    }
+
+    if(o.userData.editorType === 'cinemaStudio'){
+      const cinemaSec = section('CINEMA STUDIO', true);
+      const props = Object.assign({duration:6, fps:24, playback:'one-shot', trigger:'manual', previewCamera:'', movieTrack:[], cameras:[], keyframes:[], objectTracks:[]}, o.userData.cinemaProps || {});
+      if(!Array.isArray(props.movieTrack)) props.movieTrack = [];
+      if(!Array.isArray(props.cameras)) props.cameras = [];
+      if(!Array.isArray(props.keyframes)) props.keyframes = [];
+      if(!Array.isArray(props.objectTracks)) props.objectTracks = [];
+      o.userData.cinemaProps = props;
+      const saveCinema = patch => {
+        Object.assign(props, patch || {});
+        o.userData.cinemaProps = props;
+        if(o.userData.addedEntry) o.userData.addedEntry.props = Object.assign({}, props);
+        markDirty();
+        refreshOutliner();
+      };
+      cinemaSec.body.appendChild(sliderRow('Duration', props.duration || 6, .5, 240, .1, v => saveCinema({duration:v}), v => (+v).toFixed(1) + 's').root);
+      cinemaSec.body.appendChild(sliderRow('FPS', props.fps || 24, 12, 120, 1, v => saveCinema({fps:Math.round(v)}), v => Math.round(v)).root);
+      cinemaSec.body.appendChild(selectRow('Playback', props.playback || 'one-shot', [
+        {value:'one-shot', label:'One-shot'},
+        {value:'loop', label:'Loop'},
+      ], v => saveCinema({playback:v})).root);
+      cinemaSec.body.appendChild(selectRow('Trigger', props.trigger || 'manual', [
+        {value:'manual', label:'Manual'},
+        {value:'on-play', label:'On Play Preview'},
+        {value:'runtime-event', label:'Runtime event'},
+      ], v => saveCinema({trigger:v})).root);
+      cinemaSec.body.appendChild(selectRow('Default shot camera', props.previewCamera || '', sceneCameraOptions(), v => saveCinema({previewCamera:v})).root);
+      const trackList = el('<div class="lk-cinema-track"></div>');
+      const renderTrack = () => {
+        trackList.innerHTML = '';
+        const items = props.movieTrack.slice().sort((a,b) => (a.time || 0) - (b.time || 0));
+        if(!items.length) trackList.appendChild(el('<div class="lk-hint">Movie track is empty. Add cuts from the selected preview camera.</div>'));
+        items.forEach((cut, index) => {
+          const camera = GAME.world.registry.find(item => item.userData && item.userData.editorId === cut.cameraId);
+          const row = el('<div class="lk-cinema-cut"><span></span><button type="button">×</button></div>');
+          row.querySelector('span').textContent = (+cut.time || 0).toFixed(2) + 's - ' + ((+cut.time || 0) + (Number(cut.duration) || 1)).toFixed(2) + 's  |  ' + (camera && (camera.userData.editorName || camera.userData.editorId) || cut.cameraId || 'Camera');
+          row.querySelector('button').addEventListener('click', () => {
+            props.movieTrack.splice(index, 1);
+            saveCinema({movieTrack:props.movieTrack});
+            renderTrack();
+          });
+          trackList.appendChild(row);
+        });
+      };
+      cinemaSec.body.appendChild(trackList);
+      cinemaSec.body.appendChild(btnRow([
+        {label:'Add cut', action:() => {
+          const cameraId = props.previewCamera || (sceneCameraOptions()[1] && sceneCameraOptions()[1].value) || '';
+          if(!cameraId) return;
+          const previewTime = ED.cinemaPreview && ED.cinemaPreview.id === o.userData.editorId ? ED.cinemaPreview.time : null;
+          const lastTime = props.movieTrack.reduce((max, item) => Math.max(max, Number(item.time) || 0), -1);
+          const time = previewTime != null ? previewTime : Math.max(0, Math.min(props.duration || 6, lastTime + 1));
+          props.movieTrack.push({id:'shot_' + Date.now().toString(36), type:'shot', time, duration:Math.min(2, Math.max(.25, (props.duration || 6) - time)), cameraId});
+          saveCinema({movieTrack:props.movieTrack});
+          renderTrack();
+        }},
+        {label:'Add keyframe', action:() => {
+          props.keyframes.push({time:Math.min(props.duration || 6, props.keyframes.length), position:[o.position.x, o.position.y, o.position.z]});
+          saveCinema({keyframes:props.keyframes});
+          selectObject(o);
+        }},
+      ]));
+      cinemaSec.body.appendChild(btnRow([
+        {label:'Preview in quad', action:() => {
+          ED.viewportMode = 'quad';
+          ED.cinemaPreview = {id:o.userData.editorId, time:0, playing:false};
+          ED.viewportSlots[1] = 'timeline:' + o.userData.editorId;
+        }},
+        {label:'▶ Play movie', action:() => {
+          ED.viewportMode = 'quad';
+          ED.cinemaPreview = {id:o.userData.editorId, time:0, playing:true};
+          ED.viewportSlots[1] = 'timeline:' + o.userData.editorId;
+        }},
+        {label:'■ Stop', action:() => {
+          ED.cinemaPreview = null;
+        }},
+      ]));
+      cinemaSec.body.appendChild(el('<div class="lk-hint">Cinema Studio data is saved with this element: cameras, movie cuts, keyframes, trigger and playback mode. Runtime event playback can build on this structure.</div>'));
+      renderTrack();
+      box.appendChild(cinemaSec.root);
+    }
 
     if(o.userData.editorType === 'text'){
       const tx = section('TEXT');
@@ -251,6 +366,7 @@ function create(deps){
       const props = Object.assign({
         mode:'decal', src:null, dbKey:null, asset:null, width:2, height:2, opacity:1, color:0xffffff,
         alphaTest:.01, blending:'normal', depthBias:.012, doubleSide:true, animated:false,
+        materialModel:'unlit', roughness:.65, metalness:0, specular:.35, emissive:0x000000, emissiveIntensity:0,
       }, o.userData.textureProps || {});
       o.userData.textureProps = props;
       const updateTexture = patch => {
@@ -268,14 +384,25 @@ function create(deps){
       const preview = el('<div class="lk-texture-preview"><div></div><span>' + tr('No texture loaded', 'Nessuna texture caricata') + '</span></div>');
       const previewBox = preview.querySelector('div');
       const previewText = preview.querySelector('span');
-      const previewSrc = props.src || null;
-      if(previewSrc){
-        previewBox.style.backgroundImage = 'url(' + previewSrc + ')';
-        previewBox.style.backgroundSize = 'cover';
-        previewBox.style.backgroundPosition = 'center';
-        previewText.textContent = props.asset && (props.asset.name || props.asset.source) || tr('Inline texture', 'Texture inline');
-      } else if(props.dbKey && props.asset){
-        previewText.textContent = props.asset.name || props.asset.source || tr('Texture from asset DB', 'Texture da asset DB');
+      const applyTexturePreview = (asset, label) => {
+        if(!asset) return;
+        const previewUrl = asset.src ? Promise.resolve(asset.src) : resolveImportedAssetUrl(asset).catch(() => null);
+        previewText.textContent = label || asset.name || asset.source || tr('Imported texture', 'Texture importata');
+        previewUrl.then(url => {
+          if(!url) return;
+          previewBox.style.backgroundImage = 'url(' + url + ')';
+          previewBox.style.backgroundSize = 'cover';
+          previewBox.style.backgroundPosition = 'center';
+        });
+      };
+      const previewDbKey = props.dbKey || props.asset && props.asset.dbKey || null;
+      if(props.src || previewDbKey){
+        applyTexturePreview({
+          src:props.src || null,
+          dbKey:previewDbKey,
+          name:props.asset && props.asset.name,
+          source:props.asset && props.asset.source,
+        }, props.asset && (props.asset.name || props.asset.source) || (props.src ? tr('Inline texture', 'Texture inline') : tr('Texture from asset DB', 'Texture da asset DB')));
       }
       tex.body.appendChild(preview);
       const fileRow = el('<div class="lk-drop"><strong>' + tr('Load texture / decal', 'Carica texture / decal') + '</strong><span>' + tr('PNG, JPG, WEBP, AVIF or GIF. The file is also saved in Assets.', 'PNG, JPG, WEBP, AVIF o GIF. Il file viene salvato anche in Assets.') + '</span></div>');
@@ -290,6 +417,15 @@ function create(deps){
       fileRow.addEventListener('drop', e => {
         e.preventDefault();
         fileRow.classList.remove('drag');
+        const ref = e.dataTransfer && e.dataTransfer.getData && e.dataTransfer.getData('application/x-lotking-asset');
+        if(ref && ref.indexOf('imported:') === 0){
+          const assetId = ref.slice(9);
+          const asset = assetLibraryLoad().find(item => item && item.id === assetId && item.kind === 'texture');
+          if(asset){
+            handlePatchFromAsset(asset);
+            return;
+          }
+        }
         const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if(f) handleTextureFile(f);
       });
@@ -300,12 +436,7 @@ function create(deps){
       });
       const handlePatchFromAsset = asset => {
         if(!asset) return;
-        if(asset.src){
-          previewBox.style.backgroundImage = 'url(' + asset.src + ')';
-          previewBox.style.backgroundSize = 'cover';
-          previewBox.style.backgroundPosition = 'center';
-        }
-        previewText.textContent = asset.name || asset.source || tr('Imported texture', 'Texture importata');
+        applyTexturePreview(asset);
         updateTexture({
           src:asset.src || null,
           dbKey:asset.dbKey || null,
@@ -319,6 +450,16 @@ function create(deps){
         });
       }
       tex.body.appendChild(fileRow);
+      const textureAssets = assetLibraryLoad().filter(asset => asset && asset.kind === 'texture');
+      if(textureAssets.length){
+        tex.body.appendChild(selectRow('Use from Assets', '', [
+          {value:'', label:tr('Choose imported texture...', 'Scegli texture importata...')},
+          ...textureAssets.map(asset => ({value:asset.id, label:asset.source || asset.name || asset.key})),
+        ], id => {
+          const asset = textureAssets.find(item => item.id === id);
+          if(asset) handlePatchFromAsset(asset);
+        }).root);
+      }
       tex.body.appendChild(selectRow(tr('Type', 'Tipo'), props.mode || 'decal', [
         {value:'decal', label:tr('Surface decal', 'Decal su superficie')},
         {value:'image', label:tr('Free image', 'Immagine libera')},
@@ -336,12 +477,23 @@ function create(deps){
         {value:'multiply', label:'Multiply'},
         {value:'subtractive', label:'Subtractive'},
       ], v => updateTexture({blending:v})).root);
-      tex.body.appendChild(colorRow(tr('Tint', 'Tint'), props.color == null ? 0xffffff : props.color, v => updateTexture({color:v})).root);
+      tex.body.appendChild(colorRow(tr('Base color', 'Colore base'), props.color == null ? 0xffffff : props.color, v => updateTexture({color:v})).root);
       tex.body.appendChild(sliderRow(tr('Width', 'Larghezza'), props.width || 2, .05, 24, .05, v => updateTexture({width:v}), v => (+v).toFixed(2) + 'm').root);
       tex.body.appendChild(sliderRow(tr('Height', 'Altezza'), props.height || 2, .05, 24, .05, v => updateTexture({height:v}), v => (+v).toFixed(2) + 'm').root);
       tex.body.appendChild(sliderRow(tr('Opacity', 'Opacità'), props.opacity == null ? 1 : props.opacity, 0, 1, .01, v => updateTexture({opacity:v}), v => Math.round(v * 100) + '%').root);
       tex.body.appendChild(sliderRow('Alpha cut', props.alphaTest == null ? .01 : props.alphaTest, 0, .8, .01, v => updateTexture({alphaTest:v}), v => (+v).toFixed(2)).root);
       tex.body.appendChild(sliderRow('Depth bias', props.depthBias == null ? .012 : props.depthBias, 0, .08, .001, v => updateTexture({depthBias:v}), v => (+v).toFixed(3) + 'm').root);
+      tex.body.appendChild(selectRow(tr('Lighting', 'Illuminazione'), props.materialModel || 'unlit', [
+        {value:'unlit', label:tr('Unlit / flat', 'Non illuminato / piatto')},
+        {value:'lit', label:tr('Lit / PBR', 'Illuminato / PBR')},
+      ], v => updateTexture({materialModel:v})).root);
+      if((props.materialModel || 'unlit') === 'lit'){
+        tex.body.appendChild(sliderRow(tr('Roughness', 'Ruvidità'), props.roughness == null ? .65 : props.roughness, 0, 1, .01, v => updateTexture({roughness:v}), v => Math.round(v * 100) + '%').root);
+        tex.body.appendChild(sliderRow(tr('Metallic', 'Metallico'), props.metalness == null ? 0 : props.metalness, 0, 1, .01, v => updateTexture({metalness:v}), v => Math.round(v * 100) + '%').root);
+        tex.body.appendChild(sliderRow(tr('Specular', 'Speculare'), props.specular == null ? .35 : props.specular, 0, 1, .01, v => updateTexture({specular:v}), v => Math.round(v * 100) + '%').root);
+        tex.body.appendChild(colorRow(tr('Emission color', 'Colore emissione'), props.emissive == null ? 0x000000 : props.emissive, v => updateTexture({emissive:v})).root);
+        tex.body.appendChild(sliderRow(tr('Emission', 'Emissione'), props.emissiveIntensity == null ? 0 : props.emissiveIntensity, 0, 3, .01, v => updateTexture({emissiveIntensity:v}), v => (+v).toFixed(2)).root);
+      }
       tex.body.appendChild(checkRow(tr('Double side', 'Doppio lato'), props.doubleSide !== false, v => updateTexture({doubleSide:v})).root);
       tex.body.appendChild(checkRow(tr('Animated / GIF refresh', 'Animata / refresh GIF'), !!props.animated, v => updateTexture({animated:v})).root);
       box.appendChild(tex.root);
@@ -486,7 +638,7 @@ function create(deps){
       }
       if(isConeObject(o)){
         sc.body.appendChild(btnRow([{
-          label:'↺ Reset cono eretto',
+          label:tr('↺ Reset cone upright', '↺ Reset cono eretto'),
           action: () => resetConeToOriginalRotation(o),
         }]));
       }
@@ -500,18 +652,18 @@ function create(deps){
 
     const light = o.isLight ? o : o.userData.light;
     if(light){
-      const sl = section('LUCE');
-      sl.body.appendChild(colorRow('Colore', light.color ? light.color.getHex() : 0xffffff, v => { light.color.setHex(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
-      if(light.groundColor) sl.body.appendChild(colorRow('Colore terreno', light.groundColor.getHex(), v => { light.groundColor.setHex(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
-      sl.body.appendChild(sliderRow('Intensità', light.intensity, 0, 6, .05, v => { light.intensity = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
+      const sl = section(tr('LIGHT', 'LUCE'));
+      sl.body.appendChild(colorRow(tr('Color', 'Colore'), light.color ? light.color.getHex() : 0xffffff, v => { light.color.setHex(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
+      if(light.groundColor) sl.body.appendChild(colorRow(tr('Ground color', 'Colore terreno'), light.groundColor.getHex(), v => { light.groundColor.setHex(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
+      sl.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), light.intensity, 0, 6, .05, v => { light.intensity = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
       if(light.distance != null && !light.isDirectionalLight && !light.isHemisphereLight && !light.isAmbientLight)
-        sl.body.appendChild(sliderRow('Distanza', light.distance, 0, 200, 1, v => { light.distance = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
+        sl.body.appendChild(sliderRow(tr('Distance', 'Distanza'), light.distance, 0, 200, 1, v => { light.distance = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
       if(light.isSpotLight){
-        sl.body.appendChild(sliderRow('Angolo°', THREE.MathUtils.radToDeg(light.angle), 5, 89, 1, v => { light.angle = THREE.MathUtils.degToRad(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
-        sl.body.appendChild(sliderRow('Penombra', light.penumbra, 0, 1, .01, v => { light.penumbra = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
+        sl.body.appendChild(sliderRow(tr('Angle°', 'Angolo°'), THREE.MathUtils.radToDeg(light.angle), 5, 89, 1, v => { light.angle = THREE.MathUtils.degToRad(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
+        sl.body.appendChild(sliderRow(tr('Penumbra', 'Penombra'), light.penumbra, 0, 1, .01, v => { light.penumbra = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
       }
       if(!light.isAmbientLight && !light.isHemisphereLight)
-        sl.body.appendChild(checkRow('Proietta ombre', light.castShadow, v => { light.castShadow = v; requestWarmup(v ? 'Warm-up shadows...' : 'Warm-up light...'); markDirty(); }).root);
+        sl.body.appendChild(checkRow(tr('Cast shadows', 'Proietta ombre'), light.castShadow, v => { light.castShadow = v; requestWarmup(v ? 'Warm-up shadows...' : 'Warm-up light...'); markDirty(); }).root);
       box.appendChild(sl.root);
     }
 
@@ -519,23 +671,24 @@ function create(deps){
 
     if(o.userData.effectParams){
       const p = o.userData.effectParams;
-      const se = section('EFFETTO (' + p.kind + ')');
-      se.body.appendChild(colorRow('Colore', p.color, v => { o.userData.effectSetColor(v); markDirty(); }).root);
-      se.body.appendChild(sliderRow('Frequenza', p.rate, 1, 80, 1, v => { p.rate = v; markDirty(); }).root);
-      se.body.appendChild(sliderRow('Dimensione', p.size, .1, 8, .05, v => { p.size = v; markDirty(); }).root);
-      se.body.appendChild(sliderRow('Vita (s)', p.life, .2, 6, .05, v => { p.life = v; markDirty(); }).root);
-      se.body.appendChild(sliderRow('Spinta ↑', p.rise, 0, 8, .1, v => { p.rise = v; markDirty(); }).root);
-      se.body.appendChild(sliderRow('Dispersione', p.spread, 0, 6, .05, v => { p.spread = v; markDirty(); }).root);
-      se.body.appendChild(sliderRow('Opacità', p.opacity, .05, 1, .01, v => { p.opacity = v; markDirty(); }).root);
+      const se = section(tr('EFFECT', 'EFFETTO') + ' (' + p.kind + ')');
+      se.body.appendChild(colorRow(tr('Color', 'Colore'), p.color, v => { o.userData.effectSetColor(v); markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Rate', 'Frequenza'), p.rate, 1, 80, 1, v => { p.rate = v; markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Size', 'Dimensione'), p.size, .1, 8, .05, v => { p.size = v; markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Life (s)', 'Vita (s)'), p.life, .2, 6, .05, v => { p.life = v; markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Rise ↑', 'Spinta ↑'), p.rise, 0, 8, .1, v => { p.rise = v; markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Spread', 'Dispersione'), p.spread, 0, 6, .05, v => { p.spread = v; markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Opacity', 'Opacita'), p.opacity, .05, 1, .01, v => { p.opacity = v; markDirty(); }).root);
       box.appendChild(se.root);
     }
 
-    box.appendChild(btnRow([
+    const footerButtons = [
       {label:'🔍 Focus', action: focusSelected},
-      {label:'⧉ Duplica', action:() => duplicateEntity(o)},
-      {label:'📦 Replace GLB', action:() => replaceSelectedGlb(o)},
-      {label:'🗑 Elimina', danger:true, action:() => requestDeleteEntity(o)},
-    ]));
+      {label:tr('⧉ Duplicate', '⧉ Duplica'), action:() => duplicateEntity(o)},
+    ];
+    if(o.userData.editorType === 'mesh') footerButtons.push({label:'📦 Replace GLB', action:() => replaceSelectedGlb(o)});
+    footerButtons.push({label:tr('🗑 Delete', '🗑 Elimina'), danger:true, action:() => requestDeleteEntity(o)});
+    box.appendChild(btnRow(footerButtons));
   }
 
   return Object.freeze({build});

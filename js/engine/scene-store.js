@@ -562,6 +562,7 @@ function collectPlayerBlueprint(GAME){
   if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
   if(GAME.player.car && GAME.player.car.userData.modelDbKey) player.modelDbKey = GAME.player.car.userData.modelDbKey;
   if(GAME.player.car && GAME.player.car.userData.modelName) player.modelName = GAME.player.car.userData.modelName;
+  if(GAME.player.car && GAME.player.car.userData.matProps) player.materials = cloneData(GAME.player.car.userData.matProps);
   player.rigTransforms = collectPlayerRigTransforms(GAME);
   // engine sound set: id + copia completa (cosi' l'export LKEP e' autosufficiente)
   if(GAME.player.engineAudio && GAME.player.engineAudio.setId){
@@ -923,7 +924,7 @@ function catalogTracks(){
     active: normalizeLevelId(l.id) === activeId,
     primary: normalizeLevelId(l.id) === activeId || !!l.__lkExportPrimary,
     tag: normalizeLevelId(l.id) === activeId ? 'EDITOR TRACK' : 'CUSTOM TRACK',
-    description: 'Livello del Lot King Engine Builder salvato localmente' +
+    description: ((window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it') ? 'Livello del Lot King Engine Builder salvato localmente' : 'Locally saved Lot King Engine Builder level') +
       (l.savedAt ? ' · ' + new Date(l.savedAt).toLocaleString() : '') + '.',
     surface: 'Custom',
     goal: 'Drift sandbox',
@@ -1124,7 +1125,56 @@ function applyLightProps(l, p){
   if(p.visible != null) l.visible = p.visible;
 }
 
-// material override: applied to every mesh in the object (edited via editor)
+// material override: global or per material slot (edited via editor)
+function normalizeStoredMatProps(p){
+  if(!p) return {global:{}, slots:{}};
+  if(p.global || p.slots){
+    return {
+      global:Object.assign({}, p.global || {}),
+      slots:Object.assign({}, p.slots || {}),
+    };
+  }
+  const flat = Object.assign({}, p);
+  delete flat.materialSlot;
+  return {global:flat, slots:{}};
+}
+
+function mergeStoredMatProps(current, patch){
+  const next = normalizeStoredMatProps(current);
+  const incoming = normalizeStoredMatProps(patch);
+  next.global = Object.assign({}, next.global, incoming.global);
+  Object.keys(incoming.slots || {}).forEach(key => {
+    next.slots[key] = Object.assign({}, next.slots[key] || {}, incoming.slots[key] || {});
+  });
+  if(patch && patch.materialSlot){
+    const slot = patch.materialSlot;
+    const flat = Object.assign({}, patch);
+    delete flat.materialSlot;
+    next.slots[slot] = Object.assign({}, next.slots[slot] || {}, flat);
+  }
+  return next;
+}
+
+function sanitizePlayerMatProps(props){
+  const stored = normalizeStoredMatProps(props);
+  const global = Object.assign({}, stored.global || {});
+  const explicitGlobal = !!global.allowGlobal;
+  const slots = {};
+  Object.keys(stored.slots || {}).forEach(key => {
+    const slot = Object.assign({}, stored.slots[key] || {});
+    delete slot.allowGlobal;
+    slots[key] = slot;
+  });
+  return {
+    global: explicitGlobal ? global : {},
+    slots,
+  };
+}
+
+function materialSlotMatches(meshIndex, materialIndex, targetSlot){
+  return !targetSlot || targetSlot === 'all' || targetSlot === (meshIndex + ':' + materialIndex);
+}
+
 function applyMatProps(obj, p){
   if(!p) return;
   const loadTexture = (src, colorData) => {
@@ -1133,53 +1183,182 @@ function applyMatProps(obj, p){
     tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
     return tx;
   };
-  obj.traverse(o => {
-    if(!o.isMesh || !o.material) return;
-    if(p.materialKind === 'standard'){
-      const convert = m => {
-        if(m && m.isMeshStandardMaterial) return m;
-        const nm = new THREE.MeshStandardMaterial({
-          color: m && m.color ? m.color.clone() : new THREE.Color(0xffffff),
-          map: m ? m.map || null : null,
-          normalMap: m ? m.normalMap || null : null,
-          roughness: .7,
-          metalness: 0,
-          transparent: m ? !!m.transparent : false,
-          opacity: m && m.opacity != null ? m.opacity : 1,
-        });
-        return nm;
-      };
-      o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material);
+  const resolveTextureUrl = (src, dbKey) => {
+    if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey);
+    return Promise.resolve(src || null);
+  };
+  const applyTextureTransform = (tx, props) => {
+    if(!tx || !props) return;
+    tx.repeat.set(
+      props.repeatX != null ? props.repeatX : tx.repeat.x,
+      props.repeatY != null ? props.repeatY : tx.repeat.y
+    );
+    tx.offset.set(
+      props.offsetX != null ? props.offsetX : tx.offset.x,
+      props.offsetY != null ? props.offsetY : tx.offset.y
+    );
+    if(props.rotation != null){
+      tx.center.set(.5, .5);
+      tx.rotation = props.rotation;
     }
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    for(const m of mats){
-      if(p.color != null && m.color) m.color.setHex(p.color);
-      if(p.emissive != null && m.emissive) m.emissive.setHex(p.emissive);
-      if(p.roughness != null && m.roughness != null) m.roughness = p.roughness;
-      if(p.metalness != null && m.metalness != null) m.metalness = p.metalness;
-      if(p.opacity != null){ m.opacity = p.opacity; m.transparent = p.opacity < 1 || !!p.transparent; }
-      if(p.transparent != null) m.transparent = !!p.transparent;
-      if(p.emissiveIntensity != null && m.emissiveIntensity != null) m.emissiveIntensity = p.emissiveIntensity;
-      if(p.normalScale != null && m.normalScale) m.normalScale.set(p.normalScale, p.normalScale);
-      if(p.mapSrc === null){
-        m.map = null;
-        delete m.mapSrc;
-      } else if(p.mapSrc){
-        m.map = loadTexture(p.mapSrc, true);
-        m.mapSrc = p.mapSrc;
+    tx.needsUpdate = true;
+  };
+  const preserveMaterialMeta = (next, m) => {
+    if(!next || !m) return next;
+    next.name = m.name || next.name;
+    next.transparent = !!m.transparent;
+    next.opacity = m.opacity != null ? m.opacity : next.opacity;
+    next.alphaTest = m.alphaTest != null ? m.alphaTest : next.alphaTest;
+    next.depthWrite = m.depthWrite != null ? m.depthWrite : next.depthWrite;
+    next.depthTest = m.depthTest != null ? m.depthTest : next.depthTest;
+    next.side = m.side != null ? m.side : next.side;
+    next.blending = m.blending != null ? m.blending : next.blending;
+    next.vertexColors = m.vertexColors != null ? m.vertexColors : next.vertexColors;
+    next.fog = m.fog != null ? m.fog : next.fog;
+    next.map = m.map || next.map || null;
+    next.normalMap = m.normalMap || next.normalMap || null;
+    next.roughnessMap = m.roughnessMap || next.roughnessMap || null;
+    next.metalnessMap = m.metalnessMap || next.metalnessMap || null;
+    next.alphaMap = m.alphaMap || next.alphaMap || null;
+    next.emissiveMap = m.emissiveMap || next.emissiveMap || null;
+    next.aoMap = m.aoMap || next.aoMap || null;
+    next.lightMap = m.lightMap || next.lightMap || null;
+    next.bumpMap = m.bumpMap || next.bumpMap || null;
+    next.displacementMap = m.displacementMap || next.displacementMap || null;
+    next.envMap = m.envMap || next.envMap || null;
+    if(m.emissive && next.emissive) next.emissive.copy(m.emissive);
+    if(m.emissiveIntensity != null && next.emissiveIntensity != null) next.emissiveIntensity = m.emissiveIntensity;
+    if(m.normalScale && next.normalScale) next.normalScale.copy(m.normalScale);
+    if(m.userData) next.userData = cloneData(m.userData);
+    next.needsUpdate = true;
+    return next;
+  };
+  const convertToStandard = m => {
+    if(m && (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial)) return m;
+    return preserveMaterialMeta(new THREE.MeshStandardMaterial({
+      color: m && m.color ? m.color.clone() : new THREE.Color(0xffffff),
+      map: m ? m.map || null : null,
+      normalMap: m ? m.normalMap || null : null,
+      roughnessMap: m ? m.roughnessMap || null : null,
+      metalnessMap: m ? m.metalnessMap || null : null,
+      alphaMap: m ? m.alphaMap || null : null,
+      emissiveMap: m ? m.emissiveMap || null : null,
+      roughness: m && m.roughness != null ? m.roughness : .7,
+      metalness: m && m.metalness != null ? m.metalness : 0,
+      transparent: m ? !!m.transparent : false,
+      opacity: m && m.opacity != null ? m.opacity : 1,
+      side: m && m.side != null ? m.side : THREE.FrontSide,
+    }), m);
+  };
+  const convertToPhysical = m => {
+    if(m && m.isMeshPhysicalMaterial) return m;
+    const Mat = THREE.MeshPhysicalMaterial || THREE.MeshStandardMaterial;
+    const base = convertToStandard(m);
+    return preserveMaterialMeta(new Mat({
+      color: base.color ? base.color.clone() : new THREE.Color(0xffffff),
+      map: base.map || null,
+      normalMap: base.normalMap || null,
+      roughnessMap: base.roughnessMap || null,
+      metalnessMap: base.metalnessMap || null,
+      alphaMap: base.alphaMap || null,
+      emissiveMap: base.emissiveMap || null,
+      roughness: base.roughness != null ? base.roughness : .35,
+      metalness: base.metalness != null ? base.metalness : 0,
+      transparent: !!base.transparent,
+      opacity: base.opacity != null ? base.opacity : 1,
+      side: base.side != null ? base.side : THREE.FrontSide,
+    }), base);
+  };
+  const applyFlat = (patch, targetSlot) => {
+    if(!patch) return;
+    let meshIndex = 0;
+    obj.traverse(o => {
+      if(!o.isMesh || !o.material) return;
+      if(patch.materialKind === 'standard'){
+        const convert = (m, i) => materialSlotMatches(meshIndex, i, targetSlot) ? convertToStandard(m) : m;
+        o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material, 0);
       }
-      if(p.normalMapSrc === null && m.normalMap !== undefined){
-        m.normalMap = null;
-        delete m.normalMapSrc;
-      } else if(p.normalMapSrc && m.normalMap !== undefined){
-        m.normalMap = loadTexture(p.normalMapSrc, false);
-        m.normalMapSrc = p.normalMapSrc;
+      if(patch.materialKind === 'physical'){
+        const convert = (m, i) => materialSlotMatches(meshIndex, i, targetSlot) ? convertToPhysical(m) : m;
+        o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material, 0);
       }
-      m.needsUpdate = true;
-    }
-    if(p.castShadow != null) o.castShadow = p.castShadow;
-  });
-  obj.userData.matProps = Object.assign({}, obj.userData.matProps, p);
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m, materialIndex) => {
+        if(!materialSlotMatches(meshIndex, materialIndex, targetSlot)) return;
+        if(patch.color != null && m.color) m.color.setHex(patch.color);
+        if(patch.emissive != null && m.emissive) m.emissive.setHex(patch.emissive);
+        if(patch.roughness != null && m.roughness != null) m.roughness = patch.roughness;
+        if(patch.metalness != null && m.metalness != null) m.metalness = patch.metalness;
+        if(patch.opacity != null){ m.opacity = patch.opacity; m.transparent = patch.opacity < 1 || !!patch.transparent; }
+        if(patch.transparent != null) m.transparent = !!patch.transparent;
+        if(patch.depthWrite != null) m.depthWrite = !!patch.depthWrite;
+        if(patch.alphaTest != null) m.alphaTest = patch.alphaTest;
+        if(patch.side != null) m.side = patch.side;
+        if(patch.renderOrder != null) o.renderOrder = patch.renderOrder;
+        if(patch.emissiveIntensity != null && m.emissiveIntensity != null) m.emissiveIntensity = patch.emissiveIntensity;
+        if(patch.normalScale != null && m.normalScale) m.normalScale.set(patch.normalScale, patch.normalScale);
+        if(patch.transmission != null && m.transmission != null) m.transmission = patch.transmission;
+        if(patch.thickness != null && m.thickness != null) m.thickness = patch.thickness;
+        if(patch.ior != null && m.ior != null) m.ior = patch.ior;
+        const setMap = (prop, srcKey, dbKey, colorData, onSet) => {
+          const hasSrc = Object.prototype.hasOwnProperty.call(patch, srcKey);
+          const hasDb = Object.prototype.hasOwnProperty.call(patch, dbKey);
+          const wantsClear = (hasSrc || hasDb) && (!hasSrc || patch[srcKey] === null) && (!hasDb || patch[dbKey] === null);
+          if(wantsClear){
+            m[prop] = null;
+            delete m[srcKey];
+            delete m[dbKey];
+            m.needsUpdate = true;
+            return;
+          }
+          if((hasSrc && patch[srcKey]) || (hasDb && patch[dbKey])){
+            const srcValue = patch[srcKey] || null;
+            const dbValue = patch[dbKey] || null;
+            m[srcKey] = srcValue;
+            m[dbKey] = dbValue;
+            resolveTextureUrl(srcValue, dbValue).then(url => {
+              if(!url) return;
+              const tx = loadTexture(url, colorData);
+              applyTextureTransform(tx, patch);
+              m[prop] = tx;
+              if(onSet) onSet();
+              m.needsUpdate = true;
+            }).catch(err => console.warn('LotKing store: material texture not loaded', err));
+          }
+        };
+        setMap('map', 'mapSrc', 'mapDbKey', true);
+        setMap('normalMap', 'normalMapSrc', 'normalMapDbKey', false);
+        setMap('roughnessMap', 'roughnessMapSrc', 'roughnessMapDbKey', false);
+        setMap('metalnessMap', 'metalnessMapSrc', 'metalnessMapDbKey', false);
+        setMap('alphaMap', 'alphaMapSrc', 'alphaMapDbKey', false, () => { m.transparent = true; });
+        setMap('emissiveMap', 'emissiveMapSrc', 'emissiveMapDbKey', true);
+        applyTextureTransform(m.map, patch);
+        applyTextureTransform(m.normalMap, patch);
+        applyTextureTransform(m.roughnessMap, patch);
+        applyTextureTransform(m.metalnessMap, patch);
+        applyTextureTransform(m.alphaMap, patch);
+        applyTextureTransform(m.emissiveMap, patch);
+        m.needsUpdate = true;
+      });
+      if(patch.castShadow != null) o.castShadow = patch.castShadow;
+      meshIndex++;
+    });
+  };
+  const stored = p.materialSlot
+    ? {global:{}, slots:{[p.materialSlot]: Object.assign({}, p)}}
+    : normalizeStoredMatProps(p);
+  if(p.materialSlot) delete stored.slots[p.materialSlot].materialSlot;
+  applyFlat(stored.global, null);
+  Object.keys(stored.slots || {}).forEach(slot => applyFlat(stored.slots[slot], slot));
+  obj.userData.matProps = mergeStoredMatProps(obj.userData.matProps, p);
+}
+
+function applyPlayerMaterialProps(GAME, props){
+  if(!GAME || !GAME.player || !GAME.player.car || !props) return;
+  const root = GAME.player.getModel ? (GAME.player.getModel() || GAME.player.car) : GAME.player.car;
+  root.userData.matProps = null;
+  applyMatProps(root, sanitizePlayerMatProps(props));
+  GAME.player.car.userData.matProps = cloneData(root.userData.matProps || props);
 }
 
 // ------------------------------------------------ factories: primitives
@@ -1416,6 +1595,12 @@ function normalizeTextureProps(props){
     depthBias:.012,
     doubleSide:true,
     animated:false,
+    materialModel:'unlit',
+    roughness:.65,
+    metalness:0,
+    specular:.35,
+    emissive:0x000000,
+    emissiveIntensity:0,
   }, props || {});
 }
 
@@ -1424,6 +1609,283 @@ function textureBlending(kind){
   if(kind === 'multiply') return THREE.MultiplyBlending;
   if(kind === 'subtractive') return THREE.SubtractiveBlending;
   return THREE.NormalBlending;
+}
+
+function createTextureMaterial(props){
+  const common = {
+    color: props.color,
+    map: placeholderTexture(),
+    transparent:true,
+    opacity: Math.max(0, Math.min(1, props.opacity == null ? 1 : props.opacity)),
+    alphaTest: Math.max(0, Math.min(1, props.alphaTest == null ? .01 : props.alphaTest)),
+    side: props.doubleSide === false ? THREE.FrontSide : THREE.DoubleSide,
+    depthWrite:false,
+    depthTest: props.depthTest !== false,
+    blending:textureBlending(props.blending),
+    polygonOffset:true,
+    polygonOffsetFactor:-4,
+    polygonOffsetUnits:-4,
+  };
+  if(props.materialModel === 'lit'){
+    const Mat = THREE.MeshPhysicalMaterial || THREE.MeshStandardMaterial;
+    const mat = new Mat(Object.assign({}, common, {
+      roughness:Math.max(0, Math.min(1, props.roughness == null ? .65 : props.roughness)),
+      metalness:Math.max(0, Math.min(1, props.metalness == null ? 0 : props.metalness)),
+      emissive:new THREE.Color(props.emissive == null ? 0x000000 : props.emissive),
+      emissiveIntensity:Math.max(0, Math.min(3, props.emissiveIntensity == null ? 0 : props.emissiveIntensity)),
+    }));
+    const specular = Math.max(0, Math.min(1, props.specular == null ? .35 : props.specular));
+    if('reflectivity' in mat) mat.reflectivity = specular;
+    if('specularIntensity' in mat) mat.specularIntensity = specular;
+    if('clearcoat' in mat) mat.clearcoat = Math.max(0, specular - .65) / .35;
+    if('clearcoatRoughness' in mat) mat.clearcoatRoughness = Math.max(0, Math.min(1, props.roughness == null ? .65 : props.roughness));
+    return mat;
+  }
+  return new THREE.MeshBasicMaterial(common);
+}
+
+function isAnimatedTextureProps(props){
+  const p = props || {};
+  const asset = p.asset || {};
+  return !!(p.animated ||
+    /^data:image\/gif/i.test(p.src || '') ||
+    /\.gif(?:$|[?#])/i.test(p.src || '') ||
+    /\.gif$/i.test(asset.source || '') ||
+    /\.gif$/i.test(asset.name || '') ||
+    /gif/i.test(asset.mime || ''));
+}
+
+function gifReadSubBlocks(bytes, pos){
+  const chunks = [];
+  let total = 0;
+  while(pos < bytes.length){
+    const len = bytes[pos++];
+    if(!len) break;
+    chunks.push(bytes.subarray(pos, pos + len));
+    total += len;
+    pos += len;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  chunks.forEach(chunk => { out.set(chunk, at); at += chunk.length; });
+  return {data:out, pos};
+}
+
+function gifSkipSubBlocks(bytes, pos){
+  while(pos < bytes.length){
+    const len = bytes[pos++];
+    if(!len) break;
+    pos += len;
+  }
+  return pos;
+}
+
+function gifColorTable(bytes, pos, count){
+  const table = [];
+  for(let i = 0; i < count; i++){
+    table.push([bytes[pos++], bytes[pos++], bytes[pos++]]);
+  }
+  return {table, pos};
+}
+
+function gifReadCode(data, bitPos, size){
+  let code = 0;
+  for(let i = 0; i < size; i++){
+    if(data[(bitPos + i) >> 3] & (1 << ((bitPos + i) & 7))) code |= 1 << i;
+  }
+  return code;
+}
+
+function gifLzwDecode(minCodeSize, data, expectedLength){
+  const clear = 1 << minCodeSize;
+  const end = clear + 1;
+  let codeSize = minCodeSize + 1;
+  let nextCode = end + 1;
+  let bitPos = 0;
+  let prev = null;
+  let dict = [];
+  const reset = () => {
+    dict = [];
+    for(let i = 0; i < clear; i++) dict[i] = [i];
+    dict[clear] = [];
+    dict[end] = null;
+    codeSize = minCodeSize + 1;
+    nextCode = end + 1;
+    prev = null;
+  };
+  const out = [];
+  reset();
+  while(bitPos + codeSize <= data.length * 8){
+    const code = gifReadCode(data, bitPos, codeSize);
+    bitPos += codeSize;
+    if(code === clear){ reset(); continue; }
+    if(code === end) break;
+    let entry;
+    if(dict[code]) entry = dict[code].slice();
+    else if(code === nextCode && prev) entry = prev.concat(prev[0]);
+    else break;
+    for(let i = 0; i < entry.length; i++) out.push(entry[i]);
+    if(prev){
+      dict[nextCode++] = prev.concat(entry[0]);
+      if(nextCode === (1 << codeSize) && codeSize < 12) codeSize++;
+    }
+    prev = entry;
+    if(out.length >= expectedLength) break;
+  }
+  return out.slice(0, expectedLength);
+}
+
+function gifDeinterlace(indices, w, h){
+  const out = new Array(indices.length);
+  let src = 0;
+  const passes = [
+    {start:0, step:8},
+    {start:4, step:8},
+    {start:2, step:4},
+    {start:1, step:2},
+  ];
+  passes.forEach(pass => {
+    for(let y = pass.start; y < h; y += pass.step){
+      for(let x = 0; x < w; x++) out[y * w + x] = indices[src++];
+    }
+  });
+  return out;
+}
+
+function decodeGifAnimation(bytes){
+  const sig = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
+  if(sig !== 'GIF87a' && sig !== 'GIF89a') throw new Error('not a GIF');
+  let pos = 6;
+  const width = bytes[pos] | (bytes[pos + 1] << 8); pos += 2;
+  const height = bytes[pos] | (bytes[pos + 1] << 8); pos += 2;
+  const packed = bytes[pos++];
+  pos += 2; // background + pixel aspect
+  let globalTable = null;
+  if(packed & 0x80){
+    const res = gifColorTable(bytes, pos, 1 << ((packed & 7) + 1));
+    globalTable = res.table;
+    pos = res.pos;
+  }
+  const frames = [];
+  let gce = {delay:100, transparent:false, transparentIndex:-1, disposal:0};
+  while(pos < bytes.length){
+    const block = bytes[pos++];
+    if(block === 0x3b) break;
+    if(block === 0x21){
+      const label = bytes[pos++];
+      if(label === 0xf9){
+        pos++; // block size
+        const gp = bytes[pos++];
+        const delay = (bytes[pos] | (bytes[pos + 1] << 8)) * 10; pos += 2;
+        const transparentIndex = bytes[pos++];
+        pos++; // terminator
+        gce = {
+          delay:delay || 100,
+          transparent:!!(gp & 1),
+          transparentIndex,
+          disposal:(gp >> 2) & 7,
+        };
+      } else {
+        pos = gifSkipSubBlocks(bytes, pos);
+      }
+      continue;
+    }
+    if(block !== 0x2c) break;
+    const x = bytes[pos] | (bytes[pos + 1] << 8); pos += 2;
+    const y = bytes[pos] | (bytes[pos + 1] << 8); pos += 2;
+    const w = bytes[pos] | (bytes[pos + 1] << 8); pos += 2;
+    const h = bytes[pos] | (bytes[pos + 1] << 8); pos += 2;
+    const ip = bytes[pos++];
+    let table = globalTable;
+    if(ip & 0x80){
+      const res = gifColorTable(bytes, pos, 1 << ((ip & 7) + 1));
+      table = res.table;
+      pos = res.pos;
+    }
+    const minCodeSize = bytes[pos++];
+    const blocks = gifReadSubBlocks(bytes, pos);
+    pos = blocks.pos;
+    let indices = gifLzwDecode(minCodeSize, blocks.data, w * h);
+    if(ip & 0x40) indices = gifDeinterlace(indices, w, h);
+    frames.push({x, y, w, h, table, indices, gce:Object.assign({}, gce)});
+    gce = {delay:100, transparent:false, transparentIndex:-1, disposal:0};
+  }
+  if(!frames.length) throw new Error('GIF has no frames');
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  const rendered = [];
+  let prev = null;
+  frames.forEach(frame => {
+    if(prev){
+      if(prev.gce.disposal === 2){
+        for(let yy = 0; yy < prev.h; yy++){
+          for(let xx = 0; xx < prev.w; xx++){
+            const di = ((prev.y + yy) * width + prev.x + xx) * 4;
+            pixels[di] = pixels[di + 1] = pixels[di + 2] = pixels[di + 3] = 0;
+          }
+        }
+      } else if(prev.gce.disposal === 3 && prev.restore){
+        pixels.set(prev.restore);
+      }
+    }
+    const restore = frame.gce.disposal === 3 ? new Uint8ClampedArray(pixels) : null;
+    for(let yy = 0; yy < frame.h; yy++){
+      for(let xx = 0; xx < frame.w; xx++){
+        const idx = frame.indices[yy * frame.w + xx];
+        if(frame.gce.transparent && idx === frame.gce.transparentIndex) continue;
+        const rgb = frame.table && frame.table[idx];
+        if(!rgb) continue;
+        const di = ((frame.y + yy) * width + frame.x + xx) * 4;
+        pixels[di] = rgb[0];
+        pixels[di + 1] = rgb[1];
+        pixels[di + 2] = rgb[2];
+        pixels[di + 3] = 255;
+      }
+    }
+    rendered.push({imageData:new ImageData(new Uint8ClampedArray(pixels), width, height), delay:Math.max(20, frame.gce.delay || 100)});
+    prev = {x:frame.x, y:frame.y, w:frame.w, h:frame.h, gce:frame.gce, restore};
+  });
+  return {width, height, frames:rendered};
+}
+
+function applyAnimatedGifTexture(gp, mat, src, isCurrentLoad, configure){
+  return fetch(src)
+    .then(res => {
+      if(!res.ok) throw new Error('GIF fetch failed');
+      return res.arrayBuffer();
+    })
+    .then(buf => decodeGifAnimation(new Uint8Array(buf)))
+    .then(anim => {
+      if(!isCurrentLoad()) return;
+      const c = document.createElement('canvas');
+      c.width = anim.width;
+      c.height = anim.height;
+      const g = c.getContext('2d');
+      let frameIndex = 0;
+      let elapsed = 0;
+      const draw = () => {
+        g.putImageData(anim.frames[frameIndex].imageData, 0, 0);
+      };
+      draw();
+      const tx = configure(new THREE.CanvasTexture(c));
+      gp.userData.textureFrameUpdate = dt => {
+        if(!isCurrentLoad()) return;
+        elapsed += Math.max(1, (dt || 1 / 60) * 1000);
+        let changed = false;
+        while(elapsed >= anim.frames[frameIndex].delay){
+          elapsed -= anim.frames[frameIndex].delay;
+          frameIndex = (frameIndex + 1) % anim.frames.length;
+          changed = true;
+        }
+        if(changed){
+          draw();
+          tx.needsUpdate = true;
+        }
+      };
+      mat.map = tx;
+      mat.needsUpdate = true;
+      gp.userData.textureLoaded = true;
+      gp.userData.textureFrameUpdate(0);
+    });
 }
 
 function placeholderTexture(){
@@ -1440,10 +1902,18 @@ function placeholderTexture(){
 }
 
 function applyTextureMapFromSource(gp, mat, props){
-  const apply = tx => {
+  const loadId = (gp.userData.textureLoadId || 0) + 1;
+  gp.userData.textureLoadId = loadId;
+  const isCurrentLoad = () => gp.userData.textureLoadId === loadId;
+  function configure(tx){
     tx.encoding = THREE.sRGBEncoding;
     tx.wrapS = tx.wrapT = THREE.ClampToEdgeWrapping;
     tx.anisotropy = 4;
+    return tx;
+  }
+  const apply = tx => {
+    if(!isCurrentLoad()) return;
+    configure(tx);
     mat.map = tx;
     mat.needsUpdate = true;
     gp.userData.textureLoaded = true;
@@ -1453,6 +1923,13 @@ function applyTextureMapFromSource(gp, mat, props){
     : Promise.resolve(props.src || null);
   srcPromise.then(src => {
     if(!src) return;
+    if(isAnimatedTextureProps(props)){
+      applyAnimatedGifTexture(gp, mat, src, isCurrentLoad, configure).catch(err => {
+        console.warn('LotKing store: GIF decoder fallback', err);
+        new THREE.TextureLoader().load(src, apply, undefined, loadErr => console.warn('LotKing store: texture/decal non caricata', loadErr));
+      });
+      return;
+    }
     new THREE.TextureLoader().load(src, apply, undefined, err => console.warn('LotKing store: texture/decal non caricata', err));
   }).catch(err => console.warn('LotKing store: texture/decal non caricata', err));
 }
@@ -1461,25 +1938,17 @@ function updateTextureObject(gp, patch){
   if(!gp || !gp.userData) return gp;
   const props = normalizeTextureProps(Object.assign({}, gp.userData.textureProps || {}, patch || {}));
   gp.userData.textureProps = props;
+  gp.userData.textureFrameUpdate = null;
+  if(gp.userData.textureAnimatedImage && gp.userData.textureAnimatedImage.parentNode){
+    gp.userData.textureAnimatedImage.parentNode.removeChild(gp.userData.textureAnimatedImage);
+  }
+  gp.userData.textureAnimatedImage = null;
   gp.children.slice().forEach(child => {
     gp.remove(child);
     if(child.geometry && child.geometry.dispose) child.geometry.dispose();
     if(child.material && child.material.dispose) child.material.dispose();
   });
-  const mat = new THREE.MeshBasicMaterial({
-    color: props.color,
-    map: placeholderTexture(),
-    transparent:true,
-    opacity: Math.max(0, Math.min(1, props.opacity == null ? 1 : props.opacity)),
-    alphaTest: Math.max(0, Math.min(1, props.alphaTest == null ? .01 : props.alphaTest)),
-    side: props.doubleSide === false ? THREE.FrontSide : THREE.DoubleSide,
-    depthWrite:false,
-    depthTest: props.depthTest !== false,
-    blending:textureBlending(props.blending),
-    polygonOffset:true,
-    polygonOffsetFactor:-4,
-    polygonOffsetUnits:-4,
-  });
+  const mat = createTextureMaterial(props);
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(.05, props.width || 2), Math.max(.05, props.height || 2)), mat);
   mesh.name = props.mode === 'image' ? 'Free Texture Image' : 'Free Texture Decal';
   mesh.renderOrder = 40;
@@ -1488,9 +1957,10 @@ function updateTextureObject(gp, patch){
   mesh.receiveShadow = false;
   gp.add(mesh);
   applyTextureMapFromSource(gp, mat, props);
-  if(props.animated){
-    gp.userData.effectUpdate = () => {
-      if(mat.map) mat.map.needsUpdate = true;
+  if(isAnimatedTextureProps(props)){
+    gp.userData.effectUpdate = dt => {
+      if(gp.userData.textureFrameUpdate) gp.userData.textureFrameUpdate(dt);
+      else if(mat.map) mat.map.needsUpdate = true;
     };
   } else if(gp.userData.effectUpdate && gp.userData.editorType === 'texture'){
     delete gp.userData.effectUpdate;
@@ -1503,6 +1973,134 @@ function createTexture(kind, props){
   gp.userData.textureKind = kind === 'image' ? 'image' : 'decal';
   gp.userData.textureProps = normalizeTextureProps(Object.assign({mode: gp.userData.textureKind}, props || {}));
   return updateTextureObject(gp);
+}
+
+// ------------------------------------------------ factories: editor cameras / cinema studios
+function normalizeCameraProps(props){
+  return Object.assign({
+    fov:50,
+    near:.05,
+    far:800,
+    helperSize:1.2,
+    preview:true,
+  }, props || {});
+}
+
+function createCameraHelperMesh(props){
+  const g = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({color:0x66d9ff, transparent:true, opacity:.9, depthTest:false});
+  const bodyMat = new THREE.MeshBasicMaterial({color:0x24364f, transparent:true, opacity:.82, depthTest:false});
+  const lensMat = new THREE.MeshBasicMaterial({color:0x66d9ff, transparent:true, opacity:.9, depthTest:false});
+  const s = Math.max(.25, props.helperSize || 1.2);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(s*.54, s*.34, s*.28), bodyMat);
+  body.position.set(0, 0, s*.12);
+  body.userData.nonExportable = true;
+  body.userData.editorCameraHelperPick = true;
+  body.renderOrder = 997;
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(s*.12, s*.16, s*.22, 18), lensMat);
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(0, 0, -s*.1);
+  lens.userData.nonExportable = true;
+  lens.userData.editorCameraHelperPick = true;
+  lens.renderOrder = 998;
+  const top = new THREE.Mesh(new THREE.BoxGeometry(s*.24, s*.1, s*.18), lensMat);
+  top.position.set(0, s*.24, s*.1);
+  top.userData.nonExportable = true;
+  top.userData.editorCameraHelperPick = true;
+  top.renderOrder = 998;
+  g.add(body, lens, top);
+  const pts = [
+    new THREE.Vector3(0,0,0), new THREE.Vector3(-s*.55,-s*.35,-s),
+    new THREE.Vector3(0,0,0), new THREE.Vector3(s*.55,-s*.35,-s),
+    new THREE.Vector3(0,0,0), new THREE.Vector3(s*.55,s*.35,-s),
+    new THREE.Vector3(0,0,0), new THREE.Vector3(-s*.55,s*.35,-s),
+    new THREE.Vector3(-s*.55,-s*.35,-s), new THREE.Vector3(s*.55,-s*.35,-s),
+    new THREE.Vector3(s*.55,-s*.35,-s), new THREE.Vector3(s*.55,s*.35,-s),
+    new THREE.Vector3(s*.55,s*.35,-s), new THREE.Vector3(-s*.55,s*.35,-s),
+    new THREE.Vector3(-s*.55,s*.35,-s), new THREE.Vector3(-s*.55,-s*.35,-s),
+    new THREE.Vector3(-s*.22,s*.52,-s*.55), new THREE.Vector3(s*.22,s*.52,-s*.55),
+    new THREE.Vector3(s*.22,s*.52,-s*.55), new THREE.Vector3(0,s*.82,-s*.55),
+    new THREE.Vector3(0,s*.82,-s*.55), new THREE.Vector3(-s*.22,s*.52,-s*.55),
+  ];
+  const line = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat);
+  line.userData.nonExportable = true;
+  line.renderOrder = 998;
+  g.add(line);
+  return g;
+}
+
+function updateSceneCameraObject(gp, patch){
+  if(!gp || !gp.userData) return gp;
+  const props = normalizeCameraProps(Object.assign({}, gp.userData.cameraProps || {}, patch || {}));
+  gp.userData.cameraProps = props;
+  let cam = gp.userData.sceneCamera;
+  if(!cam){
+    cam = new THREE.PerspectiveCamera(props.fov, innerWidth / Math.max(1, innerHeight), props.near, props.far);
+    cam.name = 'Scene Camera View';
+    cam.userData.nonExportable = true;
+    gp.userData.sceneCamera = cam;
+    gp.add(cam);
+  }
+  cam.fov = props.fov;
+  cam.near = props.near;
+  cam.far = props.far;
+  cam.position.set(0, 0, 0);
+  cam.rotation.set(0, 0, 0);
+  cam.scale.set(1, 1, 1);
+  cam.updateProjectionMatrix();
+  const oldHelper = gp.children.find(child => child.userData && child.userData.editorCameraHelper);
+  if(oldHelper) gp.remove(oldHelper);
+  const helper = createCameraHelperMesh(props);
+  helper.userData.editorCameraHelper = true;
+  helper.visible = props.preview !== false;
+  gp.add(helper);
+  return gp;
+}
+
+function createSceneCamera(props){
+  const gp = new THREE.Group();
+  gp.userData.cameraProps = normalizeCameraProps(props);
+  return updateSceneCameraObject(gp);
+}
+
+function normalizeCinemaStudioProps(props){
+  return Object.assign({
+    duration:6,
+    fps:24,
+    playback:'one-shot',
+    trigger:'manual',
+    previewCamera:'',
+    movieTrack:[],
+    cameras:[],
+    keyframes:[],
+    objectTracks:[],
+  }, props || {});
+}
+
+function createCinemaStudio(props){
+  const gp = new THREE.Group();
+  gp.userData.cinemaProps = normalizeCinemaStudioProps(props);
+  const mat = new THREE.LineBasicMaterial({color:0xffd166, transparent:true, opacity:.9, depthTest:false});
+  const s = 1.1;
+  const pts = [
+    new THREE.Vector3(-s,0,-s), new THREE.Vector3(s,0,-s),
+    new THREE.Vector3(s,0,-s), new THREE.Vector3(s,0,s),
+    new THREE.Vector3(s,0,s), new THREE.Vector3(-s,0,s),
+    new THREE.Vector3(-s,0,s), new THREE.Vector3(-s,0,-s),
+    new THREE.Vector3(-s,.55,-s), new THREE.Vector3(s,.55,-s),
+    new THREE.Vector3(s,.55,-s), new THREE.Vector3(s,.55,s),
+    new THREE.Vector3(s,.55,s), new THREE.Vector3(-s,.55,s),
+    new THREE.Vector3(-s,.55,s), new THREE.Vector3(-s,.55,-s),
+    new THREE.Vector3(-s,0,-s), new THREE.Vector3(-s,.55,-s),
+    new THREE.Vector3(s,0,-s), new THREE.Vector3(s,.55,-s),
+    new THREE.Vector3(s,0,s), new THREE.Vector3(s,.55,s),
+    new THREE.Vector3(-s,0,s), new THREE.Vector3(-s,.55,s),
+  ];
+  const line = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat);
+  line.userData.nonExportable = true;
+  line.renderOrder = 998;
+  gp.add(line);
+  return gp;
 }
 
 // ------------------------------------------------ factories: lights
@@ -1662,6 +2260,8 @@ function loadGlbEntry(entry){
 
 // ------------------------------------------------ create from a saved "added" entry
 function createFromEntry(entry, GAME){
+  if(entry.kind === 'camera') return Promise.resolve(createSceneCamera(entry.props));
+  if(entry.kind === 'cinemaStudio') return Promise.resolve(createCinemaStudio(entry.props));
   if(entry.kind === 'light') return Promise.resolve(createLight(entry.light, entry.props));
   if(entry.kind === 'effect') return Promise.resolve(createEmitter(entry.effect, entry.params));
   if(entry.kind === 'text') return Promise.resolve(createText(entry.textKind || '2d', entry.props));
@@ -1682,11 +2282,14 @@ function entryType(entry, obj){
   if(entry.kind === 'clone') return (obj && (obj.isLight || obj.userData && obj.userData.light)) ? 'light' : 'mesh';
   if(entry.kind === 'text') return 'text';
   if(entry.kind === 'texture') return 'texture';
+  if(entry.kind === 'camera') return 'camera';
+  if(entry.kind === 'cinemaStudio') return 'cinemaStudio';
   return entry.kind === 'light' ? 'light' : entry.kind === 'effect' ? 'effect' : 'mesh';
 }
 
 // register + optional box collider for an added object
 function registerAdded(GAME, obj, entry){
+  ensureEffectHook(GAME);
   obj.userData.addedEntry = entry;
   if(entry.asset){
     obj.userData.assetKey = entry.asset.key;
@@ -1747,6 +2350,58 @@ function ensureEffectHook(GAME){
 
 // ------------------------------------------------ apply the whole saved scene at boot
 let builtinIds = [];
+
+function applyEnvironment(GAME, env){
+  if(!GAME || !GAME.systems || !GAME.systems.sky || !env) return;
+  if(env.skyTime != null) GAME.systems.sky.setTime(env.skyTime);
+  if(env.dayLength != null) GAME.systems.sky.setDayLength(env.dayLength);
+  if(GAME.systems.sky.hdri) GAME.systems.sky.hdri.setEnabled(false);
+  if(GAME.systems.sky.proceduralEnv){
+    if(env.procEnvEnabled != null) GAME.systems.sky.proceduralEnv.setEnabled(env.procEnvEnabled);
+    if(env.procEnvIntensity != null) GAME.systems.sky.proceduralEnv.setIntensity(env.procEnvIntensity);
+    if(env.procEnvWarmth != null) GAME.systems.sky.proceduralEnv.setWarmth(env.procEnvWarmth);
+    if(env.procEnvContrast != null) GAME.systems.sky.proceduralEnv.setContrast(env.procEnvContrast);
+  }
+  if(GAME.systems.sky.flare){
+    if(env.lensFlare && GAME.systems.sky.flare.set){
+      GAME.systems.sky.flare.set(env.lensFlare);
+    } else {
+      // livelli salvati prima del flare parametrico
+      if(env.flareEnabled != null) GAME.systems.sky.flare.setEnabled(env.flareEnabled);
+      if(env.flareOpacity != null) GAME.systems.sky.flare.setOpacity(env.flareOpacity);
+      if(env.flareSize != null) GAME.systems.sky.flare.setSize(env.flareSize);
+    }
+  }
+  if(env.sunBloom && GAME.systems.sky.sunBloom) GAME.systems.sky.sunBloom.set(env.sunBloom);
+  if(env.volClouds && GAME.systems.sky.volClouds) GAME.systems.sky.volClouds.set(env.volClouds);
+  if(env.rain && GAME.systems.rain) GAME.systems.rain.set(env.rain);
+  if(GAME.player && GAME.player.updateLights) GAME.player.updateLights();
+}
+
+function collectEnvironment(GAME){
+  const env = {
+    skyTime: GAME.systems.sky.getTime(),
+    dayLength: GAME.systems.sky.getDayLength(),
+  };
+  if(GAME.systems.sky.proceduralEnv){
+    env.procEnvEnabled = GAME.systems.sky.proceduralEnv.getEnabled();
+    env.procEnvIntensity = GAME.systems.sky.proceduralEnv.getIntensity();
+    env.procEnvWarmth = GAME.systems.sky.proceduralEnv.getWarmth();
+    env.procEnvContrast = GAME.systems.sky.proceduralEnv.getContrast();
+  }
+  if(GAME.systems.sky.flare){
+    if(GAME.systems.sky.flare.get) env.lensFlare = GAME.systems.sky.flare.get();
+    // chiavi legacy: un livello salvato ora resta leggibile da build precedenti
+    env.flareEnabled = GAME.systems.sky.flare.getEnabled();
+    env.flareOpacity = GAME.systems.sky.flare.getOpacity();
+    env.flareSize = GAME.systems.sky.flare.getSize();
+  }
+  if(GAME.systems.sky.sunBloom) env.sunBloom = GAME.systems.sky.sunBloom.get();
+  if(GAME.systems.sky.volClouds && GAME.systems.sky.volClouds.get()) env.volClouds = GAME.systems.sky.volClouds.get();
+  if(GAME.systems.rain) env.rain = GAME.systems.rain.get();
+  return env;
+}
+
 function apply(GAME){
   builtinIds = GAME.world.registry.filter(o => o.userData.builtin).map(o => o.userData.editorId);
   ensureEffectHook(GAME);
@@ -1801,40 +2456,16 @@ function apply(GAME){
   for(const entry of data.added || []){
     const p = createFromEntry(entry, GAME)
       .then(obj => {
-        registerAdded(GAME, obj, entry);
-        applyParentLink(obj, GAME);
-        if(entry.props && entry.kind === 'texture') updateTextureObject(obj, entry.props);
-        else if(entry.props && entry.kind !== 'light') applyMatProps(obj, entry.props);
-      })
+	        registerAdded(GAME, obj, entry);
+	        applyParentLink(obj, GAME);
+	        if(entry.props && entry.kind === 'texture') updateTextureObject(obj, entry.props);
+	        else if(entry.props && entry.kind === 'camera') updateSceneCameraObject(obj, entry.props);
+	        else if(entry.props && entry.kind !== 'light' && entry.kind !== 'cinemaStudio') applyMatProps(obj, entry.props);
+	      })
       .catch(err => console.warn('LotKing store: oggetto "' + entry.name + '" non ricaricato', err));
     pending.push(p);
   }
-  // environment
-  if(data.env){
-    if(data.env.skyTime != null) GAME.systems.sky.setTime(data.env.skyTime);
-    if(data.env.dayLength != null) GAME.systems.sky.setDayLength(data.env.dayLength);
-    if(GAME.systems.sky.hdri) GAME.systems.sky.hdri.setEnabled(false);
-    if(GAME.systems.sky.proceduralEnv){
-      if(data.env.procEnvEnabled != null) GAME.systems.sky.proceduralEnv.setEnabled(data.env.procEnvEnabled);
-      if(data.env.procEnvIntensity != null) GAME.systems.sky.proceduralEnv.setIntensity(data.env.procEnvIntensity);
-      if(data.env.procEnvWarmth != null) GAME.systems.sky.proceduralEnv.setWarmth(data.env.procEnvWarmth);
-      if(data.env.procEnvContrast != null) GAME.systems.sky.proceduralEnv.setContrast(data.env.procEnvContrast);
-    }
-    if(GAME.systems.sky.flare){
-      if(data.env.lensFlare && GAME.systems.sky.flare.set){
-        GAME.systems.sky.flare.set(data.env.lensFlare);
-      } else {
-        // livelli salvati prima del flare parametrico
-        if(data.env.flareEnabled != null) GAME.systems.sky.flare.setEnabled(data.env.flareEnabled);
-        if(data.env.flareOpacity != null) GAME.systems.sky.flare.setOpacity(data.env.flareOpacity);
-        if(data.env.flareSize != null) GAME.systems.sky.flare.setSize(data.env.flareSize);
-      }
-    }
-    if(data.env.sunBloom && GAME.systems.sky.sunBloom) GAME.systems.sky.sunBloom.set(data.env.sunBloom);
-    if(data.env.volClouds && GAME.systems.sky.volClouds) GAME.systems.sky.volClouds.set(data.env.volClouds);
-    if(data.env.rain && GAME.systems.rain) GAME.systems.rain.set(data.env.rain);
-    if(GAME.player && GAME.player.updateLights) GAME.player.updateLights();
-  }
+  applyEnvironment(GAME, data.env);
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
   // player blueprint
   if(data.player){
@@ -1856,6 +2487,7 @@ function apply(GAME){
           GAME.player.car.userData.modelSrc = data.player.modelSrc || null;
           GAME.player.car.userData.modelDbKey = data.player.modelDbKey || null;
           GAME.player.car.userData.modelName = data.player.modelName || null;
+          if(data.player.materials) applyPlayerMaterialProps(GAME, data.player.materials);
         }))
         .catch(err => console.warn('LotKing store: modello player non ricaricato', err));
       pending.push(p);
@@ -1888,6 +2520,7 @@ function apply(GAME){
       };
       applyHl();
     }
+    if(data.player.materials) applyPlayerMaterialProps(GAME, data.player.materials);
   }
   return Promise.allSettled(pending).then(() => {
     for(const o of GAME.world.registry) syncCollider(o);
@@ -1940,36 +2573,19 @@ function collect(GAME){
       }
       if(colliderRef && colliderRef.impact != null) e.physicsImpact = physicsImpactFrom(colliderRef.impact);
       else e.physicsImpact = physicsImpactFrom(o.userData.physicsImpact);
-      if(e.kind === 'light' && o.userData.light) e.props = lightProps(o.userData.light);
-      else if(e.kind === 'effect') e.params = Object.assign({}, o.userData.effectParams);
-      else if(e.kind === 'text') e.props = Object.assign({}, o.userData.textProps || e.props || {});
-      else if(e.kind === 'texture') e.props = Object.assign({}, o.userData.textureProps || e.props || {});
-      else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
+	      if(e.kind === 'light' && o.userData.light) e.props = lightProps(o.userData.light);
+	      else if(e.kind === 'effect') e.params = Object.assign({}, o.userData.effectParams);
+	      else if(e.kind === 'text') e.props = Object.assign({}, o.userData.textProps || e.props || {});
+	      else if(e.kind === 'texture') e.props = Object.assign({}, o.userData.textureProps || e.props || {});
+	      else if(e.kind === 'camera') e.props = Object.assign({}, o.userData.cameraProps || e.props || {});
+	      else if(e.kind === 'cinemaStudio') e.props = Object.assign({}, o.userData.cinemaProps || e.props || {});
+	      else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
       if(o.userData.assetKey) e.asset = Object.assign({}, e.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
       d.added.push(e);
     }
   }
   d.deleted = builtinIds.filter(id => !liveBuiltin.has(id));
-  d.env = {
-    skyTime: GAME.systems.sky.getTime(),
-    dayLength: GAME.systems.sky.getDayLength(),
-  };
-  if(GAME.systems.sky.proceduralEnv){
-    d.env.procEnvEnabled = GAME.systems.sky.proceduralEnv.getEnabled();
-    d.env.procEnvIntensity = GAME.systems.sky.proceduralEnv.getIntensity();
-    d.env.procEnvWarmth = GAME.systems.sky.proceduralEnv.getWarmth();
-    d.env.procEnvContrast = GAME.systems.sky.proceduralEnv.getContrast();
-  }
-  if(GAME.systems.sky.flare){
-    if(GAME.systems.sky.flare.get) d.env.lensFlare = GAME.systems.sky.flare.get();
-    // chiavi legacy: un livello salvato ora resta leggibile da build precedenti
-    d.env.flareEnabled = GAME.systems.sky.flare.getEnabled();
-    d.env.flareOpacity = GAME.systems.sky.flare.getOpacity();
-    d.env.flareSize = GAME.systems.sky.flare.getSize();
-  }
-  if(GAME.systems.sky.sunBloom) d.env.sunBloom = GAME.systems.sky.sunBloom.get();
-  if(GAME.systems.sky.volClouds && GAME.systems.sky.volClouds.get()) d.env.volClouds = GAME.systems.sky.volClouds.get();
-  if(GAME.systems.rain) d.env.rain = GAME.systems.rain.get();
+  d.env = freezeRuntimeTransforms && old && old.env ? cloneData(old.env) : collectEnvironment(GAME);
   if(GAME.ui && GAME.ui.radioHud) d.ui.radioHud = JSON.parse(JSON.stringify(GAME.ui.radioHud));
   d.player = collectPlayerBlueprint(GAME) || {};
   return d;
@@ -1997,9 +2613,9 @@ window.LK_STORE = {
   soundSets: SOUND_SETS,
   isApplied: () => applied,
   load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject,
-  tOf, applyT, syncCollider,
+  tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
   lightProps, applyLightProps, applyMatProps,
-  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
+	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, collect, nextId,
   builtinIds: () => builtinIds.slice(),

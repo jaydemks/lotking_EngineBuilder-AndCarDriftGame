@@ -356,7 +356,8 @@ function createRadioHud(deps){
       return true;
     } catch(err){
       bassBroken = true;
-      popup('BASS BOOST non disponibile', '#ff5566');
+      const it = window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it';
+      popup(it ? 'BASS BOOST non disponibile' : 'BASS BOOST unavailable', '#ff5566');
       return false;
     }
   }

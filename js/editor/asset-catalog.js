@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', texture:'▧', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerSkid:'▰', playerDataWidget:'◫'};
+const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', texture:'▧', camera:'🎥', cinemaStudio:'▤', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerSkid:'▰', playerDataWidget:'◫'};
 
 function create(deps){
   deps = deps || {};
@@ -16,6 +16,7 @@ function create(deps){
   const $ = deps.$;
   const placeProjectAsset = deps.placeProjectAsset || function(){ return Promise.resolve(false); };
   const LEVEL_PREFIX = 'lotking.level.';
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function clone(value){
     try { return value == null ? value : JSON.parse(JSON.stringify(value)); }
@@ -137,9 +138,11 @@ function create(deps){
     const src = entry.src || (entry.asset && (entry.asset.src || entry.asset.source));
     if(looksLikeGlbSource(src)) return 'glb';
     if(entry.asset && (entry.asset.dbKey || looksLikeGlbSource(entry.asset.source) || looksLikeGlbSource(entry.asset.src))) return 'glb';
-    if(entry.kind === 'light') return 'light';
-    if(entry.kind === 'effect') return 'effect';
-    if(entry.kind === 'text') return 'text';
+	    if(entry.kind === 'light') return 'light';
+	    if(entry.kind === 'effect') return 'effect';
+	    if(entry.kind === 'camera') return 'camera';
+	    if(entry.kind === 'cinemaStudio') return 'scene';
+	    if(entry.kind === 'text') return 'text';
     if(entry.kind === 'texture') return 'texture';
     return 'other';
   }
@@ -222,7 +225,7 @@ function create(deps){
         source: (entry.asset && (entry.asset.source || entry.asset.key)) || label || 'Project',
         levels: label ? [label] : [],
         type,
-        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : type === 'texture' ? 'texture' : 'other',
+	        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : type === 'texture' ? 'texture' : type === 'camera' ? 'camera' : 'other',
         raw: {entry: clone(entry), levelId: level && level.id, levelName: label},
         icon: entry.kind === 'glb' || type === 'glb' ? '📦' : type === 'texture' ? '▧' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : '▣',
         draggable:true,
@@ -338,7 +341,7 @@ function create(deps){
     }
     if(item.kind === 'scene'){
       const a = item.raw;
-      if(!a || !a.sample){ deps.status('Asset di scena non disponibile'); return; }
+      if(!a || !a.sample){ deps.status(tr('Scene asset unavailable', 'Asset di scena non disponibile')); return; }
       deps.duplicateEntity(a.sample, (at || deps.spawnPointAhead()).sub(a.sample.position));
       deps.setLeftMode('scene');
       return;
@@ -349,14 +352,14 @@ function create(deps){
     }
     if(item.kind === 'level'){ deps.status('Drag a model asset into the viewport, not a level'); return; }
     if(item.kind === 'player-blueprint'){ deps.status('Only one player blueprint can be active in scene for now'); return; }
-    deps.status('Questo tipo di asset non può essere piazzato nel viewport');
+    deps.status(tr('This asset type cannot be placed in the viewport', 'Questo tipo di asset non puo essere piazzato nel viewport'));
   }
 
   function requestDeleteAssetInstances(asset){
     if(!asset || !asset.instances || !asset.instances.length) return;
     const removable = asset.instances.filter(o =>
       !['player','playerLight','playerEffect','playerSkid','playerDataWidget'].includes(o.userData.editorType));
-    if(!removable.length){ deps.status('Questo asset non ha istanze eliminabili'); return; }
+    if(!removable.length){ deps.status(tr('This asset has no removable instances', 'Questo asset non ha istanze eliminabili')); return; }
     deps.confirmEditorAction({
       title: 'Delete asset instances?',
       message: 'Delete all ' + removable.length + ' instance(s) of "' + asset.name + '" from the current level?',

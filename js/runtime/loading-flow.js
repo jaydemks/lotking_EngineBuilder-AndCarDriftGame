@@ -59,9 +59,10 @@ function create(options){
     if(!loadText) return;
     const report = opts.getLoadReport ? opts.getLoadReport() : [];
     const fails = report.filter(r => String(r).includes('✗'));
-    if(opts.isFileMode && opts.isFileMode()) loadText.textContent = 'Apri da http://127.0.0.1:8000/gameplay.html per caricare i modelli locali';
-    else if(opts.hasGltfLoader && !opts.hasGltfLoader()) loadText.textContent = '⚠ GLTFLoader non caricato (CDN bloccata) — auto procedurali';
-    else if(fails.length) loadText.textContent = '⚠ non caricati: ' + fails.join(', ');
+    const it = window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it';
+    if(opts.isFileMode && opts.isFileMode()) loadText.textContent = it ? 'Apri da http://127.0.0.1:8000/gameplay.html per caricare i modelli locali' : 'Open from http://127.0.0.1:8000/gameplay.html to load local models';
+    else if(opts.hasGltfLoader && !opts.hasGltfLoader()) loadText.textContent = it ? '⚠ GLTFLoader non caricato (CDN bloccata) — auto procedurali' : '⚠ GLTFLoader not loaded (CDN blocked) — procedural cars';
+    else if(fails.length) loadText.textContent = (it ? '⚠ non caricati: ' : '⚠ not loaded: ') + fails.join(', ');
     else loadText.textContent = 'ready';
   }
 

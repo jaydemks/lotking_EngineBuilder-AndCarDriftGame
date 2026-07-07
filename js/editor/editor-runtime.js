@@ -27,6 +27,33 @@ function create(deps){
   const levelSelect = document.getElementById('levelSelect');
   let previewWarmupTimer = 0;
   let previewWarmupSeq = 0;
+  const cinemaStudio = window.LK_EDITOR_CINEMA_STUDIO && window.LK_EDITOR_CINEMA_STUDIO.create({
+    GAME,
+    ED,
+    root,
+    sceneCameras,
+    editorViewportRect: deps.editorViewportRect,
+    markDirty: deps.markDirty,
+    buildInspector: deps.buildInspector,
+  });
+  const viewportLayout = window.LK_EDITOR_VIEWPORT_LAYOUT && window.LK_EDITOR_VIEWPORT_LAYOUT.create({
+    THREE,
+    GAME,
+    ED,
+    root,
+    renderer,
+    scene,
+    camE,
+    $,
+    sceneCameras,
+    normalizeSceneCameraLocal,
+    getGizmo: deps.getGizmo,
+    getOrbit: deps.getOrbit,
+    editorViewportRect: deps.editorViewportRect,
+    setActiveViewportSlot: deps.setActiveViewportSlot,
+    cameraForView: deps.cameraForView,
+    cinemaStudio,
+  });
 
   function requestWarmup(label, opts){
     opts = opts || {};
@@ -121,7 +148,7 @@ function create(deps){
     $('#lkSpace').textContent = deps.spaceLabel();
     deps.updateEditorAxesConvention();
     const orbit = deps.getOrbit();
-    orbit.enabled = true;
+    orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : true;
     orbit.target.copy(car.position).setY(1);
     camE.position.copy(car.position).add(new THREE.Vector3(12, 9, 14));
     camE.lookAt(orbit.target);
@@ -133,6 +160,7 @@ function create(deps){
     deps.syncQuickAudio();
     $('#lkOutliner').className = ED.sceneViewMode || 'list';
     $('#lkAssetsPanel').className = ED.assetsViewMode || 'grid';
+    if(viewportLayout) viewportLayout.syncToolbarVisual();
     if(GAME.player.updateLights) GAME.player.updateLights();
     if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
     if(GAME.player.updateSkids) GAME.player.updateSkids();
@@ -147,6 +175,8 @@ function create(deps){
   function setPlayPreview(on){
     ED.playPreview = !!on;
     if(ED.playPreview) deps.clearHoverPickHelper();
+    if(ED.playPreview && viewportLayout) viewportLayout.updateOverlays(null);
+    if(ED.playPreview && cinemaStudio) cinemaStudio.hideTimeline();
     root.classList.toggle('play-preview', ED.playPreview);
     const btn = $('#lkPlay');
     if(btn) btn.textContent = ED.playPreview ? '■ STOP' : '▶ PREVIEW';
@@ -154,7 +184,7 @@ function create(deps){
     const gizmo = deps.getGizmo();
     if(gizmo) gizmo.visible = !ED.playPreview;
     const orbit = deps.getOrbit();
-    if(orbit) orbit.enabled = ED.active && !ED.playPreview;
+    if(orbit) orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : (ED.active && !ED.playPreview);
   }
 
   function startPlayPreview(){
@@ -165,6 +195,8 @@ function create(deps){
     requestAnimationFrame(() => {
       if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview();
       if(GAME.player.updateLights) GAME.player.updateLights();
+      if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
+      if(GAME.player.updateSkids) GAME.player.updateSkids();
       setPlayPreview(true);
       deps.status('Play preview running — Esc to stop');
     });
@@ -173,10 +205,12 @@ function create(deps){
   function stopPlayPreview(){
     if(GAME.actions.stopEditorPreview) GAME.actions.stopEditorPreview();
     setPlayPreview(false);
+    if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
+    if(GAME.player.updateSkids) GAME.player.updateSkids();
     if(deps.restorePreviewTransforms) deps.restorePreviewTransforms();
     const orbit = deps.getOrbit();
     if(orbit){
-      orbit.enabled = true;
+      orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : true;
       orbit.target.copy(GAME.player.car.position).setY(1);
     }
     const gizmo = deps.getGizmo();
@@ -204,6 +238,7 @@ function create(deps){
     const hudToggle = document.getElementById('videoEditorHud');
     if(hudToggle) hudToggle.checked = true;
     $('#lkPipFrame').classList.remove('on');
+    if(viewportLayout) viewportLayout.updateOverlays(null);
     deps.closeMenu();
     deps.clearHoverPickHelper();
     deps.clearReplaceDropHelper();
@@ -239,17 +274,23 @@ function create(deps){
     if(GAME.player.updateExhaust) GAME.player.updateExhaust(dt);
     if(GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
 
+    if(cinemaStudio) cinemaStudio.updatePreview(dt);
     syncGamePreviewCamera();
     updateCameraHelpers();
     deps.updateViewportPickingHelpers();
     deps.updateSelectionAndDropHelpers();
     deps.processThumbQueue();
-    renderEditorViewport(viewRect);
+    if(viewportLayout) viewportLayout.syncToolbarVisual();
+    if(viewportLayout) viewportLayout.renderEditorViewport(viewRect);
+    else renderEditorViewportFallback(viewRect);
     renderPip();
+    if(viewportLayout) viewportLayout.updateStats(dt, viewRect);
+    if(cinemaStudio) cinemaStudio.syncTimeline(viewRect);
   }
 
   function renderPlayPreview(dt){
     if(GAME.actions.stepGameplayPreview) GAME.actions.stepGameplayPreview(dt);
+    if(viewportLayout) viewportLayout.updateOverlays(null);
     helperGroup.visible = false;
     const gizmo = deps.getGizmo();
     if(gizmo) gizmo.visible = false;
@@ -265,6 +306,7 @@ function create(deps){
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, innerWidth, innerHeight);
     }
+    if(viewportLayout) viewportLayout.updateStats(dt, viewRect);
     helperGroup.visible = true;
     if(gizmo) gizmo.visible = false;
   }
@@ -289,13 +331,28 @@ function create(deps){
     }
   }
 
-  function renderEditorViewport(viewRect){
+  function renderEditorViewportFallback(viewRect){
     renderer.setScissorTest(true);
     renderer.setViewport(viewRect.x, innerHeight - viewRect.y - viewRect.h, viewRect.w, viewRect.h);
     renderer.setScissor(viewRect.x, innerHeight - viewRect.y - viewRect.h, viewRect.w, viewRect.h);
+    camE.aspect = viewRect.w / Math.max(1, viewRect.h);
+    camE.updateProjectionMatrix();
     renderer.render(scene, camE);
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, innerWidth, innerHeight);
+  }
+
+  function sceneCameras(){
+    return GAME.world.registry.filter(o => o && o.userData && o.userData.editorType === 'camera' && o.userData.sceneCamera);
+  }
+  function normalizeSceneCameraLocal(holder){
+    const cam = holder && holder.userData && holder.userData.sceneCamera;
+    if(!cam) return null;
+    cam.position.set(0, 0, 0);
+    cam.rotation.set(0, 0, 0);
+    cam.scale.set(1, 1, 1);
+    cam.updateMatrixWorld(true);
+    return cam;
   }
 
   function renderPip(){
@@ -317,10 +374,17 @@ function create(deps){
     const y = pos.y;
     const pipFrame = $('#lkPipFrame');
     pipFrame.classList.add('on');
+    pipFrame.classList.toggle('minimized', !!ED.pipMinimized);
+    const pipMin = $('#lkPipMinimize');
+    if(pipMin){
+      pipMin.textContent = ED.pipMinimized ? '+' : '−';
+      pipMin.title = ED.pipMinimized ? 'Expand player camera' : 'Minimize player camera';
+    }
     pipFrame.style.left = x + 'px';
     pipFrame.style.top = y + 'px';
-    pipFrame.style.width = w + 'px';
-    pipFrame.style.height = hgt + 'px';
+    pipFrame.style.width = (ED.pipMinimized ? 170 : w) + 'px';
+    pipFrame.style.height = (ED.pipMinimized ? 26 : hgt) + 'px';
+    if(ED.pipMinimized) return;
     helperGroup.visible = false;
     const gizmo = deps.getGizmo();
     if(gizmo) gizmo.visible = false;
@@ -336,8 +400,9 @@ function create(deps){
           GAME.systems.post.composer.setSize(w, hgt);
           GAME.systems.post.render();
         } catch(err){
-          console.error('LotKing editor: post-processing PIP fallito, fallback al render diretto', err);
-          deps.status('⚠ Post-processing PIP fallito (' + (err && err.message || err) + '): render diretto');
+          console.error('LotKing editor: post-processing PIP failed, falling back to direct render', err);
+          const it = GAME && GAME.i18n && GAME.i18n.lang === 'it';
+          deps.status((it ? '⚠ Post-processing PIP fallito (' : '⚠ Post-processing PIP failed (') + (err && err.message || err) + (it ? '): render diretto' : '): direct render'));
           try { renderer.setRenderTarget(null); } catch(e){}
           renderer.render(scene, gameCam);
         } finally {

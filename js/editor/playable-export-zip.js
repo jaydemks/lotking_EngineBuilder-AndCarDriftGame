@@ -11,6 +11,7 @@ function create(deps){
     return (name || 'track').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'track';
   };
   const buildPlayableBootstrapHtml = deps.buildPlayableBootstrapHtml || function(){ return ''; };
+  const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   const VENDOR_LIBS = [
     {remote: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', local: 'vendor/three.min.js'},
@@ -68,8 +69,8 @@ function create(deps){
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
     const p = new Promise((resolve, reject) => {
-      script.onload = () => window.JSZip ? resolve(window.JSZip) : reject(new Error('JSZip non disponibile dopo il caricamento'));
-      script.onerror = () => reject(new Error('Impossibile caricare JSZip dal CDN'));
+      script.onload = () => window.JSZip ? resolve(window.JSZip) : reject(new Error(tr('JSZip unavailable after loading', 'JSZip non disponibile dopo il caricamento')));
+      script.onerror = () => reject(new Error(tr('Unable to load JSZip from CDN', 'Impossibile caricare JSZip dal CDN')));
     });
     document.head.appendChild(script);
     ensureJsZipForExport._pending = p;
@@ -181,9 +182,9 @@ function create(deps){
     const zip = new JSZip();
     const level = bundle.levels && bundle.levels[0];
     const slug = slugifyTrackName((level && level.name) || 'track');
-    setProgress(4, 'Caricamento template runtime');
+    setProgress(4, tr('Loading runtime template', 'Caricamento template runtime'));
     const runtimeHtml = rewriteRuntimeHtmlForZip(await (await fetch(exportAssetUrl(RUNTIME_TEMPLATE)).then(r => {
-      if(!r.ok) throw new Error('template runtime non trovato');
+      if(!r.ok) throw new Error(tr('runtime template not found', 'template runtime non trovato'));
       return r.text();
     })));
     const runtimeRefs = extractLocalRuntimeRefs(runtimeHtml);

@@ -22,6 +22,7 @@ function create(deps){
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
   const buildInspector = deps.buildInspector;
   const getGizmo = deps.getGizmo;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   const undoStack = [];
   const redoStack = [];
@@ -94,11 +95,11 @@ function create(deps){
 
   function hudPatchLabel(patch){
     if(!patch) return 'HUD radio';
-    if(patch.buttons) return 'HUD radio pulsanti';
-    if('editTarget' in patch) return 'HUD radio modalità edit';
+    if(patch.buttons) return tr('HUD radio buttons', 'HUD radio pulsanti');
+    if('editTarget' in patch) return tr('HUD radio edit mode', 'HUD radio modalita edit');
     if('buttonLayer' in patch || 'imageLayer' in patch || 'screenLayer' in patch) return 'HUD radio layer';
     if('frameX' in patch || 'frameY' in patch || 'width' in patch || 'pngScaleX' in patch || 'pngScaleY' in patch) return 'HUD radio frame';
-    if('screenLeft' in patch || 'screenTop' in patch || 'screenWidth' in patch || 'screenHeight' in patch) return 'HUD radio interfaccia';
+    if('screenLeft' in patch || 'screenTop' in patch || 'screenWidth' in patch || 'screenHeight' in patch) return tr('HUD radio interface', 'HUD radio interfaccia');
     return 'HUD radio';
   }
 

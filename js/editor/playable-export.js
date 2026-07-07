@@ -28,6 +28,7 @@ function create(deps){
     buildPlayableBootstrapHtml,
   });
   const PLAYABLE_ZIP_RUNTIME_TEMPLATE = playableExportZip ? playableExportZip.RUNTIME_TEMPLATE : 'gameplay.html';
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function safeJsonForInlineScript(value){
     return JSON.stringify(value)
@@ -70,7 +71,7 @@ function create(deps){
   });
   async function buildPlayableBundle(levelProjects, runtimePath, levelNameHint){
     const projects = Array.isArray(levelProjects) ? levelProjects : (levelProjects ? [levelProjects] : []);
-    if(!projects.length) throw new Error('Nessun livello da esportare');
+    if(!projects.length) throw new Error(tr('No levels to export', 'Nessun livello da esportare'));
   
     const now = new Date().toISOString();
     const warnings = [];
@@ -145,7 +146,7 @@ function create(deps){
       });
     }
   
-    if(!levels.length) throw new Error('Nessun livello valido da esportare');
+    if(!levels.length) throw new Error(tr('No valid levels to export', 'Nessun livello valido da esportare'));
     const explicitActiveLevel = levels.find(item => item.__lkExportPrimary);
     const activeProject = explicitActiveLevel || levels[0];
   
@@ -275,13 +276,13 @@ function create(deps){
   </html>`;
   }
   function exportPlayableProject(project, projectName){
-    const progressToken = beginStatusWork('Export playable HTML', 'Preparazione pacchetto', 'loading');
-    updateStatusWork(progressToken, 12, 'Costruzione bundle', 'loading');
+    const progressToken = beginStatusWork('Export playable HTML', tr('Preparing package', 'Preparazione pacchetto'), 'loading');
+    updateStatusWork(progressToken, 12, tr('Building bundle', 'Costruzione bundle'), 'loading');
     Promise.resolve().then(() => buildPlayableBundle(project, 'gameplay.html', projectName)).then(bundle => {
-      updateStatusWork(progressToken, 60, 'Creazione documento HTML', 'loading');
+      updateStatusWork(progressToken, 60, tr('Creating HTML document', 'Creazione documento HTML'), 'loading');
       const level = bundle.levels[0];
       const html = buildPlayableHtml(bundle);
-      updateStatusWork(progressToken, 80, 'Avvio download', 'loading');
+      updateStatusWork(progressToken, 80, tr('Starting download', 'Avvio download'), 'loading');
       const blob = new Blob([html], {type: 'text/html'});
       const a = document.createElement('a');
       const warnings = bundle && Array.isArray(bundle.warnings) ? bundle.warnings : [];
@@ -290,16 +291,16 @@ function create(deps){
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
-      finishStatusWork(progressToken, 'Export HTML pronto', 'File pronto per il download', 'success');
-      status('PLAYABLE export created' + (warnings.length ? ' con avvisi: ' + warnings.join(' · ') : ' ✓'));
+      finishStatusWork(progressToken, tr('HTML export ready', 'Export HTML pronto'), tr('File ready for download', 'File pronto per il download'), 'success');
+      status('PLAYABLE export created' + (warnings.length ? tr(' with warnings: ', ' con avvisi: ') + warnings.join(' · ') : ' ✓'));
     }).catch(err => {
       console.error('Playable export failed', err);
-      finishStatusWork(progressToken, 'Export HTML fallito', (err && err.message) ? err.message : 'Errore sconosciuto', 'error');
+      finishStatusWork(progressToken, tr('HTML export failed', 'Export HTML fallito'), (err && err.message) ? err.message : tr('Unknown error', 'Errore sconosciuto'), 'error');
       status('⚠ Playable export failed: ' + err.message);
     });
   }
   async function exportCurrentPlayableProjectZip(){
-    const progressToken = beginStatusWork('Export playable ZIP', 'Selezione livelli', 'loading');
+    const progressToken = beginStatusWork('Export playable ZIP', tr('Selecting levels', 'Selezione livelli'), 'loading');
     const LV = levelsApi();
     const list = LV && LV.list ? LV.list() : [];
     const activeId = LV && LV.activeId ? LV.activeId() : null;
@@ -308,11 +309,11 @@ function create(deps){
     if(selectable.length){
       const selectedLevelProjects = await pickPlayableLevelsForZipExport(selectable, activeId);
       if(selectedLevelProjects === null){
-        finishStatusWork(progressToken, 'Export ZIP annullato', 'Operazione annullata', 'warning');
+        finishStatusWork(progressToken, tr('ZIP export cancelled', 'Export ZIP annullato'), tr('Operation cancelled', 'Operazione annullata'), 'warning');
         return;
       }
       if(!selectedLevelProjects.length){
-        finishStatusWork(progressToken, 'Export ZIP annullato', 'Nessun livello selezionato', 'warning');
+        finishStatusWork(progressToken, tr('ZIP export cancelled', 'Export ZIP annullato'), tr('No level selected', 'Nessun livello selezionato'), 'warning');
         return;
       }
       projects = selectedLevelProjects;
@@ -321,12 +322,12 @@ function create(deps){
     }
   
     if(!projects.length){
-      finishStatusWork(progressToken, 'Export ZIP annullato', 'Nessun livello da esportare', 'warning');
+      finishStatusWork(progressToken, tr('ZIP export cancelled', 'Export ZIP annullato'), tr('No levels to export', 'Nessun livello da esportare'), 'warning');
       return;
     }
     const bundleHint = projects.length === 1 && projects[0] && projects[0].meta ? (projects[0].meta.trackName || projects[0].meta.levelName) : null;
     try {
-      updateStatusWork(progressToken, 18, 'Costruzione pacchetto livelli', 'loading');
+      updateStatusWork(progressToken, 18, tr('Building level package', 'Costruzione pacchetto livelli'), 'loading');
       const bundle = await buildPlayableBundle(projects, PLAYABLE_ZIP_RUNTIME_TEMPLATE, bundleHint);
       // diagnostica: cosa finisce DAVVERO nel pacchetto (id/nome/#entità per livello)
       try {
@@ -334,20 +335,20 @@ function create(deps){
           const sc = l.project && l.project.scene || {};
           const nAdded = Array.isArray(sc.added) ? sc.added.length : 0;
           const nDeleted = Array.isArray(sc.deleted) ? sc.deleted.length : 0;
-          return (l.id === bundle.activeId ? '▶ ' : '  ') + l.name + ' [' + l.id + '] · +' + nAdded + ' entità, -' + nDeleted + ' builtin';
+          return (l.id === bundle.activeId ? '▶ ' : '  ') + l.name + ' [' + l.id + '] · +' + nAdded + tr(' entities, -', ' entita, -') + nDeleted + ' builtin';
         });
         console.log('[LotKing export] activeId=' + bundle.activeId + '\n' + diag.join('\n'));
-        status('Export: avvio ▶ ' + (bundle.levels.find(l => l.id === bundle.activeId) || {}).name + ' · ' + bundle.levels.length + ' livello/i (dettagli in console F12)');
+        status(tr('Export: start ▶ ', 'Export: avvio ▶ ') + (bundle.levels.find(l => l.id === bundle.activeId) || {}).name + ' · ' + bundle.levels.length + tr(' level(s) (details in F12 console)', ' livello/i (dettagli in console F12)'));
       } catch(diagErr){}
       const warnings = await buildPlayableProjectZip(bundle, (pct, step, tone) => {
         if(tone === 'error') return;
         updateStatusWork(progressToken, pct, step, 'loading');
       });
-      finishStatusWork(progressToken, 'Export ZIP pronto', 'Pacchetto con ' + bundle.levels.length + ' livello/i pronto', 'success');
-      status('PLAYABLE ZIP export created (' + bundle.levels.length + ' livelli)' + (warnings.length ? ' con avvisi: ' + warnings.join(' · ') : ' ✓'));
+      finishStatusWork(progressToken, tr('ZIP export ready', 'Export ZIP pronto'), tr('Package with ', 'Pacchetto con ') + bundle.levels.length + tr(' level(s) ready', ' livello/i pronto'), 'success');
+      status('PLAYABLE ZIP export created (' + bundle.levels.length + tr(' levels)', ' livelli)') + (warnings.length ? tr(' with warnings: ', ' con avvisi: ') + warnings.join(' · ') : ' ✓'));
     } catch(err){
       console.error('Playable ZIP export failed', err);
-      finishStatusWork(progressToken, 'Export ZIP fallito', (err && err.message) ? err.message : 'Errore sconosciuto', 'error');
+      finishStatusWork(progressToken, tr('ZIP export failed', 'Export ZIP fallito'), (err && err.message) ? err.message : tr('Unknown error', 'Errore sconosciuto'), 'error');
       status('⚠ Playable ZIP export failed: ' + err.message);
     }
   }

@@ -20,16 +20,17 @@ function create(deps){
   const sliderRow = deps.sliderRow;
   const btnRow = deps.btnRow;
   const el = deps.el;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function buildDrivingTuning(box){
-    const sg = section('GUIDA (SETUP)', false);
+    const sg = section(tr('DRIVING (SETUP)', 'GUIDA (SETUP)'), false);
     const tun = GAME.player.tuning.values;
     const applyPreset = (name, label) => {
       const preset = GAME.player.tuning.presets && GAME.player.tuning.presets[name];
       if(!preset) return;
       GAME.player.setTuning({...preset});
       markDirty();
-      if(status) status('Preset guida: ' + label);
+      if(status) status(tr('Driving preset: ', 'Preset guida: ') + label);
       buildInspector();
     };
     sg.body.appendChild(btnRow([
@@ -44,26 +45,29 @@ function create(deps){
       const patch = {}; patch[key] = v;
       GAME.player.setTuning(patch); markDirty();
     }, v => (+v).toFixed(2)).root;
-    sg.body.appendChild(tRow('torque', 'Coppia', 0, 10));
-    sg.body.appendChild(tRow('maxSpeed', 'Vel. massima', 0, 10));
-    sg.body.appendChild(tRow('oversteer', 'Sovrasterzo', -10, 10));
-    sg.body.appendChild(tRow('handbrake', 'Freno a mano', -10, 10));
-    sg.body.appendChild(tRow('steer', 'Sterzo', -10, 10));
-    sg.body.appendChild(tRow('brake', 'Frenata', -10, 10));
-    sg.body.appendChild(tRow('grip', 'Aderenza', -10, 10));
-    sg.body.appendChild(tRow('suspension', 'Sospensioni (rigidità)', -10, 10));
-    sg.body.appendChild(tRow('damping', 'Sospensioni (damping)', -10, 10));
-    sg.body.appendChild(tRow('travel', 'Escursione sospensioni', -10, 10));
-    sg.body.appendChild(tRow('ride', 'Assetto ruote', -10, 10));
-    sg.body.appendChild(tRow('roll', 'Rollio telaio', -10, 10));
+    sg.body.appendChild(tRow('torque', tr('Torque', 'Coppia'), 0, 10));
+    sg.body.appendChild(sliderRow('Horsepower', tun.horsepower == null ? 450 : tun.horsepower, 15, 1500, 5, v => {
+      GAME.player.setTuning({horsepower:v}); markDirty();
+    }, v => Math.round(+v) + ' hp').root);
+    sg.body.appendChild(tRow('maxSpeed', tr('Top speed', 'Vel. massima'), 0, 10));
+    sg.body.appendChild(tRow('oversteer', tr('Oversteer', 'Sovrasterzo'), -10, 10));
+    sg.body.appendChild(tRow('handbrake', tr('Handbrake', 'Freno a mano'), -10, 10));
+    sg.body.appendChild(tRow('steer', tr('Steering', 'Sterzo'), -10, 10));
+    sg.body.appendChild(tRow('brake', tr('Braking', 'Frenata'), -10, 10));
+    sg.body.appendChild(tRow('grip', tr('Grip', 'Aderenza'), -10, 10));
+    sg.body.appendChild(tRow('suspension', tr('Suspension stiffness', 'Sospensioni (rigidita)'), -10, 10));
+    sg.body.appendChild(tRow('damping', tr('Suspension damping', 'Sospensioni (damping)'), -10, 10));
+    sg.body.appendChild(tRow('travel', tr('Suspension travel', 'Escursione sospensioni'), -10, 10));
+    sg.body.appendChild(tRow('ride', tr('Wheel stance', 'Assetto ruote'), -10, 10));
+    sg.body.appendChild(tRow('roll', tr('Chassis roll', 'Rollio telaio'), -10, 10));
     sg.body.appendChild(tFloatRow('chassisLift', 'Chassis lift (m)', -0.35, 0.9, .01, 0));
     sg.body.appendChild(tFloatRow('reverseDelay', 'Ritardo retro (s)', 0, 2, .05, .5));
     box.appendChild(sg.root);
   }
 
   function buildModel(box){
-    const sm = section('MODELLO 3D', false);
-    sm.body.appendChild(el('<div class="lk-hint">' + (GAME.player.getModel() ? 'Modello GLB caricato' : 'Corpo procedurale (nessun GLB)') + '</div>'));
+    const sm = section(tr('3D MODEL', 'MODELLO 3D'), false);
+    sm.body.appendChild(el('<div class="lk-hint">' + (GAME.player.getModel() ? tr('GLB model loaded', 'Modello GLB caricato') : tr('Procedural body (no GLB)', 'Corpo procedurale (nessun GLB)')) + '</div>'));
     sm.body.appendChild(btnRow([{label:'📦 Replace GLB model...', action:openPlayerModelPicker}]));
     box.appendChild(sm.root);
   }
@@ -72,19 +76,19 @@ function create(deps){
     const snd = section('ENGINE SOUND', false);
     const SS = STORE.soundSets;
     if(!SS){
-      snd.body.appendChild(el('<div class="lk-empty">Sound sets non disponibili.</div>'));
+      snd.body.appendChild(el('<div class="lk-empty">' + tr('Sound sets unavailable.', 'Sound sets non disponibili.') + '</div>'));
     } else {
       const assigned = GAME.player.engineAudio && GAME.player.engineAudio.setId;
       const sets = SS.list();
       const sel = document.createElement('select');
       sel.className = 'lk-soundset-select';
-      sel.appendChild(new Option('— synth procedurale (nessun set) —', ''));
+      sel.appendChild(new Option(tr('— procedural synth (no set) —', '— synth procedurale (nessun set) —'), ''));
       for(const s of sets) sel.appendChild(new Option(s.name, s.id, false, s.id === assigned));
       sel.value = assigned || '';
       sel.addEventListener('change', () => {
         GAME.player.setEngineSound(sel.value || null);
         markDirty();
-        status(sel.value ? 'Sound set "' + sel.options[sel.selectedIndex].text + '" assegnato al veicolo' : 'Motore in fallback sintetico');
+        status(sel.value ? tr('Sound set "', 'Sound set "') + sel.options[sel.selectedIndex].text + tr('" assigned to vehicle', '" assegnato al veicolo') : tr('Engine using synthetic fallback', 'Motore in fallback sintetico'));
         buildInspector();
       });
       snd.body.appendChild(sel);
@@ -93,28 +97,28 @@ function create(deps){
         const bad = [];
         const scan = (obj, prefix) => { for(const k in obj){ if(obj[k].status === 'error') bad.push(prefix + k); } };
         scan(eaStatus.layers || {}, 'layer ');
-        scan(eaStatus.events || {}, 'evento ');
+        scan(eaStatus.events || {}, tr('event ', 'evento '));
         for(const b of ['on', 'off']) (eaStatus.banks[b] || []).forEach((s, i) => { if(s.status === 'error') bad.push('loop ' + b.toUpperCase() + ' #' + (i + 1)); });
         snd.body.appendChild(el('<div class="lk-hint">' + (bad.length
-          ? '⚠ ' + bad.length + ' sample non caricati (' + bad.slice(0, 3).join(', ') + (bad.length > 3 ? '…' : '') + ') → fallback sintetico'
-          : (eaStatus.engineReady ? '● Set attivo, sample caricati' : '… caricamento sample in corso')) + '</div>'));
+          ? tr('⚠ ', '⚠ ') + bad.length + tr(' samples not loaded (', ' sample non caricati (') + bad.slice(0, 3).join(', ') + (bad.length > 3 ? '…' : '') + tr(') → synthetic fallback', ') → fallback sintetico')
+          : (eaStatus.engineReady ? tr('● Set active, samples loaded', '● Set attivo, sample caricati') : tr('… loading samples', '… caricamento sample in corso'))) + '</div>'));
       } else {
-        snd.body.appendChild(el('<div class="lk-hint">Nessun set assegnato: il motore usa il synth procedurale.</div>'));
+        snd.body.appendChild(el('<div class="lk-hint">' + tr('No set assigned: the engine uses the procedural synth.', 'Nessun set assegnato: il motore usa il synth procedurale.') + '</div>'));
       }
       snd.body.appendChild(btnRow([
         {label:'🎛 Sound Designer', action:() => openSoundDesigner(assigned || null)},
-        {label:'＋ Nuovo set', action:async () => {
-          const name = await promptEditorAction({title:'New engine sound set', message:'Nome del nuovo sound set:', value:'New Engine Sound', okText:'Create'});
+        {label:tr('＋ New set', '＋ Nuovo set'), action:async () => {
+          const name = await promptEditorAction({title:tr('New engine sound set', 'Nuovo sound set motore'), message:tr('Name of the new sound set:', 'Nome del nuovo sound set:'), value:'New Engine Sound', okText:tr('Create', 'Crea')});
           if(!name || !name.trim()) return;
           const id = SS.create(name.trim());
-          if(!id){ status('⚠ Creazione set fallita'); return; }
+          if(!id){ status(tr('⚠ Set creation failed', '⚠ Creazione set fallita')); return; }
           GAME.player.setEngineSound(id);
           markDirty();
           buildInspector();
           openSoundDesigner(id);
         }},
       ]));
-      snd.body.appendChild(el('<div class="lk-hint">I set sono asset del progetto: li trovi anche nel tab Assets e li puoi riusare su piu veicoli/livelli.</div>'));
+      snd.body.appendChild(el('<div class="lk-hint">' + tr('Sets are project assets: you can also find them in the Assets tab and reuse them on multiple vehicles/levels.', 'I set sono asset del progetto: li trovi anche nel tab Assets e li puoi riusare su piu veicoli/livelli.') + '</div>'));
     }
     box.appendChild(snd.root);
   }

@@ -106,32 +106,32 @@ function createRoot(rpmMin, rpmMax){
     <div class="lksd-head">
       <span class="lksd-title">🎛 ENGINE SOUND DESIGNER</span>
       <select id="lksdSet" title="Sound set"></select>
-      <input id="lksdName" type="text" title="Nome del set">
-      <span id="lksdDirty" class="lksd-dirty" title="Modifiche non salvate">●</span>
+      <input id="lksdName" type="text" title="Set name">
+      <span id="lksdDirty" class="lksd-dirty" title="Unsaved changes">●</span>
       <span class="lksd-spacer"></span>
-      <button id="lksdAssign" title="Assegna questo set al veicolo player">🚗 Assegna al veicolo</button>
-      <button id="lksdDup" title="Duplica set">⧉</button>
-      <button id="lksdSave" class="lksd-save" title="Salva il set [Ctrl+S]">💾 Salva set</button>
-      <button id="lksdClose" class="lksd-x" title="Chiudi [Esc]">×</button>
+      <button id="lksdAssign" title="Assign this set to the player vehicle">🚗 Assign to vehicle</button>
+      <button id="lksdDup" title="Duplicate set">⧉</button>
+      <button id="lksdSave" class="lksd-save" title="Save set [Ctrl+S]">💾 Save set</button>
+      <button id="lksdClose" class="lksd-x" title="Close [Esc]">×</button>
     </div>
     <div class="lksd-body">
       <div class="lksd-left">
         <div class="lksd-sec">
-          <div class="lksd-sec-title">BANCHI LOOP RPM · trascina i punti sull'arco</div>
+          <div class="lksd-sec-title">RPM LOOP BANKS · drag points on the arc</div>
           <svg id="lksdTach" width="420" height="300" viewBox="0 0 420 300"></svg>
           <div class="lksd-legend">
-            <span class="on"><b>●</b> ON throttle (sotto gas)</span>
-            <span class="off"><b>●</b> OFF throttle (rilascio)</span>
+            <span class="on"><b>●</b> ON throttle</span>
+            <span class="off"><b>●</b> OFF throttle</span>
           </div>
         </div>
         <div class="lksd-sec">
-          <div class="lksd-sec-title">MOTORE · clicca un punto caldo</div>
+          <div class="lksd-sec-title">ENGINE · click a hotspot</div>
           <svg id="lksdEngine" width="420" height="312" viewBox="0 0 420 312"></svg>
         </div>
       </div>
       <div class="lksd-right">
         <div class="lksd-sec">
-          <div class="lksd-sec-title" id="lksdSlotSecTitle">SLOT SELEZIONATO</div>
+          <div class="lksd-sec-title" id="lksdSlotSecTitle">SELECTED SLOT</div>
           <div id="lksdSlot" class="lksd-slotpanel"></div>
         </div>
         <div class="lksd-sec">
@@ -143,20 +143,20 @@ function createRoot(rpmMin, rpmMax){
     <div class="lksd-test">
       <div class="lksd-rpmread"><b id="lksdRpmVal">950</b><span>RPM TEST</span></div>
       <input id="lksdRpm" type="range" min="${rpmMin}" max="${rpmMax}" step="10" value="950">
-      <button id="lksdAuto" title="AUTO RPM: col GAS i giri salgono da soli, al rilascio scendono (per testare anche la decelerazione)">⛭ AUTO</button>
-      <button id="lksdGas" class="hold" title="Tieni premuto: gas aperto (banco ON)">⛽ GAS</button>
-      <button id="lksdRamp" title="Rampa automatica idle → limitatore → rilascio">▶ RAMPA</button>
-      <button id="lksdDecel" title="Solo rilascio: giri alti → idle senza gas (banco OFF)">▼ RILASCIO</button>
+      <button id="lksdAuto" title="AUTO RPM: with GAS, revs climb automatically; on release they drop">⛭ AUTO</button>
+      <button id="lksdGas" class="hold" title="Hold: open throttle (ON bank)">⛽ GAS</button>
+      <button id="lksdRamp" title="Automatic ramp idle → limiter → release">▶ RAMP</button>
+      <button id="lksdDecel" title="Release only: high revs → idle without gas (OFF bank)">▼ RELEASE</button>
       <button id="lksdLim" title="Test fuorigiri / limitatore">🟥 LIMITER</button>
-      <button data-ev="ignition" title="Test accensione">🔑</button>
-      <button data-ev="shiftPop" title="Test pop cambiata">⚙💥</button>
-      <button data-ev="blowoff" title="Test blow-off turbina">💨</button>
-      <button data-ev="backfire" title="Test scoppio">🔥</button>
-      <button data-ev="rev" title="Test sgasata">🗲 REV</button>
-      <button data-ev="skidDrift" title="Test sgommata drift">🛞</button>
-      <button data-ev="skidBrake" title="Test sgommata frenata">🛞🛑</button>
+      <button data-ev="ignition" title="Test ignition">🔑</button>
+      <button data-ev="shiftPop" title="Test shift pop">⚙💥</button>
+      <button data-ev="blowoff" title="Test turbo blow-off">💨</button>
+      <button data-ev="backfire" title="Test backfire">🔥</button>
+      <button data-ev="rev" title="Test rev">🗲 REV</button>
+      <button data-ev="skidDrift" title="Test drift skid">🛞</button>
+      <button data-ev="skidBrake" title="Test brake skid">🛞🛑</button>
       <button data-ev="skidAccel" title="Test wheelspin">🛞🌪</button>
-      <div class="lksd-boost" title="Boost turbina simulato"><i id="lksdBoost"></i></div>
+      <div class="lksd-boost" title="Simulated turbo boost"><i id="lksdBoost"></i></div>
     </div>
   </div>`;
   return root;

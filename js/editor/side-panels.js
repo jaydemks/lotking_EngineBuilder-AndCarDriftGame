@@ -23,8 +23,12 @@ function create(deps){
   });
 
   $('#lkSceneTab').addEventListener('click', () => deps.setLeftMode('scene'));
-  $('#lkViewGrid').addEventListener('click', () => deps.setViewMode('grid'));
-  $('#lkViewList').addEventListener('click', () => deps.setViewMode('list'));
+  $('#lkViewGrid').addEventListener('click', () => deps.setViewMode('grid', 'scene'));
+  $('#lkViewList').addEventListener('click', () => deps.setViewMode('list', 'scene'));
+  const assetGrid = $('#lkAssetViewGrid');
+  const assetList = $('#lkAssetViewList');
+  if(assetGrid) assetGrid.addEventListener('click', () => deps.setViewMode('grid', 'assets'));
+  if(assetList) assetList.addEventListener('click', () => deps.setViewMode('list', 'assets'));
   $('#lkAssetImport').addEventListener('click', () => $('#lkAssetInput').click());
   $('#lkAssetFolder').addEventListener('click', () => deps.newFolder('assets'));
   $('#lkSceneFolder').addEventListener('click', () => deps.newFolder('scene'));

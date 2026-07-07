@@ -130,7 +130,11 @@ function panelWidth(side){ return editorLayout.panelWidth(side); }
 function editorViewportRect(){ return editorLayout.editorViewportRect(); }
 function clampPanelPos(pos, w, h){ return editorLayout.clampPanelPos(pos, w, h); }
 function clearHoverPickHelper(){ if(viewportPicking) viewportPicking.clearHover(); }
-window.LK_EDITOR_CORE.installCanvasViewportRectOverride(canvas, ED, editorViewportRect);
+window.LK_EDITOR_CORE.installCanvasViewportRectOverride(canvas, ED, activeCanvasViewportRect);
+canvas.addEventListener('pointerdown', e => {
+  if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
+  setActiveViewportAt(e.clientX, e.clientY);
+}, true);
 visualHelpers = window.LK_EDITOR_VISUAL_HELPERS && window.LK_EDITOR_VISUAL_HELPERS.create({
   THREE, GAME, ED, helperGroup,
   registry: () => GAME.world.registry,
@@ -148,8 +152,13 @@ function getReplaceDropHelper(){ return visualHelpers.getReplaceDropHelper(); }
 flyCamera = window.LK_EDITOR_FLY_CAMERA && window.LK_EDITOR_FLY_CAMERA.create({
   THREE, ED, fly, camE, canvas,
   getOrbit: () => orbit,
+  shouldEnableOrbit: shouldEnableOrbitForActiveViewport,
+  getActiveCamera: () => activeViewportCamera(),
+  getActiveCameraRig: () => activeViewportCameraRig(),
+  onActiveCameraRigChange,
+  panActiveViewport: (dx, dy) => panActiveViewport(dx, dy),
 });
-function flyStart(e){ return flyCamera.flyStart(e); }
+function flyStart(e, opts){ return flyCamera.flyStart(e, opts); }
 function flyMove(e){ return flyCamera.flyMove(e); }
 function syncOrbitAfterFly(){ return flyCamera.syncOrbitAfterFly(); }
 function flyEnd(e){ return flyCamera.flyEnd(e); }
@@ -159,6 +168,7 @@ gizmoControls = window.LK_EDITOR_GIZMO_CONTROLS && window.LK_EDITOR_GIZMO_CONTRO
   getGizmo: () => gizmo,
   setGizmo: value => { gizmo = value; },
   getOrbit: () => orbit,
+  shouldEnableOrbit: shouldEnableOrbitForActiveViewport,
   setOrbit: value => { orbit = value; },
   isGizmoUsingZUpProxy: () => gizmoUsingZUpProxy,
   setGizmoUsingZUpProxy: value => { gizmoUsingZUpProxy = !!value; },
@@ -224,8 +234,292 @@ editorLayout = window.LK_EDITOR_LAYOUT && window.LK_EDITOR_LAYOUT.create({
   camE,
   cameraAspect: () => GAME.player && GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (gameCam.aspect || innerWidth / innerHeight),
 });
+const editorViewCams = Object.create(null);
+function editorSceneCameras(){
+  return GAME.world.registry.filter(o => o && o.userData && o.userData.editorType === 'camera' && o.userData.sceneCamera);
+}
+function sceneCameraHolderFromSpec(spec){
+  if(!spec || spec.indexOf('cam:') !== 0) return null;
+  const id = spec.slice(4);
+  return editorSceneCameras().find(o => o.userData.editorId === id) || null;
+}
+function normalizeSceneCameraLocal(holder){
+  const cam = holder && holder.userData && holder.userData.sceneCamera;
+  if(!cam) return null;
+  cam.position.set(0, 0, 0);
+  cam.rotation.set(0, 0, 0);
+  cam.scale.set(1, 1, 1);
+  cam.updateMatrixWorld(true);
+  return cam;
+}
+function cinemaStudioById(id){
+  return GAME.world.registry.find(o => o && o.userData && o.userData.editorType === 'cinemaStudio' && o.userData.editorId === id) || null;
+}
+function cinemaShotAt(studio, time){
+  const props = studio && studio.userData && studio.userData.cinemaProps || {};
+  const shots = Array.isArray(props.movieTrack) ? props.movieTrack.slice().sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
+  return shots.find(shot => time >= (shot.time || 0) && time < (shot.time || 0) + (shot.duration || 0)) ||
+    shots.filter(shot => (shot.time || 0) <= time).pop() ||
+    shots[0] || null;
+}
+function clampViewportSplit(value){
+  return Math.max(.18, Math.min(.82, Number(value) || .5));
+}
+function editorQuadRects(viewRect){
+  const splitX = clampViewportSplit(ED.viewportSplitX);
+  const splitY = clampViewportSplit(ED.viewportSplitY);
+  ED.viewportSplitX = splitX;
+  ED.viewportSplitY = splitY;
+  const w1 = Math.floor(viewRect.w * splitX);
+  const h1 = Math.floor(viewRect.h * splitY);
+  return [
+    {slot:0, x:viewRect.x, y:viewRect.y, w:w1, h:h1},
+    {slot:1, x:viewRect.x + w1, y:viewRect.y, w:viewRect.w - w1, h:h1},
+    {slot:2, x:viewRect.x, y:viewRect.y + h1, w:w1, h:viewRect.h - h1},
+    {slot:3, x:viewRect.x + w1, y:viewRect.y + h1, w:viewRect.w - w1, h:viewRect.h - h1},
+  ];
+}
+function editorViewportTarget(){
+  if(orbit && orbit.target) return orbit.target.clone();
+  return GAME.player && GAME.player.car ? GAME.player.car.position.clone().setY(1) : new THREE.Vector3();
+}
+function editorViewState(slot){
+  const states = ED.viewportViewStates || (ED.viewportViewStates = {});
+  const key = 'slot' + Math.max(0, Math.min(3, slot || 0));
+  if(!states[key]){
+    const target = editorViewportTarget();
+    states[key] = {target:{x:target.x, y:target.y, z:target.z}, span:Math.max(18, ED.gridSize ? ED.gridSize * .22 : 48)};
+  }
+  return states[key];
+}
+function editorViewTarget(slot){
+  const state = editorViewState(slot);
+  const t = state.target || {};
+  return new THREE.Vector3(t.x || 0, t.y || 0, t.z || 0);
+}
+function setEditorViewTarget(slot, value){
+  const state = editorViewState(slot);
+  state.target = {x:value.x || 0, y:value.y || 0, z:value.z || 0};
+}
+function setEditorViewSpan(slot, value){
+  const state = editorViewState(slot);
+  state.span = Math.max(2, Math.min(2000, Number(value) || 48));
+}
+function editorPerspectiveCamera(slot, rect){
+  if(slot === 0){
+    camE.aspect = rect.w / Math.max(1, rect.h);
+    camE.updateProjectionMatrix();
+    return camE;
+  }
+  const key = slot + ':perspective';
+  let cam = editorViewCams[key];
+  if(!cam){
+    cam = new THREE.PerspectiveCamera(60, rect.w / Math.max(1, rect.h), .1, 2000);
+    cam.position.copy(camE.position);
+    cam.quaternion.copy(camE.quaternion);
+    cam.up.copy(camE.up);
+    editorViewCams[key] = cam;
+  }
+  cam.aspect = rect.w / Math.max(1, rect.h);
+  cam.updateProjectionMatrix();
+  return cam;
+}
+function activeCanvasViewportRect(){
+  const viewRect = editorViewportRect();
+  if(ED.viewportMode !== 'quad') return viewRect;
+  const slot = Math.max(0, Math.min(3, ED.activeViewportSlot || 0));
+  return editorQuadRects(viewRect)[slot] || viewRect;
+}
+function editorOrthoCamera(slot, kind, rect){
+  const key = kind || 'top';
+  const camKey = slot + ':' + key;
+  let cam = editorViewCams[camKey];
+  if(!cam){
+    cam = new THREE.OrthographicCamera(-10, 10, 10, -10, -1000, 1000);
+    editorViewCams[camKey] = cam;
+  }
+  const target = editorViewTarget(slot);
+  const aspect = rect.w / Math.max(1, rect.h);
+  const span = Math.max(2, editorViewState(slot).span || (ED.gridSize ? ED.gridSize * .22 : 48));
+  cam.left = -span * aspect * .5;
+  cam.right = span * aspect * .5;
+  cam.top = span * .5;
+  cam.bottom = -span * .5;
+  const dist = 120;
+  if(key === 'bottom'){
+    cam.position.copy(target).add(new THREE.Vector3(0, -dist, 0));
+    cam.up.set(0, 0, -1);
+  } else if(key === 'front'){
+    cam.position.copy(target).add(new THREE.Vector3(0, 0, dist));
+    cam.up.set(0, 1, 0);
+  } else if(key === 'back'){
+    cam.position.copy(target).add(new THREE.Vector3(0, 0, -dist));
+    cam.up.set(0, 1, 0);
+  } else if(key === 'right'){
+    cam.position.copy(target).add(new THREE.Vector3(dist, 0, 0));
+    cam.up.set(0, 1, 0);
+  } else if(key === 'left'){
+    cam.position.copy(target).add(new THREE.Vector3(-dist, 0, 0));
+    cam.up.set(0, 1, 0);
+  } else {
+    cam.position.copy(target).add(new THREE.Vector3(0, dist, 0));
+    cam.up.set(0, 0, -1);
+  }
+  cam.lookAt(target);
+  cam.updateProjectionMatrix();
+  return cam;
+}
+function editorCameraForView(slot, rect){
+  const spec = ED.viewportSlots[slot] || ['perspective', 'top', 'right', 'front'][slot] || 'top';
+  if(slot === 0 || spec === 'perspective') return editorPerspectiveCamera(slot, rect);
+  if(spec.indexOf('timeline:') === 0){
+    const id = spec.slice(9);
+    const studio = cinemaStudioById(id);
+    const state = ED.cinemaPreview && ED.cinemaPreview.id === id ? ED.cinemaPreview : {time:0};
+    const shot = cinemaShotAt(studio, state.time || 0);
+    if(shot && shot.cameraId){
+      const holder = sceneCameraHolderFromSpec('cam:' + shot.cameraId);
+      if(holder && holder.userData.sceneCamera){
+        const cam = normalizeSceneCameraLocal(holder);
+        cam.aspect = rect.w / Math.max(1, rect.h);
+        cam.updateProjectionMatrix();
+        holder.updateMatrixWorld(true);
+        return cam;
+      }
+    }
+  }
+  if(spec.indexOf('cam:') === 0){
+    const holder = sceneCameraHolderFromSpec(spec);
+    if(holder && holder.userData.sceneCamera){
+      const cam = normalizeSceneCameraLocal(holder);
+      cam.aspect = rect.w / Math.max(1, rect.h);
+      cam.updateProjectionMatrix();
+      holder.updateMatrixWorld(true);
+      return cam;
+    }
+  }
+  return editorOrthoCamera(slot, spec, rect);
+}
+function editorPickView(clientX, clientY){
+  const viewRect = editorViewportRect();
+  if(ED.viewportMode !== 'quad'){
+    return {slot:0, rect:viewRect, camera:camE};
+  }
+  const rects = editorQuadRects(viewRect);
+  for(let i = 0; i < rects.length; i++){
+    const r = rects[i];
+    if(clientX >= r.x && clientX <= r.x + r.w && clientY >= r.y && clientY <= r.y + r.h){
+      return {slot:i, rect:r, camera:editorCameraForView(i, r)};
+    }
+  }
+  return null;
+}
+function activeViewportSpec(){
+  if(ED.viewportMode !== 'quad'){
+    const rect = editorViewportRect();
+    camE.aspect = rect.w / Math.max(1, rect.h);
+    camE.updateProjectionMatrix();
+    return {slot:0, rect, spec:'perspective', camera:camE};
+  }
+  const slot = Math.max(0, Math.min(3, ED.activeViewportSlot || 0));
+  const rect = editorQuadRects(editorViewportRect())[slot];
+  const spec = slot === 0 ? 'perspective' : (ED.viewportSlots[slot] || ['perspective', 'top', 'right', 'front'][slot] || 'top');
+  return {slot, rect, spec, camera:editorCameraForView(slot, rect)};
+}
+function setActiveViewportAt(clientX, clientY){
+  const view = editorPickView(clientX, clientY);
+  if(!view) return null;
+  setActiveViewportSlot(view.slot);
+  return view;
+}
+function setActiveViewportSlot(slot){
+  ED.activeViewportSlot = ED.viewportMode === 'quad' ? Math.max(0, Math.min(3, slot || 0)) : 0;
+  const view = activeViewportSpec();
+  if(orbit) orbit.enabled = shouldEnableOrbitForActiveViewport();
+  if(gizmo && view && view.camera){
+    gizmo.camera = view.camera;
+    if(gizmo.updateMatrixWorld) gizmo.updateMatrixWorld(true);
+  }
+  return view;
+}
+function shouldEnableOrbitForActiveViewport(){
+  return !!(ED.active && !ED.playPreview && (ED.viewportMode !== 'quad' || (ED.activeViewportSlot || 0) === 0));
+}
+function activeViewportCamera(){
+  return activeViewportSpec().camera || camE;
+}
+function activeViewportCameraRig(){
+  const view = activeViewportSpec();
+  if(view.spec && view.spec.indexOf('timeline:') === 0){
+    const id = view.spec.slice(9);
+    const studio = cinemaStudioById(id);
+    const state = ED.cinemaPreview && ED.cinemaPreview.id === id ? ED.cinemaPreview : {time:0};
+    const shot = cinemaShotAt(studio, state.time || 0);
+    return shot && shot.cameraId ? sceneCameraHolderFromSpec('cam:' + shot.cameraId) : null;
+  }
+  return sceneCameraHolderFromSpec(view.spec);
+}
+function isActiveViewportCameraDriven(){
+  return !!activeViewportCameraRig();
+}
+function onActiveCameraRigChange(rig){
+  if(!rig) return;
+  markDirty();
+  if(ED.selected === rig){
+    if(usesZUpGizmoProxy()) syncZUpProxyFromSelected();
+    refreshSelectionHelpers();
+    updateSelectionAndDropHelpers();
+    syncTransformFields();
+    if(gizmo && gizmo.updateMatrixWorld) gizmo.updateMatrixWorld(true);
+  }
+}
+function panActiveViewport(dx, dy){
+  const view = activeViewportSpec();
+  if(!view.camera || !view.camera.isOrthographicCamera) return false;
+  const key = view.spec || 'top';
+  if(key.indexOf('cam:') === 0) return false;
+  const current = editorViewTarget(view.slot);
+  const span = Math.max(2, editorViewState(view.slot).span || 48);
+  const scale = span / Math.max(80, view.rect.h || 1);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(view.camera.quaternion).normalize();
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(view.camera.quaternion).normalize();
+  current.addScaledVector(right, -dx * scale);
+  current.addScaledVector(up, dy * scale);
+  setEditorViewTarget(view.slot, current);
+  return true;
+}
+function zoomActiveViewport(deltaY, clientX, clientY){
+  const picked = clientX == null ? activeViewportSpec() : editorPickView(clientX, clientY);
+  if(!picked || !picked.camera || !picked.camera.isOrthographicCamera) return false;
+  const slot = picked.slot || 0;
+  const state = editorViewState(slot);
+  setEditorViewSpan(slot, (state.span || 48) * (deltaY > 0 ? 1.12 : .88));
+  return true;
+}
+function focusActiveViewportTarget(target){
+  if(!target) return false;
+  const box = new THREE.Box3().setFromObject(target);
+  const c = box.isEmpty() ? target.position.clone() : box.getCenter(new THREE.Vector3());
+  const r = box.isEmpty() ? 4 : Math.max(2.5, box.getSize(new THREE.Vector3()).length() * .8);
+  const view = activeViewportSpec();
+  if(view.camera && view.camera.isOrthographicCamera){
+    setEditorViewTarget(view.slot, c);
+    setEditorViewSpan(view.slot, Math.max(6, r * 2.4));
+    return true;
+  }
+  if(view.camera && view.camera.isPerspectiveCamera){
+    const dir = new THREE.Vector3().subVectors(view.camera.position, c).normalize();
+    if(dir.lengthSq() < .01) dir.set(1, .6, 1).normalize();
+    view.camera.position.copy(c).addScaledVector(dir, r * 1.6).add(new THREE.Vector3(0, r*.35, 0));
+    view.camera.lookAt(c);
+    if(view.camera === camE && orbit) orbit.target.copy(c);
+    return true;
+  }
+  return true;
+}
 viewportPicking = window.LK_EDITOR_VIEWPORT_PICKING && window.LK_EDITOR_VIEWPORT_PICKING.create({
   THREE,
+  pickView: editorPickView,
   viewportRect: editorViewportRect,
   camera: () => camE,
   registry: () => GAME.world.registry,
@@ -234,7 +528,19 @@ viewportPicking = window.LK_EDITOR_VIEWPORT_PICKING && window.LK_EDITOR_VIEWPORT
   hoverSuppressed: () => !!(ED.playPreview || ED.levelsOpen || ED.projectsOpen || (gizmo && (gizmo.dragging || gizmo.axis)) || gizmoPointerActive),
 });
 if(!viewportPicking){
-  viewportPicking = {pickAt:()=>null, groundPointAt:()=>spawnPointAhead(), spawnPointAhead:()=>camE.position.clone().setY(0), updateHover:()=>{}, updateHelpers:()=>{}, clearHover:()=>{}, isGroundLikeEntity:()=>false};
+  viewportPicking = {
+    pickAt:()=>null,
+    pickMaterialAt:()=>null,
+    materialSlotInfo:()=>null,
+    setMaterialPickHelper:()=>{},
+    clearMaterialPickHelper:()=>{},
+    groundPointAt:()=>spawnPointAhead(),
+    spawnPointAhead:()=>camE.position.clone().setY(0),
+    updateHover:()=>{},
+    updateHelpers:()=>{},
+    clearHover:()=>{},
+    isGroundLikeEntity:()=>false,
+  };
 }
 
 function assetLibraryLoad(){ return assetLibrary ? assetLibrary.load() : []; }
@@ -248,7 +554,7 @@ function createGlbEntryFromAsset(asset, at){ return assetLibrary ? assetLibrary.
 function createTextureEntryFromAsset(asset, at){ return assetLibrary ? assetLibrary.createTextureEntry(asset, at) : {}; }
 
 assetImports = window.LK_EDITOR_ASSET_IMPORTS && window.LK_EDITOR_ASSET_IMPORTS.create({
-  GAME, STORE, status, setAssetLoading, confirmEditorAction, refreshAssetsPanel, finishAdd,
+  GAME, STORE, THREE, status, setAssetLoading, confirmEditorAction, refreshAssetsPanel, finishAdd,
   spawnPointAhead, performDeleteEntity, selected: () => ED.selected,
   assetLibraryLoad, assetLibrarySave, supportedAssetFiles, assetKeyFromFile, assetDbKeyFromFile,
   resolveImportedAssetUrl, upsertImportedAsset, createGlbEntryFromAsset, createTextureEntryFromAsset,
@@ -261,6 +567,8 @@ function placeImportedAsset(asset, at){ return assetImports ? assetImports.place
 function deleteImportedAsset(asset){ if(assetImports) assetImports.deleteImportedAsset(asset); }
 function replaceSelectedWithAsset(asset, target){ if(assetImports) assetImports.replaceSelectedWithAsset(asset, target); }
 function replaceObjectWithFile(target, file){ if(assetImports) assetImports.replaceObjectWithFile(target, file); }
+function replaceTextureObjectWithAsset(asset, target){ if(assetImports) assetImports.replaceTextureObjectWithAsset(asset, target); }
+function replaceTextureObjectWithFile(target, file){ if(assetImports) assetImports.replaceTextureObjectWithFile(target, file); }
 function replacePlayerModelWithAsset(asset){ if(assetImports) assetImports.replacePlayerModelWithAsset(asset); }
 function replacePlayerModelWithFile(file){ if(assetImports) assetImports.replacePlayerModelWithFile(file); }
 
@@ -292,7 +600,7 @@ function deletePlayerBlueprintAsset(asset){ if(playerBlueprints) playerBlueprint
 folderManager = window.LK_EDITOR_FOLDER_MANAGER && window.LK_EDITOR_FOLDER_MANAGER.create({
   promptEditorAction, openMenu, refreshScene: refreshOutliner, refreshAssets: refreshAssetsPanel,
 });
-function newFolder(kind){ if(folderManager) folderManager.newFolder(kind); }
+function newFolder(kind){ if(folderManager) (folderManager.createFolder || folderManager.newFolder)(kind); }
 function makeFolderRow(kind, folder){ return folderManager ? folderManager.makeRow(kind, folder) : document.createElement('div'); }
 function folderList(kind){ return folderManager ? folderManager.list(kind) : []; }
 function folderAssignments(kind){ return folderManager ? folderManager.assignments(kind) : {}; }
@@ -372,6 +680,10 @@ projectIo = window.LK_EDITOR_PROJECT_IO && window.LK_EDITOR_PROJECT_IO.create({
   reopenEditorAndReload,
   setLevelLoading,
   status,
+  getEditorLang: editorLang,
+  setEditorLang: value => {
+    if(preferences && preferences.setLang) preferences.setLang(value);
+  },
   assetLibraryLoad,
   applyInputConfig: cfg => {
     if(inputSettings) inputSettings.setConfig(cfg);
@@ -432,6 +744,8 @@ assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
   importAssetFiles,
   replaceSelectedWithAsset,
   replaceObjectWithFile,
+  replaceTextureObjectWithAsset,
+  replaceTextureObjectWithFile,
   replacePlayerModelWithAsset,
   replacePlayerModelWithFile,
   placeAssetRef,
@@ -459,6 +773,10 @@ function setViewMode(m, scope){
   if(target === 'assets'){
     ED.assetsViewMode = mode;
     $('#lkAssetsPanel').className = mode;
+    const ag = $('#lkAssetViewGrid');
+    const al = $('#lkAssetViewList');
+    if(ag) ag.classList.toggle('on', mode === 'grid');
+    if(al) al.classList.toggle('on', mode === 'list');
     refreshAssetsPanel();
     return;
   }
@@ -514,16 +832,16 @@ function cloneForStorage(value){
 }
 function placeProjectAsset(rawAsset, at){
   if(!rawAsset || !rawAsset.entry){
-    status('Asset di progetto non disponibile');
+    status(editorLang() === 'it' ? 'Asset di progetto non disponibile' : 'Project asset unavailable');
     return;
   }
   const entry = cloneForStorage(rawAsset.entry);
   const point = at || spawnPointAhead();
   if(!entry || !point){
-    status('Posizione non disponibile per il posizionamento');
+    status(editorLang() === 'it' ? 'Posizione non disponibile per il posizionamento' : 'Position unavailable for placement');
     return;
   }
-  setAssetLoading(true, entry.name || entry.kind || 'project asset', 15, 'Caricamento template');
+  setAssetLoading(true, entry.name || entry.kind || 'project asset', 15, editorLang() === 'it' ? 'Caricamento template' : 'Loading template');
   return Promise.resolve()
     .then(() => STORE.createFromEntry(entry, GAME))
     .then(obj => {
@@ -550,12 +868,12 @@ function placeProjectAsset(rawAsset, at){
       }
       STORE.registerAdded(GAME, obj, nextEntry);
       finishAdd(obj);
-      setAssetLoading(true, entry.name || entry.kind || 'project asset', 100, 'Posizionato');
+      setAssetLoading(true, entry.name || entry.kind || 'project asset', 100, editorLang() === 'it' ? 'Posizionato' : 'Placed');
       setTimeout(() => setAssetLoading(false), 300);
     })
     .catch(err => {
       setAssetLoading(false);
-      status('Aggiunta asset progetto fallita: ' + err.message);
+      status((editorLang() === 'it' ? 'Aggiunta asset progetto fallita: ' : 'Project asset add failed: ') + err.message);
     });
 }
 
@@ -698,13 +1016,29 @@ selectionManager = window.LK_EDITOR_SELECTION_MANAGER && window.LK_EDITOR_SELECT
   pushHistory,
   confirmEditorAction,
   getOrbit: () => orbit,
+  focusViewportTarget: focusActiveViewportTarget,
   applyZUpProxyToSelected,
   syncTransformFields,
 });
-function selectObject(o){ return selectionManager.selectObject(o); }
-function selectCollider(o){ return selectionManager.selectCollider(o); }
-function selectColliderPart(o, index){ return selectionManager.selectColliderPart(o, index); }
+function selectObject(o){
+  if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== o) clearLiveMaterialSelection();
+  if(o && o.userData && o.userData.editorType === 'cinemaStudio'){
+    ED.cinemaTimelineClosedId = null;
+    ED.cinemaTimelineId = o.userData.editorId;
+    ED.cinemaTimelineOpen = true;
+  }
+  return selectionManager.selectObject(o);
+}
+function selectCollider(o){
+  if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== o) clearLiveMaterialSelection();
+  return selectionManager.selectCollider(o);
+}
+function selectColliderPart(o, index){
+  if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== o) clearLiveMaterialSelection();
+  return selectionManager.selectColliderPart(o, index);
+}
 function selectPlayerCollider(){
+  if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== GAME.player.car) clearLiveMaterialSelection();
   clearHoverPickHelper();
   ED.multiSelected = null;
   ED.special = null;
@@ -719,10 +1053,22 @@ function selectPlayerCollider(){
   refreshOutliner();
   status('player_car collider selected');
 }
-function selectMultiObjects(objects){ return selectionManager.selectMultiObjects(objects); }
-function selectSimilarObjects(o){ return selectionManager.selectSimilarObjects(o); }
-function selectSpecial(kind){ return selectionManager.selectSpecial(kind); }
-function deselect(){ return selectionManager.deselect(); }
+function selectMultiObjects(objects){
+  if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  return selectionManager.selectMultiObjects(objects);
+}
+function selectSimilarObjects(o){
+  if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  return selectionManager.selectSimilarObjects(o);
+}
+function selectSpecial(kind){
+  if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  return selectionManager.selectSpecial(kind);
+}
+function deselect(){
+  if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  return selectionManager.deselect();
+}
 function isPlayerCameraSelection(){ return selectionManager.isPlayerCameraSelection(); }
 function isLightLikeObject(o){
   if(!o) return false;
@@ -752,18 +1098,83 @@ function pickAt(clientX, clientY, opts){ return viewportPicking.pickAt(clientX, 
 function groundPointAt(clientX, clientY){ return viewportPicking.groundPointAt(clientX, clientY); }
 function spawnPointAhead(){ return viewportPicking.spawnPointAhead(); }
 function isGroundLikeEntity(o){ return viewportPicking.isGroundLikeEntity(o); }
+function liveMaterialRoot(o){ return materialEditor && materialEditor.materialRoot ? materialEditor.materialRoot(o) : o; }
+function isLiveMaterialSelectionActive(o){
+  const target = o || ED.selected;
+  return !!(target && ED.liveMaterialSelection && ED.liveMaterialSelection.object === target && ED.selected === target);
+}
+function clearLiveMaterialSelection(){
+  if(viewportPicking && viewportPicking.clearMaterialPickHelper) viewportPicking.clearMaterialPickHelper();
+  ED.liveMaterialSelection = null;
+}
+function syncLiveMaterialSelection(o){
+  if(!isLiveMaterialSelectionActive(o)) return;
+  const root = liveMaterialRoot(o);
+  const key = o && o.userData && o.userData.materialEditorSlot;
+  if(!root || !key || key === 'all'){
+    viewportPicking.clearMaterialPickHelper();
+    return;
+  }
+  viewportPicking.setMaterialPickHelper(viewportPicking.materialSlotInfo(root, key), 0xffd166);
+}
+function toggleLiveMaterialSelection(o){
+  if(!o) return;
+  if(isLiveMaterialSelectionActive(o)){
+    clearLiveMaterialSelection();
+    status(editorLang() === 'it' ? 'Live Mat Selection disattivata' : 'Live Mat Selection off');
+    return;
+  }
+  ED.liveMaterialSelection = {object:o};
+  clearHoverPickHelper();
+  syncLiveMaterialSelection(o);
+  status(editorLang() === 'it'
+    ? 'Live Mat Selection: clicca una parte del modello per scegliere il materiale'
+    : 'Live Mat Selection: click a model part to choose the material');
+}
+function updateLiveMaterialSelection(e){
+  if(!isLiveMaterialSelectionActive()) return false;
+  const o = ED.liveMaterialSelection.object;
+  const hit = viewportPicking.pickMaterialAt(liveMaterialRoot(o), e.clientX, e.clientY);
+  if(hit){
+    const current = o && o.userData && o.userData.materialEditorSlot;
+    viewportPicking.setMaterialPickHelper(hit, hit.key === current ? 0xffd166 : 0x52b7ff);
+  } else {
+    syncLiveMaterialSelection(o);
+  }
+  return true;
+}
+function commitLiveMaterialSelection(e){
+  if(!isLiveMaterialSelectionActive()) return false;
+  const o = ED.liveMaterialSelection.object;
+  const hit = viewportPicking.pickMaterialAt(liveMaterialRoot(o), e.clientX, e.clientY);
+  if(hit){
+    o.userData.materialEditorSlot = hit.key;
+    viewportPicking.setMaterialPickHelper(hit, 0xffd166);
+    buildInspector();
+    status('Material target: ' + hit.label);
+  } else {
+    status(editorLang() === 'it' ? 'Nessun materiale sotto il puntatore' : 'No material under pointer');
+  }
+  return true;
+}
 viewportEvents = window.LK_EDITOR_VIEWPORT_EVENTS && window.LK_EDITOR_VIEWPORT_EVENTS.create({
   ED, GAME, canvas,
   clearHoverPickHelper,
   updateHover: e => viewportPicking.updateHover(e),
+  isLiveMaterialSelectionActive,
+  updateLiveMaterialSelection,
+  commitLiveMaterialSelection,
+  setActiveViewportAt,
   flyStart,
   flyMove,
   flyEnd,
   isFlyActive: () => fly.rmb,
   flyMoved: () => fly.moved,
+  isActiveViewportCameraDriven,
+  zoomActiveViewport,
   adjustFlySpeed: deltaY => {
     fly.speed = Math.max(2, Math.min(80, fly.speed * (deltaY > 0 ? .85 : 1.18)));
-    status('Velocità volo: ' + fly.speed.toFixed(0));
+    status((editorLang() === 'it' ? 'Velocita volo: ' : 'Fly speed: ') + fly.speed.toFixed(0));
   },
   shouldSuppressSceneClick: () => !!(gizmoSuppressSceneClick || gizmoPointerActive || (gizmo && (gizmo.dragging || gizmo.axis))),
   getGizmo: () => gizmo,
@@ -790,6 +1201,8 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   addEffect,
   addText,
   addTexture,
+  addCamera,
+  addCinemaStudio,
   openGlbImportAt,
   setTool,
   selectObject,
@@ -855,6 +1268,8 @@ function addLight(kind, at){ return addActions.addLight(kind, at); }
 function addEffect(kind, at){ return addActions.addEffect(kind, at); }
 function addText(kind, at){ return addActions.addText(kind, at); }
 function addTexture(kind, at, asset){ return addActions.addTexture(kind, at, asset); }
+function addCamera(at){ return addActions.addCamera(at); }
+function addCinemaStudio(at){ return addActions.addCinemaStudio(at); }
 function finishAdd(obj){ return addActions.finishAdd(obj); }
 function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
 function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }
@@ -886,6 +1301,8 @@ musicLibraryPanel = window.LK_EDITOR_MUSIC_LIBRARY_PANEL && window.LK_EDITOR_MUS
   el,
 });
 materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_EDITOR.create({
+  THREE,
+  GAME,
   STORE,
   thumbCache,
   markDirty,
@@ -897,6 +1314,12 @@ materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_E
   colorRow,
   sliderRow,
   textureDrop,
+  assetLibraryLoad,
+  liveMaterialSelection: {
+    isActive: isLiveMaterialSelectionActive,
+    toggle: toggleLiveMaterialSelection,
+    sync: syncLiveMaterialSelection,
+  },
   requestWarmup: label => requestEditorWarmup(label),
   btnRow,
   el,
@@ -917,11 +1340,11 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   tf,
   el,
   section,
+  selectRow,
   sliderRow,
   btnRow,
   checkRow,
   colorRow,
-  sliderRow,
   entityIcon,
   markDirty,
   refreshOutliner,
@@ -942,6 +1365,8 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   replaceSelectedGlb: beginReplaceObject,
   requestWarmup: label => requestEditorWarmup(label),
   importTextureFile,
+  assetLibraryLoad,
+  resolveImportedAssetUrl,
 });
 playerCameraInspector = window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR && window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR.create({
   GAME,
@@ -1044,6 +1469,7 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
   playerLightsInspector,
   playerAttachmentsInspector,
   playerSetupInspector,
+  buildMaterialEditor,
   copyPlayerBlueprintAsset,
   currentPlayerBlueprint,
   applyPlayerBlueprintAsset,
@@ -1081,6 +1507,7 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
   setCamHelper: value => { camHelper = value; },
   getGizmo: () => gizmo,
   getOrbit: () => orbit,
+  shouldEnableOrbit: shouldEnableOrbitForActiveViewport,
   setGizmoUsingZUpProxy: value => { gizmoUsingZUpProxy = value; },
   spaceLabel,
   updateEditorAxesConvention,
@@ -1110,12 +1537,16 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
       if(o.userData.physicsVel) o.userData.physicsVel = null;
       if(o.userData.physicsAng) o.userData.physicsAng = null;
     }
+    if(data.env && STORE.applyEnvironment) STORE.applyEnvironment(GAME, data.env);
     refreshOutliner();
     buildInspector();
   },
   closeMenu,
+  markDirty,
   updateEditorControls,
   editorViewportRect,
+  setActiveViewportSlot,
+  cameraForView: editorCameraForView,
   updateCameraRigHelper,
   updateViewportPickingHelpers: () => viewportPicking.updateHelpers(),
   updateSelectionAndDropHelpers,

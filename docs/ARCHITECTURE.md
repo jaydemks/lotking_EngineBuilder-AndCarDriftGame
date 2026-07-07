@@ -15,8 +15,8 @@ The project is still intentionally simple at the platform level: plain JavaScrip
 - `js/runtime/input/` contains the multi-device input stack introduced in v0.5.2: action schema, physical device sources, per-player assignment, in-game controls menu, visual mapping overlay, and touch controls.
 - `js/runtime/ui/` contains runtime/editor-shared UI utilities, currently the floating window manager used by the mapping overlay and movable editor settings panels.
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
-- `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface.
-- `js/editor/` contains the modular Engine Editor: core state, layout, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, playable export, Sound Designer, input settings, and preview/runtime handoff.
+- `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface. Direct editor pages and the lazy loader must keep the same module order.
+- `js/editor/` contains the modular Engine Editor: core state, layout, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, viewport layout, Cinema Studio, playable export, Sound Designer, input settings, and preview/runtime handoff.
 - `css/lot-king.css` styles runtime UI, HUD, menus, touch controls, mapping windows, and shared overlays.
 - `css/editor.css` styles the Engine Editor, inspector panels, editor settings, asset dock, outliner, Sound Designer, and editor-specific overlays.
 - `docs/` contains architecture docs and release history.
@@ -108,7 +108,7 @@ Current loading responsibilities:
 
 - `index.html` loads the landing/menu UI and keeps menu music alive while transitioning into embedded gameplay.
 - `gameplay.html` loads the gameplay runtime, settings, HUD, radio, audio, track catalog, scene store, and runtime modules needed to play.
-- `engine_editor.html` loads the editor-specific DOM and module stack so editor preview works with the same runtime systems while remaining isolated from normal gameplay.
+- `engine_editor.html` loads the editor-specific DOM and module stack so editor preview works with the same runtime systems while remaining isolated from normal gameplay. Its direct script list mirrors `js/editor/loader.js`; when editor modules are extracted, both paths must be updated.
 - `drift-parking-lot.html` redirects old links to the new landing page.
 
 The runtime should stay playable without loading editor CSS or `js/editor/*` modules. The editor can still use the staged loader/module ordering internally, but the architectural boundary is now page-level separation first.
@@ -121,19 +121,24 @@ Major editor areas:
 
 - Core and chrome: `editor-core.js`, `editor-template.js`, `editor-layout.js`, `floating-layout.js`.
 - Toolbar and preferences: `toolbar.js`, `preferences.js`, `quick-audio.js`, `side-panels.js`.
-- Viewport: `viewport-picking.js`, `viewport-events.js`, `fly-camera.js`, `gizmo-controls.js`, `visual-helpers.js`.
+- Viewport: `viewport-layout.js`, `viewport-picking.js`, `viewport-events.js`, `fly-camera.js`, `gizmo-controls.js`, `visual-helpers.js`.
 - Selection/history: `selection-manager.js`, `history-manager.js`, `keyboard-shortcuts.js`.
-- Assets: `asset-library.js`, `asset-imports.js`, `asset-panel.js`, `asset-catalog.js`, `asset-dnd.js`, `folder-manager.js`, `thumbnail-manager.js`.
+- Assets: `asset-library.js`, `asset-imports.js`, `asset-panel.js`, `asset-properties.js`, `asset-catalog.js`, `asset-dnd.js`, `folder-manager.js`, `thumbnail-manager.js`.
 - Scene tree and menus: `outliner.js`, `context-menu.js`, `editor-menus.js`, `scene-menu-actions.js`.
 - Project and levels: `project-io.js`, `level-manager.js`, `dialogs.js`, `status-ui.js`.
 - Player systems: `player-blueprints.js`, `player-camera-inspector.js`, `player-lights-inspector.js`, `player-attachments-inspector.js`, `player-setup-inspector.js`.
 - Inspectors: `inspector-controller.js`, `inspector-ui.js`, `object-inspector.js`, `material-editor.js`, `hud-inspector.js`, `environment-inspector.js`, `music-library-panel.js`.
 - Input authoring: `input-settings.js` plus shared runtime mapping modules.
 - Runtime handoff and preview: `editor-runtime.js`.
+- Sequencer/cameras: `cinema-studio.js`.
 - Playable export: `playable-export.js`, `playable-export-level-picker.js`, `playable-export-assets.js`, `playable-export-zip.js`.
 - Sound Designer: `sound-designer.js`, `sound-designer-template.js`, `sound-designer-form.js`.
 
 The editor has its own free camera, grid/helpers, transform gizmo, asset dock, outliner, inspector, settings overlay, preview mode, and export flows. During edit mode it guards gameplay input with `LOT_KING.state.editorActive` and can override the canvas viewport rect so picking and editor panels behave correctly.
+
+`editor-runtime.js` is intentionally kept as an orchestration module: editor enter/exit, Play Preview, frame handoff, player-camera preview, and runtime/editor state guards. View-specific behavior lives in `viewport-layout.js`, which owns quad view layout, view selector overlays, per-view render modes, stats overlays, and independent secondary perspective cameras. Input/picking/control helpers still live in `viewport-events.js`, `viewport-picking.js`, `fly-camera.js`, and `gizmo-controls.js`.
+
+`cinema-studio.js` owns the early Cinema Studio sequencer surface: dock/lock timeline UI, shot/camera cuts, timeline output evaluation, animated target tracks, transform keyframes, basic curve modes, and selected-item deletion. This is integrated as a foundation but is not considered final; richer clip editing, runtime triggers/events, advanced curves, and multi-property tracks are still future work.
 
 The editor opens with the Projects overlay on top of the editor surface. If the browser project list is empty but an older/current editor project already exists in the legacy active project slot, `project-io.js` seeds that project into the Projects list so existing work remains visible. Loading a project writes it into the active store and reloads the editor surface; saving updates the active browser project and keeps `.lkep.json` export as the explicit portable workflow.
 

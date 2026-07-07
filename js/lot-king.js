@@ -39,12 +39,103 @@ GAME.i18n = {
   setLang(value){
     this.lang = value === 'it' ? 'it' : 'en';
     try { localStorage.setItem(LK_LANG_KEY, this.lang); } catch(err){}
+    applyRuntimeLanguage();
   },
   t(key, fallback){
     const entry = I18N_DICT[key];
     return entry ? (entry[this.lang] || entry.en || fallback || key) : (fallback || key);
   },
+  pick(en, it){
+    return this.lang === 'it' ? (it || en) : en;
+  },
 };
+
+const RUNTIME_DOM_I18N = [
+  ['#controlsToggleBtn', 'text', 'SHOW CONTROLS', 'MOSTRA COMANDI'],
+  ['#controlsToggleBtn', 'data-show', 'SHOW CONTROLS', 'MOSTRA COMANDI'],
+  ['#controlsToggleBtn', 'data-hide', 'HIDE CONTROLS', 'NASCONDI COMANDI'],
+  ['#controls-list span:nth-child(24)', 'text', 'Driving setup', 'Setup guida'],
+  ['#controls-list span:nth-child(26)', 'text', 'Audio menu', 'Menu audio'],
+  ['#tuneBtn', 'title', 'Driving setup', 'Setup guida'],
+  ['.tuneTitle', 'text', 'DRIVING SETUP', 'SETUP GUIDA'],
+  ['.tuneHint', 'text', '0 = base style', '0 = stile base'],
+  ['#tuneTorque', 'label', 'Vehicle torque*', 'Coppia veicolo*'],
+  ['#tuneTorque', 'desc', 'More pull under acceleration and corner exit.', 'Piu spinta in accelerazione e uscita curva.'],
+  ['#tuneMaxSpeed', 'label', 'Top speed*', 'Velocita massima*'],
+  ['#tuneMaxSpeed', 'desc', 'Extends the maximum limit on straights.', 'Allunga il limite massimo sul rettilineo.'],
+  ['#tuneOversteer', 'label', 'Oversteer', 'Sovrasterzo'],
+  ['#tuneOversteer', 'desc', 'Negative is more stable, positive is easier to throw sideways.', 'Negativo piu stabile, positivo piu facile da mettere di traverso.'],
+  ['#tuneHandbrake', 'label', 'Handbrake', 'Freno a mano'],
+  ['#tuneHandbrake', 'desc', 'How much grip breaks when you press it.', 'Quanto rompe il grip quando lo premi.'],
+  ['#tuneSteer', 'label', 'Steering sensitivity', 'Sensibilita sterzo'],
+  ['#tuneSteer', 'desc', 'Negative is softer, positive is sharper and more reactive.', 'Negativo piu morbida, positivo piu agile e reattiva.'],
+  ['#tuneBrake', 'label', 'Braking', 'Frenata'],
+  ['#tuneBrake', 'desc', 'From progressive braking to a more aggressive bite.', 'Da freno progressivo a staccata piu aggressiva.'],
+  ['#tuneGrip', 'label', 'Tire grip', 'Aderenza gomme'],
+  ['#tuneGrip', 'desc', 'Negative is slippier, positive is more planted.', 'Negativo piu scivolosa, positivo piu incollata.'],
+  ['.lg-body', 'html',
+    '<b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br><b>Mouse</b> free look · <b>Scroll</b> zoom · <b>V</b> look back · <b>C</b> camera · <b>R</b> reset<br><b>TAB</b> radio · <b>P</b> play/pause · <b>N</b> next · <b>B</b> prev<br><b>ESC</b> menu · <b>U</b> driving setup · <b>M</b> mute · <b>F</b> flip model · <b>H</b> show/hide this panel<br><b>Gamepad / touch</b> supported · remap keys from <b>ESC → Controls</b>',
+    '<b>W A S D / frecce</b> guida · <b>SPACE</b> freno a mano (drift)<br><b>Mouse</b> free look · <b>Scroll</b> zoom · <b>V</b> look back · <b>C</b> camera · <b>R</b> reset<br><b>TAB</b> radio · <b>P</b> play/pausa · <b>N</b> next · <b>B</b> prev<br><b>ESC</b> menu · <b>U</b> setup guida · <b>M</b> muto · <b>F</b> flip modello · <b>H</b> mostra/nascondi questo pannello<br><b>Gamepad / touch</b> supportati · rimappa i tasti da <b>ESC → Controlli</b>'
+  ],
+  ['[data-settings-tab="controls"]', 'text', 'Controls', 'Controlli'],
+  ['.settingsRow[data-audio-row="master"]', 'label', 'Master volume', 'Volume generale'],
+  ['.settingsRow[data-audio-row="master"]', 'desc', 'Controls the whole active mix.', 'Controlla tutto il mix attivo.'],
+  ['.settingsRow[data-audio-row="car"]', 'label', 'Engine and tires', 'Motore e gomme'],
+  ['.settingsRow[data-audio-row="car"]', 'desc', 'Adjusts engine, turbo audio and tire squeal.', 'Regola motore, turbo sonoro e stridio gomme.'],
+  ['.settingsRow[data-audio-row="sfx"]', 'label', 'Game effects', 'Effetti gioco'],
+  ['.settingsRow[data-audio-row="sfx"]', 'desc', 'Impacts, cones and parking-lot ambience.', 'Urti, coni e ambiente del parcheggio.'],
+  ['.settingsRow[data-audio-row="music"]', 'label', 'Music', 'Musica'],
+  ['.settingsRow[data-audio-row="music"]', 'desc', 'Radio and start-menu music volume.', 'Volume radio e musica del menu iniziale.'],
+  ['#videoQuality', 'row-label', 'Render quality', 'Qualita render'],
+  ['#videoQuality', 'row-desc', 'Visual profile for the engine editor and viewport.', 'Profilo visivo dell\'engine editor e del viewport.'],
+  ['#videoAA', 'row-label', 'Antialiasing', 'Antialiasing'],
+  ['#videoAA', 'row-desc', 'Sharpens edges and lines in the game and editor.', 'Aumenta la nitidezza di bordi e linee nel gioco e nell\'editor.'],
+  ['#videoRenderer', 'row-label', 'Renderer', 'Renderer'],
+  ['#videoRenderer', 'row-desc', 'Standard WebGL or experimental raytracing preset with safe fallback.', 'WebGL normale oppure preset sperimentale raytracing con fallback sicuro.'],
+  ['#videoVolumetricLighting', 'row-label', 'Volumetric lighting', 'Volumetric lighting'],
+  ['#videoVolumetricLighting', 'row-desc', 'Enables screen-space light rays in the current renderer.', 'Abilita raggi luce screen-space nel renderer attuale.'],
+  ['#videoEditorHud', 'row-label', 'Editor HUD', 'HUD editor'],
+  ['#videoEditorHud', 'row-desc', 'Shows editor panels and helpers.', 'Mostra pannelli e helper dell\'editor.'],
+  ['#videoVolumetricLighting', 'next-label', 'Enabled', 'Abilitato'],
+  ['#videoEditorHud', 'next-label', 'Visible', 'Visibile'],
+  ['#openGameplayTune', 'row-label', 'Driving setup', 'Setup guida'],
+  ['#openGameplayTune', 'row-desc', 'Open the driving parameters already available in the game.', 'Apri i parametri di guida gia presenti nel gioco.'],
+  ['#openGameplayTune', 'text', 'Open setup', 'Apri setup'],
+  ['#loadTxt', 'text', 'loading world…', 'caricamento mondo…'],
+];
+
+function applyRuntimeLanguage(){
+  const L = GAME.i18n.lang;
+  document.documentElement.lang = L;
+  const pick = (en, it) => L === 'it' ? it : en;
+  RUNTIME_DOM_I18N.forEach(item => {
+    const node = document.querySelector(item[0]);
+    if(!node) return;
+    const value = pick(item[2], item[3]);
+    if(item[1] === 'text') node.textContent = value;
+    else if(item[1] === 'html') node.innerHTML = value;
+    else if(item[1] === 'title') node.title = value;
+    else if(item[1] === 'data-show') node.dataset.showLabel = value;
+    else if(item[1] === 'data-hide') node.dataset.hideLabel = value;
+    else if(item[1] === 'label') {
+      const label = node.closest('.tuneRow, .settingsRow') ? node.closest('.tuneRow, .settingsRow').querySelector('.tuneName, .settingsName') : null;
+      if(label) label.textContent = value;
+    } else if(item[1] === 'desc') {
+      const desc = node.closest('.tuneRow, .settingsRow') ? node.closest('.tuneRow, .settingsRow').querySelector('.tuneDesc, .settingsDesc') : null;
+      if(desc) desc.textContent = value;
+    } else if(item[1] === 'row-label') {
+      const label = node.closest('.settingsRow') ? node.closest('.settingsRow').querySelector('.settingsName') : null;
+      if(label) label.textContent = value;
+    } else if(item[1] === 'row-desc') {
+      const desc = node.closest('.settingsRow') ? node.closest('.settingsRow').querySelector('.settingsDesc') : null;
+      if(desc) desc.textContent = value;
+    } else if(item[1] === 'next-label') {
+      const label = node.parentElement ? node.parentElement.querySelector('span') : null;
+      if(label) label.textContent = value;
+    }
+  });
+}
+applyRuntimeLanguage();
 
 // ------------------------------------------------ local assets
 const RUNTIME_ASSETS = window.LK_RUNTIME_ASSETS;
@@ -300,11 +391,20 @@ function createSkidSourceRig(idx, cfg){
   anchor.userData.skidIndex = idx;
   anchor.userData.skidWheel = wheel;
   anchor.userData.editorName = label;
-  const helper = new THREE.Mesh(
-    new THREE.PlaneGeometry(.24, .7),
-    new THREE.MeshBasicMaterial({color:0x111111, wireframe:true, transparent:true, opacity:.9, depthTest:false, depthWrite:false})
+  const helperGeo = new THREE.BufferGeometry();
+  helperGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+    -.12, 0, -.35,  .12, 0, -.35,
+     .12, 0, -.35,  .12, 0,  .35,
+     .12, 0,  .35, -.12, 0,  .35,
+    -.12, 0,  .35, -.12, 0, -.35,
+    -.12, 0,    0,  .12, 0,    0,
+       0, 0, -.35,    0, 0,  .35,
+  ], 3));
+  const helper = new THREE.LineSegments(
+    helperGeo,
+    new THREE.LineBasicMaterial({color:0x111111, transparent:true, opacity:.95, depthTest:false, depthWrite:false})
   );
-  helper.rotation.x = -Math.PI / 2;
+  helper.visible = false;
   helper.userData.helperOnly = true;
   helper.renderOrder = 999;
   anchor.add(helper);
@@ -358,7 +458,7 @@ function setPlayerExhaustConfig(patch){
 }
 function applyPlayerSkidConfig(){
   ensureSkidRigs();
-  const show = !!PLAYER_SKID_CFG.dummyVisible && !!GAME.state.editorActive;
+  const show = !!PLAYER_SKID_CFG.dummyVisible && !!GAME.state.editorActive && !GAME.state.editorPreview;
   for(const rig of playerSkidRig.sources) if(rig && rig.helper) rig.helper.visible = show;
 }
 function setPlayerSkidConfig(patch){
@@ -499,6 +599,8 @@ const DRIVE = {
   burnoutHold: 0.85,          // seconds: rear tires keep slipping after a standing burnout starts
   burnoutWheelspin: 2.65,     // rear drive force margin while the tires are intentionally spinning
   reverseDelay: 0.5,           // automatic reverse engagement delay after stopping [s]
+  horsepower: 450,
+  powerScale: 1,
 };
 const BASE_DRIVE = Object.freeze({...DRIVE});
 const PLAYER_COLLISION = {hx:0.92, hy:0.42, hz:1.85, offsetY:0.45, bodyY:0.55, radius:1.4};
@@ -515,6 +617,7 @@ const ENGINE = {
   throttle: 0,
   reverseActive: false,
   burnout: false,
+  driftShiftSpeed: 0,
 };
 const GEARBOX = Object.freeze({
   idle: 950,
@@ -547,9 +650,21 @@ function resetEngine(){
   ENGINE.limiterPulse = 0;
   ENGINE.throttle = 0;
   ENGINE.reverseActive = false;
+  ENGINE.driftShiftSpeed = 0;
 }
-function updateEngineModel(vF, throttle, sliding, dt){
+function updateEngineModel(vF, throttle, sliding, dt, driftCtx){
+  driftCtx = driftCtx || {};
   const speed = Math.abs(vF);
+  const driftSpeed = Number.isFinite(driftCtx.speedTot) ? Math.abs(driftCtx.speedTot) : speed;
+  const driftLat = Number.isFinite(driftCtx.lateral) ? driftCtx.lateral : 0;
+  const driftForward = Number.isFinite(driftCtx.forward) ? driftCtx.forward : vF;
+  const driftAngle = Math.atan2(Math.abs(driftLat), Math.max(0.1, Math.abs(driftForward)));
+  const driftAngle01 = clamp(driftAngle / 0.86, 0, 1);
+  const driftActive = !!(sliding && driftCtx.active && throttle > .05);
+  if(!driftActive || !ENGINE.driftShiftSpeed) ENGINE.driftShiftSpeed = driftSpeed;
+  const previousDriftShiftSpeed = ENGINE.driftShiftSpeed;
+  const driftDecel = driftActive && driftSpeed < previousDriftShiftSpeed - 0.05;
+  ENGINE.driftShiftSpeed += (driftSpeed - ENGINE.driftShiftSpeed) * Math.min(1, dt * 5.5);
   ENGINE.throttle = throttle;
   ENGINE.shiftTimer = Math.max(0, ENGINE.shiftTimer - dt);
   ENGINE.limiterTimer = Math.max(0, ENGINE.limiterTimer - dt);
@@ -557,16 +672,29 @@ function updateEngineModel(vF, throttle, sliding, dt){
   ENGINE.limiterPulse = Math.max(0, ENGINE.limiterPulse - dt);
   const g = ENGINE.gear - 1;
   const top = GEARBOX.tops[g] || GEARBOX.tops[0];
-  let targetRpm = GEARBOX.idle + clamp(speed / top, 0, 1.25) * (GEARBOX.redline - GEARBOX.idle);
+  const rpmSpeed = driftActive
+    ? Math.max(speed, driftSpeed * (0.58 + throttle * .22 + (1 - driftAngle01) * .12))
+    : speed;
+  let targetRpm = GEARBOX.idle + clamp(rpmSpeed / top, 0, 1.25) * (GEARBOX.redline - GEARBOX.idle);
   if(throttle > .05){
     targetRpm += 650 * throttle;
-    if(sliding || speed < 8) targetRpm += (sliding ? 1650 : 1250) * throttle;
+    if(sliding || speed < 8) targetRpm += (sliding ? (1450 + driftAngle01 * 520) : 1250) * throttle;
   }
   if(ENGINE.shiftTimer > 0) targetRpm *= .58;
   const slew = throttle > .05 ? 7.2 : 4.0;
   ENGINE.rpm += (targetRpm - ENGINE.rpm) * Math.min(1, dt * slew);
   if(throttle > .05 && ENGINE.rpm > GEARBOX.upshift && ENGINE.gear < GEARBOX.tops.length && ENGINE.shiftTimer <= 0){
-    if(ENGINE.limiterTimer <= 0){
+    const nextTop = GEARBOX.tops[ENGINE.gear] || top;
+    const driftShiftSpeed = driftActive ? Math.max(speed, driftSpeed * (0.66 - driftAngle01 * .18)) : speed;
+    const driftCanUpshift = !driftActive || (
+      driftShiftSpeed > top * (0.98 + driftAngle01 * .12) &&
+      driftSpeed > nextTop * (0.46 + driftAngle01 * .08) &&
+      driftAngle01 < .94
+    );
+    if(!driftCanUpshift){
+      ENGINE.limiterTimer = Math.max(ENGINE.limiterTimer, .13 + (DRIVE.shiftOverrun || 0) * .7);
+      ENGINE.limiterPulse = Math.max(ENGINE.limiterPulse, .14);
+    } else if(ENGINE.limiterTimer <= 0){
       ENGINE.limiterTimer = GEARBOX.limiterHold + (sliding ? (DRIVE.shiftOverrun || 0) : 0);
       ENGINE.limiterPulse = .18;
     } else if(ENGINE.limiterTimer < .08){
@@ -576,6 +704,10 @@ function updateEngineModel(vF, throttle, sliding, dt){
       ENGINE.limiterTimer = 0;
       ENGINE.rpm *= .70;
     }
+  } else if(driftActive && ENGINE.gear > 1 && ENGINE.shiftTimer <= 0 && ENGINE.limiterTimer <= 0 && driftAngle01 > .24 && (driftDecel || ENGINE.rpm < 4350) && driftSpeed < top * (0.64 + driftAngle01 * .08) && ENGINE.rpm < (5000 + driftAngle01 * 520)){
+    ENGINE.gear--;
+    ENGINE.rpm = Math.min(GEARBOX.redline * .94, Math.max(ENGINE.rpm * 1.30, 4550 + driftAngle01 * 950));
+    ENGINE.shiftPulse = .16;
   } else if(ENGINE.rpm < GEARBOX.downshift && ENGINE.gear > 1 && (throttle > .05 || speed < GEARBOX.tops[ENGINE.gear - 2] * .42)){
     ENGINE.gear--;
     ENGINE.rpm = Math.min(GEARBOX.redline * .92, ENGINE.rpm * 1.34);
@@ -584,11 +716,21 @@ function updateEngineModel(vF, throttle, sliding, dt){
     ENGINE.rpm = GEARBOX.redline + Math.sin(performance.now() * .075) * 520;
   }
   const rev01 = clamp((ENGINE.rpm - GEARBOX.idle) / (GEARBOX.redline - GEARBOX.idle), 0, 1.12);
-  const lowTorque = clamp((ENGINE.rpm - 1200) / 500, 0, 1);
+  const lowTorque = clamp((ENGINE.rpm - GEARBOX.idle) / 1150, 0, 1);
   const midTorque = clamp((6700 - ENGINE.rpm) / 900, .28, 1);
-  const curve = clamp(.48 + lowTorque * 1.02 * midTorque + rev01 * .04, .36, 1.34);
+  let curve = clamp(.58 + lowTorque * .92 * midTorque + rev01 * .05, .46, 1.34);
+  if(throttle > .05 && sliding){
+    const lowRpmSupport = clamp((3200 - ENGINE.rpm) / 2200, 0, 1);
+    curve = Math.max(curve, .72 + lowRpmSupport * .16);
+  }
   ENGINE.rpm01 = clamp(rev01, 0, 1.12);
-  ENGINE.torque01 = curve * GEARBOX.torque[ENGINE.gear - 1] * (ENGINE.shiftTimer > 0 ? .25 : (ENGINE.limiterTimer > 0 ? .82 : 1));
+  const shiftTorque = driftActive
+    ? clamp(.38 + driftAngle01 * .20 + Math.max(0, (DRIVE.powerScale || 1) - 1) * .09, .34, .74)
+    : .25;
+  const limiterTorque = driftActive
+    ? clamp(.84 + driftAngle01 * .08, .82, .94)
+    : .82;
+  ENGINE.torque01 = curve * GEARBOX.torque[ENGINE.gear - 1] * (ENGINE.shiftTimer > 0 ? shiftTorque : (ENGINE.limiterTimer > 0 ? limiterTorque : 1));
   return ENGINE;
 }
 
@@ -959,7 +1101,12 @@ function updateCarCannon(dt){
   let driveA = 0, brakeA = 0, muRl = CFG.muR, muFl = CFG.muF;
   let handbrakeForce = 0;
   const burnout = updateBurnoutState(up, down, handbrake, speedTot, dt);
-  const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, dt);
+  const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, dt, {
+    active: isDrifting || handbrake || Math.abs(vy) > 2.0,
+    speedTot,
+    lateral: vy,
+    forward: vx,
+  });
   ENGINE.reverseActive = false;
   if(down && !up) brakeHoldTimer = Math.min(BRAKE_RAMP_TIME, brakeHoldTimer + dt);
   else brakeHoldTimer = 0;
@@ -985,7 +1132,8 @@ function updateCarCannon(dt){
   if(isDrifting && up && driveA > 0){
     const driftDrive = DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive;
     const angle01 = clamp(Math.abs(vy) / Math.max(4, Math.abs(vx) + 2), 0, 1);
-    ax += driveA * driftDrive * (.34 + .56 * angle01);
+    const lowSpeed01 = clamp((18 - speedTot) / 12, 0, 1);
+    ax += driveA * driftDrive * (.34 + .56 * angle01 + .30 * lowSpeed01);
   }
   if(burnout > 0){
     muRl *= Math.max(.12, 1 - .88 * burnout);
@@ -1080,7 +1228,8 @@ function updateCarCannon(dt){
       body.velocity.x += rightV.x * (hold - vy * pull);
       body.velocity.z += rightV.z * (hold - vy * pull);
       if(speedTot < CFG.maxSpeed * 1.04){
-        const push = (DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive) * throttleAmt * CFG.driftGasPush * dt * .88;
+        const lowSpeed01 = clamp((18 - speedTot) / 12, 0, 1);
+        const push = (DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive) * throttleAmt * CFG.driftGasPush * dt * (.88 + .62 * lowSpeed01);
         body.velocity.x += fwd.x * push;
         body.velocity.z += fwd.z * push;
       }
@@ -1256,7 +1405,12 @@ function updateCar(dt){
     let driveA = 0;
     let brakeA = 0;
     const burnout = updateBurnoutState(up, down, handbrake, speedTot, h);
-    const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, h);
+    const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, h, {
+      active: isDrifting || handbrake || Math.abs(vy) > 2.0,
+      speedTot,
+      lateral: vy,
+      forward: vx,
+    });
     ENGINE.reverseActive = false;
     if(down && !up) brakeHoldTimer = Math.min(BRAKE_RAMP_TIME, brakeHoldTimer + h);
     else brakeHoldTimer = 0;
@@ -1269,6 +1423,12 @@ function updateCar(dt){
       driveA = CFG.accel * engine.torque01 * throttleAmt * Math.max(0, 1 - Math.max(0, vx) / (CFG.maxSpeed * 1.08));
       driveA = Math.min(driveA, CFG.muR * gR * (burnout > 0 ? DRIVE.burnoutWheelspin : DRIVE.wheelspin));   // traction limit (+ wheelspin margin)
       ax += burnout > 0 && down ? driveA * .12 : driveA;
+    }
+    if(isDrifting && up && driveA > 0){
+      const driftDrive = DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive;
+      const angle01 = clamp(Math.abs(vy) / Math.max(4, Math.abs(vx) + 2), 0, 1);
+      const lowSpeed01 = clamp((18 - speedTot) / 12, 0, 1);
+      ax += driveA * driftDrive * (.28 + .48 * angle01 + .24 * lowSpeed01);
     }
     if(burnout > 0){
       muRl *= Math.max(.12, 1 - .88 * burnout);
@@ -1352,8 +1512,12 @@ function updateCar(dt){
     if(isDrifting){
       r += P.steer * CFG.driftAssist * (vx < 0 ? -1 : 1) * h * 2.2;          // countersteer authority
       if(up && Math.abs(vy) > .5){
+        const lowSpeed01 = clamp((18 - speedTot) / 12, 0, 1);
         vy += Math.sign(vy) * CFG.driftGasPush * h;
         vy -= vy * clamp(CFG.driftThrottlePull * h, 0, .06);
+        if(speedTot < CFG.maxSpeed * 1.04){
+          vx += (DRIVE.driftDrive == null ? .35 : DRIVE.driftDrive) * throttleAmt * CFG.driftGasPush * h * (.55 + .45 * lowSpeed01);
+        }
       }
     }
     // low speed: settle rotation and creep so the car doesn't "ice skate" when parking

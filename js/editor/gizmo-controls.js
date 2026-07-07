@@ -54,6 +54,10 @@ function create(deps){
     if(ED.selected && gizmo && ED.tool !== 'select') attachGizmoToSelection();
   }
 
+  function shouldEnableOrbit(){
+    return deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : (ED.active && !ED.playPreview);
+  }
+
   function usesZUpGizmoProxy(){
     return !!(ED.selected && !ED.colliderEdit && ED.space !== 'engine' && ED.tool === 'translate');
   }
@@ -233,12 +237,12 @@ function create(deps){
         deps.setGizmoPointerActive(false);
         setTimeout(() => { deps.setGizmoSuppressSceneClick(false); }, 0);
         const activeOrbit = deps.getOrbit();
-        if(activeOrbit) activeOrbit.enabled = ED.active && !ED.playPreview;
+        if(activeOrbit) activeOrbit.enabled = shouldEnableOrbit();
       });
       gizmo.addEventListener('objectChange', deps.onGizmoChange);
       gizmo.addEventListener('dragging-changed', e => {
         const activeOrbit = deps.getOrbit();
-        if(activeOrbit) activeOrbit.enabled = !e.value && ED.active && !ED.playPreview;
+        if(activeOrbit) activeOrbit.enabled = !e.value && shouldEnableOrbit();
       });
       addEventListener('keydown', e => {
         if(e.key === 'Shift'){

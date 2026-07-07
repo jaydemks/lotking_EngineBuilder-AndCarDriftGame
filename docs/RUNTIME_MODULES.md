@@ -13,7 +13,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Gameplay runtime page. Loads the runtime, HUD, settings, radio, audio, scene store, track catalog, and game flow without loading editor modules.
 
 - `engine_editor.html`
-  Standalone editor page. Loads the runtime/editor DOM and editor module stack required by editor preview, HUD editing, Sound Designer, asset management, and project export.
+  Standalone editor page. Loads the runtime/editor DOM and editor module stack required by editor preview, HUD editing, Sound Designer, asset management, viewport tools, Cinema Studio, and project export. Its direct script order must stay aligned with `js/editor/loader.js`.
 
 - `drift-parking-lot.html`
   Compatibility redirect to `index.html`.
@@ -149,7 +149,7 @@ This file is runtime-adjacent rather than inside `js/runtime/`, but it is part o
 ## Editor Loader and Runtime-Shared Dependencies
 
 - `js/editor/loader.js`
-  Keeps editor module dependency ordering and staged loading responsibilities. The current primary editor surface is `engine_editor.html`, while gameplay remains separated in `gameplay.html` so playable/runtime pages do not need editor modules.
+  Keeps editor module dependency ordering and staged loading responsibilities. The current primary editor surface is `engine_editor.html`, while gameplay remains separated in `gameplay.html` so playable/runtime pages do not need editor modules. Any new editor module needed by `editor-runtime.js` must be added both here and to the direct script stack in `engine_editor.html`.
 
 The editor loader is included here because it controls when runtime-shared modules such as input actions, mapping overlay, and the window manager are available to editor code.
 
@@ -164,7 +164,13 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
   Project input settings UI. Edits allowed devices, touch mode, player defaults, device instances, base bindings, and mapping overlay data stored in `meta.input`.
 
 - `js/editor/editor-runtime.js`
-  Editor enter/exit, play preview, frame-loop handoff, editor camera sync, and runtime/editor state guards.
+  Editor enter/exit, Play Preview, frame-loop handoff, editor camera sync, player-camera preview rendering, and runtime/editor state guards. It should remain an orchestration layer; viewport layout and Cinema Studio behavior are delegated to focused modules.
+
+- `js/editor/viewport-layout.js`
+  Runtime-adjacent editor viewport module. Owns quad/single viewport rendering, secondary view selectors, independent secondary perspective cameras, orthographic view cameras, per-view render modes, split handles, viewport overlays, and FPS/performance stats. It is loaded before `editor-runtime.js` and is used by the runtime frame handoff while editing.
+
+- `js/editor/cinema-studio.js`
+  Runtime-adjacent editor sequencer module. Owns the early Cinema Studio timeline UI, dock/lock state, playback preview, shot/camera cuts, timeline output evaluation, animated target tracks, transform keyframes, selected-item deletion, and basic curve modes. It is integrated as an editor preview foundation; final runtime trigger/event playback and richer timeline editing are future work.
 
 - `js/editor/playable-export.js`
   Coordinates playable ZIP export.

@@ -30,9 +30,11 @@ function create(deps){
   }
   function editorViewportRect(){
     const x = Math.round(panelWidth('left') + 10);
-    const y = 46;
+    const toolbarH = ED.viewportToolbarCollapsed ? 28 : 36;
+    const y = 46 + toolbarH;
     const w = Math.max(220, Math.round(innerWidth - panelWidth('left') - panelWidth('right') - 20));
-    const h = Math.max(160, Math.round(innerHeight - 46 - 40 - ED.assetsH));
+    const timelineH = ED.cinemaTimelineOpen && ED.cinemaTimelineDocked ? (ED.cinemaTimelineH || 136) : 0;
+    const h = Math.max(160, Math.round(innerHeight - y - 40 - ED.assetsH - timelineH));
     return {x, y, w, h};
   }
   function clampPanelPos(pos, w, h){

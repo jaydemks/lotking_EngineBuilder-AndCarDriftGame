@@ -19,6 +19,7 @@ const ARC_A0 = -215, ARC_A1 = 35;   // gradi: arco del contagiri
 const CX = 210, CY = 205, R_ON = 168, R_OFF = 128;
 const TEMPLATE = window.LK_SOUND_DESIGNER_TEMPLATE;
 const FORM_HELPERS = window.LK_SOUND_DESIGNER_FORM;
+const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
 // ------------------------------------------------ DOM
 if(!TEMPLATE || !FORM_HELPERS){ console.warn('LotKing Sound Designer: moduli UI non trovati'); return; }
@@ -40,12 +41,12 @@ function clearDirty(){ dirty = false; $('#lksdDirty').classList.remove('show'); 
 
 function fileOptions(current){
   const known = EA().knownFiles();
-  const opts = [{v: '', l: '— vuoto (fallback sintetico) —'}];
+  const opts = [{v: '', l: tr('— empty (synthetic fallback) —', '— vuoto (fallback sintetico) —')}];
   for(const f of known) opts.push({v: f, l: f.replace(EA().engineDir, '')});
   if(current && !known.includes(current) && current !== ''){
     opts.push({v: current, l: (current.indexOf('blob:') === 0 ? '(custom) ' : '') + current.split('/').pop()});
   }
-  opts.push({v: '__upload__', l: '📁 Carica file audio…'});
+  opts.push({v: '__upload__', l: tr('📁 Load audio file...', '📁 Carica file audio…')});
   return opts;
 }
 const formUi = FORM_HELPERS.create({
@@ -257,14 +258,14 @@ function renderSlotPanel(){
     const smp = list[i];
     $('#lksdSlotSecTitle').textContent = 'LOOP ' + bank.toUpperCase() + '-THROTTLE · #' + (i + 1);
     if(!smp){
-      box.appendChild(Object.assign(document.createElement('div'), {className: 'lksd-hint', textContent: 'Nessun loop in questo banco. Aggiungine uno.'}));
+      box.appendChild(Object.assign(document.createElement('div'), {className: 'lksd-hint', textContent: tr('No loop in this bank. Add one.', 'Nessun loop in questo banco. Aggiungine uno.')}));
     } else {
       const st = (status.banks[bank][i] || {}).status || 'empty';
       box.appendChild(ledRow(st));
       box.appendChild(rowFile(smp));
       const rpmRow = document.createElement('div');
       rpmRow.className = 'lksd-row';
-      rpmRow.innerHTML = `<label>RPM registrazione</label><input type="number" min="500" max="9000" step="50">`;
+      rpmRow.innerHTML = `<label>${tr('Recorded RPM', 'RPM registrazione')}</label><input type="number" min="500" max="9000" step="50">`;
       const rpmInp = rpmRow.querySelector('input');
       rpmInp.value = smp.rpm;
       rpmInp.addEventListener('change', () => {
@@ -278,7 +279,7 @@ function renderSlotPanel(){
     const btns = document.createElement('div');
     btns.className = 'lksd-btnrow';
     const addB = document.createElement('button');
-    addB.textContent = '＋ Aggiungi loop ' + bank.toUpperCase();
+    addB.textContent = tr('＋ Add loop ', '＋ Aggiungi loop ') + bank.toUpperCase();
     addB.addEventListener('click', () => {
       if(list.length >= 6) return;
       list.push({src: '', rpm: 3500, volume: 1});
@@ -289,7 +290,7 @@ function renderSlotPanel(){
     if(smp){
       const delB = document.createElement('button');
       delB.className = 'warn';
-      delB.textContent = '🗑 Rimuovi questo loop';
+      delB.textContent = tr('🗑 Remove this loop', '🗑 Rimuovi questo loop');
       delB.addEventListener('click', () => {
         list.splice(i, 1);
         selected.index = Math.max(0, i - 1);
@@ -297,14 +298,14 @@ function renderSlotPanel(){
       });
       btns.appendChild(delB);
       const testB = document.createElement('button');
-      testB.textContent = '▶ Porta il tester qui';
+      testB.textContent = tr('▶ Move tester here', '▶ Porta il tester qui');
       testB.addEventListener('click', () => { testRpm = smp.rpm; $('#lksdRpm').value = testRpm; });
       btns.appendChild(testB);
     }
     box.appendChild(btns);
     const hint = document.createElement('div');
     hint.className = 'lksd-hint';
-    hint.textContent = 'Il banco ON suona col gas aperto, il banco OFF in rilascio: il mix segue il pedale. Tra un punto e il vicino il suono e\' un crossfade constant-power.';
+    hint.textContent = tr('The ON bank plays under throttle, the OFF bank on release: the mix follows the pedal. Between neighboring points, sound crossfades at constant power.', 'Il banco ON suona col gas aperto, il banco OFF in rilascio: il mix segue il pedale. Tra un punto e il vicino il suono e un crossfade constant-power.');
     box.appendChild(hint);
     return;
   }
@@ -313,14 +314,14 @@ function renderSlotPanel(){
     const key = selected.key;
     const hs = HOTSPOTS.find(h => h.kind === 'skid' && h.key === key) || {label: key};
     const slot = (work.skids || {})[key];
-    $('#lksdSlotSecTitle').textContent = 'SGOMMATA · ' + hs.label;
-    if(!slot){ box.appendChild(Object.assign(document.createElement('div'), {className: 'lksd-hint', textContent: 'Slot non presente nel set.'})); return; }
+    $('#lksdSlotSecTitle').textContent = tr('SKID · ', 'SGOMMATA · ') + hs.label;
+    if(!slot){ box.appendChild(Object.assign(document.createElement('div'), {className: 'lksd-hint', textContent: tr('Slot not present in this set.', 'Slot non presente nel set.')})); return; }
     box.appendChild(ledRow(((status.skids || {})[key] || {}).status || 'empty'));
-    box.appendChild(rowCheck('Attivo', slot.enabled !== false, v => { slot.enabled = v; }));
+    box.appendChild(rowCheck(tr('Enabled', 'Attivo'), slot.enabled !== false, v => { slot.enabled = v; }));
     box.appendChild(rowFile(slot));
     box.appendChild(rowSlider('Volume', slot.volume == null ? 1 : slot.volume, 0, 1.5, .01, pct, v => { slot.volume = v; }));
     box.appendChild(rowSlider('Pitch', slot.pitch == null ? 1 : slot.pitch, .5, 2, .01, flt(2), v => { slot.pitch = v; }));
-    box.appendChild(rowSlider('Filtro lowpass', slot.tone == null ? 16000 : slot.tone, 500, 16000, 100, hz, v => { slot.tone = v; }));
+    box.appendChild(rowSlider(tr('Low-pass filter', 'Filtro lowpass'), slot.tone == null ? 16000 : slot.tone, 500, 16000, 100, hz, v => { slot.tone = v; }));
     box.appendChild(rowSlider('Attack (s)', slot.attack == null ? .06 : slot.attack, .02, .5, .01, flt(2), v => { slot.attack = v; }));
     box.appendChild(rowSlider('Release (s)', slot.release == null ? .25 : slot.release, .02, 1.5, .01, flt(2), v => { slot.release = v; }));
     const btns = document.createElement('div');
@@ -331,9 +332,9 @@ function renderSlotPanel(){
     btns.appendChild(testB);
     box.appendChild(btns);
     const skidHints = {
-      drift: 'Suona in derapata e col freno a mano: parte e finisce con le skid mark. Attack/release regolano quanto e\' reattivo l\'inviluppo.',
-      brake: 'Staccata violenta a ruote bloccate: il volume ha un leggero "judder" ritmico da frenata. Sincronizzato con le strisciate anche delle anteriori.',
-      accel: 'Wheelspin in accelerazione da fermo: il pitch sale col livello di slittamento (le gomme che "urlano" alla partenza).',
+      drift: tr('Plays while drifting and using the handbrake: starts and ends with skid marks. Attack/release control envelope response.', 'Suona in derapata e col freno a mano: parte e finisce con le skid mark. Attack/release regolano quanto e reattivo l\'inviluppo.'),
+      brake: tr('Hard locked-wheel braking: volume has a light rhythmic brake judder. Synced with streaks from the front tires too.', 'Staccata violenta a ruote bloccate: il volume ha un leggero judder ritmico da frenata. Sincronizzato con le strisciate anche delle anteriori.'),
+      accel: tr('Wheelspin under acceleration from standstill: pitch rises with slip level.', 'Wheelspin in accelerazione da fermo: il pitch sale col livello di slittamento.'),
     };
     const h = document.createElement('div');
     h.className = 'lksd-hint';
@@ -346,17 +347,17 @@ function renderSlotPanel(){
   const hs = HOTSPOTS.find(h => h.key === key) || {label: key};
   const isLayer = selected.kind === 'layer';
   const slot = isLayer ? work.layers[key] : work.events[key];
-  $('#lksdSlotSecTitle').textContent = (isLayer ? 'LAYER · ' : 'EVENTO · ') + hs.label;
-  if(!slot){ box.appendChild(Object.assign(document.createElement('div'), {className: 'lksd-hint', textContent: 'Slot non presente nel set.'})); return; }
+  $('#lksdSlotSecTitle').textContent = (isLayer ? 'LAYER · ' : tr('EVENT · ', 'EVENTO · ')) + hs.label;
+  if(!slot){ box.appendChild(Object.assign(document.createElement('div'), {className: 'lksd-hint', textContent: tr('Slot not present in this set.', 'Slot non presente nel set.')})); return; }
   const stMap = isLayer ? status.layers : status.events;
   const limiterGenerated = key === 'limiter' && (slot.mode || (slot.src ? 'sample' : 'generated')) === 'generated';
   box.appendChild(ledRow(limiterGenerated ? 'generated' : ((stMap[key] || {}).status || 'empty')));
-  box.appendChild(rowCheck('Attivo', slot.enabled !== false, v => { slot.enabled = v; }));
+  box.appendChild(rowCheck(tr('Enabled', 'Attivo'), slot.enabled !== false, v => { slot.enabled = v; }));
   if(key === 'limiter'){
     const mode = slot.mode || (slot.src ? 'sample' : 'generated');
     slot.mode = mode;
-    box.appendChild(rowSelect('Tipo fuorigiri', mode, [
-      {value: 'generated', label: 'Generato dal motore'},
+    box.appendChild(rowSelect(tr('Limiter type', 'Tipo fuorigiri'), mode, [
+      {value: 'generated', label: tr('Generated by engine', 'Generato dal motore')},
       {value: 'sample', label: 'Sample WAV'},
     ], v => { slot.mode = v; }));
     if(mode === 'sample') box.appendChild(rowFile(slot));
@@ -364,20 +365,20 @@ function renderSlotPanel(){
     box.appendChild(rowFile(slot));
   }
   box.appendChild(rowSlider('Volume', slot.volume == null ? 1 : slot.volume, 0, 1.5, .01, pct, v => { slot.volume = v; }));
-  box.appendChild(rowSlider('Filtro lowpass', slot.tone == null ? 16000 : slot.tone, 500, 16000, 100, hz, v => { slot.tone = v; }));
+  box.appendChild(rowSlider(tr('Low-pass filter', 'Filtro lowpass'), slot.tone == null ? 16000 : slot.tone, 500, 16000, 100, hz, v => { slot.tone = v; }));
   if(isLayer && key !== 'limiter'){
     box.appendChild(rowSlider('Sin mod (Hz)', slot.wobbleRate || 0, 0, 20, .1, flt(1), v => { slot.wobbleRate = v; }));
     box.appendChild(rowSlider('Sin mod depth', slot.wobbleDepth || 0, 0, 1, .01, pct, v => { slot.wobbleDepth = v; }));
   }
   if(key === 'limiter'){
     if((slot.mode || 'generated') === 'sample'){
-      box.appendChild(rowSlider('Velocita\' sample', slot.rate == null ? 1 : slot.rate, .4, 1.6, .01, flt(2), v => { slot.rate = v; }));
+      box.appendChild(rowSlider(tr('Sample speed', 'Velocita sample'), slot.rate == null ? 1 : slot.rate, .4, 1.6, .01, flt(2), v => { slot.rate = v; }));
     }
     box.appendChild(rowSlider('Stutter (Hz)', slot.stutterRate == null ? 10 : slot.stutterRate, 3, 20, .5, flt(1), v => { slot.stutterRate = v; }));
     box.appendChild(rowSlider('Stutter depth', slot.stutterDepth == null ? ((slot.mode || 'generated') === 'generated' ? .62 : 0) : slot.stutterDepth, 0, 1, .01, pct, v => { slot.stutterDepth = v; }));
     if((slot.mode || 'generated') === 'generated'){
       box.appendChild(rowSlider('Pitch bounce', slot.pitchBounce == null ? .34 : slot.pitchBounce, 0, 1, .01, pct, v => { slot.pitchBounce = v; }));
-      box.appendChild(rowSlider('Filtro pulse', slot.tonePulse == null ? .28 : slot.tonePulse, 0, 1, .01, pct, v => { slot.tonePulse = v; }));
+      box.appendChild(rowSlider(tr('Filter pulse', 'Filtro pulse'), slot.tonePulse == null ? .28 : slot.tonePulse, 0, 1, .01, pct, v => { slot.tonePulse = v; }));
     }
   }
   if(!isLayer){
@@ -385,11 +386,11 @@ function renderSlotPanel(){
     if(slot.pitchRandom != null || ['shiftPop', 'backfire', 'blowoff'].includes(key))
       box.appendChild(rowSlider('Pitch random ±', slot.pitchRandom || 0, 0, .5, .01, pct, v => { slot.pitchRandom = v; }));
     if(slot.probability != null)
-      box.appendChild(rowSlider('Probabilita\'', slot.probability, 0, 1, .05, pct, v => { slot.probability = v; }));
+      box.appendChild(rowSlider(tr('Probability', 'Probabilita'), slot.probability, 0, 1, .05, pct, v => { slot.probability = v; }));
     if(slot.cooldown != null)
       box.appendChild(rowSlider('Cooldown (s)', slot.cooldown, 0, 3, .05, flt(2), v => { slot.cooldown = v; }));
     if(key === 'blowoff')
-      box.appendChild(rowSlider('Boost minimo', slot.minBoost == null ? .45 : slot.minBoost, 0, 1, .05, pct, v => { slot.minBoost = v; }));
+      box.appendChild(rowSlider(tr('Minimum boost', 'Boost minimo'), slot.minBoost == null ? .45 : slot.minBoost, 0, 1, .05, pct, v => { slot.minBoost = v; }));
   } else if(key === 'turbo'){
     box.appendChild(rowSlider('Pitch min', slot.pitchMin == null ? .55 : slot.pitchMin, .2, 1.5, .01, flt(2), v => { slot.pitchMin = v; }));
     box.appendChild(rowSlider('Pitch max', slot.pitchMax == null ? 1.6 : slot.pitchMax, .5, 3, .01, flt(2), v => { slot.pitchMax = v; }));
@@ -411,15 +412,15 @@ function renderSlotPanel(){
   }
   box.appendChild(btns);
   const hints = {
-    turbo: 'Il fischio segue il boost (gas x giri). Attack = quanto in fretta carica, release = quanto canta al rilascio. Tieni GAS e rilascia per sentire anche il blow-off.',
-    limiter: 'Sample WAV usa un file dedicato. Generato dal motore usa invece i loop del motore al massimo dei giri e aggiunge taglio ritmico, micro pitch bounce e filtro pulse per simulare il fuorigiri senza caricare un audio extra.',
-    shiftPop: 'Triggherato a ogni cambiata (con probabilita\'). Il pitch random evita che due pop siano identici.',
-    backfire: 'Scoppio allo scarico: cambiata e fuorigiri. Coordinato con l\'effetto fuoco del veicolo.',
-    blowoff: 'Sfiato turbina al rilascio del gas sopra il boost minimo. Attivo solo se la turbina e\' abilitata.',
-    ignition: 'Suona all\'avvio della sessione, prima che i loop entrino.',
-    rev: 'Sgasata one-shot, utile anche come suono "showoff".',
-    gearWhinePower: 'Fischio trasmissione sotto carico: volume legato a gas + velocita\'.',
-    gearWhineOff: 'Fischio trasmissione in rilascio: volume legato a velocita\' senza gas.',
+    turbo: tr('Whine follows boost (gas x revs). Attack controls spool speed, release controls how long it sings on lift.', 'Il fischio segue il boost (gas x giri). Attack = quanto in fretta carica, release = quanto canta al rilascio.'),
+    limiter: tr('Sample WAV uses a dedicated file. Generated mode uses high-RPM engine loops with rhythmic cut, pitch bounce and filter pulse.', 'Sample WAV usa un file dedicato. Generato dal motore usa invece i loop del motore al massimo dei giri e aggiunge taglio ritmico, micro pitch bounce e filtro pulse.'),
+    shiftPop: tr('Triggered on every gear shift. Pitch random keeps pops from sounding identical.', 'Triggherato a ogni cambiata. Il pitch random evita che due pop siano identici.'),
+    backfire: tr('Exhaust bang: gear shifts and limiter. Coordinated with the vehicle fire effect.', 'Scoppio allo scarico: cambiata e fuorigiri. Coordinato con l\'effetto fuoco del veicolo.'),
+    blowoff: tr('Turbo blow-off on throttle lift above minimum boost. Active only when turbo is enabled.', 'Sfiato turbina al rilascio del gas sopra il boost minimo. Attivo solo se la turbina e abilitata.'),
+    ignition: tr('Plays at session start before loops enter.', 'Suona all\'avvio della sessione, prima che i loop entrino.'),
+    rev: tr('One-shot rev, also useful as a showoff sound.', 'Sgasata one-shot, utile anche come suono showoff.'),
+    gearWhinePower: tr('Transmission whine under load: volume tied to throttle + speed.', 'Fischio trasmissione sotto carico: volume legato a gas + velocita.'),
+    gearWhineOff: tr('Transmission whine on release: volume tied to speed without gas.', 'Fischio trasmissione in rilascio: volume legato a velocita senza gas.'),
   };
   if(hints[key]){
     const h = document.createElement('div');
@@ -431,18 +432,18 @@ function renderSlotPanel(){
 function renderMasterPanel(){
   const box = $('#lksdMaster');
   box.innerHTML = '';
-  box.appendChild(rowSlider('Volume set', work.master.volume, 0, 1.5, .01, pct, v => { work.master.volume = v; }));
-  box.appendChild(rowSlider('Pitch globale', work.master.pitchShift == null ? 1 : work.master.pitchShift, .6, 1.6, .01, flt(2), v => { work.master.pitchShift = v; }));
-  box.appendChild(rowSlider('Riverbero', work.master.reverb == null ? .12 : work.master.reverb, 0, .6, .01, pct, v => { work.master.reverb = v; }));
-  const decayRow = rowSlider('Coda riverbero (s)', work.master.reverbDecay == null ? 1.4 : work.master.reverbDecay, .3, 4, .1, flt(1), v => { work.master.reverbDecay = v; });
+  box.appendChild(rowSlider(tr('Set volume', 'Volume set'), work.master.volume, 0, 1.5, .01, pct, v => { work.master.volume = v; }));
+  box.appendChild(rowSlider(tr('Global pitch', 'Pitch globale'), work.master.pitchShift == null ? 1 : work.master.pitchShift, .6, 1.6, .01, flt(2), v => { work.master.pitchShift = v; }));
+  box.appendChild(rowSlider(tr('Reverb', 'Riverbero'), work.master.reverb == null ? .12 : work.master.reverb, 0, .6, .01, pct, v => { work.master.reverb = v; }));
+  const decayRow = rowSlider(tr('Reverb tail (s)', 'Coda riverbero (s)'), work.master.reverbDecay == null ? 1.4 : work.master.reverbDecay, .3, 4, .1, flt(1), v => { work.master.reverbDecay = v; });
   decayRow.querySelector('input').addEventListener('change', () => applyLive(true));   // nuova impulse response
   box.appendChild(decayRow);
-  box.appendChild(rowSlider('Taglio bassi', work.master.toneLow == null ? 0 : work.master.toneLow, 0, 400, 5, v => v < 15 ? 'off' : Math.round(v) + 'Hz', v => { work.master.toneLow = v; }));
-  box.appendChild(rowSlider('Taglio alti', work.master.toneHigh == null ? 16000 : work.master.toneHigh, 1000, 16000, 100, hz, v => { work.master.toneHigh = v; }));
-  box.appendChild(rowSlider('Fade tra loop', work.bankParams.fadeWidth == null ? .55 : work.bankParams.fadeWidth, .1, 1, .01, pct, v => { work.bankParams.fadeWidth = v; }));
-  box.appendChild(rowSlider('Risposta gas', work.bankParams.throttleSmooth == null ? 7 : work.bankParams.throttleSmooth, 2, 16, .5, flt(1), v => { work.bankParams.throttleSmooth = v; }));
-  box.appendChild(rowSlider('Fluidita\' giri', work.bankParams.rpmSmooth == null ? 16 : work.bankParams.rpmSmooth, 4, 40, 1, flt(0), v => { work.bankParams.rpmSmooth = v; }));
-  box.appendChild(rowSlider('Volume rilascio', work.bankParams.offVolume == null ? 1 : work.bankParams.offVolume, 0, 1.3, .01, pct, v => { work.bankParams.offVolume = v; }));
+  box.appendChild(rowSlider(tr('Low cut', 'Taglio bassi'), work.master.toneLow == null ? 0 : work.master.toneLow, 0, 400, 5, v => v < 15 ? 'off' : Math.round(v) + 'Hz', v => { work.master.toneLow = v; }));
+  box.appendChild(rowSlider(tr('High cut', 'Taglio alti'), work.master.toneHigh == null ? 16000 : work.master.toneHigh, 1000, 16000, 100, hz, v => { work.master.toneHigh = v; }));
+  box.appendChild(rowSlider(tr('Loop crossfade', 'Fade tra loop'), work.bankParams.fadeWidth == null ? .55 : work.bankParams.fadeWidth, .1, 1, .01, pct, v => { work.bankParams.fadeWidth = v; }));
+  box.appendChild(rowSlider(tr('Throttle response', 'Risposta gas'), work.bankParams.throttleSmooth == null ? 7 : work.bankParams.throttleSmooth, 2, 16, .5, flt(1), v => { work.bankParams.throttleSmooth = v; }));
+  box.appendChild(rowSlider(tr('RPM smoothness', 'Fluidita giri'), work.bankParams.rpmSmooth == null ? 16 : work.bankParams.rpmSmooth, 4, 40, 1, flt(0), v => { work.bankParams.rpmSmooth = v; }));
+  box.appendChild(rowSlider(tr('Release volume', 'Volume rilascio'), work.bankParams.offVolume == null ? 1 : work.bankParams.offVolume, 0, 1.3, .01, pct, v => { work.bankParams.offVolume = v; }));
 }
 function renderAll(){
   renderTach();

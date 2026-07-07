@@ -8,12 +8,13 @@
 function create(deps){
   deps = deps || {};
   const assetLibraryLoad = deps.assetLibraryLoad || function(){ return []; };
+  const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   function blobToDataUrl(blob){
     return new Promise((resolve, reject) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result);
-      r.onerror = () => reject(new Error('conversione asset in base64 fallita'));
+      r.onerror = () => reject(new Error(tr('asset base64 conversion failed', 'conversione asset in base64 fallita')));
       r.readAsDataURL(blob);
     });
   }
@@ -78,13 +79,13 @@ function create(deps){
       try {
         resolved = await exportResolveAssetFromDbKey(meta.dbKey, dbCache);
       } catch(err) {
-        warnings.push('Errore nell\'inclusione asset ' + fallbackName + ': ' + (err.message || 'blob mancante'));
+        warnings.push(tr('Error including asset ', 'Errore nell\'inclusione asset ') + fallbackName + ': ' + (err.message || tr('missing blob', 'blob mancante')));
         return;
       }
     }
     if(!resolved){
       if(typeof meta.src === 'string' && !/^blob:/i.test(meta.src)) return;
-      warnings.push('Asset ' + fallbackName + ' non esportabile: nessuna sorgente recuperabile');
+      warnings.push('Asset ' + fallbackName + tr(' not exportable: no recoverable source', ' non esportabile: nessuna sorgente recuperabile'));
       return;
     }
     owner[prop] = resolved;

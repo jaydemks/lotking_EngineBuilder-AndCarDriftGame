@@ -11,6 +11,7 @@ function create(deps){
   const status = deps.status || function(){};
   const levelsApi = deps.levelsApi || function(){ return null; };
   const getCurrentPlayableProject = deps.getCurrentPlayableProject || function(){ return null; };
+  const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   async function pick(levels, activeId){
     const overlay = $('#lkConfirmOverlay');
@@ -24,7 +25,7 @@ function create(deps){
     if(!list.length) return null;
 
     const activeKey = activeId != null ? String(activeId) : '';
-    const nameOf = level => level.name || (level.meta && (level.meta.trackName || level.meta.levelName)) || level.id || 'Livello';
+    const nameOf = level => level.name || (level.meta && (level.meta.trackName || level.meta.levelName)) || level.id || tr('Level', 'Livello');
 
     const activeEntry = list.find(l => String(l.id) === activeKey) || (list.some(l => l.active) ? list.find(l => l.active) : list[0]);
     const primaryDefault = activeEntry && activeEntry.id ? String(activeEntry.id) : (list[0] && list[0].id ? String(list[0].id) : '');
@@ -46,8 +47,8 @@ function create(deps){
     const oldPicker = overlay.querySelector('.lk-playable-level-picker');
     if(oldPicker) oldPicker.remove();
 
-    title.textContent = 'Export livelli giocabili (ZIP)';
-    ok.textContent = '⇩ Esporta ZIP';
+    title.textContent = tr('Export playable levels (ZIP)', 'Export livelli giocabili (ZIP)');
+    ok.textContent = tr('⇩ Export ZIP', '⇩ Esporta ZIP');
     ok.classList.toggle('danger', false);
     message.textContent = '';
 
@@ -60,7 +61,7 @@ function create(deps){
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'lk-playable-level-picker-toggle';
-    toggle.textContent = 'Seleziona tutto';
+    toggle.textContent = tr('Select all', 'Seleziona tutto');
 
     const selectCount = document.createElement('div');
     selectCount.className = 'lk-playable-level-picker-count';
@@ -72,8 +73,8 @@ function create(deps){
       for(const r of buildRows) r.cb.checked = selected.has(String(r.id));
       const totalChecked = rows.filter(r => r.checked).length;
       const allChecked = totalChecked === rows.length;
-      toggle.textContent = allChecked ? 'Deseleziona tutto' : 'Seleziona tutto';
-      selectCount.textContent = totalChecked + ' / ' + rows.length + ' livelli · avvio: ' +
+      toggle.textContent = allChecked ? tr('Deselect all', 'Deseleziona tutto') : tr('Select all', 'Seleziona tutto');
+      selectCount.textContent = totalChecked + ' / ' + rows.length + tr(' levels · start: ', ' livelli · avvio: ') +
         (primaryId ? (nameOf(list.find(l => String(l.id) === primaryId) || {})) : '-');
       for(const r of buildRows){
         const on = r.cb.checked;
@@ -101,7 +102,7 @@ function create(deps){
       cb.className = 'lk-playable-level-picker-check';
       cb.value = id;
       cb.checked = !!(id && selected.has(String(id)));
-      cb.title = 'Includi questo livello nel pacchetto';
+      cb.title = tr('Include this level in the package', 'Includi questo livello nel pacchetto');
 
       const radio = document.createElement('input');
       radio.type = 'radio';
@@ -109,7 +110,7 @@ function create(deps){
       radio.className = 'lk-playable-level-picker-radio';
       radio.value = id;
       radio.checked = String(id) === primaryId;
-      radio.title = 'Livello di avvio (parte per primo quando apri il pacchetto)';
+      radio.title = tr('Startup level (starts first when you open the package)', 'Livello di avvio (parte per primo quando apri il pacchetto)');
 
       const label = document.createElement('span');
       label.className = 'lk-playable-level-picker-label';
@@ -117,7 +118,7 @@ function create(deps){
       if(level.active){
         const badge = document.createElement('span');
         badge.className = 'lk-playable-level-picker-badge';
-        badge.textContent = 'ATTIVO';
+        badge.textContent = tr('ACTIVE', 'ATTIVO');
         label.appendChild(badge);
       }
 
@@ -156,7 +157,7 @@ function create(deps){
 
     const hint = document.createElement('div');
     hint.className = 'lk-playable-level-picker-hint';
-    hint.textContent = 'Spunta tutti i livelli da mettere nel pacchetto. Il pallino ▶ indica quale parte per primo quando apri la build esportata.';
+    hint.textContent = tr('Check every level to include in the package. The ▶ dot marks which one starts first when you open the exported build.', 'Spunta tutti i livelli da mettere nel pacchetto. Il pallino ▶ indica quale parte per primo quando apri la build esportata.');
 
     controls.appendChild(toggle);
     controls.appendChild(selectCount);
@@ -185,7 +186,7 @@ function create(deps){
         ensurePrimaryValid();
         const checkedIds = Array.from(selected).map(id => String(id).trim()).filter(Boolean);
         if(!checkedIds.length){
-          status('⚠ Seleziona almeno un livello');
+          status(tr('⚠ Select at least one level', '⚠ Seleziona almeno un livello'));
           return;
         }
         const orderedIds = [primaryId].concat(checkedIds.filter(id => id !== primaryId))
@@ -201,7 +202,7 @@ function create(deps){
           if(!project && LV && LV.get) project = LV.get(levelId);
           if(!project) project = readStoredLevelProject(levelId);
           if(!project){
-            status('⚠ Livello non trovato: ' + levelId);
+            status(tr('⚠ Level not found: ', '⚠ Livello non trovato: ') + levelId);
             continue;
           }
           if(project.scene || project.meta || project.version){

@@ -66,14 +66,16 @@ function create(opts){
 
   function updateWork(token, pct, step, state, title){
     if(!token) return;
-    const t = title ? title : ($('#lkStatusWorkTitle') ? $('#lkStatusWorkTitle').textContent : 'Processo in corso');
+    const lang = window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang;
+    const t = title ? title : ($('#lkStatusWorkTitle') ? $('#lkStatusWorkTitle').textContent : (lang === 'it' ? 'Processo in corso' : 'Process running'));
     showWork(token, t, pct, step, state || 'loading');
   }
 
   function finishWork(token, msg, step, state){
     if(!token || token !== workActive) return;
     const finalState = state || 'success';
-    showWork(token, msg || (finalState === 'success' ? 'Completato' : 'Errore'), 100, step || '', finalState);
+    const lang = window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang;
+    showWork(token, msg || (finalState === 'success' ? (lang === 'it' ? 'Completato' : 'Complete') : (lang === 'it' ? 'Errore' : 'Error')), 100, step || '', finalState);
     clearTimeout(workTimer);
     if(finalState === 'success'){
       workTimer = setTimeout(() => hideWork(token), 1800);

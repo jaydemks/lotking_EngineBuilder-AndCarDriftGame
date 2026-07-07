@@ -130,6 +130,7 @@ function create(deps){
     list: folderList,
     assignments: folderAssignments,
     createFolder: newFolder,
+    newFolder,
     byId: folderById,
     makeRow: makeFolderRow,
   });

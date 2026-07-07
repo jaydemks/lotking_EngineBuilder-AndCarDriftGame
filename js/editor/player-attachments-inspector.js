@@ -20,10 +20,11 @@ function create(deps){
   const selectRow = deps.selectRow;
   const colorRow = deps.colorRow;
   const el = deps.el;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function buildExhaust(box){
     if(!GAME.player.exhaust || !GAME.player.setExhaust) return;
-    const sx = section('SCARICO / FUMO', false);
+    const sx = section(tr('EXHAUST / SMOKE', 'SCARICO / FUMO'), false);
     const ex = GAME.player.exhaust;
     const updEx = patch => { GAME.player.setExhaust(patch); markDirty(); };
     const selectExhaust = id => {
@@ -46,31 +47,31 @@ function create(deps){
     };
     sx.body.appendChild(el('<div class="lk-hint">Sources attached to the vehicle: place them on the exhaust. Smoke follows throttle, shifting and limiter.</div>'));
     sx.body.appendChild(btnRow([
-      {label:'+ Sorgente scarico', action:addExhaust},
-      {label:'Prova fumo/fuoco', action:() => { if(GAME.player.testExhaust) GAME.player.testExhaust(); }},
+      {label:tr('+ Exhaust source', '+ Sorgente scarico'), action:addExhaust},
+      {label:tr('Test smoke/fire', 'Prova fumo/fuoco'), action:() => { if(GAME.player.testExhaust) GAME.player.testExhaust(); }},
     ]));
-    sx.body.appendChild(checkRow('Scarico attivo', ex.enabled, v => updEx({enabled:v})).root);
-    sx.body.appendChild(checkRow('Mostra dummy scarico', ex.dummyVisible !== false, v => updEx({dummyVisible:v})).root);
-    sx.body.appendChild(checkRow('Fumo accelerazione', ex.smoke !== false, v => updEx({smoke:v})).root);
-    sx.body.appendChild(checkRow('Fumo minimo da fermo', ex.idleSmoke !== false, v => updEx({idleSmoke:v})).root);
-    sx.body.appendChild(sliderRow('Intensità', ex.intensity, 0, 4, .05, v => updEx({intensity:v})).root);
-    sx.body.appendChild(sliderRow('Soglia acceleratore', ex.smokeThrottle, 0, 1, .01, v => updEx({smokeThrottle:v}), v => Math.round(v * 100) + '%').root);
-    sx.body.appendChild(checkRow('Sparo fuoco', ex.fire !== false, v => updEx({fire:v})).root);
-    sx.body.appendChild(sliderRow('Giri fuoco', ex.fireRpm, .55, 1.08, .01, v => updEx({fireRpm:v}), v => Math.round(v * 100) + '%').root);
-    sx.body.appendChild(checkRow('Fuoco al cambio', ex.shiftFire !== false, v => updEx({shiftFire:v})).root);
-    sx.body.appendChild(checkRow('Fuoco limitatore', ex.limiterFire !== false, v => updEx({limiterFire:v})).root);
+    sx.body.appendChild(checkRow(tr('Exhaust enabled', 'Scarico attivo'), ex.enabled, v => updEx({enabled:v})).root);
+    sx.body.appendChild(checkRow(tr('Show exhaust dummies', 'Mostra dummy scarico'), ex.dummyVisible !== false, v => updEx({dummyVisible:v})).root);
+    sx.body.appendChild(checkRow(tr('Throttle smoke', 'Fumo accelerazione'), ex.smoke !== false, v => updEx({smoke:v})).root);
+    sx.body.appendChild(checkRow(tr('Idle smoke while stopped', 'Fumo minimo da fermo'), ex.idleSmoke !== false, v => updEx({idleSmoke:v})).root);
+    sx.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), ex.intensity, 0, 4, .05, v => updEx({intensity:v})).root);
+    sx.body.appendChild(sliderRow(tr('Throttle threshold', 'Soglia acceleratore'), ex.smokeThrottle, 0, 1, .01, v => updEx({smokeThrottle:v}), v => Math.round(v * 100) + '%').root);
+    sx.body.appendChild(checkRow(tr('Fire burst', 'Sparo fuoco'), ex.fire !== false, v => updEx({fire:v})).root);
+    sx.body.appendChild(sliderRow(tr('Fire RPM', 'Giri fuoco'), ex.fireRpm, .55, 1.08, .01, v => updEx({fireRpm:v}), v => Math.round(v * 100) + '%').root);
+    sx.body.appendChild(checkRow(tr('Shift fire', 'Fuoco al cambio'), ex.shiftFire !== false, v => updEx({shiftFire:v})).root);
+    sx.body.appendChild(checkRow(tr('Limiter fire', 'Fuoco limitatore'), ex.limiterFire !== false, v => updEx({limiterFire:v})).root);
     (ex.sources || []).forEach((src, idx) => {
-      const ss = section('SORGENTE SCARICO ' + (idx + 1), false);
+      const ss = section(tr('EXHAUST SOURCE ', 'SORGENTE SCARICO ') + (idx + 1), false);
       const patch = p => { const a = []; a[idx] = p; updEx({sources:a}); };
       ss.body.appendChild(btnRow([
         {label:'Select dummy', action:() => selectExhaust('player_exhaust_' + idx)},
-        {label:'Prova da qui', action:() => {
+        {label:tr('Test from here', 'Prova da qui'), action:() => {
           const anchor = GAME.world.registry.find(x => x.userData.editorId === 'player_exhaust_' + idx);
           if(anchor) selectExhaust('player_exhaust_' + idx);
           if(GAME.player.testExhaust) GAME.player.testExhaust(anchor);
         }},
       ]));
-      ss.body.appendChild(checkRow('Attiva sorgente', src.enabled !== false, v => patch({enabled:v, userDisabled:!v})).root);
+      ss.body.appendChild(checkRow(tr('Source enabled', 'Attiva sorgente'), src.enabled !== false, v => patch({enabled:v, userDisabled:!v})).root);
       sx.body.appendChild(ss.root);
     });
     box.appendChild(sx.root);
@@ -81,12 +82,12 @@ function create(deps){
     const sk = GAME.player.skids;
     const skidLabel = (src, idx) => {
       const labels = {
-        rearLeft:'Posteriore L',
-        rearRight:'Posteriore R',
-        frontLeft:'Anteriore L',
-        frontRight:'Anteriore R',
+        rearLeft:tr('Rear L', 'Posteriore L'),
+        rearRight:tr('Rear R', 'Posteriore R'),
+        frontLeft:tr('Front L', 'Anteriore L'),
+        frontRight:tr('Front R', 'Anteriore R'),
       };
-      return labels[(src && src.wheel) || ''] || ('Sorgente ' + (idx + 1));
+      return labels[(src && src.wheel) || ''] || (tr('Source ', 'Sorgente ') + (idx + 1));
     };
     const ss = section('SKID MARKS', false);
     const updSk = patch => { GAME.player.setSkids(patch); markDirty(); };
@@ -110,23 +111,23 @@ function create(deps){
     };
     ss.body.appendChild(el('<div class="lk-hint">Skid mark sources attached to the vehicle. Move and scale each dummy to align tire marks with the car.</div>'));
     ss.body.appendChild(btnRow([
-      {label:'+ Sorgente sgommata', action:addSkid},
-      {label:'Post L', action:() => selectSkid('player_skid_0')},
-      {label:'Post R', action:() => selectSkid('player_skid_1')},
-      {label:'Ant L', action:() => selectSkid('player_skid_2')},
-      {label:'Ant R', action:() => selectSkid('player_skid_3')},
+      {label:tr('+ Skid source', '+ Sorgente sgommata'), action:addSkid},
+      {label:tr('Rear L', 'Post L'), action:() => selectSkid('player_skid_0')},
+      {label:tr('Rear R', 'Post R'), action:() => selectSkid('player_skid_1')},
+      {label:tr('Front L', 'Ant L'), action:() => selectSkid('player_skid_2')},
+      {label:tr('Front R', 'Ant R'), action:() => selectSkid('player_skid_3')},
     ]));
-    ss.body.appendChild(checkRow('Sgommate attive', sk.enabled !== false, v => updSk({enabled:v})).root);
-    ss.body.appendChild(checkRow('Mostra dummy sgommate', sk.dummyVisible !== false, v => updSk({dummyVisible:v})).root);
-    ss.body.appendChild(sliderRow('Larghezza base', sk.width == null ? .24 : sk.width, .04, 1.2, .01, v => updSk({width:v}), v => (+v).toFixed(2)).root);
-    ss.body.appendChild(sliderRow('Lunghezza base', sk.length == null ? .7 : sk.length, .08, 3.0, .01, v => updSk({length:v}), v => (+v).toFixed(2)).root);
-    ss.body.appendChild(sliderRow('Opacità', sk.opacity == null ? .55 : sk.opacity, .05, 1, .01, v => updSk({opacity:v}), v => Math.round(v * 100) + '%').root);
-    ss.body.appendChild(sliderRow('Durata segno', sk.life == null ? 14 : sk.life, 1, 40, .5, v => updSk({life:v}), v => (+v).toFixed(1) + 's').root);
+    ss.body.appendChild(checkRow(tr('Skids enabled', 'Sgommate attive'), sk.enabled !== false, v => updSk({enabled:v})).root);
+    ss.body.appendChild(checkRow(tr('Show skid dummies', 'Mostra dummy sgommate'), sk.dummyVisible !== false, v => updSk({dummyVisible:v})).root);
+    ss.body.appendChild(sliderRow(tr('Base width', 'Larghezza base'), sk.width == null ? .24 : sk.width, .04, 1.2, .01, v => updSk({width:v}), v => (+v).toFixed(2)).root);
+    ss.body.appendChild(sliderRow(tr('Base length', 'Lunghezza base'), sk.length == null ? .7 : sk.length, .08, 3.0, .01, v => updSk({length:v}), v => (+v).toFixed(2)).root);
+    ss.body.appendChild(sliderRow(tr('Opacity', 'Opacita'), sk.opacity == null ? .55 : sk.opacity, .05, 1, .01, v => updSk({opacity:v}), v => Math.round(v * 100) + '%').root);
+    ss.body.appendChild(sliderRow(tr('Mark life', 'Durata segno'), sk.life == null ? 14 : sk.life, 1, 40, .5, v => updSk({life:v}), v => (+v).toFixed(1) + 's').root);
     (sk.sources || []).forEach((src, idx) => {
-      const row = section('SGOMMATA ' + skidLabel(src, idx), false);
+      const row = section(tr('SKID ', 'SGOMMATA ') + skidLabel(src, idx), false);
       const patch = p => { const a = []; a[idx] = p; updSk({sources:a}); };
       row.body.appendChild(btnRow([{label:'Select dummy', action:() => selectSkid('player_skid_' + idx)}]));
-      row.body.appendChild(checkRow('Attiva sorgente', src.enabled !== false, v => patch({enabled:v})).root);
+      row.body.appendChild(checkRow(tr('Source enabled', 'Attiva sorgente'), src.enabled !== false, v => patch({enabled:v})).root);
       ss.body.appendChild(row.root);
     });
     box.appendChild(ss.root);

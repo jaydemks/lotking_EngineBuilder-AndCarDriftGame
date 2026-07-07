@@ -466,12 +466,16 @@ function create(deps){
       deps.markDirty(); deps.refreshOutliner(); selectObject(created);
     };
     if(obj) place(obj);
-    else STORE.createFromEntry(entry, GAME).then(place).catch(err => deps.status('Duplicazione fallita: ' + err.message));
+    else STORE.createFromEntry(entry, GAME).then(place).catch(err => {
+      const it = GAME && GAME.i18n && GAME.i18n.lang === 'it';
+      deps.status((it ? 'Duplicazione fallita: ' : 'Duplicate failed: ') + err.message);
+    });
   }
 
   function focusSelected(){
     const target = ED.selected || (ED.special === 'env' ? null : null);
     if(!target) return;
+    if(deps.focusViewportTarget && deps.focusViewportTarget(target)) return;
     const box = new THREE.Box3().setFromObject(target);
     const c = box.isEmpty() ? target.position.clone() : box.getCenter(new THREE.Vector3());
     const r = box.isEmpty() ? 4 : Math.max(2.5, box.getSize(new THREE.Vector3()).length() * .8);

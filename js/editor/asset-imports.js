@@ -9,6 +9,7 @@ function create(deps){
   deps = deps || {};
   const GAME = deps.GAME;
   const STORE = deps.STORE;
+  const THREE = deps.THREE || window.THREE;
   const status = deps.status || function(){};
   const setAssetLoading = deps.setAssetLoading || function(){};
   const confirmEditorAction = deps.confirmEditorAction || function(){ return Promise.resolve(false); };
@@ -25,6 +26,7 @@ function create(deps){
   const upsertImportedAsset = deps.upsertImportedAsset || function(){ return null; };
   const createGlbEntryFromAsset = deps.createGlbEntryFromAsset || function(){ return {}; };
   const createTextureEntryFromAsset = deps.createTextureEntryFromAsset || function(){ return {}; };
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   function entityPhysicsMass(target){
     const stored = target && target.userData ? Number(target.userData.physicsMass) : NaN;
     if(Number.isFinite(stored) && stored > 0) return stored;
@@ -37,7 +39,7 @@ function create(deps){
     return new Promise((res, rej) => {
       const r = new FileReader();
       r.onload = () => res(r.result);
-      r.onerror = () => rej(new Error('lettura file fallita'));
+      r.onerror = () => rej(new Error(tr('file read failed', 'lettura file fallita')));
       r.readAsDataURL(f);
     });
   }
@@ -67,8 +69,66 @@ function create(deps){
     finishAdd(obj);
     return obj;
   }
+  function textureAssetPatch(asset){
+    if(!asset) return null;
+    return {
+      src:asset.src || null,
+      dbKey:asset.dbKey || null,
+      asset:{key:asset.key, dbKey:asset.dbKey || null, name:asset.name, source:asset.source || 'Imported texture'},
+      animated:/\.gif$/i.test(asset.source || '') || /gif/i.test(asset.mime || ''),
+    };
+  }
+  function targetTextureSize(target){
+    if(!target) return {width:2, height:2};
+    try {
+      const box = new THREE.Box3().setFromObject(target);
+      const size = box.getSize(new THREE.Vector3());
+      return {width:Math.max(.25, Math.max(size.x, size.z) || 2), height:Math.max(.25, size.y || size.z || size.x || 2)};
+    } catch(err){
+      return {width:2, height:2};
+    }
+  }
+  function replaceTextureObjectWithAsset(asset, target){
+    if(!asset || !target) return;
+    const patch = textureAssetPatch(asset);
+    if(!patch) return;
+    if(target.userData && target.userData.editorType === 'texture'){
+      const props = Object.assign({}, target.userData.textureProps || {}, patch);
+      target.userData.textureProps = props;
+      if(target.userData.addedEntry){
+        target.userData.addedEntry.props = Object.assign({}, props);
+        target.userData.addedEntry.asset = Object.assign({}, patch.asset);
+      }
+      STORE.updateTextureObject(target);
+      refreshAssetsPanel();
+      status(tr('Texture replaced: ', 'Texture sostituita: ') + (asset.name || asset.source || 'asset'));
+      return;
+    }
+    const at = target.position || spawnPointAhead();
+    const entry = createTextureEntryFromAsset(asset, at);
+    const size = targetTextureSize(target);
+    entry.props = Object.assign({}, entry.props || {}, patch, size);
+    entry.t = STORE.tOf(target);
+    entry.kind = 'texture';
+    entry.textureKind = entry.props.mode === 'image' ? 'image' : 'decal';
+    const obj = STORE.createTexture(entry.textureKind || 'decal', entry.props || {});
+    obj.position.copy(target.position);
+    obj.rotation.copy(target.rotation);
+    obj.scale.copy(target.scale);
+    performDeleteEntity(target);
+    STORE.registerAdded(GAME, obj, entry);
+    finishAdd(obj);
+    refreshAssetsPanel();
+    status(tr('Replaced with texture: ', 'Sostituito con texture: ') + (asset.name || asset.source || 'asset'));
+  }
+  function replaceTextureObjectWithFile(target, file){
+    if(!target || !file) return;
+    importTextureFile(file).then(asset => {
+      if(asset) replaceTextureObjectWithAsset(asset, target);
+    }).catch(err => status(tr('Texture replacement failed: ', 'Sostituzione texture fallita: ') + err.message));
+  }
   function placeImportedAsset(asset, at){
-    if(!asset) return Promise.reject(new Error('asset non valido'));
+    if(!asset) return Promise.reject(new Error(tr('invalid asset', 'asset non valido')));
     if(asset.kind === 'texture') return Promise.resolve(registerImportedTexture(asset, at));
     return resolveImportedAssetUrl(asset)
       .then(src => STORE.loadGlb(src, asset.fit || 5))
@@ -113,7 +173,7 @@ function create(deps){
       const asset = upsertImportedAsset(file, sourceInfo);
       if(asset && options.placePoint) registerImportedTexture(asset, options.placePoint);
       refreshAssetsPanel();
-      status('Texture importata: ' + (file.name || asset && asset.name || 'asset'));
+      status(tr('Texture imported: ', 'Texture importata: ') + (file.name || asset && asset.name || 'asset'));
       return asset;
     });
   }
@@ -175,7 +235,9 @@ function create(deps){
       setAssetLoading(true, 'Asset import complete', 100, imported.length + ' asset' + (imported.length === 1 ? '' : 's') + ' imported');
       refreshAssetsPanel();
       setTimeout(() => setAssetLoading(false), 450);
-      status(imported.length + ' asset importati');
+      status(imported.length + (GAME && GAME.i18n && GAME.i18n.lang === 'it'
+        ? (imported.length === 1 ? ' asset importato' : ' asset importati')
+        : (' asset' + (imported.length === 1 ? '' : 's') + ' imported')));
       return imported;
     }).catch(err => {
       setAssetLoading(false);
@@ -242,10 +304,10 @@ function create(deps){
       if(asset) refreshAssetsPanel();
       setAssetLoading(true, file.name, 100, 'Replacement complete');
       setTimeout(() => setAssetLoading(false), 300);
-      status('Sostituito con ' + file.name);
+      status(tr('Replaced with ', 'Sostituito con ') + file.name);
     })).catch(err => {
       setAssetLoading(false);
-      status('Sostituzione fallita: ' + err.message);
+      status(tr('Replacement failed: ', 'Sostituzione fallita: ') + err.message);
     });
   }
 
@@ -259,13 +321,13 @@ function create(deps){
       GAME.player.car.userData.assetName = label || GAME.player.car.userData.assetName;
       GAME.player.car.userData.assetSource = label || GAME.player.car.userData.assetSource;
       refreshAssetsPanel();
-      status('Modello player sostituito' + (label ? ': ' + label : ''));
+      status(tr('Player model replaced', 'Modello player sostituito') + (label ? ': ' + label : ''));
       return sceneRoot;
     });
   }
 
   function replacePlayerModelWithAsset(asset){
-    if(!asset){ status('Asset player non valido'); return; }
+    if(!asset){ status(tr('Invalid player asset', 'Asset player non valido')); return; }
     setAssetLoading(true, asset.name || 'Player model', 20, 'Loading player model');
     resolveImportedAssetUrl(asset).then(src => {
       setAssetLoading(true, asset.name || 'Player model', 72, 'Applying player model');
@@ -284,7 +346,7 @@ function create(deps){
   }
 
   function replacePlayerModelWithFile(file){
-    if(!file){ status('File player non valido'); return; }
+    if(!file){ status(tr('Invalid player file', 'File player non valido')); return; }
     setAssetLoading(true, file.name, 12, 'Importing player model');
     const key = assetKeyFromFile(file);
     const dbKey = assetDbKeyFromFile(file, key);
@@ -323,6 +385,8 @@ function create(deps){
     importAssetFiles,
     replaceSelectedWithAsset,
     replaceObjectWithFile,
+    replaceTextureObjectWithAsset,
+    replaceTextureObjectWithFile,
     replacePlayerModelWithAsset,
     replacePlayerModelWithFile,
   });

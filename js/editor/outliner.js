@@ -16,13 +16,14 @@ function create(deps){
   let sceneDragId = null;
   const linkExpanded = Object.create(null);
   let sceneIndex = new Map();
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function visibleEntities(){
     return GAME.world.registry.filter(o => {
       if(!o || !o.userData) return false;
       if(ED.filter === 'added' && o.userData.builtin) return false;
       if(ED.filter === 'builtin' && !o.userData.builtin) return false;
-      if(['mesh','light','effect'].includes(ED.filter) && o.userData.editorType !== ED.filter) return false;
+	      if(['mesh','light','effect','camera','cinemaStudio'].includes(ED.filter) && o.userData.editorType !== ED.filter) return false;
       if(ED.search && !(o.userData.editorName || '').toLowerCase().includes(ED.search)) return false;
       return true;
     });
@@ -103,10 +104,10 @@ function create(deps){
     const name = documentRef.createElement('span');
     name.className = 'lk-name';
     name.textContent = o.userData.editorName || id;
-    name.title = (o.userData.builtin ? '(originale) ' : '(aggiunto) ') + (o.userData.editorName || id);
+    name.title = (o.userData.builtin ? tr('(original) ', '(originale) ') : tr('(added) ', '(aggiunto) ')) + (o.userData.editorName || id);
 
     const eye = documentRef.createElement('button');
-    eye.className = 'lk-eye'; eye.textContent = o.visible ? '👁' : '—'; eye.title = 'Mostra/Nascondi';
+    eye.className = 'lk-eye'; eye.textContent = o.visible ? '👁' : '—'; eye.title = tr('Show/Hide', 'Mostra/Nascondi');
     if(!o.__lkSkipControls){
       eye.addEventListener('click', ev => { ev.stopPropagation(); deps.toggleVisible(o); });
     } else {
@@ -116,7 +117,7 @@ function create(deps){
     }
 
     const del = documentRef.createElement('button');
-    del.className = 'lk-del'; del.textContent = '×'; del.title = 'Elimina';
+    del.className = 'lk-del'; del.textContent = '×'; del.title = tr('Delete', 'Elimina');
     if(!o.__lkSkipControls){
       del.addEventListener('click', ev => { ev.stopPropagation(); deps.requestDeleteEntity(o); });
     } else {

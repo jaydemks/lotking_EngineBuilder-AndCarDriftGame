@@ -24,13 +24,14 @@ function create(deps){
   }
 
   function editorViewportRect(){
+    const timelineH = ED.cinemaTimelineOpen && ED.cinemaTimelineDocked ? (ED.cinemaTimelineH || 136) : 0;
     return floatingLayout
       ? floatingLayout.editorViewportRect()
       : {
         x: panelWidth('left') + 10,
-        y: 46,
+        y: 46 + (ED.viewportToolbarCollapsed ? 28 : 36),
         w: Math.max(220, innerWidth - panelWidth('left') - panelWidth('right') - 20),
-        h: Math.max(160, innerHeight - 46 - 40 - ED.assetsH),
+        h: Math.max(160, innerHeight - 46 - (ED.viewportToolbarCollapsed ? 28 : 36) - 40 - ED.assetsH - timelineH),
       };
   }
 

@@ -15,7 +15,7 @@ function create(){
       <button data-tool="rotate" type="button" title="Rotate (E)">⟳</button>
       <button data-tool="scale" type="button" title="Scale (R)">⤢</button>
     </div>
-    <button id="lkSpace" type="button" title="Cambia spazio: World Z-up / Local Z-up / Engine Y-up">🌐 World Z-up</button>
+    <button id="lkSpace" type="button" title="Change space: World Z-up / Local Z-up / Engine Y-up">🌐 World Z-up</button>
     <div class="lk-history-tools">
       <button id="lkUndo" class="disabled" type="button" title="Undo">↶</button>
       <button id="lkRedo" class="disabled" type="button" title="Redo">↷</button>
@@ -52,6 +52,25 @@ function create(){
     <button id="lkPlay" type="button">▶ PREVIEW</button>
     <button id="lkExit" type="button" title="Exit editor">×</button>
   </div>
+  <div id="lkViewportToolbar">
+    <button id="lkViewportToolbarFold" type="button" title="Collapse viewport tools">▴</button>
+    <div class="lk-viewport-toolset">
+      <button id="lkViewportSingle" class="on" type="button" title="Single perspective viewport">▣</button>
+      <button id="lkViewportQuad" type="button" title="Quad view">▦</button>
+      <select id="lkViewportRenderMode" title="Render mode for selected view">
+        <option value="normal">Lit</option>
+        <option value="wire">Wireframe</option>
+        <option value="clay">Clay</option>
+        <option value="mesh">Mesh only</option>
+        <option value="lights">Lights only</option>
+        <option value="unlit">Unlit</option>
+        <option value="reflect">Reflections</option>
+      </select>
+      <button id="lkViewportFps" type="button" title="Toggle FPS status">FPS</button>
+      <button id="lkViewportPerf" type="button" title="Toggle performance debug">▤</button>
+      <span class="lk-viewport-caption">VIEWPORT</span>
+    </div>
+  </div>
   <aside id="lkLeft">
     <div id="lkLeftResize" class="lk-resize-handle"></div>
     <div class="lk-panelhead">SCENE</div>
@@ -60,7 +79,7 @@ function create(){
       <input id="lkSearch" type="search" placeholder="search...">
       <select id="lkFilter">
         <option value="all">All</option><option value="mesh">Meshes</option><option value="light">Lights</option>
-        <option value="effect">Effects</option><option value="added">Added</option><option value="builtin">Built-in</option>
+        <option value="effect">Effects</option><option value="camera">Cameras</option><option value="cinemaStudio">Cinema</option><option value="added">Added</option><option value="builtin">Built-in</option>
       </select>
       <button id="lkViewGrid" type="button" title="Grid view">▦</button>
       <button id="lkViewList" class="on" type="button" title="List view">☰</button>
@@ -84,7 +103,11 @@ function create(){
       <strong>ASSETS</strong>
       <button id="lkAssetsTab" class="on" type="button">Assets</button>
       <button id="lkAssetImport" type="button">Import</button>
-      <button id="lkAssetFolder" type="button">Folder</button>
+      <span class="lk-assets-viewtools">
+        <button id="lkAssetViewGrid" class="on" type="button" title="Assets grid view">▦</button>
+        <button id="lkAssetViewList" type="button" title="Assets list view">☰</button>
+        <button id="lkAssetFolder" type="button" title="New assets folder">📁</button>
+      </span>
       <button id="lkAssetRefresh" type="button">Refresh</button>
       <span id="lkAssetsFilters">
         <label><input data-asset-filter="blueprint" type="checkbox" checked> player car logic</label>
@@ -95,6 +118,7 @@ function create(){
         <label><input data-asset-filter="texture" type="checkbox" checked> texture</label>
         <label><input data-asset-filter="light" type="checkbox" checked> light</label>
         <label><input data-asset-filter="effect" type="checkbox" checked> effect</label>
+        <label><input data-asset-filter="camera" type="checkbox" checked> camera</label>
         <label><input data-asset-filter="other" type="checkbox" checked> other</label>
       </span>
     </div>
@@ -102,7 +126,7 @@ function create(){
   </section>
   <div id="lkStatus">
     <b>Lot King Engine Editor</b>
-    <span class="lk-status-help"><b>LMB</b> seleziona/orbita · <b>RMB drag</b> vola · <b>RMB click</b> menu rapido · <b>MMB</b> pan · <b>Wheel</b> zoom/velocità volo · <b>Q/W/E/R</b> select/move/rotate/scale · <b>Ctrl+Z/Y</b> undo/redo · <b>Ctrl+R</b> ripeti trasformazione · <b>Ctrl+D</b> duplica · <b>Del</b> elimina</span>
+    <span class="lk-status-help"><b>LMB</b> select/orbit · <b>RMB drag</b> fly · <b>RMB click</b> quick menu · <b>MMB</b> pan · <b>Wheel</b> zoom/fly speed · <b>Q/W/E/R</b> select/move/rotate/scale · <b>Ctrl+Z/Y</b> undo/redo · <b>Ctrl+R</b> repeat transform · <b>Ctrl+D</b> duplicate · <b>Del</b> delete</span>
     <span id="lkStatusRightWrap">
       <span id="lkStatusRight"></span>
       <span id="lkStatusWork">
@@ -119,14 +143,55 @@ function create(){
     <input id="lkQuickMusicVol" type="range" min="0" max="100" step="1" value="100" title="Menu music volume">
     <button id="lkQuickNext" type="button" title="Next menu music">Next</button>
   </div>
-  <div id="lkPipFrame"><div class="lk-pip-title">PLAYER CAMERA</div><div id="lkPipResize"></div></div>
+  <div id="lkViewportOverlays">
+    <div class="lk-view-corner" data-view-slot="0"><span>Perspective</span></div>
+    <div class="lk-view-corner" data-view-slot="1"><select></select></div>
+    <div class="lk-view-corner" data-view-slot="2"><select></select></div>
+    <div class="lk-view-corner" data-view-slot="3"><select></select></div>
+    <div id="lkViewportSplitV" class="lk-view-split lk-view-split-v" data-split="x" title="Resize left/right views"></div>
+    <div id="lkViewportSplitH" class="lk-view-split lk-view-split-h" data-split="y" title="Resize top/bottom views"></div>
+    <div id="lkViewportSplitC" class="lk-view-split-center" data-split="xy" title="Resize all quad views"></div>
+  </div>
+  <div id="lkViewportStats"></div>
+  <div id="lkCinemaTimeline">
+    <div class="lk-cinema-timeline-head">
+      <b>CINEMA STUDIO</b>
+      <span id="lkCinemaTlName"></span>
+      <span id="lkCinemaTlClock"></span>
+      <button id="lkCinemaTlLock" type="button" title="Lock sequencer to this Cinema Studio">Lock</button>
+      <button id="lkCinemaTlDock" type="button" title="Dock sequencer under the viewport">Dock</button>
+      <button id="lkCinemaTlPlay" type="button">Play</button>
+      <button id="lkCinemaTlStop" type="button">Stop</button>
+      <select id="lkCinemaTlCamera" title="Shot camera"></select>
+      <button id="lkCinemaTlAddCut" type="button">Add shot</button>
+      <select id="lkCinemaTlObject" title="Animated target: object or camera"></select>
+      <button id="lkCinemaTlAddObject" type="button" title="Add selected object or camera as an animated target">Add target</button>
+      <button id="lkCinemaTlKeyObject" type="button" title="Key selected object or camera transform at the current time">Key selected</button>
+      <button id="lkCinemaTlCurve" type="button" title="Edit selected key curves">∿</button>
+      <button id="lkCinemaTlDelete" type="button" title="Delete selected timeline item">Delete</button>
+      <button id="lkCinemaTlClose" type="button" title="Close sequencer">×</button>
+    </div>
+    <input id="lkCinemaTlScrub" type="range" min="0" max="6" step="0.01" value="0">
+    <div id="lkCinemaTlTrack"></div>
+    <div id="lkCinemaCurvePanel">
+      <span>Curve</span>
+      <select id="lkCinemaCurveMode">
+        <option value="linear">Linear</option>
+        <option value="ease-in">Ease in</option>
+        <option value="ease-out">Ease out</option>
+        <option value="ease-in-out">Ease in/out</option>
+        <option value="manual">Manual</option>
+      </select>
+    </div>
+  </div>
+  <div id="lkPipFrame"><div class="lk-pip-title"><span>PLAYER CAMERA</span><button id="lkPipMinimize" type="button" title="Minimize player camera">−</button></div><div id="lkPipResize"></div></div>
   <div id="lkLevelsOverlay"><div class="lk-levels-panel">
     <div class="lk-levels-head"><div class="lk-levels-title">🗀 PROJECT LEVELS</div><div class="lk-levels-sub">stored locally</div><button id="lkLevelsClose" type="button">×</button></div>
     <div id="lkLevelsList"></div>
     <div class="lk-levels-foot"><button id="lkLevelsNew" type="button">New level</button><button id="lkLevelsFromFile" type="button">Load from file...</button></div>
   </div></div>
   <div id="lkProjectsOverlay"><div class="lk-levels-panel">
-    <div class="lk-levels-head"><div class="lk-projects-title">🗂 PROJECTS</div><div class="lk-projects-sub">stored in this browser</div><button id="lkProjectsClose" type="button">×</button></div>
+    <div class="lk-levels-head"><div class="lk-projects-title">🗂 PROJECTS</div><div class="lk-projects-sub">stored in this browser</div><div class="lk-projects-lang" role="group" aria-label="Editor language"><button data-project-lang="en" type="button" title="English">EN</button><button data-project-lang="it" type="button" title="Italiano">IT</button></div><button id="lkProjectsClose" type="button">×</button></div>
     <div id="lkProjectsList"></div>
     <div class="lk-levels-foot"><button id="lkProjectsNew" type="button">New project</button><button id="lkProjectsFromFile" type="button">Import project file...</button></div>
   </div></div>
@@ -135,7 +200,7 @@ function create(){
       <div class="lk-level-loading-title">LOADING</div>
       <div id="lkLevelLoadingName">Preparing editor</div>
       <div class="lk-level-loading-bar"><span id="lkLevelLoadingFill"></span></div>
-      <div id="lkLevelLoadingStep">Avvio</div>
+      <div id="lkLevelLoadingStep">Starting</div>
     </div>
   </div>
   <div id="lkConfirmOverlay"><div class="lk-confirm-box"><div id="lkConfirmTitle"></div><div id="lkConfirmMessage"></div><div class="lk-confirm-actions"><button id="lkConfirmCancel" type="button">Cancel</button><button id="lkConfirmOk" type="button">OK</button></div></div></div>

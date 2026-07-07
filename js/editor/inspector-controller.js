@@ -12,6 +12,7 @@ function create(deps){
   const STORE = deps.STORE;
   const ED = deps.ED;
   const tf = deps.tf;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function syncTransformFields(){
     const o = ED.selected;
@@ -99,10 +100,10 @@ function create(deps){
   }
 
   function buildMultiInspector(box, list){
-    box.appendChild(deps.el('<div class="lk-head"><span class="lk-head-ic">☑</span><span class="lk-bp-title">MULTI SELECT</span><span class="lk-head-id">' + list.length + ' objects</span></div>'));
-    box.appendChild(deps.el('<div class="lk-hint">Only the field you edit is applied to every selected object. Mixed or untouched values stay exactly as they are.</div>'));
+    box.appendChild(deps.el('<div class="lk-head"><span class="lk-head-ic">☑</span><span class="lk-bp-title">' + tr('MULTI SELECT', 'MULTI SELEZIONE') + '</span><span class="lk-head-id">' + list.length + ' ' + tr('objects', 'oggetti') + '</span></div>'));
+    box.appendChild(deps.el('<div class="lk-hint">' + tr('Only the field you edit is applied to every selected object. Mixed or untouched values stay exactly as they are.', 'Solo il campo che modifichi viene applicato a tutti gli oggetti selezionati. Valori misti o non toccati restano invariati.') + '</div>'));
 
-    const st = deps.section('TRASFORMAZIONE');
+    const st = deps.section(tr('TRANSFORM', 'TRASFORMAZIONE'));
     ['x','y','z'].forEach(ax => st.body.appendChild(multiNumberRow('Pos ' + ax.toUpperCase(), list, o => o.position[ax], (o,v) => { o.position[ax] = v; }, .1)));
     ['x','y','z'].forEach(ax => st.body.appendChild(multiNumberRow('Rot ' + ax.toUpperCase() + '°', list, o => THREE.MathUtils.radToDeg(o.rotation[ax]), (o,v) => { o.rotation[ax] = v; }, 1, true)));
     ['x','y','z'].forEach(ax => st.body.appendChild(multiNumberRow('Scale ' + ax.toUpperCase(), list, o => o.scale[ax], (o,v) => { o.scale[ax] = v; }, .1)));
@@ -113,9 +114,9 @@ function create(deps){
     ]));
     box.appendChild(st.root);
 
-    const sv = deps.section('VISIBILITÀ');
+    const sv = deps.section(tr('VISIBILITY', 'VISIBILITA'));
     const vis = sameValue(list, o => !!o.visible);
-    const visRow = deps.checkRow('Visibile', vis.same ? vis.value : false, v => {
+    const visRow = deps.checkRow(tr('Visible', 'Visibile'), vis.same ? vis.value : false, v => {
       list.forEach(o => { o.visible = v; });
       if(deps.markDirty) deps.markDirty();
       if(deps.refreshOutliner) deps.refreshOutliner();
@@ -147,7 +148,7 @@ function create(deps){
         const force = Number(o.userData.physicsImpact != null ? o.userData.physicsImpact : (ref && ref.impact));
         return Number.isFinite(force) ? Math.max(0, Math.min(1, force)) : .25;
       }, setImpactForce, .01));
-      sp.body.appendChild(deps.el('<div class="lk-hint">Mass controls how easily the object moves. Impact force controls how much the player vehicle slows down on hit.</div>'));
+      sp.body.appendChild(deps.el('<div class="lk-hint">' + tr('Mass controls how easily the object moves. Impact force controls how much the player vehicle slows down on hit.', 'La massa controlla quanto facilmente si muove l\'oggetto. La forza impatto controlla quanto il veicolo rallenta al contatto.') + '</div>'));
       box.appendChild(sp.root);
     }
   }
@@ -174,19 +175,19 @@ function create(deps){
     box.appendChild(deps.el('<div class="lk-head lk-bp"><span class="lk-head-ic">' + (selectedCollider ? '▧' : '🚗') + '</span><span class="lk-bp-title">' + (selectedCollider ? 'PLAYER_CAR · COLLIDER' : 'PLAYER_CAR · LOGIC') + '</span><span class="lk-head-id">player vehicle</span></div>'));
     box.appendChild(deps.btnRow([
       {label:'◇ Copy car logic', action: deps.copyPlayerBlueprintAsset},
-      {label:'★ Promote current to Base', action:() => {
+      {label:tr('★ Promote current to Base', '★ Promuovi corrente a Base'), action:() => {
         const bp = deps.currentPlayerBlueprint();
         if(bp && STORE.playerBlueprints && STORE.playerBlueprints.setDefault){
           STORE.playerBlueprints.setDefault(bp, {levelId: ED.trackId, levelName: ED.trackName, copiedFrom: 'scene-player'});
           deps.applyPlayerBlueprintAsset(bp, {applySpawn:false, silent:true});
-          deps.status('Current player_car logic promoted to Base');
+          deps.status(tr('Current player_car logic promoted to Base', 'player_car Logic corrente promosso a Base'));
         }
       }},
     ]));
 
-    const st = deps.section('POSIZIONE / SPAWN');
-    st.body.appendChild(deps.el('<div class="lk-hint">Move the car with the gizmo: its position becomes the spawn.</div>'));
-    const row = deps.el('<div class="lk-vec"><label>Posizione</label></div>');
+    const st = deps.section(tr('POSITION / SPAWN', 'POSIZIONE / SPAWN'));
+    st.body.appendChild(deps.el('<div class="lk-hint">' + tr('Move the car with the gizmo: its position becomes the spawn.', 'Muovi l\'auto con il gizmo: la sua posizione diventa lo spawn.') + '</div>'));
+    const row = deps.el('<div class="lk-vec"><label>' + tr('Position', 'Posizione') + '</label></div>');
     const ins = [];
     ['x','y','z'].forEach(ax => {
       const i = deps.el('<input type="number" step="0.5">');
@@ -199,7 +200,7 @@ function create(deps){
     });
     st.body.appendChild(row);
 
-    const rowR = deps.el('<div class="lk-vec"><label>Direzione°</label></div>');
+    const rowR = deps.el('<div class="lk-vec"><label>' + tr('Direction°', 'Direzione°') + '</label></div>');
     const rI = deps.el('<input type="number" step="5">');
     rI.value = +THREE.MathUtils.radToDeg(o.rotation.y).toFixed(1);
     rI.addEventListener('focus', deps.beginTransformHistory);
@@ -209,7 +210,7 @@ function create(deps){
     st.body.appendChild(rowR);
 
     tf.inputs = [ins[0], ins[1], ins[2], {set value(v){}, get value(){return 0;}}, rI, {set value(v){}, get value(){return 0;}}, {set value(v){}}, {set value(v){}}, {set value(v){}}];
-    st.body.appendChild(deps.btnRow([{label:'📍 Spawn qui', action: deps.setSpawnHere}, {label:'↺ Spawn default', action:() => {
+    st.body.appendChild(deps.btnRow([{label:tr('📍 Spawn here', '📍 Spawn qui'), action: deps.setSpawnHere}, {label:tr('↺ Default spawn', '↺ Spawn default'), action:() => {
       o.position.set(0,0,55);
       o.rotation.y = Math.PI;
       deps.onGizmoChange();
@@ -225,7 +226,7 @@ function create(deps){
       if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
       if(deps.markDirty) deps.markDirty();
     };
-    pc.body.appendChild(deps.el('<div class="lk-hint">' + (selectedCollider ? 'Collider selection active. Edit this dummy here; it is separate from the player_car object transform.' : 'Dedicated player_car collision. This controls the car body used by physics and the lightweight arcade impact radius.') + '</div>'));
+    pc.body.appendChild(deps.el('<div class="lk-hint">' + (selectedCollider ? tr('Collider selection active. Edit this dummy here; it is separate from the player_car object transform.', 'Selezione collider attiva. Modifica qui questo dummy; e separato dalla trasformazione del player_car.') : tr('Dedicated player_car collision. This controls the car body used by physics and the lightweight arcade impact radius.', 'Collisione dedicata del player_car. Controlla la carrozzeria usata dalla fisica e il raggio impatto arcade.')) + '</div>'));
     pc.body.appendChild(deps.sliderRow('Half X', collision.hx == null ? .92 : collision.hx, .1, 4, .01, v => setCollision({hx:v}), v => (+v).toFixed(2)).root);
     pc.body.appendChild(deps.sliderRow('Half Y', collision.hy == null ? .42 : collision.hy, .05, 2, .01, v => setCollision({hy:v}), v => (+v).toFixed(2)).root);
     pc.body.appendChild(deps.sliderRow('Half Z', collision.hz == null ? 1.85 : collision.hz, .1, 6, .01, v => setCollision({hz:v}), v => (+v).toFixed(2)).root);
@@ -238,12 +239,13 @@ function create(deps){
     deps.playerLightsInspector.build(box);
     deps.playerAttachmentsInspector.build(box);
     deps.playerSetupInspector.build(box);
+    if(deps.buildMaterialEditor) deps.buildMaterialEditor(box, o);
   }
 
   function openSoundDesigner(setId){
     const open = () => {
       if(window.LK_SOUND_DESIGNER) window.LK_SOUND_DESIGNER.open(setId);
-      else deps.status('⚠ Sound Designer non disponibile');
+      else deps.status(tr('⚠ Sound Designer unavailable', '⚠ Sound Designer non disponibile'));
     };
     if(window.LK_SOUND_DESIGNER) return open();
     const loadScript = src => new Promise((resolve, reject) => {
@@ -260,7 +262,7 @@ function create(deps){
       .then(() => window.LK_SOUND_DESIGNER_FORM ? null : loadScript('js/editor/sound-designer-form.js'))
       .then(() => loadScript('js/editor/sound-designer.js'))
       .then(open)
-      .catch(() => deps.status('⚠ Sound Designer non caricato'));
+      .catch(() => deps.status(tr('⚠ Sound Designer not loaded', '⚠ Sound Designer non caricato')));
   }
 
   return Object.freeze({

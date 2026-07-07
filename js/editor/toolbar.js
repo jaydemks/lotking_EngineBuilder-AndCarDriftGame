@@ -85,6 +85,49 @@ function create(deps){
     deps.syncToolbarState();
     if(!ED.pipOn) $('#lkPipFrame').classList.remove('on');
   });
+  const vpFold = $('#lkViewportToolbarFold');
+  const vpSingle = $('#lkViewportSingle');
+  const vpQuad = $('#lkViewportQuad');
+  if(vpFold) vpFold.addEventListener('click', () => {
+    ED.viewportToolbarCollapsed = !ED.viewportToolbarCollapsed;
+    root.classList.toggle('viewport-toolbar-collapsed', ED.viewportToolbarCollapsed);
+    vpFold.textContent = ED.viewportToolbarCollapsed ? '▾' : '▴';
+    vpFold.title = ED.viewportToolbarCollapsed ? 'Expand viewport tools' : 'Collapse viewport tools';
+  });
+  if(vpSingle) vpSingle.addEventListener('click', () => {
+    ED.viewportMode = 'single';
+    ED.activeViewportSlot = 0;
+    vpSingle.classList.add('on');
+    if(vpQuad) vpQuad.classList.remove('on');
+  });
+  if(vpQuad) vpQuad.addEventListener('click', () => {
+    ED.viewportMode = 'quad';
+    vpQuad.classList.add('on');
+    if(vpSingle) vpSingle.classList.remove('on');
+    ED.pipMinimized = true;
+  });
+  const vpRender = $('#lkViewportRenderMode');
+  if(vpRender) vpRender.addEventListener('change', () => {
+    const slot = ED.viewportMode === 'quad' ? Math.max(0, Math.min(3, ED.activeViewportSlot || 0)) : 0;
+    ED.viewportRenderModes[slot] = vpRender.value || 'normal';
+  });
+  const vpFps = $('#lkViewportFps');
+  if(vpFps) vpFps.addEventListener('click', () => {
+    ED.showFps = !ED.showFps;
+    vpFps.classList.toggle('on', ED.showFps);
+  });
+  const vpPerf = $('#lkViewportPerf');
+  if(vpPerf) vpPerf.addEventListener('click', () => {
+    ED.showPerf = !ED.showPerf;
+    vpPerf.classList.toggle('on', ED.showPerf);
+  });
+  const pipMin = $('#lkPipMinimize');
+  if(pipMin) pipMin.addEventListener('click', e => {
+    e.stopPropagation();
+    ED.pipMinimized = !ED.pipMinimized;
+    pipMin.textContent = ED.pipMinimized ? '+' : '−';
+    pipMin.title = ED.pipMinimized ? 'Expand player camera' : 'Minimize player camera';
+  });
 
   $('#lkAddMenu').addEventListener('click', e => deps.openMenu(deps.addMenuItems(deps.spawnPointAhead()), e.clientX, e.clientY));
   root.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => deps.setTool(b.dataset.tool)));

@@ -66,6 +66,8 @@ const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.929998, 'loading hud inspector', 'js/editor/hud-inspector.js'],
   [.929999, 'loading environment inspector', 'js/editor/environment-inspector.js'],
   [.9299995, 'loading inspector controller', 'js/editor/inspector-controller.js'],
+  [.9299996, 'loading cinema studio', 'js/editor/cinema-studio.js'],
+  [.92999965, 'loading viewport layout', 'js/editor/viewport-layout.js'],
   [.9299997, 'loading editor runtime', 'js/editor/editor-runtime.js'],
   [.9299998, 'loading playable export level picker', 'js/editor/playable-export-level-picker.js'],
   [.92999985, 'loading playable export assets', 'js/editor/playable-export-assets.js'],

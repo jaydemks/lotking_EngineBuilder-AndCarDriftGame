@@ -24,6 +24,8 @@ function create(deps){
   const setLevelLoading = deps.setLevelLoading || function(){};
   const status = deps.status;
   const applyInputConfig = deps.applyInputConfig || function(){};
+  const getEditorLang = deps.getEditorLang || function(){ return 'en'; };
+  const setEditorLang = deps.setEditorLang || function(){};
   const ACT = window.LK_RUNTIME_INPUT_ACTIONS;
   const BROWSER_PROJECT_INDEX = 'lk.editor.projects.v1';
   const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
@@ -35,7 +37,9 @@ function create(deps){
   let projectFileBusy = false;
   let activeBrowserProjectId = null;
   let startupProjectsShown = false;
+  let projectsLanguageBound = false;
   let projectImportTarget = 'project';
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function slugifyTrackName(name){
     return (name || 'track').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'track';
@@ -330,36 +334,36 @@ function create(deps){
   function importProjectAsBrowserProject(file, raw, progressToken){
     const project = STORE.parseProject ? STORE.parseProject(raw) : JSON.parse(raw);
     const name = importedProjectName(file, project);
-    updateStatusWork(progressToken, 42, 'Preparazione asset locali', 'loading');
+    updateStatusWork(progressToken, 42, tr('Preparing local assets', 'Preparazione asset locali'), 'loading');
     return prepareImportedProjectText(JSON.stringify(project)).then(projectText => {
       STORE.importProject(projectText);
       const imported = STORE.parseProject ? STORE.parseProject(projectText) : JSON.parse(projectText);
       writeBrowserProject(imported, {name, newProject:true});
-      finishStatusWork(progressToken, 'Importazione completata', 'Caricamento progetto', 'success');
+      finishStatusWork(progressToken, tr('Import complete', 'Importazione completata'), tr('Loading project', 'Caricamento progetto'), 'success');
       reopenEditorAndReload('Project imported', name);
     });
   }
 
   function saveScene(opts){
     opts = opts || {};
-    const progressToken = beginStatusWork('Salvataggio livello', 'Verifica stato corrente', 'loading');
-    updateStatusWork(progressToken, 10, 'Preparazione dati', 'loading');
+    const progressToken = beginStatusWork(tr('Saving level', 'Salvataggio livello'), tr('Checking current state', 'Verifica stato corrente'), 'loading');
+    updateStatusWork(progressToken, 10, tr('Preparing data', 'Preparazione dati'), 'loading');
     flushHudHistory();
     const input = $('#lkTrackName');
     if(input && input.value.trim()){
       ED.trackName = input.value.trim();
     }
-    updateStatusWork(progressToken, 45, 'Scrittura catalogo', 'loading');
+    updateStatusWork(progressToken, 45, tr('Writing catalog', 'Scrittura catalogo'), 'loading');
     const sceneData = STORE.collect(GAME);
     const ok = STORE.save(sceneData, currentTrackMeta());
     if(!ok){
       ED.dirty = true;
       $('#lkDirty').classList.add('show');
-      finishStatusWork(progressToken, 'Salvataggio fallito', 'Local storage non disponibile', 'error');
+      finishStatusWork(progressToken, tr('Save failed', 'Salvataggio fallito'), tr('Local storage unavailable', 'Local storage non disponibile'), 'error');
       status('⚠ Save failed: local level library was not updated');
       return false;
     }
-    updateStatusWork(progressToken, 85, 'Sincronizzazione UI', 'loading');
+    updateStatusWork(progressToken, 85, tr('Syncing UI', 'Sincronizzazione UI'), 'loading');
     const LV = levelsApi();
     const activeId = LV && LV.activeId ? LV.activeId() : ED.trackId;
     setTrackMeta({trackId: activeId || ED.trackId, trackName: ED.trackName});
@@ -368,7 +372,7 @@ function create(deps){
     if(LV && LV.syncCatalog) LV.syncCatalog();
     if(ED.levelsOpen) refreshLevelsOverlay();
     refreshAssetsPanel();
-    finishStatusWork(progressToken, 'Livello salvato', 'Operazione completata', 'success');
+    finishStatusWork(progressToken, tr('Level saved', 'Livello salvato'), tr('Operation complete', 'Operazione completata'), 'success');
     const project = createProjectSnapshot(sceneData);
     try {
       writeBrowserProject(project);
@@ -381,11 +385,11 @@ function create(deps){
   }
 
   function exportProject(){
-    const progressToken = beginStatusWork('Export LKEP', 'Serializzazione livello corrente', 'loading');
+    const progressToken = beginStatusWork('Export LKEP', tr('Serializing current level', 'Serializzazione livello corrente'), 'loading');
     flushHudHistory();
-    updateStatusWork(progressToken, 10, 'Snapshot dati', 'loading');
+    updateStatusWork(progressToken, 10, tr('Data snapshot', 'Snapshot dati'), 'loading');
     const sceneData = STORE.collect(GAME);
-    updateStatusWork(progressToken, 35, 'Generazione progetto', 'loading');
+    updateStatusWork(progressToken, 35, tr('Generating project', 'Generazione progetto'), 'loading');
     const project = createProjectSnapshot(sceneData);
     let picked;
     try {
@@ -393,26 +397,26 @@ function create(deps){
     } catch(err) {
       picked = Promise.reject(err);
     }
-    updateStatusWork(progressToken, 55, 'Preparazione asset progetto', 'loading');
+    updateStatusWork(progressToken, 55, tr('Preparing project assets', 'Preparazione asset progetto'), 'loading');
     picked.then(handle => {
       if(handle) projectFileHandle = handle;
       return preparePortableProject(project).then(result => ({handle, result}));
     }).then(bundle => {
-      updateStatusWork(progressToken, 82, bundle.handle ? 'Scrittura file progetto' : 'Download avviato', 'loading');
+      updateStatusWork(progressToken, 82, bundle.handle ? tr('Writing project file', 'Scrittura file progetto') : tr('Download started', 'Download avviato'), 'loading');
       if(bundle.handle) return writeProjectFile(bundle.handle, bundle.result.project).then(() => bundle.result);
       downloadProject(bundle.result.project);
       return bundle.result;
     }).then(result => {
-      const warningText = result.warnings && result.warnings.length ? 'Con avvisi: ' + result.warnings[0] : 'Operazione completata';
-      finishStatusWork(progressToken, 'LKEP esportato', warningText, result.warnings && result.warnings.length ? 'warning' : 'success');
+      const warningText = result.warnings && result.warnings.length ? tr('With warnings: ', 'Con avvisi: ') + result.warnings[0] : tr('Operation complete', 'Operazione completata');
+      finishStatusWork(progressToken, tr('LKEP exported', 'LKEP esportato'), warningText, result.warnings && result.warnings.length ? 'warning' : 'success');
       status(projectFileHandle ? 'LKEP saved and linked to Save ✓' : 'LKEP exported');
     }).catch(err => {
       if(err && err.name === 'AbortError'){
-        finishStatusWork(progressToken, 'Export annullato', 'Nessun file scritto', 'warning');
+        finishStatusWork(progressToken, tr('Export cancelled', 'Export annullato'), tr('No file written', 'Nessun file scritto'), 'warning');
         status('Export cancelled');
         return;
       }
-      finishStatusWork(progressToken, 'Export fallito', (err && err.message) ? err.message : 'Errore', 'error');
+      finishStatusWork(progressToken, tr('Export failed', 'Export fallito'), (err && err.message) ? err.message : tr('Error', 'Errore'), 'error');
       status('Export failed: ' + (err && err.message ? err.message : err));
     });
   }
@@ -422,7 +426,7 @@ function create(deps){
     if(!file) return;
     const importTarget = projectImportTarget;
     projectImportTarget = 'project';
-    const progressToken = beginStatusWork('Importazione LKEP', 'Lettura file in corso', 'loading');
+    const progressToken = beginStatusWork(tr('LKEP import', 'Importazione LKEP'), tr('Reading file', 'Lettura file in corso'), 'loading');
     const reader = new FileReader();
     reader.onload = () => {
       Promise.resolve().then(async () => {
@@ -430,14 +434,14 @@ function create(deps){
           await importProjectAsBrowserProject(file, reader.result, progressToken);
           return;
         }
-        updateStatusWork(progressToken, 28, 'Preparazione asset progetto', 'loading');
+        updateStatusWork(progressToken, 28, tr('Preparing project assets', 'Preparazione asset progetto'), 'loading');
         const projectText = await prepareImportedProjectText(reader.result);
         const LV = levelsApi();
         if(LV){
-          updateStatusWork(progressToken, 42, 'Inserimento in libreria livelli', 'loading');
+          updateStatusWork(progressToken, 42, tr('Adding to level library', 'Inserimento in libreria livelli'), 'loading');
           const id = LV.importProjectAsLevel(projectText, file.name.replace(/\.lkep(\.json)?$|\.json$/i, ''));
-          if(!id) throw new Error('salvataggio locale fallito (quota?)');
-          updateStatusWork(progressToken, 68, 'Apertura livello', 'loading');
+          if(!id) throw new Error(tr('local save failed (quota?)', 'salvataggio locale fallito (quota?)'));
+          updateStatusWork(progressToken, 68, tr('Opening level', 'Apertura livello'), 'loading');
           const openImported = () => {
             LV.setActive(id);
             reopenEditorAndReload('Importato');
@@ -445,42 +449,42 @@ function create(deps){
           if(ED.dirty){
             confirmEditorAction({
               title:'Open imported level?',
-              message:'Il livello corrente ha modifiche non salvate che andranno perse. Aprire il livello importato?',
+              message:tr('The current level has unsaved changes that will be lost. Open the imported level?', 'Il livello corrente ha modifiche non salvate che andranno perse. Aprire il livello importato?'),
               okText:'Open level',
               danger:false,
             }).then(ok => {
               if(ok){
-                finishStatusWork(progressToken, 'Importazione completata', 'Caricamento livello importato', 'success');
+                finishStatusWork(progressToken, tr('Import complete', 'Importazione completata'), tr('Loading imported level', 'Caricamento livello importato'), 'success');
                 openImported();
               }
               else {
                 refreshLevelsOverlay();
                 refreshAssetsPanel();
-                finishStatusWork(progressToken, 'Importazione completata', 'Il livello è ora in libreria', 'success');
-                status('Livello importato nella libreria ✓');
+                finishStatusWork(progressToken, tr('Import complete', 'Importazione completata'), tr('The level is now in the library', 'Il livello e ora in libreria'), 'success');
+                status(tr('Level imported into library ✓', 'Livello importato nella libreria ✓'));
               }
             });
             return;
           }
-          updateStatusWork(progressToken, 86, 'Ricaricamento editor', 'loading');
+          updateStatusWork(progressToken, 86, tr('Reloading editor', 'Ricaricamento editor'), 'loading');
           openImported();
           return;
         }
-        updateStatusWork(progressToken, 75, 'Applicazione progetto locale', 'loading');
+        updateStatusWork(progressToken, 75, tr('Applying local project', 'Applicazione progetto locale'), 'loading');
         const project = STORE.importProject(projectText);
         setTrackMeta(project.meta);
         ED.dirty = false;
         $('#lkDirty').classList.remove('show');
-        finishStatusWork(progressToken, 'Importazione completata', 'Ricaricamento in corso', 'success');
+        finishStatusWork(progressToken, tr('Import complete', 'Importazione completata'), tr('Reloading', 'Ricaricamento in corso'), 'success');
         status('Imported ' + (project.meta && project.meta.trackName ? project.meta.trackName : 'LKEP') + ' · reloading...');
         setTimeout(() => location.reload(), 450);
       }).catch(err => {
-        finishStatusWork(progressToken, 'Importazione fallita', (err && err.message) ? err.message : 'Errore', 'error');
+        finishStatusWork(progressToken, tr('Import failed', 'Importazione fallita'), (err && err.message) ? err.message : tr('Error', 'Errore'), 'error');
         status('Import failed: ' + err.message);
       });
     };
     reader.onerror = () => {
-      finishStatusWork(progressToken, 'Importazione fallita', 'File non leggibile', 'error');
+      finishStatusWork(progressToken, tr('Import failed', 'Importazione fallita'), tr('File not readable', 'File non leggibile'), 'error');
       status('Import failed: file not readable');
     };
     reader.readAsText(file);
@@ -490,10 +494,38 @@ function create(deps){
     projectImportTarget = target === 'level' ? 'level' : 'project';
   }
 
+  function syncProjectsLanguagePicker(){
+    const L = getEditorLang() === 'it' ? 'it' : 'en';
+    document.querySelectorAll('[data-project-lang]').forEach(button => {
+      button.classList.toggle('on', button.dataset.projectLang === L);
+      button.setAttribute('aria-pressed', button.dataset.projectLang === L ? 'true' : 'false');
+    });
+  }
+
+  function bindProjectsLanguagePicker(){
+    if(projectsLanguageBound) return;
+    projectsLanguageBound = true;
+    const overlay = $('#lkProjectsOverlay');
+    if(!overlay) return;
+    overlay.querySelectorAll('[data-project-lang]').forEach(button => {
+      button.addEventListener('click', () => {
+        setEditorLang(button.dataset.projectLang);
+        syncProjectsLanguagePicker();
+        refreshProjectsOverlay();
+      });
+    });
+    window.addEventListener('lotking:languagechange', () => {
+      syncProjectsLanguagePicker();
+      if(ED.projectsOpen) refreshProjectsOverlay();
+    });
+  }
+
   function setProjectsOverlayOpen(open){
     ED.projectsOpen = !!open;
     const overlay = $('#lkProjectsOverlay');
     if(overlay) overlay.classList.toggle('open', ED.projectsOpen);
+    bindProjectsLanguagePicker();
+    syncProjectsLanguagePicker();
     if(ED.projectsOpen) refreshProjectsOverlay();
   }
 
@@ -504,7 +536,7 @@ function create(deps){
     const idx = browserProjectIndex();
     const list = Array.isArray(idx.projects) ? idx.projects.map(project => Object.assign({}, project, {active: project.id === idx.activeId})) : [];
     if(!list.length){
-      box.appendChild(el('<div class="lk-empty">Nessun progetto salvato.<br>Crea un progetto o premi Salva per salvare quello corrente.</div>'));
+      box.appendChild(el('<div class="lk-empty">' + tr('No saved projects.<br>Create a project or press Save to save the current one.', 'Nessun progetto salvato.<br>Crea un progetto o premi Salva per salvare quello corrente.') + '</div>'));
       return;
     }
     list.forEach(project => {
@@ -512,9 +544,9 @@ function create(deps){
       const meta = el('<div class="lk-level-meta"></div>');
       const nm = el('<div class="lk-level-name"></div>');
       nm.textContent = project.name || project.id;
-      if(project.active) nm.appendChild(el('<span class="lk-level-badge">ATTIVO</span>'));
+      if(project.active) nm.appendChild(el('<span class="lk-level-badge">' + tr('ACTIVE', 'ATTIVO') + '</span>'));
       const sub = el('<div class="lk-level-sub"></div>');
-      sub.textContent = project.id + (project.savedAt ? ' · salvato ' + new Date(project.savedAt).toLocaleString() : '');
+      sub.textContent = project.id + (project.savedAt ? tr(' · saved ', ' · salvato ') + new Date(project.savedAt).toLocaleString() : '');
       meta.append(nm, sub);
       const actions = el('<div class="lk-level-actions"></div>');
       const mkBtn = (label, title, fn, cls) => {
@@ -524,22 +556,22 @@ function create(deps){
         b.addEventListener('click', fn);
         return b;
       };
-      if(!project.active) actions.appendChild(mkBtn('▶ Carica', 'Apri questo progetto', () => loadBrowserProject(project.id, project.name), 'lk-level-load'));
-      actions.appendChild(mkBtn('✎', 'Rinomina', () => renameBrowserProject(project.id, project.name)));
-      actions.appendChild(mkBtn('⇩', 'Esporta LKEP', () => exportBrowserProject(project.id)));
-      actions.appendChild(mkBtn('🗑', 'Elimina', () => deleteBrowserProject(project.id, project.name), 'lk-level-del'));
+      if(!project.active) actions.appendChild(mkBtn(tr('▶ Load', '▶ Carica'), tr('Open this project', 'Apri questo progetto'), () => loadBrowserProject(project.id, project.name), 'lk-level-load'));
+      actions.appendChild(mkBtn('✎', tr('Rename', 'Rinomina'), () => renameBrowserProject(project.id, project.name)));
+      actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportBrowserProject(project.id)));
+      actions.appendChild(mkBtn('🗑', tr('Delete', 'Elimina'), () => deleteBrowserProject(project.id, project.name), 'lk-level-del'));
       row.append(meta, actions);
       box.appendChild(row);
     });
   }
 
   async function createBrowserProject(){
-    const next = await promptEditorAction({title:'New project', message:'Nome del nuovo progetto:', value:'New Project', okText:'Create'});
+    const next = await promptEditorAction({title:tr('New project', 'Nuovo progetto'), message:tr('New project name:', 'Nome del nuovo progetto:'), value:'New Project', okText:tr('Create', 'Crea')});
     if(!next || !next.trim()) return;
     if(ED.dirty){
       const ok = await confirmEditorAction({
         title:'Create new project?',
-        message:'Il progetto corrente ha modifiche non salvate che andranno perse. Continuare?',
+        message:tr('The current project has unsaved changes that will be lost. Continue?', 'Il progetto corrente ha modifiche non salvate che andranno perse. Continuare?'),
         okText:'Continue',
         danger:false,
       });
@@ -563,7 +595,7 @@ function create(deps){
     if(ED.dirty){
       const ok = await confirmEditorAction({
         title:'Load project?',
-        message:'Il progetto corrente ha modifiche non salvate che andranno perse. Caricare "' + (name || id) + '"?',
+        message:tr('The current project has unsaved changes that will be lost. Load "', 'Il progetto corrente ha modifiche non salvate che andranno perse. Caricare "') + (name || id) + '"?',
         okText:'Load',
         danger:false,
       });
@@ -593,7 +625,7 @@ function create(deps){
   }
 
   async function renameBrowserProject(id, currentName){
-    const next = await promptEditorAction({title:'Rename project', message:'Nuovo nome progetto:', value:currentName || '', okText:'Rename'});
+    const next = await promptEditorAction({title:tr('Rename project', 'Rinomina progetto'), message:tr('New project name:', 'Nuovo nome progetto:'), value:currentName || '', okText:tr('Rename', 'Rinomina')});
     if(!next || !next.trim() || next.trim() === currentName) return;
     try {
       const idx = browserProjectIndex();

@@ -7,11 +7,11 @@
 
 const PRESETS = Object.freeze({
   race: Object.freeze({
-    torque:1, maxSpeed:2, oversteer:-1, handbrake:0, steer:4, brake:0, grip:1,
+    torque:1, horsepower:420, maxSpeed:2, oversteer:-1, handbrake:0, steer:4, brake:0, grip:1,
     reverseDelay:.5, suspension:0, damping:0, travel:0, ride:0, roll:0, chassisLift:0,
   }),
   drift: Object.freeze({
-    torque:10, maxSpeed:2, oversteer:8, handbrake:2, steer:8, brake:-3, grip:-10,
+    torque:10, horsepower:700, maxSpeed:2, oversteer:-8, handbrake:2, steer:0, brake:-3, grip:-10,
     reverseDelay:.45, suspension:-1, damping:0, travel:3, ride:-1, roll:-3, chassisLift:0,
   }),
 });
@@ -58,18 +58,25 @@ function create(options){
     const steer = values.steer / 10;
     const brake = values.brake / 10;
     const grip = values.grip / 10;
+    const horsepower = clamp(values.horsepower == null ? 450 : Number(values.horsepower), 15, 1500);
+    const hpScale = horsepower / 450;
+    const hpAccel = clamp(Math.pow(hpScale, .86), .16, 3.05);
+    const hpWheelspin = clamp(Math.pow(hpScale, .56), .28, 1.95);
     const chassisLift = clamp(values.chassisLift == null ? 0 : Number(values.chassisLift), -0.35, 0.9);
     drive.reverseDelay = clamp(values.reverseDelay == null ? .5 : Number(values.reverseDelay), 0, 2);
+    values.horsepower = horsepower;
+    drive.horsepower = horsepower;
+    drive.powerScale = hpScale;
 
-    cfg.accel = baseCfg.accel * (1 + torque * .95);
-    cfg.revAccel = baseCfg.revAccel * (1 + torque * .55);
+    cfg.accel = baseCfg.accel * (1 + torque * .95) * hpAccel;
+    cfg.revAccel = baseCfg.revAccel * (1 + torque * .55) * clamp(Math.pow(hpScale, .72), .20, 2.55);
     cfg.maxSpeed = baseCfg.maxSpeed * (1 + maxSpeed * .45);
     cfg.brake = baseCfg.brake * clamp(1 + brake * .28, 0.5, 1.15);
     drive.brakeBias = clamp(baseDrive.brakeBias + brake * .035, 0.48, 0.62);
     drive.brakeDriveLock = clamp((baseDrive.brakeDriveLock == null ? 1 : baseDrive.brakeDriveLock) * (1 + brake * .22), 0.45, 1.15);
     drive.brakeWheelScale = clamp((baseDrive.brakeWheelScale == null ? .14 : baseDrive.brakeWheelScale) * (1 + brake * .18), .07, .22);
-    drive.wheelspin = clamp(baseDrive.wheelspin * (1 + torque * .55 + over * .10), 1.25, 3.5);
-    drive.driftDrive = clamp((baseDrive.driftDrive == null ? .5 : baseDrive.driftDrive) * (1 + torque * 1.05 + over * .48), .35, 1.65);
+    drive.wheelspin = clamp(baseDrive.wheelspin * (1 + torque * .55 + over * .10) * hpWheelspin, 1.0, 5.4);
+    drive.driftDrive = clamp((baseDrive.driftDrive == null ? .5 : baseDrive.driftDrive) * (1 + torque * 1.05 + over * .48 + (hpScale - 1) * .18), .28, 2.25);
     drive.shiftOverrun = clamp((Math.max(0, over) * .22) + (Math.max(0, torque) * .16), 0, .42);
 
     cfg.steerMax = baseCfg.steerMax * clamp(1 + steer * .38, 0.65, 1.5);
@@ -133,21 +140,23 @@ function create(options){
     setOpen = open => {
       dock.classList.toggle('open', open);
       btn.textContent = open ? '×' : '🔧';
-      btn.title = open ? 'Chiudi setup guida' : 'Setup guida';
+      const it = window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it';
+      btn.title = open ? (it ? 'Chiudi setup guida' : 'Close driving setup') : (it ? 'Setup guida' : 'Driving setup');
     };
     toggle = () => setOpen(!dock.classList.contains('open'));
     btn.addEventListener('click', toggle);
     panel.querySelectorAll('input[type="range"]').forEach(input => {
       const out = panel.querySelector('output[for="' + input.id + '"]');
+      const format = () => input.dataset.tune === 'horsepower' ? Math.round(Number(input.value)) + ' hp' : input.value;
       const update = () => {
         values[input.dataset.tune] = Number(input.value);
-        if(out) out.value = input.value;
+        if(out) out.value = format();
         apply();
       };
       input.addEventListener('input', update);
       const value = values[input.dataset.tune];
       if(value != null) input.value = value;
-      if(out) out.value = String(input.value);
+      if(out) out.value = format();
     });
     panel.querySelectorAll('[data-tune-preset]').forEach(button => {
       button.addEventListener('click', () => applyPreset(button.dataset.tunePreset));
@@ -163,7 +172,7 @@ function create(options){
       if(value == null) return;
       input.value = value;
       const out = document.querySelector('#tunePanel output[for="' + input.id + '"]');
-      if(out) out.value = String(value);
+      if(out) out.value = input.dataset.tune === 'horsepower' ? Math.round(Number(value)) + ' hp' : String(value);
     });
     updatePresetButtons();
   }

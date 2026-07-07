@@ -27,6 +27,7 @@ function create(deps){
   const readFileAsDataURL = deps.readFileAsDataURL;
   const buildInspector = deps.buildInspector;
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   const requestWarmup = label => {
     if(GAME && GAME.editor && GAME.editor.requestWarmup) GAME.editor.requestWarmup(label || 'Warm-up lights...');
   };
@@ -146,12 +147,50 @@ function create(deps){
       depthBias:.012,
       doubleSide:true,
       animated: !!(asset && (/\.gif$/i.test(asset.source || '') || /gif/i.test(asset.mime || ''))),
+      materialModel:'unlit',
+      roughness:.65,
+      metalness:0,
+      specular:.35,
+      emissive:0x000000,
+      emissiveIntensity:0,
     };
     const obj = STORE.createTexture(textureKind, props);
     const entry = {id, kind:'texture', textureKind, name:textureKind === 'image' ? 'Free Texture Image' : 'Free Texture Decal', collide:false,
       props:Object.assign({}, obj.userData.textureProps),
       asset: asset ? {key:asset.key, dbKey:asset.dbKey || null, name:asset.name, source:asset.source || 'Imported texture'} : {key:'texture:free', name:'Free Texture / Decal', source:'Editor texture'},
       t:{p:[at.x, textureKind === 'image' ? 1.2 : .025, at.z], r:[textureKind === 'image' ? 0 : -Math.PI/2,0,0], s:[1,1,1], v:true}};
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = entry.asset.key;
+    obj.userData.assetName = entry.asset.name;
+    obj.userData.assetSource = entry.asset.source;
+    finishAdd(obj);
+    return obj;
+  }
+
+  function addCamera(at){
+    const id = STORE.nextId();
+    const props = {fov:50, near:.05, far:800, helperSize:1.2, preview:true};
+    const obj = STORE.createSceneCamera(props);
+    const entry = {id, kind:'camera', name:'Scene Camera', collide:false,
+      props:Object.assign({}, obj.userData.cameraProps),
+      asset:{key:'camera:scene', name:'Scene Camera', source:'Editor camera'},
+      t:{p:[at.x, 2.2, at.z], r:[0,0,0], s:[1,1,1], v:true}};
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = entry.asset.key;
+    obj.userData.assetName = entry.asset.name;
+    obj.userData.assetSource = entry.asset.source;
+    finishAdd(obj);
+    return obj;
+  }
+
+  function addCinemaStudio(at){
+    const id = STORE.nextId();
+    const props = {duration:6, fps:24, playback:'one-shot', trigger:'manual', previewCamera:'', movieTrack:[], cameras:[], keyframes:[], objectTracks:[]};
+    const obj = STORE.createCinemaStudio(props);
+    const entry = {id, kind:'cinemaStudio', name:'Cinema Studio', collide:false,
+      props:Object.assign({}, obj.userData.cinemaProps),
+      asset:{key:'cinema:studio', name:'Cinema Studio', source:'Editor cinema'},
+      t:{p:[at.x, .05, at.z], r:[0,0,0], s:[1,1,1], v:true}};
     STORE.registerAdded(GAME, obj, entry);
     obj.userData.assetKey = entry.asset.key;
     obj.userData.assetName = entry.asset.name;
@@ -168,7 +207,7 @@ function create(deps){
     });
     markDirty(); refreshOutliner(); refreshAssetsPanel(); selectObject(obj);
     if(ED.tool === 'select') setTool('translate');
-    status('Aggiunto: ' + obj.userData.editorName);
+    status(tr('Added: ', 'Aggiunto: ') + obj.userData.editorName);
   }
 
   function openGlbImportAt(point){
@@ -191,7 +230,7 @@ function create(deps){
         const at = pendingGlbPoint || spawnPointAhead();
         pendingGlbPoint = null;
         importAssetFiles([f], {placePoint: at}).then(() => {
-          if(/\.(glb|gltf)$/i.test(f.name || '') && f.size > 4.5e6) status('⚠ GLB grande (' + (f.size/1e6).toFixed(1) + ' MB): il salvataggio permanente può fallire');
+          if(/\.(glb|gltf)$/i.test(f.name || '') && f.size > 4.5e6) status(tr('⚠ Large GLB (', '⚠ GLB grande (') + (f.size/1e6).toFixed(1) + tr(' MB): permanent save may fail', ' MB): il salvataggio permanente puo fallire'));
         });
       });
     }
@@ -222,7 +261,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

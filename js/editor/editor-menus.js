@@ -12,6 +12,7 @@ function create(deps){
   const STORE = deps.STORE;
   const root = deps.root;
   const $ = deps.$;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function assetContextMenuItems(item){
     if(!item) return [];
@@ -33,12 +34,12 @@ function create(deps){
         {label:'Open Engine Sound Designer', icon:'🎛', action:() => deps.openSoundDesigner(s.id)},
         {label:'Assign to player vehicle', icon:'🚗', disabled:assignedSoundSet === s.id, action:() => {
           GAME.player.setEngineSound(s.id); deps.markDirty(); deps.refreshAssetsPanel();
-          deps.status('Sound set "' + s.name + '" assegnato al veicolo');
+          deps.status(tr('Sound set "', 'Sound set "') + s.name + tr('" assigned to vehicle', '" assegnato al veicolo'));
         }},
         {label:'Duplicate sound set', icon:'⧉', action:() => { STORE.soundSets.duplicate(s.id); deps.refreshAssetsPanel(); }},
         {sep:true},
         {label:'Delete sound set', icon:'🗑', action:() => {
-          deps.confirmEditorAction({title:'Delete sound set?', message:'Eliminare il sound set "' + s.name + '"?', okText:'Delete'}).then(ok => {
+          deps.confirmEditorAction({title:'Delete sound set?', message:tr('Delete sound set "', 'Eliminare il sound set "') + s.name + '"?', okText:tr('Delete', 'Elimina')}).then(ok => {
             if(!ok) return;
             STORE.soundSets.remove(s.id);
             if(assignedSoundSet === s.id){ GAME.player.setEngineSound(null); deps.markDirty(); }

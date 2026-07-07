@@ -73,6 +73,11 @@ function create(deps){
 
   function lang(){ return prefs.lang === 'it' ? 'it' : 'en'; }
 
+  function emitLanguageChange(){
+    refreshOutliner();
+    window.dispatchEvent(new CustomEvent('lotking:languagechange', {detail:{lang: lang()}}));
+  }
+
   function applyLanguage(){
     const L = lang();
     if(window.LOT_KING && window.LOT_KING.i18n) window.LOT_KING.i18n.setLang(L);
@@ -95,6 +100,18 @@ function create(deps){
     root.classList.toggle('lk-light', prefs.theme === 'light');
     document.body.classList.toggle('lk-light', prefs.theme === 'light');
     applyLanguage();
+  }
+
+  function setLang(value){
+    const next = value === 'it' ? 'it' : 'en';
+    if(prefs.lang === next){
+      apply();
+      return;
+    }
+    prefs.lang = next;
+    save();
+    apply();
+    emitLanguageChange();
   }
 
   function setOpen(open){
@@ -124,7 +141,7 @@ function create(deps){
     if(r.checked){ prefs.theme = r.value; save(); apply(); }
   }));
   root.querySelectorAll('[name="lkPrefLang"]').forEach(r => r.addEventListener('change', () => {
-    if(r.checked){ prefs.lang = r.value; save(); apply(); refreshOutliner(); window.dispatchEvent(new CustomEvent('lotking:languagechange', {detail:{lang: lang()}})); }
+    if(r.checked) setLang(r.value);
   }));
   $('#lkQuickHide').addEventListener('click', () => {
     prefs.musicPanel = false;
@@ -138,6 +155,7 @@ function create(deps){
   return Object.freeze({
     prefs,
     lang,
+    setLang,
     apply,
     setOpen,
     setTab,
