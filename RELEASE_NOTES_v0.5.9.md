@@ -1,0 +1,30 @@
+# LOT KING ENGINE EDITOR v0.5.9 - Local launch origin fix
+
+## v0.5.9 - Local launch origin fix
+
+### Release Status
+
+- Status: released.
+- Tag target: `v0.5.9`.
+- Scope: local launch workflow cleanup, browser-storage origin consistency, README run instructions, and landing version label update.
+
+### Fixed
+
+- `avvio.bat` now opens the editor on `http://localhost:5600/engine_editor.html` by default.
+- `avvio.bat` now matches the normal manual local workflow that uses `localhost`, so browser-stored projects, imported assets, IndexedDB asset blobs and the saved player-car model appear consistently.
+- `avvio.bat` now checks whether the selected port is already occupied before opening the browser, avoiding accidental launches against an older server process.
+- The landing page version label now reflects `v0.5.9`.
+
+### Improved
+
+- `avvio.bat` now uses `serve_lan.py` when available, preserving no-cache headers and project MIME handling for local editor startup.
+- `avvio.bat` still binds locally by default, while allowing overrides through `PORT`, `HOST`, `BIND` and `PAGE`.
+- README now explains the two supported launch paths:
+  - `avvio.bat` for normal local editor work.
+  - manual static server commands for custom local/LAN testing.
+- README now explains that `localhost`, `127.0.0.1`, different ports and LAN IPs are separate browser storage origins.
+
+### Notes
+
+- This release does not change the saved project format.
+- If assets still appear different, verify the exact URL in the browser address bar. The project data lives under the full origin, not just the repository folder.
