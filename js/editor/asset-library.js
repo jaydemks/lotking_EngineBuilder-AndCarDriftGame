@@ -32,16 +32,25 @@ function create(opts){
     }
   }
 
+  function assetKindFromFile(file){
+    const name = String(file && file.name || '').toLowerCase();
+    const type = String(file && file.type || '').toLowerCase();
+    if(/\.(glb|gltf)$/i.test(name)) return 'glb';
+    if(/^image\//.test(type) || /\.(png|jpe?g|webp|gif|avif)$/i.test(name)) return 'texture';
+    return 'other';
+  }
+
   function fileName(file){
-    return (file.name || 'Asset').replace(/\.(glb|gltf)$/i, '');
+    return (file.name || 'Asset').replace(/\.(glb|gltf|png|jpe?g|webp|gif|avif)$/i, '');
   }
 
   function supportedFiles(files){
-    return Array.from(files || []).filter(file => /\.(glb|gltf)$/i.test(file.name || ''));
+    return Array.from(files || []).filter(file => assetKindFromFile(file) !== 'other');
   }
 
   function keyFromFile(file){
-    return 'glb:' + fileName(file).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const kind = assetKindFromFile(file);
+    return kind + ':' + fileName(file).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   }
 
   function dbKeyFromFile(file, key){
@@ -66,17 +75,19 @@ function create(opts){
     const list = load();
     const key = keyFromFile(file);
     const existing = list.find(a => a.key === key);
+    const kind = assetKindFromFile(file);
     const asset = {
       id: existing ? existing.id : ('asset_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7)),
       key,
-      kind: 'glb',
+      kind,
       name: fileName(file),
       source: file.name,
+      mime: file.type || (kind === 'texture' ? 'image/*' : ''),
       size: file.size || 0,
       src: info.src || null,
       dbKey: info.dbKey || null,
-      rigged: !!(info.rigged || (existing && existing.rigged)),
-      fit: 5,
+      rigged: kind === 'glb' ? !!(info.rigged || (existing && existing.rigged)) : false,
+      fit: kind === 'glb' ? 5 : undefined,
       importedAt: new Date().toISOString(),
     };
     if(existing) Object.assign(existing, asset);
@@ -99,9 +110,37 @@ function create(opts){
     };
   }
 
+  function createTextureEntry(asset, at){
+    const id = store.nextId();
+    return {
+      id,
+      kind: 'texture',
+      name: asset.name || 'Free Texture',
+      collide:false,
+      props:{
+        mode:'decal',
+        src: asset.src || null,
+        dbKey: asset.dbKey || null,
+        asset:{key: asset.key, dbKey: asset.dbKey || null, name: asset.name, source: asset.source || 'Imported texture'},
+        width:2,
+        height:2,
+        opacity:1,
+        color:0xffffff,
+        alphaTest:.01,
+        blending:'normal',
+        depthBias:.012,
+        doubleSide:true,
+        animated:/\.gif$/i.test(asset.source || '') || /gif/i.test(asset.mime || ''),
+      },
+      asset:{key: asset.key, dbKey: asset.dbKey || null, name: asset.name, source: asset.source || 'Imported texture'},
+      t:{p:[at.x, .025, at.z], r:[-Math.PI/2,0,0], s:[1,1,1], v:true},
+    };
+  }
+
   return {
     load,
     save,
+    assetKindFromFile,
     fileName,
     supportedFiles,
     keyFromFile,
@@ -109,6 +148,7 @@ function create(opts){
     resolveUrl,
     upsert,
     createGlbEntry,
+    createTextureEntry,
   };
 }
 

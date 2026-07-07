@@ -90,13 +90,17 @@ function create(deps){
   root.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => deps.setTool(b.dataset.tool)));
   $('#lkUndo').addEventListener('click', deps.undo);
   $('#lkRedo').addEventListener('click', deps.redo);
-  $('#lkSave').addEventListener('click', deps.saveScene);
+  $('#lkSave').addEventListener('click', () => deps.saveScene({projectFile:true}));
   $('#lkNewTrack').addEventListener('click', deps.newTrack);
   $('#lkSaveAsTrack').addEventListener('click', deps.saveAsTrack);
+  $('#lkProjects').addEventListener('click', () => deps.setProjectsOverlayOpen(!ED.projectsOpen));
+  $('#lkProjectsClose').addEventListener('click', () => deps.setProjectsOverlayOpen(false));
+  $('#lkProjectsNew').addEventListener('click', deps.createBrowserProject);
+  $('#lkProjectsFromFile').addEventListener('click', () => { deps.setProjectImportTarget('project'); $('#lkProjectInput').click(); });
   $('#lkLevels').addEventListener('click', () => deps.setLevelsOverlayOpen(!ED.levelsOpen));
   $('#lkLevelsClose').addEventListener('click', () => deps.setLevelsOverlayOpen(false));
   $('#lkLevelsNew').addEventListener('click', deps.newTrack);
-  $('#lkLevelsFromFile').addEventListener('click', () => $('#lkProjectInput').click());
+  $('#lkLevelsFromFile').addEventListener('click', () => { deps.setProjectImportTarget('level'); $('#lkProjectInput').click(); });
   $('#lkProjectInput').addEventListener('change', e => deps.importProjectFile(e.target.files && e.target.files[0]));
 
   $('#lkResetScene').addEventListener('click', () => {
@@ -109,7 +113,7 @@ function create(deps){
     const playableExport = getPlayableExport();
     if(playableExport) playableExport.exportCurrentPlayableProject();
   });
-  $('#lkImportProject').addEventListener('click', () => $('#lkProjectInput').click());
+  $('#lkImportProject').addEventListener('click', () => { deps.setProjectImportTarget('project'); $('#lkProjectInput').click(); });
   $('#lkExportPlayable').addEventListener('click', () => {
     const playableExport = getPlayableExport();
     if(playableExport) playableExport.exportCurrentPlayableProjectZip();

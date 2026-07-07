@@ -135,6 +135,7 @@ function create(deps){
     $('#lkAssetsPanel').className = ED.assetsViewMode || 'grid';
     if(GAME.player.updateLights) GAME.player.updateLights();
     if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
+    if(GAME.player.updateSkids) GAME.player.updateSkids();
     if(GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
     deps.refreshOutliner();
     deps.refreshAssetsPanel();
@@ -197,6 +198,7 @@ function create(deps){
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
     if(GAME.player.updateLights) GAME.player.updateLights();
     if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
+    if(GAME.player.updateSkids) GAME.player.updateSkids();
     root.classList.remove('active');
     document.body.classList.remove('editor-hud-hidden');
     const hudToggle = document.getElementById('videoEditorHud');

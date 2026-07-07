@@ -142,16 +142,24 @@ function create(deps){
   function importedItems(q){
     return deps.assetLibraryLoad().map(asset => {
       const mb = asset.size ? ' · ' + (asset.size / 1e6).toFixed(1) + ' MB' : '';
+      const isTexture = asset.kind === 'texture';
       const item = {
-        kind:'imported-glb', ref:'imported:' + asset.id, id:asset.id, name:asset.source || asset.name || 'Imported Asset',
-        sub:'imported glb · ' + (asset.source || asset.key) + mb,
-        source:asset.source || asset.key, icon:'📦', draggable:true,
+        kind:isTexture ? 'imported-texture' : 'imported-glb',
+        ref:'imported:' + asset.id,
+        id:asset.id,
+        name:asset.source || asset.name || 'Imported Asset',
+        sub:(isTexture ? 'texture/decal' : 'imported glb') + ' · ' + (asset.source || asset.key) + mb,
+        source:asset.source || asset.key,
+        icon:isTexture ? '▧' : '📦',
+        thumbUrl:isTexture ? (asset.src || null) : null,
+        filterType:isTexture ? 'texture' : 'glb',
+        draggable:true,
         badges: asset.rigged ? [{label:'Rigged', type:'rigged'}] : [],
       };
-      const refItem = () => ({kind:'imported-glb', ref:item.ref, id:asset.id, name:asset.name, raw:asset});
+      const refItem = () => ({kind:item.kind, ref:item.ref, id:asset.id, name:asset.name, raw:asset});
       item.defaultAction = () => deps.placeAssetRef(refItem(), deps.spawnPointAhead());
       item.actions = [
-        {label:'Place', title:'Place this asset in front of the editor camera', fn:() => deps.placeAssetRef(refItem(), deps.spawnPointAhead())},
+        {label:isTexture ? 'Add' : 'Place', title:'Place this asset in front of the editor camera', fn:() => deps.placeAssetRef(refItem(), deps.spawnPointAhead())},
         {label:'×', title:'Remove from imported asset library', fn:() => deps.deleteImportedAsset(asset)},
       ];
       return item;
@@ -260,6 +268,7 @@ function create(deps){
       filterType: looksLikeGlbAsset(a) ? 'glb' :
         (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'light') ? 'light' :
         (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'effect') ? 'effect' :
+        (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'texture') ? 'texture' :
         'scene',
       type:a.type, sub:a.type + ' · ' + a.instances.length + ' instances · ' + a.source,
       source:a.source, icon:deps.entityIcon(a.sample), thumbObject:a.sample,

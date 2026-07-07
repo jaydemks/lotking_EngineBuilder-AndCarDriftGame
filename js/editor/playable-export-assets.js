@@ -128,6 +128,9 @@ function create(deps){
         if(entry && entry.kind === 'glb'){
           await normalizePlayableAssetRef(entry, 'src', 'added.glb' + (entry.name ? ' "' + entry.name + '"' : ''), dbCache, library, warnings);
         }
+        if(entry && entry.kind === 'texture' && entry.props && typeof entry.props === 'object'){
+          await normalizePlayableAssetRef(entry.props, 'src', 'added.texture' + (entry.name ? ' "' + entry.name + '"' : ''), dbCache, library, warnings);
+        }
       }
     }
     if(scene && scene.player && scene.player.engineAudio && scene.player.engineAudio.set){

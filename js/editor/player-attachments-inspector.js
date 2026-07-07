@@ -76,6 +76,62 @@ function create(deps){
     box.appendChild(sx.root);
   }
 
+  function buildSkids(box){
+    if(!GAME.player.skids || !GAME.player.setSkids) return;
+    const sk = GAME.player.skids;
+    const skidLabel = (src, idx) => {
+      const labels = {
+        rearLeft:'Posteriore L',
+        rearRight:'Posteriore R',
+        frontLeft:'Anteriore L',
+        frontRight:'Anteriore R',
+      };
+      return labels[(src && src.wheel) || ''] || ('Sorgente ' + (idx + 1));
+    };
+    const ss = section('SKID MARKS', false);
+    const updSk = patch => { GAME.player.setSkids(patch); markDirty(); };
+    const selectSkid = id => {
+      const anchor = GAME.world.registry.find(x => x.userData.editorId === id);
+      if(!anchor) return;
+      GAME.player.setSkids({dummyVisible:true});
+      selectObject(anchor);
+      if(ED.tool === 'select') setTool('translate');
+    };
+    const addSkid = () => {
+      if(!GAME.player.addSkid) return;
+      const anchor = GAME.player.addSkid({enabled:true});
+      GAME.player.setSkids({dummyVisible:true});
+      markDirty();
+      refreshOutliner();
+      if(anchor){
+        selectObject(anchor);
+        if(ED.tool === 'select') setTool('translate');
+      }
+    };
+    ss.body.appendChild(el('<div class="lk-hint">Skid mark sources attached to the vehicle. Move and scale each dummy to align tire marks with the car.</div>'));
+    ss.body.appendChild(btnRow([
+      {label:'+ Sorgente sgommata', action:addSkid},
+      {label:'Post L', action:() => selectSkid('player_skid_0')},
+      {label:'Post R', action:() => selectSkid('player_skid_1')},
+      {label:'Ant L', action:() => selectSkid('player_skid_2')},
+      {label:'Ant R', action:() => selectSkid('player_skid_3')},
+    ]));
+    ss.body.appendChild(checkRow('Sgommate attive', sk.enabled !== false, v => updSk({enabled:v})).root);
+    ss.body.appendChild(checkRow('Mostra dummy sgommate', sk.dummyVisible !== false, v => updSk({dummyVisible:v})).root);
+    ss.body.appendChild(sliderRow('Larghezza base', sk.width == null ? .24 : sk.width, .04, 1.2, .01, v => updSk({width:v}), v => (+v).toFixed(2)).root);
+    ss.body.appendChild(sliderRow('Lunghezza base', sk.length == null ? .7 : sk.length, .08, 3.0, .01, v => updSk({length:v}), v => (+v).toFixed(2)).root);
+    ss.body.appendChild(sliderRow('Opacità', sk.opacity == null ? .55 : sk.opacity, .05, 1, .01, v => updSk({opacity:v}), v => Math.round(v * 100) + '%').root);
+    ss.body.appendChild(sliderRow('Durata segno', sk.life == null ? 14 : sk.life, 1, 40, .5, v => updSk({life:v}), v => (+v).toFixed(1) + 's').root);
+    (sk.sources || []).forEach((src, idx) => {
+      const row = section('SGOMMATA ' + skidLabel(src, idx), false);
+      const patch = p => { const a = []; a[idx] = p; updSk({sources:a}); };
+      row.body.appendChild(btnRow([{label:'Select dummy', action:() => selectSkid('player_skid_' + idx)}]));
+      row.body.appendChild(checkRow('Attiva sorgente', src.enabled !== false, v => patch({enabled:v})).root);
+      ss.body.appendChild(row.root);
+    });
+    box.appendChild(ss.root);
+  }
+
   function buildDataWidgets(box){
     if(!GAME.player.dataWidgets || !GAME.player.setDataWidgets) return;
     const dw = GAME.player.dataWidgets;
@@ -120,6 +176,7 @@ function create(deps){
 
   function build(box){
     buildExhaust(box);
+    buildSkids(box);
     buildDataWidgets(box);
   }
 

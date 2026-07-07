@@ -194,7 +194,7 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   syncToolbarState, transformControlsSpace, updateEditorAxesConvention, setGrid,
   applyGridSize,
   openMenu, addMenuItems, spawnPointAhead, setTool, undo, redo, saveScene,
-  newTrack, saveAsTrack, setLevelsOverlayOpen, importProjectFile,
+  newTrack, saveAsTrack, setLevelsOverlayOpen, setProjectsOverlayOpen, createBrowserProject, setProjectImportTarget, importProjectFile,
   confirmEditorAction, exportProject, stopPlayPreview, startPlayPreview,
   exitEditor, restoreFloatingPanels,
 });
@@ -231,7 +231,7 @@ viewportPicking = window.LK_EDITOR_VIEWPORT_PICKING && window.LK_EDITOR_VIEWPORT
   registry: () => GAME.world.registry,
   helperGroup: () => helperGroup,
   selected: () => ED.selected,
-  hoverSuppressed: () => !!(ED.playPreview || ED.levelsOpen || (gizmo && (gizmo.dragging || gizmo.axis)) || gizmoPointerActive),
+  hoverSuppressed: () => !!(ED.playPreview || ED.levelsOpen || ED.projectsOpen || (gizmo && (gizmo.dragging || gizmo.axis)) || gizmoPointerActive),
 });
 if(!viewportPicking){
   viewportPicking = {pickAt:()=>null, groundPointAt:()=>spawnPointAhead(), spawnPointAhead:()=>camE.position.clone().setY(0), updateHover:()=>{}, updateHelpers:()=>{}, clearHover:()=>{}, isGroundLikeEntity:()=>false};
@@ -245,16 +245,18 @@ function assetDbKeyFromFile(file, key){ return assetLibrary ? assetLibrary.dbKey
 function resolveImportedAssetUrl(asset){ return assetLibrary ? assetLibrary.resolveUrl(asset) : Promise.reject(new Error('asset library unavailable')); }
 function upsertImportedAsset(file, data){ return assetLibrary ? assetLibrary.upsert(file, data) : null; }
 function createGlbEntryFromAsset(asset, at){ return assetLibrary ? assetLibrary.createGlbEntry(asset, at) : {}; }
+function createTextureEntryFromAsset(asset, at){ return assetLibrary ? assetLibrary.createTextureEntry(asset, at) : {}; }
 
 assetImports = window.LK_EDITOR_ASSET_IMPORTS && window.LK_EDITOR_ASSET_IMPORTS.create({
   GAME, STORE, status, setAssetLoading, confirmEditorAction, refreshAssetsPanel, finishAdd,
   spawnPointAhead, performDeleteEntity, selected: () => ED.selected,
   assetLibraryLoad, assetLibrarySave, supportedAssetFiles, assetKeyFromFile, assetDbKeyFromFile,
-  resolveImportedAssetUrl, upsertImportedAsset, createGlbEntryFromAsset,
+  resolveImportedAssetUrl, upsertImportedAsset, createGlbEntryFromAsset, createTextureEntryFromAsset,
 });
 function readFileAsDataURL(f){ return assetImports ? assetImports.readFileAsDataURL(f) : Promise.reject(new Error('asset imports unavailable')); }
 function hasExternalFileDrag(e){ return assetImports ? assetImports.hasExternalFileDrag(e) : false; }
 function importAssetFiles(files, opts){ return assetImports ? assetImports.importAssetFiles(files, opts) : Promise.resolve([]); }
+function importTextureFile(file, opts){ return assetImports ? assetImports.importTextureFile(file, opts) : Promise.resolve(null); }
 function placeImportedAsset(asset, at){ return assetImports ? assetImports.placeImportedAsset(asset, at) : Promise.reject(new Error('asset imports unavailable')); }
 function deleteImportedAsset(asset){ if(assetImports) assetImports.deleteImportedAsset(asset); }
 function replaceSelectedWithAsset(asset, target){ if(assetImports) assetImports.replaceSelectedWithAsset(asset, target); }
@@ -298,7 +300,7 @@ function folderById(kind, id){ return folderManager ? folderManager.byId(kind, i
 function writeFolderState(){ if(folderManager) folderManager.write(); }
 
 keyboardShortcuts = window.LK_EDITOR_KEYBOARD_SHORTCUTS && window.LK_EDITOR_KEYBOARD_SHORTCUTS.create({
-  ED, fly, GAME, closeMenu, setPrefsOpen, setLevelsOverlayOpen, stopPlayPreview,
+  ED, fly, GAME, closeMenu, setPrefsOpen, setLevelsOverlayOpen, setProjectsOverlayOpen, stopPlayPreview,
   saveAsTrack, saveScene, newTrack, duplicateEntity, undo, redo, applyLastTransform,
   setTool, focusSelected, setGrid, requestDeleteEntity,
 });
@@ -365,9 +367,12 @@ projectIo = window.LK_EDITOR_PROJECT_IO && window.LK_EDITOR_PROJECT_IO.create({
   levelsApi,
   refreshLevelsOverlay,
   refreshAssetsPanel,
+  promptEditorAction,
   confirmEditorAction,
   reopenEditorAndReload,
+  setLevelLoading,
   status,
+  assetLibraryLoad,
   applyInputConfig: cfg => {
     if(inputSettings) inputSettings.setConfig(cfg);
     if(GAME.input){
@@ -404,10 +409,13 @@ function slugifyTrackName(name){ return projectIo.slugifyTrackName(name); }
 function setTrackMeta(meta){ return projectIo.setTrackMeta(meta); }
 function currentTrackMeta(){ return projectIo.currentTrackMeta(); }
 function loadTrackMeta(){ return projectIo.loadTrackMeta(); }
-function saveScene(){ return projectIo.saveScene(); }
+function saveScene(opts){ return projectIo.saveScene(opts); }
 function projectFilename(project){ return projectIo.projectFilename(project); }
 function exportProject(){ return projectIo.exportProject(); }
 function importProjectFile(file){ return projectIo.importProjectFile(file); }
+function setProjectImportTarget(target){ return projectIo.setProjectImportTarget(target); }
+function setProjectsOverlayOpen(open){ return projectIo.setProjectsOverlayOpen(open); }
+function createBrowserProject(){ return projectIo.createBrowserProject(); }
 // ------------------------------------------------ outliner
 let viewportReplaceTarget = null;
 assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
@@ -535,6 +543,8 @@ function placeProjectAsset(rawAsset, at){
       if(nextEntry.props && nextEntry.kind === 'light' && obj.userData && obj.userData.light){
         const l = obj.userData.light;
         if(l) STORE.applyLightProps(l, nextEntry.props);
+      } else if(nextEntry.props && nextEntry.kind === 'texture' && STORE.updateTextureObject){
+        STORE.updateTextureObject(obj, nextEntry.props);
       } else if(nextEntry.props && nextEntry.kind !== 'light'){
         STORE.applyMatProps(obj, nextEntry.props);
       }
@@ -776,6 +786,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   addLight,
   addEffect,
   addText,
+  addTexture,
   openGlbImportAt,
   setTool,
   selectObject,
@@ -840,6 +851,7 @@ function addPrimitive(prim, at){ return addActions.addPrimitive(prim, at); }
 function addLight(kind, at){ return addActions.addLight(kind, at); }
 function addEffect(kind, at){ return addActions.addEffect(kind, at); }
 function addText(kind, at){ return addActions.addText(kind, at); }
+function addTexture(kind, at, asset){ return addActions.addTexture(kind, at, asset); }
 function finishAdd(obj){ return addActions.finishAdd(obj); }
 function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
 function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }
@@ -926,6 +938,7 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   requestDeleteEntity,
   replaceSelectedGlb: beginReplaceObject,
   requestWarmup: label => requestEditorWarmup(label),
+  importTextureFile,
 });
 playerCameraInspector = window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR && window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR.create({
   GAME,

@@ -189,6 +189,7 @@ function create(deps){
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
     if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
+    if(o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);
     STORE.syncCollider(o);
     refreshSelectionHelpers();
     const gizmo = getGizmo();

@@ -13,6 +13,7 @@ function create(deps){
   const closeMenu = deps.closeMenu || function(){};
   const setPrefsOpen = deps.setPrefsOpen || function(){};
   const setLevelsOverlayOpen = deps.setLevelsOverlayOpen || function(){};
+  const setProjectsOverlayOpen = deps.setProjectsOverlayOpen || function(){};
   const stopPlayPreview = deps.stopPlayPreview || function(){};
   const saveAsTrack = deps.saveAsTrack || function(){};
   const saveScene = deps.saveScene || function(){};
@@ -45,6 +46,7 @@ function create(deps){
       e.preventDefault();
       closeMenu();
       if(ED.prefsOpen){ setPrefsOpen(false); return; }
+      if(ED.projectsOpen){ setProjectsOverlayOpen(false); return; }
       if(ED.levelsOpen){ setLevelsOverlayOpen(false); return; }
       if(document.getElementById('settingsOverlay').classList.contains('open')) GAME.actions.closePause();
       else GAME.actions.openPause('editor');
@@ -53,7 +55,8 @@ function create(deps){
     if(typing) return;
     if(fly.rmb) { e.preventDefault(); return; }
     const mod = e.ctrlKey || e.metaKey;
-    if(mod && key === 's'){ e.preventDefault(); e.shiftKey ? saveAsTrack() : saveScene(); return; }
+    if(mod && key === 's'){ e.preventDefault(); e.shiftKey ? saveAsTrack() : saveScene({projectFile:true}); return; }
+    if(mod && key === 'p'){ e.preventDefault(); setProjectsOverlayOpen(!ED.projectsOpen); return; }
     if(mod && key === 'o'){ e.preventDefault(); setLevelsOverlayOpen(!ED.levelsOpen); return; }
     if(mod && e.altKey && key === 'n'){ e.preventDefault(); newTrack(); return; }
     if(mod && key === 'd'){ e.preventDefault(); duplicateEntity(ED.selected); return; }

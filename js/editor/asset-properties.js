@@ -198,9 +198,49 @@ function create(deps){
     renderGlbPreview(overlay.querySelector('.lk-prop-preview'), asset);
   }
 
+  function openImportedTexture(asset){
+    close();
+    overlay = documentRef.createElement('div');
+    overlay.className = 'lk-prop-overlay open';
+    overlay.innerHTML = [
+      '<div class="lk-prop-window">',
+      '  <div class="lk-prop-title"><span>Texture Properties</span><button type="button" title="Close">×</button></div>',
+      '  <div class="lk-prop-body">',
+      '    <div class="lk-prop-preview lk-prop-preview-texture"></div>',
+      '    <div class="lk-prop-info"></div>',
+      '  </div>',
+      '</div>',
+    ].join('');
+    overlay.querySelector('button').addEventListener('click', close);
+    overlay.addEventListener('pointerdown', e => { if(e.target === overlay) close(); });
+    const p = overlay.querySelector('.lk-prop-preview');
+    p.textContent = 'Loading preview...';
+    resolveImportedAssetUrl(asset).then(src => {
+      p.textContent = '';
+      p.style.backgroundImage = 'url(' + src + ')';
+      p.style.backgroundSize = 'contain';
+      p.style.backgroundRepeat = 'no-repeat';
+      p.style.backgroundPosition = 'center';
+    }).catch(err => { p.textContent = 'Preview failed: ' + (err && err.message || 'unknown error'); });
+    const info = overlay.querySelector('.lk-prop-info');
+    info.append(
+      row('Name', asset.source || asset.name || 'Imported Texture'),
+      row('Display name', asset.name || ''),
+      row('Type', asset.mime || 'Image texture'),
+      row('Size', fmtBytes(asset.size)),
+      row('Storage', asset.dbKey ? 'IndexedDB blob' : (asset.src ? 'Inline/data URL' : 'Unknown')),
+      row('Imported at', fmtDate(asset.importedAt)),
+      row('Asset id', asset.id || ''),
+      row('Asset key', asset.key || ''),
+      row('Blob key', asset.dbKey || '')
+    );
+    documentRef.body.appendChild(overlay);
+  }
+
   function open(item){
     const raw = item && item.raw;
     if(item && item.kind === 'imported-glb' && raw) openImportedGlb(raw);
+    else if(item && item.kind === 'imported-texture' && raw) openImportedTexture(raw);
     else if(item && item.kind === 'player-blueprint' && raw) openBlueprint(item, raw);
   }
 

@@ -158,7 +158,7 @@ The editor loader is included here because it controls when runtime-shared modul
 These files live under `js/editor/`, but they directly coordinate with runtime/store systems and should be understood when tracing behavior:
 
 - `js/editor/project-io.js`
-  Editor project metadata, save, import, export, and active level/project round-trip. Owns editor-side `meta.input` serialization through the runtime input schema when available.
+  Editor project metadata, browser-based Projects overlay, active project save/load, import/export, and active level/project round-trip. Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data, while project storage in the editor remains scoped to the current browser origin.
 
 - `js/editor/input-settings.js`
   Project input settings UI. Edits allowed devices, touch mode, player defaults, device instances, base bindings, and mapping overlay data stored in `meta.input`.
@@ -173,7 +173,7 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
   Selects which saved levels/projects are exported and which selected level is primary.
 
 - `js/editor/playable-export-assets.js`
-  Collects and normalizes referenced assets, including blob-backed imported models/audio.
+  Collects and normalizes referenced assets, including blob-backed imported models/audio and texture/decal image assets.
 
 - `js/editor/playable-export-zip.js`
   Builds the gameplay-only ZIP payload, runtime file list, asset list, manifest, local launch helpers, and editor-only exclusion guard.

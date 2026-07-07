@@ -129,6 +129,37 @@ function create(deps){
     finishAdd(obj);
   }
 
+  function addTexture(kind, at, asset){
+    const id = STORE.nextId();
+    const textureKind = kind === 'image' ? 'image' : 'decal';
+    const props = {
+      mode:textureKind,
+      src: asset && asset.src || null,
+      dbKey: asset && asset.dbKey || null,
+      asset: asset ? {key:asset.key, dbKey:asset.dbKey || null, name:asset.name, source:asset.source || 'Imported texture'} : null,
+      width:2,
+      height:2,
+      opacity:1,
+      color:0xffffff,
+      alphaTest:.01,
+      blending:'normal',
+      depthBias:.012,
+      doubleSide:true,
+      animated: !!(asset && (/\.gif$/i.test(asset.source || '') || /gif/i.test(asset.mime || ''))),
+    };
+    const obj = STORE.createTexture(textureKind, props);
+    const entry = {id, kind:'texture', textureKind, name:textureKind === 'image' ? 'Free Texture Image' : 'Free Texture Decal', collide:false,
+      props:Object.assign({}, obj.userData.textureProps),
+      asset: asset ? {key:asset.key, dbKey:asset.dbKey || null, name:asset.name, source:asset.source || 'Imported texture'} : {key:'texture:free', name:'Free Texture / Decal', source:'Editor texture'},
+      t:{p:[at.x, textureKind === 'image' ? 1.2 : .025, at.z], r:[textureKind === 'image' ? 0 : -Math.PI/2,0,0], s:[1,1,1], v:true}};
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = entry.asset.key;
+    obj.userData.assetName = entry.asset.name;
+    obj.userData.assetSource = entry.asset.source;
+    finishAdd(obj);
+    return obj;
+  }
+
   function finishAdd(obj){
     pushHistory({
       label: 'Add ' + (obj.userData.editorName || 'Entity'),
@@ -160,7 +191,7 @@ function create(deps){
         const at = pendingGlbPoint || spawnPointAhead();
         pendingGlbPoint = null;
         importAssetFiles([f], {placePoint: at}).then(() => {
-          if(f.size > 4.5e6) status('⚠ GLB grande (' + (f.size/1e6).toFixed(1) + ' MB): il salvataggio permanente può fallire');
+          if(/\.(glb|gltf)$/i.test(f.name || '') && f.size > 4.5e6) status('⚠ GLB grande (' + (f.size/1e6).toFixed(1) + ' MB): il salvataggio permanente può fallire');
         });
       });
     }
@@ -191,7 +222,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, addText, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

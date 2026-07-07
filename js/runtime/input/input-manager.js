@@ -33,6 +33,7 @@ function create(deps){
   let enabled = true;
   let touchOn = false;                    // is the on-screen touch UI currently shown
   let portrait = false;                   // is the rendered game frame portrait
+  let touchHardwareSeen = false;          // set by the first real touch event on stricter mobile browsers
   let assignments = [];                  // player index -> device instance id
   const manualAssign = {};               // player index -> forced instance id
   let activeDeviceId = null;             // last device Player 1 actually used (auto-assign)
@@ -65,12 +66,15 @@ function create(deps){
   // ------------------------------------------------ touch visibility
   function detectPhone(){
     const ua = (navigator.userAgent || '');
-    if(/Mobi|Android|iPhone|iPod|iPad|Windows Phone|IEMobile/i.test(ua)) return true;
+    if(touchHardwareSeen) return true;
+    if(/Mobi|Android|iPhone|iPod|iPad|Windows Phone|IEMobile|Mobile Safari/i.test(ua)) return true;
     const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
     const noHover = window.matchMedia && window.matchMedia('(hover: none)').matches;
     const touchPoints = navigator.maxTouchPoints || navigator.msMaxTouchPoints || 0;
-    const compactScreen = Math.min(window.innerWidth, window.innerHeight) < 920;
-    return !!(touchPoints > 0 && (coarse || noHover || compactScreen));
+    const hasTouchApi = ('ontouchstart' in window) || touchPoints > 0;
+    const compactScreen = Math.min(window.innerWidth, window.innerHeight) < 920 || Math.max(window.innerWidth, window.innerHeight) <= 1180;
+    const iPadOs = /Macintosh/i.test(ua) && touchPoints > 1;
+    return !!(iPadOs || (touchPoints > 0 && (coarse || noHover || compactScreen)) || (hasTouchApi && compactScreen));
   }
   function computeTouchOn(){
     if(!allowed('touch')) return false;
@@ -232,6 +236,10 @@ function create(deps){
   // ------------------------------------------------ config / control
   function setConfig(raw){
     projectConfig = ACT.normalizeConfig(raw);
+    if(projectConfig.touchMode === 'on' && userOverride && userOverride.touchMode !== 'on'){
+      delete userOverride.touchMode;
+      saveOverride();
+    }
     recompute();
     recomputeTouch();
     update();
@@ -258,7 +266,18 @@ function create(deps){
   function setTouchEnabled(v){ setTouchMode(v ? 'on' : 'off'); return touchOn; }   // back-compat toggle
   function isTouchEnabled(){ return touchOn; }
   function isTouchAllowed(){ return allowed('touch'); }
-  function isPhone(){ return PHONE; }
+  function isPhone(){ return detectPhone(); }
+
+  function refreshTouchState(){
+    if(recomputeTouch()){ resolveAssignments(); emitChange(); }
+    else if((config.touchMode || 'auto') === 'on') emitChange();
+  }
+
+  function markTouchHardwareSeen(){
+    if(touchHardwareSeen) return;
+    touchHardwareSeen = true;
+    refreshTouchState();
+  }
 
   function setActiveContext(id){
     if(!config.contexts[id]) return;
@@ -352,6 +371,10 @@ function create(deps){
 
   window.addEventListener('gamepadconnected', update);
   window.addEventListener('gamepaddisconnected', update);
+  window.addEventListener('resize', refreshTouchState);
+  window.addEventListener('orientationchange', refreshTouchState);
+  window.addEventListener('pointerdown', e => { if(e && e.pointerType === 'touch') markTouchHardwareSeen(); }, {passive:true});
+  window.addEventListener('touchstart', markTouchHardwareSeen, {passive:true});
   update();
 
   return {

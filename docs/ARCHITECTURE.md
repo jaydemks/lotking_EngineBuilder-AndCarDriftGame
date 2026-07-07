@@ -69,6 +69,8 @@ The store is responsible for:
 
 LKEP project metadata now includes `meta.input`. That field stores the project-owned input policy: allowed device families, touch mode, player defaults, input contexts, device instances, base bindings, and per-instance overrides. Runtime user remaps are stored separately as local player overrides and do not widen the project-owned allowed-device list.
 
+Editor projects are browser-based by default. `js/editor/project-io.js` owns the editor-facing Projects overlay and stores the project list in browser storage for the current origin, while larger imported assets still live in IndexedDB through `LK_ASSET_BLOBS`. This keeps the editor full-browser/static-server based: there is no required project backend. Because browser storage is scoped by device and origin, the portable path between origins/devices is explicit `.lkep.json` export/import. During export, blob-backed project assets are normalized into portable data so the resulting file does not depend on the original browser cache.
+
 ## Input Architecture
 
 The v0.5.2 input stack separates driving actions from physical devices.
@@ -132,6 +134,8 @@ Major editor areas:
 - Sound Designer: `sound-designer.js`, `sound-designer-template.js`, `sound-designer-form.js`.
 
 The editor has its own free camera, grid/helpers, transform gizmo, asset dock, outliner, inspector, settings overlay, preview mode, and export flows. During edit mode it guards gameplay input with `LOT_KING.state.editorActive` and can override the canvas viewport rect so picking and editor panels behave correctly.
+
+The editor opens with the Projects overlay on top of the editor surface. If the browser project list is empty but an older/current editor project already exists in the legacy active project slot, `project-io.js` seeds that project into the Projects list so existing work remains visible. Loading a project writes it into the active store and reloads the editor surface; saving updates the active browser project and keeps `.lkep.json` export as the explicit portable workflow.
 
 ## Player Blueprint and Vehicle Systems
 

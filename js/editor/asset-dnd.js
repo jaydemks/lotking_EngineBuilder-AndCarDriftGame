@@ -51,7 +51,7 @@ function create(deps){
   function canReplaceTarget(o){
     o = normalizeDropTarget(o);
     return !!(o && o.userData &&
-      !['playerLight','playerEffect','playerDataWidget'].includes(o.userData.editorType));
+      !['playerLight','playerEffect','playerSkid','playerDataWidget'].includes(o.userData.editorType));
   }
 
   function dragAssetModel(e){
@@ -60,13 +60,31 @@ function create(deps){
     return asset && asset.kind === 'imported-glb' ? asset : null;
   }
 
+  function dragAsset(e){
+    const ref = e.dataTransfer && (e.dataTransfer.getData('application/x-lotking-asset') || assetDragRef);
+    return ref ? deps.getAssetByRef(ref) : null;
+  }
+
+  function glbFiles(files){
+    return Array.from(files || []).filter(file => /\.(glb|gltf)$/i.test(file.name || ''));
+  }
+
   function updateViewportReplaceHint(e){
     const hasModelAsset = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('application/x-lotking-asset');
     const hasFile = deps.hasExternalFileDrag(e);
     if(!hasModelAsset && !hasFile){ deps.clearReplaceDropHelper(); return null; }
+    const fileModels = hasFile ? glbFiles(e.dataTransfer.files) : [];
+    if(hasFile && !fileModels.length && !hasModelAsset){
+      deps.clearReplaceDropHelper();
+      return null;
+    }
+    if(hasModelAsset && !hasFile && !(dragAsset(e) && dragAsset(e).kind === 'imported-glb')){
+      deps.clearReplaceDropHelper();
+      return null;
+    }
     const hit = deps.pickAt(e.clientX, e.clientY);
     if(!hit || !hit.entity){ deps.clearReplaceDropHelper(); return null; }
-    let modelOk = hasFile || hasModelAsset;
+    let modelOk = !!dragAssetModel(e) || fileModels.length > 0;
     const target = normalizeDropTarget(hit.entity);
     const ok = modelOk && canReplaceTarget(target);
     deps.setReplaceDropHelper(target || hit.entity, ok);
@@ -139,7 +157,7 @@ function create(deps){
       const hasFile = deps.hasExternalFileDrag(e);
       if(!hasAsset && !hasFile) return null;
       const realTarget = normalizeDropTarget(target);
-      const ok = canReplaceTarget(realTarget) && (hasFile || hasAsset || !!dragAssetModel(e));
+      const ok = canReplaceTarget(realTarget) && (!!dragAssetModel(e) || (hasFile && glbFiles(e.dataTransfer.files).length > 0));
       return {ok, hasAsset, hasFile};
     };
     el.addEventListener('dragover', e => {
@@ -164,12 +182,13 @@ function create(deps){
       }
       if(info.hasAsset){
         const asset = dragAssetModel(e);
+        if(!asset) return;
         const realTarget = normalizeDropTarget(target);
         if(asset && realTarget.userData.editorType === 'player' && deps.replacePlayerModelWithAsset) deps.replacePlayerModelWithAsset(asset.raw);
         else if(asset) deps.replaceSelectedWithAsset(asset.raw, realTarget);
         return;
       }
-      const files = deps.supportedAssetFiles(e.dataTransfer.files);
+      const files = glbFiles(e.dataTransfer.files);
       if(files.length !== 1){
         deps.status('Drop one GLB/GLTF to replace this object');
         return;
@@ -236,7 +255,7 @@ function create(deps){
       const files = deps.supportedAssetFiles(e.dataTransfer.files);
       if(files.length !== 1){
         deps.clearReplaceDropHelper();
-        deps.status('Viewport drop accepts one model at a time');
+        deps.status('Viewport drop accepts one asset at a time');
         return;
       }
       if(blockedReplaceNow){
@@ -244,7 +263,7 @@ function create(deps){
         deps.status('Questo oggetto non puo essere sostituito direttamente');
         return;
       }
-      if(replaceTargetNow){
+      if(replaceTargetNow && glbFiles(files).length){
         openViewportDropChoice(e, {
           target: replaceTargetNow,
           files,

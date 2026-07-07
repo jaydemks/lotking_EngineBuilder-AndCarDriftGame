@@ -29,16 +29,19 @@ function create(options){
     if(!overlay) return;
     overlay.classList.remove('hidden');
     overlay.classList.remove('choosing-level');
+    call('refreshTouchControls');
   }
 
   function hideMenuOverlay(){
     if(!overlay) return;
     overlay.classList.remove('choosing-level');
     overlay.classList.add('hidden');
+    call('refreshTouchControls');
   }
 
   function setHudVisible(visible){
     if(hud) hud.style.display = visible ? 'block' : 'none';
+    call('refreshTouchControls');
   }
 
   function showLevelSelect(){

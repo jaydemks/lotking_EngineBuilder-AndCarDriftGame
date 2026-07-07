@@ -25,21 +25,21 @@ function create(deps){
   if(!canvas || !canvas.addEventListener) return Object.freeze({});
 
   canvas.addEventListener('pointerdown', e => {
-    if(!ED.active || ED.playPreview || ED.levelsOpen) return;
+    if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
     downX = e.clientX; downY = e.clientY; downBtn = e.button;
     deps.clearHoverPickHelper();
     if(e.button === 2) deps.flyStart(e);
   });
 
   addEventListener('pointermove', e => {
-    if(ED.active && !ED.playPreview && !ED.levelsOpen){
+    if(ED.active && !ED.playPreview && !ED.levelsOpen && !ED.projectsOpen){
       deps.flyMove(e);
       updateViewportHover(e);
     }
   });
 
   addEventListener('pointerup', e => {
-    if(!ED.active || ED.playPreview || ED.levelsOpen) return;
+    if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
     const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
     const wasFlying = deps.isFlyActive() && deps.flyMoved() > 6;
     const suppressSceneClick = deps.shouldSuppressSceneClick();
@@ -77,14 +77,14 @@ function create(deps){
     }
   });
 
-  canvas.addEventListener('contextmenu', e => { if(ED.active && !ED.levelsOpen) e.preventDefault(); });
+  canvas.addEventListener('contextmenu', e => { if(ED.active && !ED.levelsOpen && !ED.projectsOpen) e.preventDefault(); });
   addEventListener('contextmenu', e => {
-    if(!ED.active || ED.levelsOpen) return;
+    if(!ED.active || ED.levelsOpen || ED.projectsOpen) return;
     e.preventDefault();
   }, true);
 
   canvas.addEventListener('wheel', e => {
-    if(ED.levelsOpen) return;
+    if(ED.levelsOpen || ED.projectsOpen) return;
     if(ED.active && !ED.playPreview){
       e.preventDefault();
       if(deps.isFlyActive()) deps.adjustFlySpeed(e.deltaY);

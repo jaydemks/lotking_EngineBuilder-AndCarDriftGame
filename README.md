@@ -17,7 +17,7 @@ Current main entrypoints:
 
 **Play.** Pick a track from the level select, start the engine and drift. Points for angle and speed, cones to kick around, a working gearbox with a limiter, slow-motion radio mode (TAB), day/night cycle, damage-free arcade physics that's easy to pick up.
 
-**Build levels.** The Engine Editor gives you a free-fly camera, selection and transform gizmos (move/rotate/scale with snapping), an outliner, an inspector, undo/redo, and context menus. You can add primitives, lights, particle effects, collision volumes and imported GLB/GLTF models, then lay out a whole new track. Levels are real assets: create, save, save-as, rename, duplicate, delete, export to a `.lkep` file and import it back. Every level you save shows up as a playable card in the game's track selection screen.
+**Build projects and levels.** The Engine Editor opens with a browser-based Projects overlay so you can choose, create, import, export, rename or delete the editor project you want to work on. Inside a project you can build levels with a free-fly camera, selection and transform gizmos (move/rotate/scale with snapping), an outliner, an inspector, undo/redo, and context menus. You can add primitives, lights, particle effects, collision volumes, text, Free Texture / Decal elements and imported GLB/GLTF models, then lay out a whole new track. Levels are still real assets inside the project: create, save, save-as, rename, duplicate, delete, export to a `.lkep` file and import it back. Every level you save shows up as a playable card in the game's track selection screen.
 
 **Manage assets.** The Assets tab collects everything reusable in one place: your levels, imported 3D models (stored in IndexedDB so big files survive reloads), scene assets, player car logic assets and engine sound sets. Drag models straight into the viewport, filter by type, right-click for actions, and choose whether a dropped asset should be placed normally or replace the object under the cursor.
 
@@ -42,9 +42,9 @@ The current direction is:
 - **Playable ZIP Export** for publishing a game build without shipping the editor.
 - **Default content** based on bundled/free/self-made assets so the editor opens with a usable starter project.
 
-Recent work closes a major player-car driving milestone: the vehicle now uses a stronger RaycastVehicle-style wheel/suspension setup, separate Race and Drift drive presets, default Drift mode, a new RPM/KM/H/gear/drive-type vehicle HUD, much softer service braking, stronger controllable countersteer, and a mid-range torque curve tuned for sustained drifting.
+Recent work closes a major player-car driving milestone and starts the next editor-workflow pass: browser-based Projects, touch UI polish, four-wheel skid mark sources, Free Texture / Decal elements, image assets, EN/IT consolidation, and portable `.lkep.json` project export/import with embedded asset data.
 
-The same milestone also improves editor workflow around the Scene sidebar/outliner, player-car logic visibility, selected-object autofocus, text objects, warm-up feedback, auto-aspect runtime behavior, and player-car tuning controls.
+The same milestone also improves editor workflow around the Scene sidebar/outliner, player-car logic visibility, selected-object autofocus, text objects, warm-up feedback, auto-aspect runtime behavior, touch safe margins, and player-car tuning controls.
 
 Known active refinement area: final vehicle feel tuning can continue in smaller passes, especially around high-speed drift control and edge cases on custom drive surfaces. The current direction remains arcade drift first.
 
@@ -124,6 +124,38 @@ Start any static server from the project root, for example:
 ```bash
 python3 -m http.server 8000
 ```
+
+For phone/tablet testing on the same Wi-Fi, use the LAN helper instead:
+
+```bash
+python3 serve_lan.py
+```
+
+If you are working from WSL2, start the Windows helper instead. WSL2 is behind a
+virtual network, so a phone on Wi-Fi often cannot reach a server started inside
+WSL:
+
+```bat
+serve_lan_windows.bat
+```
+
+It serves the full project on `0.0.0.0`, prints the LAN URLs to open from the
+phone, and keeps local assets such as GLB models, music, textures and engine
+samples available through the same static server. The helper also treats aborted
+large-file transfers, such as a phone cancelling a GLB download during reload,
+as normal client disconnects instead of dumping a Python traceback.
+
+If the phone cannot connect, allow Python through the OS firewall or run this
+from Windows PowerShell in the project folder:
+
+```powershell
+py -3 serve_lan.py --port 8000 --bind 0.0.0.0
+```
+
+Browser storage is per device and per origin: a project saved in the desktop
+browser under `localhost` will not automatically exist on the phone under the
+LAN IP. Use `Export Project` from the editor and `Import Project` on the target
+browser/device when you need to move the same project across origins or devices.
 
 Then open:
 

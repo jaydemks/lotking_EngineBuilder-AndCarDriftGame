@@ -11,6 +11,7 @@ function create(deps){
   deps = deps || {};
   const manager = deps.manager;
   const mount = deps.mount || document.body;
+  const isRuntimeVisible = typeof deps.isRuntimeVisible === 'function' ? deps.isRuntimeVisible : () => true;
   if(!manager || !manager.touchSource) return null;
   const touch = manager.touchSource;
 
@@ -31,13 +32,15 @@ function create(deps){
 
   const steerZone = root.querySelector('.lk-touch-steer');
   const steerThumb = root.querySelector('.lk-touch-steer-thumb');
+  let frameRect = null;
 
   // --- steering: horizontal drag inside the pad, auto-centers on release ---
   let steerPointer = null;
   let steerOrigin = 0;
   function steerRange(){ return Math.max(60, steerZone.clientWidth * 0.4); }
   function setSteer(v){
-    touch.set({steer: v});
+    // Runtime steering convention is left-positive, while the visual slider is right-positive.
+    touch.set({steer: -v});
     steerThumb.style.transform = 'translateX(' + (v * 42) + '%)';
   }
   steerZone.addEventListener('pointerdown', e => {
@@ -75,15 +78,40 @@ function create(deps){
   bindHold('.lk-touch-hb', v => touch.set({handbrake: !!v}));
 
   function refresh(){
-    const on = manager.isTouchEnabled();
+    const on = manager.isTouchEnabled() && isRuntimeVisible();
     root.classList.toggle('on', on);
+    document.body.classList.toggle('lk-touch-active', on);
     root.setAttribute('aria-hidden', on ? 'false' : 'true');
     if(!on){ touch.clear(); setSteer(0); }
   }
+  function setFrameRect(rect){
+    frameRect = rect || null;
+    if(frameRect){
+      root.style.left = Math.round(frameRect.x || 0) + 'px';
+      root.style.top = Math.round(frameRect.y || 0) + 'px';
+      root.style.width = Math.round(frameRect.w || window.innerWidth) + 'px';
+      root.style.height = Math.round(frameRect.h || window.innerHeight) + 'px';
+      root.style.right = 'auto';
+      root.style.bottom = 'auto';
+    } else {
+      root.style.left = '0px';
+      root.style.top = '0px';
+      root.style.width = '100vw';
+      root.style.height = '100vh';
+      root.style.right = 'auto';
+      root.style.bottom = 'auto';
+    }
+    refresh();
+  }
   manager.onChange(refresh);
+  window.addEventListener('resize', refresh);
+  window.addEventListener('orientationchange', refresh);
+  document.addEventListener('visibilitychange', refresh);
+  const refreshTimer = window.setInterval(refresh, 250);
+  setFrameRect(null);
   refresh();
 
-  return {root, refresh};
+  return {root, refresh, setFrameRect, destroy:() => window.clearInterval(refreshTimer)};
 }
 
 window.LK_RUNTIME_TOUCH_CONTROLS = Object.freeze({create});

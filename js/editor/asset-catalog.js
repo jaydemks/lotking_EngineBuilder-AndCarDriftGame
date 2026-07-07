@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerDataWidget:'◫'};
+const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', texture:'▧', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerSkid:'▰', playerDataWidget:'◫'};
 
 function create(deps){
   deps = deps || {};
@@ -140,6 +140,7 @@ function create(deps){
     if(entry.kind === 'light') return 'light';
     if(entry.kind === 'effect') return 'effect';
     if(entry.kind === 'text') return 'text';
+    if(entry.kind === 'texture') return 'texture';
     return 'other';
   }
 
@@ -221,9 +222,9 @@ function create(deps){
         source: (entry.asset && (entry.asset.source || entry.asset.key)) || label || 'Project',
         levels: label ? [label] : [],
         type,
-        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : 'other',
+        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : type === 'texture' ? 'texture' : 'other',
         raw: {entry: clone(entry), levelId: level && level.id, levelName: label},
-        icon: entry.kind === 'glb' || type === 'glb' ? '📦' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : '▣',
+        icon: entry.kind === 'glb' || type === 'glb' ? '📦' : type === 'texture' ? '▧' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : '▣',
         draggable:true,
         badges: entry.rigged ? [{label:'Rigged', type:'rigged'}] : [],
       };
@@ -292,7 +293,14 @@ function create(deps){
     if(ref.indexOf('imported:') === 0){
       const id = ref.slice(9);
       const asset = deps.assetLibraryLoad().find(a => a.id === id);
-      return asset ? {kind:'imported-glb', ref, id:asset.id, name:asset.name, raw:asset} : null;
+      if(!asset) return null;
+      return {
+        kind: asset.kind === 'texture' ? 'imported-texture' : 'imported-glb',
+        ref,
+        id:asset.id,
+        name:asset.name,
+        raw:asset,
+      };
     }
     if(ref.indexOf('scene:') === 0){
       const key = ref.slice(6);
@@ -317,7 +325,7 @@ function create(deps){
 
   function placeAssetRef(item, at){
     if(!item) return;
-    if(item.kind === 'imported-glb'){
+    if(item.kind === 'imported-glb' || item.kind === 'imported-texture'){
       deps.setAssetLoading(true, item.name, 20, 'Loading asset instance');
       deps.placeImportedAsset(item.raw, at || deps.spawnPointAhead()).then(() => {
         deps.setAssetLoading(true, item.name, 100, 'Placed in scene');
@@ -347,7 +355,7 @@ function create(deps){
   function requestDeleteAssetInstances(asset){
     if(!asset || !asset.instances || !asset.instances.length) return;
     const removable = asset.instances.filter(o =>
-      !['player','playerLight','playerEffect','playerDataWidget'].includes(o.userData.editorType));
+      !['player','playerLight','playerEffect','playerSkid','playerDataWidget'].includes(o.userData.editorType));
     if(!removable.length){ deps.status('Questo asset non ha istanze eliminabili'); return; }
     deps.confirmEditorAction({
       title: 'Delete asset instances?',

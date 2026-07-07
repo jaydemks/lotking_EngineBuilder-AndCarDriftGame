@@ -24,6 +24,7 @@ function create(deps){
   const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return Promise.resolve(asset && asset.src); };
   const upsertImportedAsset = deps.upsertImportedAsset || function(){ return null; };
   const createGlbEntryFromAsset = deps.createGlbEntryFromAsset || function(){ return {}; };
+  const createTextureEntryFromAsset = deps.createTextureEntryFromAsset || function(){ return {}; };
   function entityPhysicsMass(target){
     const stored = target && target.userData ? Number(target.userData.physicsMass) : NaN;
     if(Number.isFinite(stored) && stored > 0) return stored;
@@ -56,8 +57,19 @@ function create(deps){
     finishAdd(obj);
     return obj;
   }
+  function registerImportedTexture(asset, at){
+    const entry = createTextureEntryFromAsset(asset, at || spawnPointAhead());
+    const obj = STORE.createTexture(entry.textureKind || 'decal', entry.props || {});
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = asset.key;
+    obj.userData.assetName = asset.name;
+    obj.userData.assetSource = asset.source || 'Imported texture';
+    finishAdd(obj);
+    return obj;
+  }
   function placeImportedAsset(asset, at){
     if(!asset) return Promise.reject(new Error('asset non valido'));
+    if(asset.kind === 'texture') return Promise.resolve(registerImportedTexture(asset, at));
     return resolveImportedAssetUrl(asset)
       .then(src => STORE.loadGlb(src, asset.fit || 5))
       .then(obj => registerImportedObject(asset, obj, at));
@@ -88,12 +100,29 @@ function create(deps){
     found.playerModelAt = new Date().toISOString();
     assetLibrarySave(list);
   }
+  function saveImportedBlob(file, dbKey){
+    return window.LK_ASSET_BLOBS
+      ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
+      : readFileAsDataURL(file).then(src => ({src}));
+  }
+  function importTextureFile(file, opts){
+    const options = opts || {};
+    const key = assetKeyFromFile(file);
+    const dbKey = assetDbKeyFromFile(file, key);
+    return saveImportedBlob(file, dbKey).then(sourceInfo => {
+      const asset = upsertImportedAsset(file, sourceInfo);
+      if(asset && options.placePoint) registerImportedTexture(asset, options.placePoint);
+      refreshAssetsPanel();
+      status('Texture importata: ' + (file.name || asset && asset.name || 'asset'));
+      return asset;
+    });
+  }
   function importAssetFiles(files, opts){
     const list = supportedAssetFiles(files);
     const options = opts || {};
-    if(!list.length){ status('Drop GLB/GLTF files to import assets'); return Promise.resolve([]); }
+    if(!list.length){ status('Drop GLB/GLTF or image files to import assets'); return Promise.resolve([]); }
     if(options.placePoint && list.length !== 1){
-      status('Viewport drop accepts one model at a time');
+      status('Viewport drop accepts one asset at a time');
       return Promise.resolve([]);
     }
     const imported = [];
@@ -106,13 +135,23 @@ function create(deps){
         setAssetLoading(true, file.name, basePct, 'Reading file ' + (index + 1) + ' of ' + total);
         const key = assetKeyFromFile(file);
         const dbKey = assetDbKeyFromFile(file, key);
+        if(/\.(png|jpe?g|webp|gif|avif)$/i.test(file.name || '') || /^image\//i.test(file.type || '')){
+          setAssetLoading(true, file.name, basePct + Math.round(35 / total), 'Saving texture blob');
+          return saveImportedBlob(file, dbKey).then(sourceInfo => {
+            const asset = upsertImportedAsset(file, sourceInfo);
+            if(asset) imported.push(asset);
+            if(options.placePoint && asset){
+              setAssetLoading(true, file.name, 86, 'Spawning texture/decal');
+              registerImportedTexture(asset, options.placePoint);
+            }
+          }).then(() => {
+            setAssetLoading(true, file.name, Math.round((index + 1) / total * 100), 'Imported');
+          });
+        }
         const objectUrl = URL.createObjectURL(file);
         return STORE.loadGlb(objectUrl, 5).then(obj => {
           setAssetLoading(true, file.name, basePct + Math.round(42 / total), 'Saving asset blob');
-          const put = window.LK_ASSET_BLOBS
-            ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
-            : readFileAsDataURL(file).then(src => ({src}));
-          return put.then(sourceInfo => {
+          return saveImportedBlob(file, dbKey).then(sourceInfo => {
             const asset = upsertImportedAsset(file, sourceInfo);
             if(asset) imported.push(asset);
             setAssetLoading(true, file.name, Math.round((index + .75) / total * 100), 'Registering asset');
@@ -277,8 +316,10 @@ function create(deps){
     readFileAsDataURL,
     hasExternalFileDrag,
     registerImportedObject,
+    registerImportedTexture,
     placeImportedAsset,
     deleteImportedAsset,
+    importTextureFile,
     importAssetFiles,
     replaceSelectedWithAsset,
     replaceObjectWithFile,

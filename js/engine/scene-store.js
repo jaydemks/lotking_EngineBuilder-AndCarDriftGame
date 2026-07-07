@@ -357,6 +357,7 @@ function playerBlueprintScore(player){
   if(player.tuning) score += Object.keys(player.tuning).length;
   if(player.lights) score += 10 + JSON.stringify(player.lights).length / 300;
   if(player.exhaust) score += 12 + JSON.stringify(player.exhaust).length / 220;
+  if(player.skids) score += 8 + JSON.stringify(player.skids).length / 240;
   if(player.dataWidgets) score += 8 + JSON.stringify(player.dataWidgets).length / 260;
   return score;
 }
@@ -544,6 +545,7 @@ function collectPlayerBlueprint(GAME){
     lights: cloneData(GAME.player.lights || {}),
     dataWidgets: cloneData(GAME.player.dataWidgets || {}),
     exhaust: cloneData(GAME.player.exhaust || {}),
+    skids: cloneData(GAME.player.skids || {}),
     collision: cloneData(GAME.player.collision || {}),
   };
   if(GAME.player.spawn) player.spawn = cloneData(GAME.player.spawn);
@@ -590,6 +592,8 @@ function applyPlayerRigTransforms(GAME, player){
   for(const id in transforms){
     const o = byId[id];
     if(o) applyT(o, transforms[id]);
+    if(o && o.userData && o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);
+    if(o && o.userData && o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
   }
   for(const id in transforms){
     const o = byId[id];
@@ -709,6 +713,7 @@ function playerTemplateFromLevelLibrary(GAME){
       lights: cloneData(GAME.player.lights || {}),
       dataWidgets: cloneData(GAME.player.dataWidgets || {}),
       exhaust: cloneData(GAME.player.exhaust || {}),
+      skids: cloneData(GAME.player.skids || {}),
       collision: cloneData(GAME.player.collision || {}),
     };
     if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
@@ -1371,6 +1376,111 @@ function createText(kind, props){
   return updateTextObject(gp);
 }
 
+// ------------------------------------------------ factories: free texture / decal planes
+function normalizeTextureProps(props){
+  return Object.assign({
+    mode:'decal',
+    src:null,
+    dbKey:null,
+    asset:null,
+    width:2,
+    height:2,
+    opacity:1,
+    color:0xffffff,
+    alphaTest:.01,
+    blending:'normal',
+    depthBias:.012,
+    doubleSide:true,
+    animated:false,
+  }, props || {});
+}
+
+function textureBlending(kind){
+  if(kind === 'additive') return THREE.AdditiveBlending;
+  if(kind === 'multiply') return THREE.MultiplyBlending;
+  if(kind === 'subtractive') return THREE.SubtractiveBlending;
+  return THREE.NormalBlending;
+}
+
+function placeholderTexture(){
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#151a24'; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = '#ffd166'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+  g.fillStyle = '#4be3a0'; g.fillRect(64, 0, 64, 64); g.fillRect(0, 64, 64, 64);
+  g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, 0, c.width, c.height);
+  const tx = new THREE.CanvasTexture(c);
+  tx.encoding = THREE.sRGBEncoding;
+  return tx;
+}
+
+function applyTextureMapFromSource(gp, mat, props){
+  const apply = tx => {
+    tx.encoding = THREE.sRGBEncoding;
+    tx.wrapS = tx.wrapT = THREE.ClampToEdgeWrapping;
+    tx.anisotropy = 4;
+    mat.map = tx;
+    mat.needsUpdate = true;
+    gp.userData.textureLoaded = true;
+  };
+  const srcPromise = props.dbKey && window.LK_ASSET_BLOBS
+    ? window.LK_ASSET_BLOBS.getUrl(props.dbKey)
+    : Promise.resolve(props.src || null);
+  srcPromise.then(src => {
+    if(!src) return;
+    new THREE.TextureLoader().load(src, apply, undefined, err => console.warn('LotKing store: texture/decal non caricata', err));
+  }).catch(err => console.warn('LotKing store: texture/decal non caricata', err));
+}
+
+function updateTextureObject(gp, patch){
+  if(!gp || !gp.userData) return gp;
+  const props = normalizeTextureProps(Object.assign({}, gp.userData.textureProps || {}, patch || {}));
+  gp.userData.textureProps = props;
+  gp.children.slice().forEach(child => {
+    gp.remove(child);
+    if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+    if(child.material && child.material.dispose) child.material.dispose();
+  });
+  const mat = new THREE.MeshBasicMaterial({
+    color: props.color,
+    map: placeholderTexture(),
+    transparent:true,
+    opacity: Math.max(0, Math.min(1, props.opacity == null ? 1 : props.opacity)),
+    alphaTest: Math.max(0, Math.min(1, props.alphaTest == null ? .01 : props.alphaTest)),
+    side: props.doubleSide === false ? THREE.FrontSide : THREE.DoubleSide,
+    depthWrite:false,
+    depthTest: props.depthTest !== false,
+    blending:textureBlending(props.blending),
+    polygonOffset:true,
+    polygonOffsetFactor:-4,
+    polygonOffsetUnits:-4,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(.05, props.width || 2), Math.max(.05, props.height || 2)), mat);
+  mesh.name = props.mode === 'image' ? 'Free Texture Image' : 'Free Texture Decal';
+  mesh.renderOrder = 40;
+  mesh.position.y = props.mode === 'decal' ? Math.max(0, props.depthBias || 0) : 0;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  gp.add(mesh);
+  applyTextureMapFromSource(gp, mat, props);
+  if(props.animated){
+    gp.userData.effectUpdate = () => {
+      if(mat.map) mat.map.needsUpdate = true;
+    };
+  } else if(gp.userData.effectUpdate && gp.userData.editorType === 'texture'){
+    delete gp.userData.effectUpdate;
+  }
+  return gp;
+}
+
+function createTexture(kind, props){
+  const gp = new THREE.Group();
+  gp.userData.textureKind = kind === 'image' ? 'image' : 'decal';
+  gp.userData.textureProps = normalizeTextureProps(Object.assign({mode: gp.userData.textureKind}, props || {}));
+  return updateTextureObject(gp);
+}
+
 // ------------------------------------------------ factories: lights
 function createLight(kind, props){
   props = props || {};
@@ -1531,6 +1641,7 @@ function createFromEntry(entry, GAME){
   if(entry.kind === 'light') return Promise.resolve(createLight(entry.light, entry.props));
   if(entry.kind === 'effect') return Promise.resolve(createEmitter(entry.effect, entry.params));
   if(entry.kind === 'text') return Promise.resolve(createText(entry.textKind || '2d', entry.props));
+  if(entry.kind === 'texture') return Promise.resolve(createTexture(entry.textureKind || (entry.props && entry.props.mode) || 'decal', entry.props));
   if(entry.kind === 'glb') return loadGlbEntry(entry);
   if(entry.kind === 'clone'){
     const src = GAME && GAME.world.registry.find(o => o.userData.editorId === entry.srcId);
@@ -1546,6 +1657,7 @@ function createFromEntry(entry, GAME){
 function entryType(entry, obj){
   if(entry.kind === 'clone') return (obj && (obj.isLight || obj.userData && obj.userData.light)) ? 'light' : 'mesh';
   if(entry.kind === 'text') return 'text';
+  if(entry.kind === 'texture') return 'texture';
   return entry.kind === 'light' ? 'light' : entry.kind === 'effect' ? 'effect' : 'mesh';
 }
 
@@ -1627,6 +1739,7 @@ function apply(GAME){
   if(data.player && data.player.lights && GAME.player.setLights) GAME.player.setLights(data.player.lights);
   if(data.player && data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
   if(data.player && data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
+  if(data.player && data.player.skids && GAME.player.setSkids) GAME.player.setSkids(data.player.skids);
 
   const byId = {};
   for(const o of GAME.world.registry) byId[o.userData.editorId] = o;
@@ -1666,7 +1779,8 @@ function apply(GAME){
       .then(obj => {
         registerAdded(GAME, obj, entry);
         applyParentLink(obj, GAME);
-        if(entry.props && entry.kind !== 'light') applyMatProps(obj, entry.props);
+        if(entry.props && entry.kind === 'texture') updateTextureObject(obj, entry.props);
+        else if(entry.props && entry.kind !== 'light') applyMatProps(obj, entry.props);
       })
       .catch(err => console.warn('LotKing store: oggetto "' + entry.name + '" non ricaricato', err));
     pending.push(p);
@@ -1695,6 +1809,7 @@ function apply(GAME){
     if(data.env.sunBloom && GAME.systems.sky.sunBloom) GAME.systems.sky.sunBloom.set(data.env.sunBloom);
     if(data.env.volClouds && GAME.systems.sky.volClouds) GAME.systems.sky.volClouds.set(data.env.volClouds);
     if(data.env.rain && GAME.systems.rain) GAME.systems.rain.set(data.env.rain);
+    if(GAME.player && GAME.player.updateLights) GAME.player.updateLights();
   }
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
   // player blueprint
@@ -1733,6 +1848,7 @@ function apply(GAME){
     if(data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
     if(data.player.dataWidgets && GAME.player.setDataWidgets) GAME.player.setDataWidgets(data.player.dataWidgets);
     if(data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
+    if(data.player.skids && GAME.player.setSkids) GAME.player.setSkids(data.player.skids);
     applyPlayerRigTransforms(GAME, data.player);
     if(data.player.engineAudio && GAME.player.setEngineSound){
       // il set embedded entra in libreria se manca, poi si applica per id
@@ -1803,6 +1919,7 @@ function collect(GAME){
       if(e.kind === 'light' && o.userData.light) e.props = lightProps(o.userData.light);
       else if(e.kind === 'effect') e.params = Object.assign({}, o.userData.effectParams);
       else if(e.kind === 'text') e.props = Object.assign({}, o.userData.textProps || e.props || {});
+      else if(e.kind === 'texture') e.props = Object.assign({}, o.userData.textureProps || e.props || {});
       else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
       if(o.userData.assetKey) e.asset = Object.assign({}, e.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
       d.added.push(e);
@@ -1858,7 +1975,7 @@ window.LK_STORE = {
   load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject,
   tOf, applyT, syncCollider,
   lightProps, applyLightProps, applyMatProps,
-  createPrimitive, createText, updateTextObject, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
+  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, collect, nextId,
   builtinIds: () => builtinIds.slice(),

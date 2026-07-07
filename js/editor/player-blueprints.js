@@ -61,6 +61,7 @@ function create(deps){
     if(bp.lights && GAME.player.setLights) GAME.player.setLights(bp.lights);
     if(bp.collision && GAME.player.setCollision) GAME.player.setCollision(bp.collision);
     if(bp.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(bp.exhaust);
+    if(bp.skids && GAME.player.setSkids) GAME.player.setSkids(bp.skids);
     if(bp.dataWidgets && GAME.player.setDataWidgets) GAME.player.setDataWidgets(bp.dataWidgets);
     if(bp.rigTransforms && STORE.playerBlueprints && STORE.playerBlueprints.applyRig) STORE.playerBlueprints.applyRig(GAME, bp);
     if(options.applySpawn !== false && bp.spawn && GAME.player.car){

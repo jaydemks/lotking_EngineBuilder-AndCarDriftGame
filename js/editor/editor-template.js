@@ -38,6 +38,7 @@ function create(){
     <button id="lkAddMenu" type="button" title="Add object">+ Add ▾</button>
     <span class="lk-spacer"></span>
     <div class="lk-trackbar"><span>LEVEL</span><input id="lkTrackName" type="text" value="Parking Lot"></div>
+    <button id="lkProjects" type="button">🗂 Projects</button>
     <button id="lkLevels" type="button">🗀 Levels</button>
     <button id="lkNewTrack" type="button">New</button>
     <button id="lkSaveAsTrack" type="button">Save As</button>
@@ -124,6 +125,11 @@ function create(){
     <div id="lkLevelsList"></div>
     <div class="lk-levels-foot"><button id="lkLevelsNew" type="button">New level</button><button id="lkLevelsFromFile" type="button">Load from file...</button></div>
   </div></div>
+  <div id="lkProjectsOverlay"><div class="lk-levels-panel">
+    <div class="lk-levels-head"><div class="lk-projects-title">🗂 PROJECTS</div><div class="lk-projects-sub">stored in this browser</div><button id="lkProjectsClose" type="button">×</button></div>
+    <div id="lkProjectsList"></div>
+    <div class="lk-levels-foot"><button id="lkProjectsNew" type="button">New project</button><button id="lkProjectsFromFile" type="button">Import project file...</button></div>
+  </div></div>
   <div id="lkLevelLoading" aria-hidden="true">
     <div class="lk-level-loading-box" role="status" aria-live="polite">
       <div class="lk-level-loading-title">LOADING</div>
@@ -145,8 +151,8 @@ function create(){
     </div>
   </div></div>
   <div id="lkCtx"></div>
-  <input id="lkAssetInput" type="file" accept=".glb,.gltf" multiple hidden>
-  <input id="lkGlbInput" type="file" accept=".glb,.gltf" hidden>
+  <input id="lkAssetInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
+  <input id="lkGlbInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
   <input id="lkReplaceInput" type="file" accept=".glb,.gltf" hidden>
   <input id="lkPlayerModelInput" type="file" accept=".glb,.gltf" hidden>
   <input id="lkProjectInput" type="file" accept=".json,.lkep" hidden>

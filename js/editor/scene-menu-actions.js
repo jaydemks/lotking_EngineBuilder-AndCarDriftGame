@@ -14,6 +14,7 @@ function create(deps){
   const scene = deps.scene;
   const camE = deps.camE;
   const $ = deps.$;
+  const t = (key, fallback) => GAME && GAME.i18n ? GAME.i18n.t(key, fallback) : fallback;
 
   function addMenuItems(at){
     const P = at ? {x: at.x, y: at.y, z: at.z} : deps.spawnPointAhead();
@@ -37,8 +38,12 @@ function create(deps){
         {label:'Text 2D', icon:'T', action:() => deps.addText('2d', P)},
         {label:'Text 3D', icon:'T', action:() => deps.addText('3d', P)},
       ]},
+      {label:t('editor.freeTexture', 'Free Texture / Decal'), icon:'▧', sub: [
+        {label:t('editor.decalSurface', 'Decal su superficie'), icon:'▧', action:() => deps.addTexture('decal', P)},
+        {label:t('editor.freeImage', 'Immagine libera'), icon:'▣', action:() => deps.addTexture('image', P)},
+      ]},
       {sep:true},
-      {label:'Importa modello GLB…', icon:'📦', action:() => deps.openGlbImportAt(P)},
+      {label:'Importa asset GLB/Texture…', icon:'📦', action:() => deps.openGlbImportAt(P)},
     ];
   }
 

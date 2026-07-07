@@ -54,6 +54,7 @@ function create(deps){
     ['#lkSave', 'text', {en:'💾 Save', it:'💾 Salva'}],
     ['#lkNewTrack', 'text', {en:'New', it:'Nuovo'}],
     ['#lkSaveAsTrack', 'text', {en:'Save As', it:'Salva come'}],
+    ['#lkProjects', 'text', {en:'🗂 Projects', it:'🗂 Progetti'}],
     ['#lkLevels', 'text', {en:'🗀 Levels', it:'🗀 Livelli'}],
     ['#lkResetScene', 'text', {en:'↺ Reset', it:'↺ Reset'}],
     ['#lkPlay', 'text', {en:'▶ PREVIEW', it:'▶ PROVA'}],
@@ -61,6 +62,10 @@ function create(deps){
     ['.lk-levels-sub', 'text', {en:'stored locally · LKEP format', it:'salvati localmente · formato LKEP'}],
     ['#lkLevelsNew', 'text', {en:'＋ New level', it:'＋ Nuovo livello'}],
     ['#lkLevelsFromFile', 'text', {en:'⇧ Load from file…', it:'⇧ Carica da file…'}],
+    ['.lk-projects-title', 'text', {en:'🗂 PROJECTS', it:'🗂 PROGETTI'}],
+    ['.lk-projects-sub', 'text', {en:'stored in this browser', it:'salvati in questo browser'}],
+    ['#lkProjectsNew', 'text', {en:'＋ New project', it:'＋ Nuovo progetto'}],
+    ['#lkProjectsFromFile', 'text', {en:'⇧ Import project file…', it:'⇧ Importa file progetto…'}],
     ['#lkPinned .lk-pin[data-special="env"] .lk-pin-label', 'text', {en:'Environment', it:'Environment'}],
     ['#lkPinned .lk-pin[data-special="player"] .lk-pin-label', 'text', {en:'player_car (Logic)', it:'player_car (Logic)'}],
     ['#lkPinned .lk-pin[data-special="hud"] .lk-pin-label', 'text', {en:'HUD / Radio TAB', it:'HUD / Radio TAB'}],
@@ -70,6 +75,8 @@ function create(deps){
 
   function applyLanguage(){
     const L = lang();
+    if(window.LOT_KING && window.LOT_KING.i18n) window.LOT_KING.i18n.setLang(L);
+    document.documentElement.lang = L;
     root.querySelectorAll('[data-pref-i18n]').forEach(n => {
       const e = I18N[n.dataset.prefI18n];
       if(e) n.textContent = e[L];
@@ -117,7 +124,7 @@ function create(deps){
     if(r.checked){ prefs.theme = r.value; save(); apply(); }
   }));
   root.querySelectorAll('[name="lkPrefLang"]').forEach(r => r.addEventListener('change', () => {
-    if(r.checked){ prefs.lang = r.value; save(); apply(); refreshOutliner(); }
+    if(r.checked){ prefs.lang = r.value; save(); apply(); refreshOutliner(); window.dispatchEvent(new CustomEvent('lotking:languagechange', {detail:{lang: lang()}})); }
   }));
   $('#lkQuickHide').addEventListener('click', () => {
     prefs.musicPanel = false;

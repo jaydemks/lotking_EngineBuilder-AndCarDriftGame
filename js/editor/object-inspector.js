@@ -36,6 +36,7 @@ function create(deps){
   const requestDeleteEntity = deps.requestDeleteEntity;
   const replaceSelectedGlb = deps.replaceSelectedGlb;
   const requestWarmup = deps.requestWarmup || function(){};
+  const importTextureFile = deps.importTextureFile || function(){ return Promise.resolve(null); };
   const beginColliderHistory = deps.beginColliderHistory || function(){};
   const commitColliderHistory = deps.commitColliderHistory || function(){};
 
@@ -108,12 +109,15 @@ function create(deps){
   }
 
   function build(box, o){
+    const lang = GAME && GAME.i18n && GAME.i18n.lang === 'it' ? 'it' : 'en';
+    const tr = (en, it) => lang === 'it' ? (it || en) : en;
     const head = el('<div class="lk-head"><span class="lk-head-ic">' + entityIcon(o) + '</span><input class="lk-head-name"><span class="lk-head-id">' + o.userData.editorId + (o.userData.builtin ? ' · originale' : ' · aggiunto') + '</span></div>');
     const nameI = head.querySelector('input');
     nameI.value = o.userData.editorName || '';
     nameI.addEventListener('change', () => { o.userData.editorName = nameI.value; markDirty(); refreshOutliner(); });
     box.appendChild(head);
-    if(o.userData.editorType === 'playerLight' || o.userData.editorType === 'playerEffect' || o.userData.editorType === 'playerDataWidget'){
+    if(o.userData.editorType === 'playerLight' || o.userData.editorType === 'playerEffect' ||
+      o.userData.editorType === 'playerSkid' || o.userData.editorType === 'playerDataWidget'){
       box.appendChild(btnRow([
         {label:'← player_car Logic', action:() => selectObject(GAME.player.car)},
         {label:'Focus componente', action: focusSelected},
@@ -147,7 +151,7 @@ function create(deps){
         const i = el('<input type="number" step="' + (isDeg ? 1 : .1) + '" title="' + axis.label + '">');
         i.value = +get(ax).toFixed(3);
         i.addEventListener('focus', beginTransformHistory);
-        i.addEventListener('input', () => { set(ax, parseFloat(i.value) || 0); STORE.syncCollider(o); markDirty(); if(o.userData.editorType==='player' || o.userData.editorType==='playerDataWidget') onGizmoChange(); });
+        i.addEventListener('input', () => { set(ax, parseFloat(i.value) || 0); STORE.syncCollider(o); markDirty(); if(o.userData.editorType==='player' || o.userData.editorType==='playerDataWidget' || o.userData.editorType==='playerSkid') onGizmoChange(); });
         i.addEventListener('change', () => commitTransformHistory(label));
         row.appendChild(i); ins.push({input:i, prop:ax, kind});
       });
@@ -240,6 +244,107 @@ function create(deps){
         updateText({height:Math.max(.35, lines * (props.fontSize || 96) / 120 * (props.lineHeight || 1.15) + (props.padding || 0) * 2)});
       }}]));
       box.appendChild(tx.root);
+    }
+
+    if(o.userData.editorType === 'texture'){
+      const tex = section('FREE TEXTURE / DECAL');
+      const props = Object.assign({
+        mode:'decal', src:null, dbKey:null, asset:null, width:2, height:2, opacity:1, color:0xffffff,
+        alphaTest:.01, blending:'normal', depthBias:.012, doubleSide:true, animated:false,
+      }, o.userData.textureProps || {});
+      o.userData.textureProps = props;
+      const updateTexture = patch => {
+        Object.assign(props, patch || {});
+        o.userData.textureProps = props;
+        if(o.userData.addedEntry){
+          o.userData.addedEntry.textureKind = props.mode === 'image' ? 'image' : 'decal';
+          o.userData.addedEntry.props = Object.assign({}, props);
+          if(props.asset) o.userData.addedEntry.asset = Object.assign({}, props.asset);
+        }
+        if(STORE.updateTextureObject) STORE.updateTextureObject(o);
+        markDirty();
+        refreshOutliner();
+      };
+      const preview = el('<div class="lk-texture-preview"><div></div><span>' + tr('No texture loaded', 'Nessuna texture caricata') + '</span></div>');
+      const previewBox = preview.querySelector('div');
+      const previewText = preview.querySelector('span');
+      const previewSrc = props.src || null;
+      if(previewSrc){
+        previewBox.style.backgroundImage = 'url(' + previewSrc + ')';
+        previewBox.style.backgroundSize = 'cover';
+        previewBox.style.backgroundPosition = 'center';
+        previewText.textContent = props.asset && (props.asset.name || props.asset.source) || tr('Inline texture', 'Texture inline');
+      } else if(props.dbKey && props.asset){
+        previewText.textContent = props.asset.name || props.asset.source || tr('Texture from asset DB', 'Texture da asset DB');
+      }
+      tex.body.appendChild(preview);
+      const fileRow = el('<div class="lk-drop"><strong>' + tr('Load texture / decal', 'Carica texture / decal') + '</strong><span>' + tr('PNG, JPG, WEBP, AVIF or GIF. The file is also saved in Assets.', 'PNG, JPG, WEBP, AVIF o GIF. Il file viene salvato anche in Assets.') + '</span></div>');
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/webp,image/gif,image/avif';
+      input.hidden = true;
+      fileRow.appendChild(input);
+      fileRow.addEventListener('click', () => input.click());
+      fileRow.addEventListener('dragover', e => { e.preventDefault(); fileRow.classList.add('drag'); });
+      fileRow.addEventListener('dragleave', () => fileRow.classList.remove('drag'));
+      fileRow.addEventListener('drop', e => {
+        e.preventDefault();
+        fileRow.classList.remove('drag');
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if(f) handleTextureFile(f);
+      });
+      input.addEventListener('change', e => {
+        const f = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if(f) handleTextureFile(f);
+      });
+      const handlePatchFromAsset = asset => {
+        if(!asset) return;
+        if(asset.src){
+          previewBox.style.backgroundImage = 'url(' + asset.src + ')';
+          previewBox.style.backgroundSize = 'cover';
+          previewBox.style.backgroundPosition = 'center';
+        }
+        previewText.textContent = asset.name || asset.source || tr('Imported texture', 'Texture importata');
+        updateTexture({
+          src:asset.src || null,
+          dbKey:asset.dbKey || null,
+          asset:{key:asset.key, dbKey:asset.dbKey || null, name:asset.name, source:asset.source || 'Imported texture'},
+          animated:/\.gif$/i.test(asset.source || '') || /gif/i.test(asset.mime || ''),
+        });
+      };
+      function handleTextureFile(file){
+        importTextureFile(file).then(handlePatchFromAsset).catch(err => {
+          console.warn('Texture import failed', err);
+        });
+      }
+      tex.body.appendChild(fileRow);
+      tex.body.appendChild(selectRow(tr('Type', 'Tipo'), props.mode || 'decal', [
+        {value:'decal', label:tr('Surface decal', 'Decal su superficie')},
+        {value:'image', label:tr('Free image', 'Immagine libera')},
+      ], v => {
+        beginTransformHistory();
+        updateTexture({mode:v});
+        o.rotation.x = v === 'decal' ? -Math.PI / 2 : 0;
+        o.position.y = v === 'decal' ? Math.max(o.position.y, .025) : Math.max(o.position.y, 1.2);
+        commitTransformHistory('Texture mode');
+        syncTransformFields();
+      }).root);
+      tex.body.appendChild(selectRow(tr('Blending', 'Fusione'), props.blending || 'normal', [
+        {value:'normal', label:'Normal alpha'},
+        {value:'additive', label:'Additive'},
+        {value:'multiply', label:'Multiply'},
+        {value:'subtractive', label:'Subtractive'},
+      ], v => updateTexture({blending:v})).root);
+      tex.body.appendChild(colorRow(tr('Tint', 'Tint'), props.color == null ? 0xffffff : props.color, v => updateTexture({color:v})).root);
+      tex.body.appendChild(sliderRow(tr('Width', 'Larghezza'), props.width || 2, .05, 24, .05, v => updateTexture({width:v}), v => (+v).toFixed(2) + 'm').root);
+      tex.body.appendChild(sliderRow(tr('Height', 'Altezza'), props.height || 2, .05, 24, .05, v => updateTexture({height:v}), v => (+v).toFixed(2) + 'm').root);
+      tex.body.appendChild(sliderRow(tr('Opacity', 'Opacità'), props.opacity == null ? 1 : props.opacity, 0, 1, .01, v => updateTexture({opacity:v}), v => Math.round(v * 100) + '%').root);
+      tex.body.appendChild(sliderRow('Alpha cut', props.alphaTest == null ? .01 : props.alphaTest, 0, .8, .01, v => updateTexture({alphaTest:v}), v => (+v).toFixed(2)).root);
+      tex.body.appendChild(sliderRow('Depth bias', props.depthBias == null ? .012 : props.depthBias, 0, .08, .001, v => updateTexture({depthBias:v}), v => (+v).toFixed(3) + 'm').root);
+      tex.body.appendChild(checkRow(tr('Double side', 'Doppio lato'), props.doubleSide !== false, v => updateTexture({doubleSide:v})).root);
+      tex.body.appendChild(checkRow(tr('Animated / GIF refresh', 'Animata / refresh GIF'), !!props.animated, v => updateTexture({animated:v})).root);
+      box.appendChild(tex.root);
     }
 
     if(o.userData.editorType === 'mesh'){

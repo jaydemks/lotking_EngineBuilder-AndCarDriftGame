@@ -47,11 +47,12 @@ function create(deps){
         }},
       ];
     }
-    if(item.kind === 'imported-glb'){
+    if(item.kind === 'imported-glb' || item.kind === 'imported-texture'){
       const asset = item.raw;
+      const isTexture = item.kind === 'imported-texture' || asset.kind === 'texture';
       return [
         {label:'Add to level', icon:'＋', action:() => deps.placeAssetRef(item, deps.spawnPointAhead())},
-        {label:'Replace selected scene object', icon:'📦', disabled:!ED.selected || ED.selected.userData.editorType === 'player', action:() => deps.replaceSelectedWithAsset(asset)},
+        {label:'Replace selected scene object', icon:'📦', disabled:isTexture || !ED.selected || ED.selected.userData.editorType === 'player', action:() => deps.replaceSelectedWithAsset(asset)},
         {label:'Properties', icon:'ⓘ', action:() => deps.openAssetProperties(item)},
         {sep:true},
         {label:'Delete imported asset', icon:'🗑', action:() => deps.deleteImportedAsset(asset)},
@@ -116,7 +117,7 @@ function create(deps){
     }));
     return [
       {label:'Create assets folder/group', icon:'📁', action:() => deps.newFolder('assets')},
-      {label:'Import GLB/GLTF assets', icon:'＋', action:() => $('#lkAssetInput').click()},
+      {label:'Import GLB/Texture assets', icon:'＋', action:() => $('#lkAssetInput').click()},
       {label:'Refresh assets', icon:'↻', action:() => { deps.refreshAssetsPanel(); deps.status('Asset library refreshed'); }},
       {sep:true},
       {label:'Grid view', icon:'▦', disabled:ED.assetsViewMode === 'grid', action:() => deps.setViewMode('grid', 'assets')},

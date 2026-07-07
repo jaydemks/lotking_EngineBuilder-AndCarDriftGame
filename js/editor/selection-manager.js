@@ -17,7 +17,8 @@ function create(deps){
 
   function isBlueprintPart(o){
     return !o || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
-      o.userData.editorType === 'playerEffect' || o.userData.editorType === 'playerDataWidget';
+      o.userData.editorType === 'playerEffect' || o.userData.editorType === 'playerSkid' ||
+      o.userData.editorType === 'playerDataWidget';
   }
 
   function syncSelectedGizmo(o){
@@ -519,6 +520,8 @@ function create(deps){
       }
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
+    if(o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);
+    if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
     STORE.syncCollider(o);
     deps.markDirty();
     deps.syncTransformFields();

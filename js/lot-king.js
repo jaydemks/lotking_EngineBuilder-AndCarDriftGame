@@ -18,6 +18,33 @@ const GAME = window.LOT_KING = {
   state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false},
   hooks: {frame: [], frameOverride: null},
 };
+const LK_LANG_KEY = 'lotking.lang.v1';
+function readLotKingLang(){
+  try {
+    const direct = localStorage.getItem(LK_LANG_KEY);
+    if(direct === 'it' || direct === 'en') return direct;
+    const prefs = JSON.parse(localStorage.getItem('lotking.editorPrefs.v1') || '{}');
+    return prefs && prefs.lang === 'it' ? 'it' : 'en';
+  } catch(err){ return 'en'; }
+}
+const I18N_DICT = {
+  'asset.importedTexture': {en:'Texture imported', it:'Texture importata'},
+  'asset.importFailed': {en:'Asset import failed', it:'Import asset fallito'},
+  'editor.freeTexture': {en:'Free Texture / Decal', it:'Free Texture / Decal'},
+  'editor.decalSurface': {en:'Surface decal', it:'Decal su superficie'},
+  'editor.freeImage': {en:'Free image', it:'Immagine libera'},
+};
+GAME.i18n = {
+  lang: readLotKingLang(),
+  setLang(value){
+    this.lang = value === 'it' ? 'it' : 'en';
+    try { localStorage.setItem(LK_LANG_KEY, this.lang); } catch(err){}
+  },
+  t(key, fallback){
+    const entry = I18N_DICT[key];
+    return entry ? (entry[this.lang] || entry.en || fallback || key) : (fallback || key);
+  },
+};
 
 // ------------------------------------------------ local assets
 const RUNTIME_ASSETS = window.LK_RUNTIME_ASSETS;
@@ -160,7 +187,22 @@ const PLAYER_EXHAUST_CFG = {
     {enabled:true},
   ],
 };
+const PLAYER_SKID_CFG = {
+  enabled:true,
+  dummyVisible:true,
+  width:.24,
+  length:.7,
+  opacity:.55,
+  life:14,
+  sources:[
+    {enabled:true, wheel:'rearLeft', offset:[-.92,.03,-1.35], scale:[1,1,1]},
+    {enabled:true, wheel:'rearRight', offset:[.92,.03,-1.35], scale:[1,1,1]},
+    {enabled:true, wheel:'frontLeft', offset:[-.92,.03,1.35], scale:[1,1,1]},
+    {enabled:true, wheel:'frontRight', offset:[.92,.03,1.35], scale:[1,1,1]},
+  ],
+};
 const playerExhaustRig = {sources:[]};
+const playerSkidRig = {sources:[]};
 let exhaustTestPulse = 0;
 function defaultExhaustSourceConfig(){
   return {enabled:true};
@@ -207,10 +249,87 @@ function createExhaustSourceRig(idx, cfg){
   playerExhaustRig.sources[idx] = {anchor, helper};
   return playerExhaustRig.sources[idx];
 }
+function defaultSkidSourceConfig(idx){
+  const defaults = [
+    {wheel:'rearLeft', offset:[-.92,.03,-1.35]},
+    {wheel:'rearRight', offset:[.92,.03,-1.35]},
+    {wheel:'frontLeft', offset:[-.92,.03,1.35]},
+    {wheel:'frontRight', offset:[.92,.03,1.35]},
+  ];
+  const d = defaults[idx];
+  if(d) return {enabled:true, wheel:d.wheel, offset:d.offset.slice(), scale:[1,1,1]};
+  const side = idx % 2 === 0 ? -1 : 1;
+  const row = Math.floor((idx - defaults.length) / 2);
+  return {enabled:true, wheel:'extra' + (idx + 1), offset:[side * .92, .03, -1.35 - row * .16], scale:[1,1,1]};
+}
+function skidWheelKey(idx, cfg){
+  return (cfg && cfg.wheel) || defaultSkidSourceConfig(idx).wheel || ('extra' + (idx + 1));
+}
+function skidWheelLabel(wheel, idx){
+  const labels = {
+    rearLeft:'Rear Skid L',
+    rearRight:'Rear Skid R',
+    frontLeft:'Front Skid L',
+    frontRight:'Front Skid R',
+  };
+  return labels[wheel] || ('Skid Mark Source ' + (idx + 1));
+}
+function isRearSkidWheel(wheel){ return wheel === 'rearLeft' || wheel === 'rearRight' || /^extra/.test(wheel || ''); }
+function isFrontSkidWheel(wheel){ return wheel === 'frontLeft' || wheel === 'frontRight'; }
+function normalizeSkidSource(idx){
+  const base = defaultSkidSourceConfig(idx);
+  const cfg = PLAYER_SKID_CFG.sources[idx] || {};
+  PLAYER_SKID_CFG.sources[idx] = Object.assign({}, base, cfg, {
+    wheel: cfg.wheel || base.wheel,
+    offset: (cfg.offset || base.offset).slice ? (cfg.offset || base.offset).slice() : base.offset.slice(),
+    scale: (cfg.scale || base.scale).slice ? (cfg.scale || base.scale).slice() : base.scale.slice(),
+  });
+  return PLAYER_SKID_CFG.sources[idx];
+}
+function createSkidSourceRig(idx, cfg){
+  cfg = cfg || normalizeSkidSource(idx);
+  const anchor = new THREE.Group();
+  const off = cfg.offset || defaultSkidSourceConfig(idx).offset;
+  const sc = cfg.scale || [1,1,1];
+  const wheel = skidWheelKey(idx, cfg);
+  const label = skidWheelLabel(wheel, idx);
+  anchor.position.set(off[0] || 0, off[1] == null ? .03 : off[1], off[2] == null ? -1.35 : off[2]);
+  anchor.scale.set(sc[0] || 1, sc[1] || 1, sc[2] || 1);
+  anchor.userData.editorType = 'playerSkid';
+  anchor.userData.builtin = true;
+  anchor.userData.skidIndex = idx;
+  anchor.userData.skidWheel = wheel;
+  anchor.userData.editorName = label;
+  const helper = new THREE.Mesh(
+    new THREE.PlaneGeometry(.24, .7),
+    new THREE.MeshBasicMaterial({color:0x111111, wireframe:true, transparent:true, opacity:.9, depthTest:false, depthWrite:false})
+  );
+  helper.rotation.x = -Math.PI / 2;
+  helper.userData.helperOnly = true;
+  helper.renderOrder = 999;
+  anchor.add(helper);
+  car.add(anchor);
+  tagEntity(anchor, anchor.userData.editorName, 'playerSkid', {id:'player_skid_' + idx});
+  playerSkidRig.sources[idx] = {anchor, helper};
+  return playerSkidRig.sources[idx];
+}
 function ensureExhaustRigs(){
   for(let i=0;i<PLAYER_EXHAUST_CFG.sources.length;i++){
     if(!PLAYER_EXHAUST_CFG.sources[i]) PLAYER_EXHAUST_CFG.sources[i] = defaultExhaustSourceConfig();
     if(!playerExhaustRig.sources[i]) createExhaustSourceRig(i, PLAYER_EXHAUST_CFG.sources[i]);
+  }
+}
+function ensureSkidRigs(){
+  for(let i=PLAYER_SKID_CFG.sources.length;i<4;i++) PLAYER_SKID_CFG.sources[i] = defaultSkidSourceConfig(i);
+  for(let i=0;i<PLAYER_SKID_CFG.sources.length;i++){
+    const cfg = normalizeSkidSource(i);
+    if(!playerSkidRig.sources[i]) createSkidSourceRig(i, PLAYER_SKID_CFG.sources[i]);
+    const rig = playerSkidRig.sources[i];
+    if(rig && rig.anchor){
+      const wheel = skidWheelKey(i, cfg);
+      rig.anchor.userData.skidWheel = wheel;
+      rig.anchor.userData.editorName = skidWheelLabel(wheel, i);
+    }
   }
 }
 function updatePlayerLights(){ (PLAYER_LIGHT_RIG.syncTimeOfDay || PLAYER_LIGHT_RIG.update)(); }
@@ -237,6 +356,47 @@ function setPlayerExhaustConfig(patch){
   ensureExhaustRigs();
   applyPlayerExhaustConfig();
 }
+function applyPlayerSkidConfig(){
+  ensureSkidRigs();
+  const show = !!PLAYER_SKID_CFG.dummyVisible && !!GAME.state.editorActive;
+  for(const rig of playerSkidRig.sources) if(rig && rig.helper) rig.helper.visible = show;
+}
+function setPlayerSkidConfig(patch){
+  if(!patch) return;
+  if(patch.sources) patch.sources.forEach((v, i) => {
+    if(!v) return;
+    if(!PLAYER_SKID_CFG.sources[i]) PLAYER_SKID_CFG.sources[i] = defaultSkidSourceConfig(i);
+    Object.assign(PLAYER_SKID_CFG.sources[i], v);
+    normalizeSkidSource(i);
+    const rig = playerSkidRig.sources[i];
+    if(rig && rig.anchor){
+      if(v.offset) rig.anchor.position.set(v.offset[0] || 0, v.offset[1] == null ? .03 : v.offset[1], v.offset[2] == null ? -1.35 : v.offset[2]);
+      if(v.scale) rig.anchor.scale.set(v.scale[0] || 1, v.scale[1] || 1, v.scale[2] || 1);
+      const wheel = skidWheelKey(i, PLAYER_SKID_CFG.sources[i]);
+      rig.anchor.userData.skidWheel = wheel;
+      rig.anchor.userData.editorName = skidWheelLabel(wheel, i);
+    }
+  });
+  const rest = Object.assign({}, patch);
+  delete rest.sources;
+  Object.assign(PLAYER_SKID_CFG, rest);
+  ensureSkidRigs();
+  applyPlayerSkidConfig();
+}
+function syncPlayerSkidSource(anchor){
+  if(!anchor || anchor.userData.skidIndex == null) return;
+  const cfg = PLAYER_SKID_CFG.sources[anchor.userData.skidIndex];
+  if(!cfg) return;
+  cfg.offset = [anchor.position.x, anchor.position.y, anchor.position.z];
+  cfg.scale = [anchor.scale.x, anchor.scale.y, anchor.scale.z];
+}
+function addPlayerSkidSource(preset){
+  const idx = PLAYER_SKID_CFG.sources.length;
+  PLAYER_SKID_CFG.sources.push(Object.assign(defaultSkidSourceConfig(idx), preset || {}));
+  ensureSkidRigs();
+  applyPlayerSkidConfig();
+  return playerSkidRig.sources[idx] && playerSkidRig.sources[idx].anchor;
+}
 function addPlayerExhaustSource(preset){
   const idx = PLAYER_EXHAUST_CFG.sources.length;
   PLAYER_EXHAUST_CFG.sources.push(Object.assign(defaultExhaustSourceConfig(), preset || {}));
@@ -248,6 +408,8 @@ PLAYER_LIGHT_RIG.build();
 PLAYER_LIGHT_RIG.apply();
 ensureExhaustRigs();
 applyPlayerExhaustConfig();
+ensureSkidRigs();
+applyPlayerSkidConfig();
 const wheelGeo = new THREE.CylinderGeometry(.38,.38,.32,14);
 const wheelMat = new THREE.MeshStandardMaterial({color:0x101216, roughness:.9});
 const rimMat = new THREE.MeshStandardMaterial({color:0xd9d9d9, roughness:.3, metalness:.8});
@@ -1473,22 +1635,30 @@ const skidPool = [];
 for(let i=0;i<SKID_N;i++){
   const m = new THREE.Mesh(skidGeo, new THREE.MeshBasicMaterial({color:0x0a0a0c, transparent:true, opacity:0, depthWrite:false}));
   m.rotation.x = -Math.PI/2; m.position.y = .015; m.visible = false;
-  scene.add(m); skidPool.push({m, life:0});
+  scene.add(m); skidPool.push({m, life:0, opacity:0});
 }
 let skidIdx = 0;
-function spawnSkid(x, z, heading){
+function spawnSkid(x, z, heading, widthScale, lengthScale, strength){
+  if(!PLAYER_SKID_CFG.enabled) return;
   const p = skidPool[skidIdx++ % SKID_N];
+  const baseW = PLAYER_SKID_CFG.width == null ? .24 : PLAYER_SKID_CFG.width;
+  const baseL = PLAYER_SKID_CFG.length == null ? .7 : PLAYER_SKID_CFG.length;
+  const slip = clamp(strength == null ? 1 : strength, 0, 1);
+  const opacity = PLAYER_SKID_CFG.opacity == null ? .55 : PLAYER_SKID_CFG.opacity;
+  const life = PLAYER_SKID_CFG.life == null ? 14 : PLAYER_SKID_CFG.life;
   p.m.visible = true;
   p.m.position.set(x, .015 + (skidIdx%7)*0.0004, z);
   p.m.rotation.z = -heading;
-  p.m.material.opacity = .55;
-  p.life = 14;
+  p.m.scale.set((baseW / .24) * (widthScale || 1), (baseL / .7) * (lengthScale || 1) * (.78 + slip * .42), 1);
+  p.opacity = opacity * (.22 + slip * .78);
+  p.m.material.opacity = p.opacity;
+  p.life = life * (.72 + slip * .42);
 }
 function updateSkids(dt){
   for(const p of skidPool){
     if(!p.m.visible) continue;
     p.life -= dt;
-    if(p.life < 4) p.m.material.opacity = Math.max(0, p.life/4*.55);
+    if(p.life < 4) p.m.material.opacity = Math.max(0, p.life/4*(p.opacity || 0));
     if(p.life <= 0) p.m.visible = false;
   }
 }
@@ -1600,6 +1770,7 @@ function setCameraConfig(patch, reset){
   camSnapNext = true;
 }
 const LETTERBOX_COLOR = new THREE.Color(0x141518);
+let TOUCH_CONTROLS = null;
 function letterboxColor(){
   if(CAM_CFG.letterboxColor){ try { LETTERBOX_COLOR.set(CAM_CFG.letterboxColor); } catch(err){} }
   return LETTERBOX_COLOR;
@@ -1624,6 +1795,7 @@ function syncHudRect(css){
     hud.style.setProperty('--ui-mask-left', '0px');
 
     if(RADIO && RADIO.setFrameRect) RADIO.setFrameRect(css);
+    if(TOUCH_CONTROLS && TOUCH_CONTROLS.setFrameRect) TOUCH_CONTROLS.setFrameRect(css);
   } else {
     hud.style.left = hud.style.top = hud.style.width = hud.style.height = hud.style.right = hud.style.bottom = '';
     hud.style.setProperty('--ui-mask-top', '0px');
@@ -1631,6 +1803,7 @@ function syncHudRect(css){
     hud.style.setProperty('--ui-mask-bottom', '0px');
     hud.style.setProperty('--ui-mask-left', '0px');
     if(RADIO && RADIO.setFrameRect) RADIO.setFrameRect(null);
+    if(TOUCH_CONTROLS && TOUCH_CONTROLS.setFrameRect) TOUCH_CONTROLS.setFrameRect(null);
   }
   // portrait / phone frame: drop the legend and let the input manager show touch
   document.body.classList.toggle('lk-portrait', portrait);
@@ -1908,9 +2081,23 @@ function applyProjectInputConfig(){
   INPUT.setConfig(cfg);
 }
 let MAPPING = null;
+function touchControlsRuntimeVisible(){
+  const settings = document.getElementById('settingsOverlay');
+  if(settings && settings.classList.contains('open')) return false;
+  if(GAME.state.editorActive) return !!GAME.state.editorPreview;
+  if(!(SESSION && SESSION.isStarted && SESSION.isStarted())) return false;
+  return !(overlay && !overlay.classList.contains('hidden'));
+}
+function refreshTouchControls(){
+  if(TOUCH_CONTROLS && TOUCH_CONTROLS.refresh) TOUCH_CONTROLS.refresh();
+}
 if(INPUT){
   if(window.LK_RUNTIME_TOUCH_CONTROLS){
-    window.LK_RUNTIME_TOUCH_CONTROLS.create({manager: INPUT, mount: document.getElementById('hud') || document.body});
+    TOUCH_CONTROLS = window.LK_RUNTIME_TOUCH_CONTROLS.create({
+      manager: INPUT,
+      mount: document.body,
+      isRuntimeVisible: touchControlsRuntimeVisible,
+    });
   }
   // draggable/resizable Mapping window shared by the in-game Controls menu
   if(window.LK_RUNTIME_WINDOW_MANAGER && window.LK_RUNTIME_MAPPING_OVERLAY){
@@ -1925,11 +2112,11 @@ if(INPUT){
       liveKeyboardDown: code => INPUT.liveKeyboardDown(code),
       liveGamepad: idx => INPUT.liveGamepad(idx),
     };
-    MAPPING = window.LK_RUNTIME_MAPPING_OVERLAY.create({wm: WM, session, lang: () => 'it', windowId: 'lk-mapping-game'});
+    MAPPING = window.LK_RUNTIME_MAPPING_OVERLAY.create({wm: WM, session, lang: () => GAME.i18n.lang, windowId: 'lk-mapping-game'});
     GAME.input.openMapping = () => MAPPING && MAPPING.open();
   }
   if(window.LK_RUNTIME_INPUT_MENU){
-    window.LK_RUNTIME_INPUT_MENU.create({manager: INPUT, body: document.getElementById('lkControlsBody'), lang: 'it', openMapping: () => MAPPING && MAPPING.open()});
+    window.LK_RUNTIME_INPUT_MENU.create({manager: INPUT, body: document.getElementById('lkControlsBody'), lang: GAME.i18n.lang, openMapping: () => MAPPING && MAPPING.open()});
   }
   applyProjectInputConfig();
 }
@@ -2210,6 +2397,7 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   clearFrameOverride: () => { GAME.hooks.frameOverride = null; },
   setDragging: value => { dragging = !!value; },
   resetGameplayCamera: resetCameraState,
+  refreshTouchControls,
   setSettingsOpen,
   setTuneOpen,
   initGameplayPhysics: () => {
@@ -2323,6 +2511,11 @@ Object.assign(GAME.player, {
   setDataWidgets: PLAYER_DATA_WIDGETS.set,
   updateDataWidgets: PLAYER_DATA_WIDGETS.update,
   syncDataWidget: PLAYER_DATA_WIDGETS.syncFromAnchor,
+  skids: PLAYER_SKID_CFG,
+  setSkids: setPlayerSkidConfig,
+  addSkid: addPlayerSkidSource,
+  syncSkid: syncPlayerSkidSource,
+  updateSkids: applyPlayerSkidConfig,
   engineAudio: PLAYER_ENGINE_AUDIO_CFG,
   setEngineSound: setPlayerEngineSound,
   exhaust: PLAYER_EXHAUST_CFG,
@@ -2430,24 +2623,83 @@ function stepGameplayFrame(dt, shouldRender){
   PLAYER_DATA_WIDGETS.update();
   WORLD_STATE.updatePhysicsObjects(sdt);
 
-  // effects: sgommate laterali (drift/freno a mano) + slittamento longitudinale
-  // (staccata violenta o wheelspin in accelerazione da fermo)
+  // Tire mark decals: drift, braking, wheelspin, burnout and spinout all feed
+  // the same ground marks; intensity controls both density and opacity.
   const slide = Math.min(1, Math.abs(vR)/12);
   const driveFx = readDriveInput();
-  const brakeSlip = driveFx.brake > .05 && !ENGINE.reverseActive && speedKmh > 28;
+  const speed01 = clamp(speedKmh / 120, 0, 1);
+  const tireRotation01 = clamp(Math.abs(vF) / 28, 0, 1);
+  const yawSpin = clamp(Math.abs(P.yawRate || 0) / 2.8, 0, 1);
+  const gSlip = clamp((lastLatG || 0) / .75, 0, 1);
+  const decelSlip = clamp(Math.max(0, -axPrev) / (G_ACC * .72), 0, 1);
+  const accelForce = clamp(Math.max(0, axPrev) / (G_ACC * .95), 0, 1);
+  const brakeSlip = driveFx.brake > .05 && !ENGINE.reverseActive && speedKmh > 16;
   const burnoutSlip = !!ENGINE.burnout && !ENGINE.reverseActive;
   const accelSlip = (ENGINE.throttle || 0) > .55 && !ENGINE.reverseActive &&
     speedKmh > 2 && speedKmh < 26 && (ENGINE.rpm01 || 0) > .4;
   const lateralSlip = (drifting || (handbrake && speedKmh > 15)) && speedKmh > 12;
-  if(lateralSlip || brakeSlip || accelSlip || burnoutSlip){
-    const slipAmount = burnoutSlip ? Math.min(1, .62 + (ENGINE.rpm01 || 0) * .3) : (lateralSlip ? slide : (brakeSlip ? .35 : Math.min(1, .25 + (ENGINE.rpm01 || 0) * .5)));
-    const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
-    const side = new THREE.Vector3(fwd.z,0,-fwd.x);
-    const mainAxleZ = -1.35;
-    for(const s of [-1,1]){
-      const wp = P.pos.clone().addScaledVector(fwd, mainAxleZ).addScaledVector(side, s*.92);
-      if(Math.random() < .3 + slipAmount*.6) spawnSmoke(wp, slipAmount);
-      spawnSkid(wp.x, wp.z, P.heading);
+  const driveWheelMismatch = clamp(
+    ((ENGINE.rpm01 || 0) * Math.max(.25, ENGINE.throttle || 0)) + (burnoutSlip ? .55 : 0) - tireRotation01 * .68 - speed01 * .18,
+    0,
+    1
+  );
+  const spinoutSlip = speedKmh > 12 ? clamp(Math.max(slide, yawSpin, gSlip) * .92, 0, 1) : 0;
+  const allWheelSlip = Math.max(
+    lateralSlip ? Math.max(slide, gSlip * .72) : 0,
+    brakeSlip ? Math.max(.18 + driveFx.brake * .45 + speed01 * .22, decelSlip) : 0,
+    spinoutSlip > .42 ? spinoutSlip : 0
+  );
+  const rearWheelSlip = Math.max(
+    allWheelSlip,
+    burnoutSlip ? clamp(.58 + (ENGINE.rpm01 || 0) * .36, 0, 1) : 0,
+    accelSlip ? clamp(.22 + driveWheelMismatch * .62 + (ENGINE.rpm01 || 0) * .28 + accelForce * .34 + slide * .18, 0, 1) : 0
+  );
+  const frontWheelSlip = Math.max(allWheelSlip, brakeSlip ? decelSlip : 0);
+  const skidAudioDrift = Math.max(lateralSlip ? Math.min(1, .35 + slide * .8) : 0, spinoutSlip > .42 ? spinoutSlip : 0);
+  const skidAudioBrake = brakeSlip ? Math.min(1, .34 + driveFx.brake * .42 + speedKmh / 170 + decelSlip * .36) : 0;
+  const skidAudioAccel = Math.max(
+    accelSlip ? Math.min(1, .28 + driveWheelMismatch * .56 + (ENGINE.rpm01 || 0) * .32 + accelForce * .2) : 0,
+    burnoutSlip ? Math.min(1, .62 + (ENGINE.rpm01 || 0) * .3) : 0
+  );
+  if(lateralSlip || brakeSlip || accelSlip || burnoutSlip || spinoutSlip > .42){
+    const activeSkids = playerSkidRig.sources
+      .map((rig, i) => ({rig, cfg:PLAYER_SKID_CFG.sources[i]}))
+      .filter(item => item.rig && item.rig.anchor && item.cfg && item.cfg.enabled !== false);
+    const hasSkidRig = playerSkidRig.sources.some(rig => rig && rig.anchor);
+    if(activeSkids.length){
+      for(const item of activeSkids){
+        const idx = item.rig.anchor.userData.skidIndex;
+        const wheel = skidWheelKey(idx, item.cfg);
+        const slipAmount = clamp(isFrontSkidWheel(wheel) ? frontWheelSlip : (isRearSkidWheel(wheel) ? rearWheelSlip : allWheelSlip), 0, 1);
+        if(slipAmount < .08) continue;
+        const anchor = item.rig.anchor;
+        const wp = new THREE.Vector3();
+        anchor.getWorldPosition(wp);
+        const q = new THREE.Quaternion();
+        anchor.getWorldQuaternion(q);
+        const dir = new THREE.Vector3(0,0,1).applyQuaternion(q);
+        const heading = Math.atan2(dir.x, dir.z);
+        const density = clamp(.16 + slipAmount * .74 + speed01 * .12 + gSlip * .16, 0, 1);
+        if(Math.random() < density * .62) spawnSmoke(wp, slipAmount);
+        if(Math.random() < density) spawnSkid(wp.x, wp.z, heading, Math.abs(anchor.scale.x || 1), Math.abs(anchor.scale.z || 1), slipAmount);
+      }
+    } else if(!hasSkidRig) {
+      const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
+      const side = new THREE.Vector3(fwd.z,0,-fwd.x);
+      const fallback = [
+        {z:-1.35, s:-1, slip:rearWheelSlip},
+        {z:-1.35, s:1, slip:rearWheelSlip},
+        {z:1.35, s:-1, slip:frontWheelSlip},
+        {z:1.35, s:1, slip:frontWheelSlip},
+      ];
+      for(const src of fallback){
+        const slipAmount = clamp(src.slip, 0, 1);
+        if(slipAmount < .08) continue;
+        const wp = P.pos.clone().addScaledVector(fwd, src.z).addScaledVector(side, src.s*.92);
+        const density = clamp(.16 + slipAmount * .74 + speed01 * .12 + gSlip * .16, 0, 1);
+        if(Math.random() < density * .62) spawnSmoke(wp, slipAmount);
+        if(Math.random() < density) spawnSkid(wp.x, wp.z, P.heading, 1, 1, slipAmount);
+      }
     }
   }
   updateSmoke(sdt);
@@ -2464,9 +2716,9 @@ function stepGameplayFrame(dt, shouldRender){
   // partono e finiscono insieme; lo screech del synth resta come fallback
   const skidByEngineAudio = ENGINE_AUDIO.handlesSkids();
   ENGINE_AUDIO.setSkids({
-    drift: lateralSlip ? Math.min(1, .35 + slide * .8) * TS.cur : 0,
-    brake: brakeSlip ? Math.min(1, .4 + speedKmh / 140) * TS.cur : 0,
-    accel: accelSlip ? Math.min(1, .3 + (ENGINE.rpm01 || 0) * .7) * TS.cur : 0,
+    drift: skidAudioDrift * TS.cur,
+    brake: skidAudioBrake * TS.cur,
+    accel: skidAudioAccel * TS.cur,
   });
   const screech01 = skidByEngineAudio ? 0 : (drifting || (handbrake && speedKmh>15) ? Math.min(1,.3+slide) : 0);
   SFX.update(rpm01 * TS.cur, throttle * TS.cur, screech01 * TS.cur);
