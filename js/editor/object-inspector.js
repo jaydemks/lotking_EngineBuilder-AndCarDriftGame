@@ -399,7 +399,9 @@ function create(deps){
       sc.body.appendChild(physicsMassRow.root);
       sc.body.appendChild(impactRow.root);
       const hint = hasCollider
-        ? 'Collision uses one axis-aligned box around this object. Disable it for full maps, floors or visual-only GLB assets.'
+        ? ((o.userData.colliderShape && o.userData.colliderShape.mode === 'complex')
+          ? 'Complex collision uses child mesh boxes. Select a child dummy in Scene to tune or disable that single collider.'
+          : 'Collision uses one solid box around this object. Switch to Complex for GLB child mesh boxes.')
         : 'No collision. Recommended for large track/map GLB files; add smaller collision primitives where the car must hit something.';
       sc.body.appendChild(el('<div class="lk-hint">' + hint + '</div>'));
       if(hasCollider && c && c.ref){
@@ -421,6 +423,7 @@ function create(deps){
           applyColliderShape({mode: modeSelect.value === 'complex' ? 'complex' : 'simple'});
           commitColliderHistory('Collider mode');
           deps.rebuildColliderHelpers && deps.rebuildColliderHelpers();
+          refreshOutliner();
         });
         sc.body.appendChild(modeRow);
         const colliderSlider = row => {
@@ -428,6 +431,44 @@ function create(deps){
           row.root.addEventListener('lk-slider-edit-end', () => commitColliderHistory('Collider edit'));
           return row.root;
         };
+        const selectedPartIndex = Number.isInteger(ED.colliderPartIndex) ? ED.colliderPartIndex : null;
+        if(shape.mode === 'complex' && selectedPartIndex != null && c.ref.parts && c.ref.parts[selectedPartIndex]){
+          const part = c.ref.parts[selectedPartIndex];
+          if(!Array.isArray(shape.parts)) shape.parts = [];
+          const partShape = shape.parts[selectedPartIndex] || (shape.parts[selectedPartIndex] = {});
+          if(part.partName && !partShape.name) partShape.name = part.partName;
+          const applyPartShape = patch => {
+            Object.assign(partShape, patch || {});
+            if(patch && patch.mode !== 'off' && patch.mode !== 'complex') partShape.mode = 'solid';
+            shape.parts[selectedPartIndex] = partShape;
+            o.userData.colliderShape = shape;
+            if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
+            STORE.syncCollider(o);
+            if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+            deps.rebuildColliderHelpers && deps.rebuildColliderHelpers();
+            markDirty();
+            refreshOutliner();
+          };
+          sc.body.appendChild(el('<div class="lk-hint">Selected complex dummy: ' + (part.partName || ('Collider ' + (selectedPartIndex + 1))) + '. Complex follows the GLB mesh; Solid keeps your manual box; Off disables only this part.</div>'));
+          const partModeRow = el('<div class="lk-row"><label>Dummy mode</label><select><option value="complex">Complex mesh</option><option value="solid">Solid box</option><option value="off">Off</option></select></div>');
+          const partModeSelect = partModeRow.querySelector('select');
+          partModeSelect.value = partShape.mode === 'solid' ? 'solid' : (partShape.mode === 'off' ? 'off' : 'complex');
+          partModeSelect.addEventListener('change', () => {
+            beginColliderHistory(o);
+            applyPartShape({mode: partModeSelect.value});
+            commitColliderHistory('Collider part mode');
+          });
+          sc.body.appendChild(partModeRow);
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy offset X', Number.isFinite(Number(partShape.offsetX)) ? Number(partShape.offsetX) : 0, -50, 50, .05, v => applyPartShape({offsetX:v}), v => (+v).toFixed(2))));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy offset Y', Number.isFinite(Number(partShape.offsetY)) ? Number(partShape.offsetY) : 0, -50, 50, .05, v => applyPartShape({offsetY:v}), v => (+v).toFixed(2))));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy offset Z', Number.isFinite(Number(partShape.offsetZ)) ? Number(partShape.offsetZ) : 0, -50, 50, .05, v => applyPartShape({offsetZ:v}), v => (+v).toFixed(2))));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy half X', part.hx || 1, .05, 250, .05, v => applyPartShape({hx:Math.max(.05, v)}), v => (+v).toFixed(2))));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy half Y', part.hy || .5, .05, 250, .05, v => applyPartShape({hy:Math.max(.05, v)}), v => (+v).toFixed(2))));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy half Z', part.hz || 1, .05, 250, .05, v => applyPartShape({hz:Math.max(.05, v)}), v => (+v).toFixed(2))));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy rot X°', THREE.MathUtils.radToDeg(part.rotX || 0), -180, 180, .5, v => applyPartShape({rotX:THREE.MathUtils.degToRad(v)}), v => (+v).toFixed(1) + '°')));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy rot Y°', THREE.MathUtils.radToDeg(part.rotY != null ? part.rotY : (part.rot || 0)), -180, 180, .5, v => applyPartShape({rotY:THREE.MathUtils.degToRad(v), rot:THREE.MathUtils.degToRad(v)}), v => (+v).toFixed(1) + '°')));
+          sc.body.appendChild(colliderSlider(sliderRow('Dummy rot Z°', THREE.MathUtils.radToDeg(part.rotZ || 0), -180, 180, .5, v => applyPartShape({rotZ:THREE.MathUtils.degToRad(v)}), v => (+v).toFixed(1) + '°')));
+        }
         sc.body.appendChild(colliderSlider(sliderRow('Collider offset X', Number.isFinite(Number(shape.offsetX)) ? Number(shape.offsetX) : 0, -50, 50, .05, v => applyColliderShape({offsetX:v}), v => (+v).toFixed(2))));
         sc.body.appendChild(colliderSlider(sliderRow('Collider offset Y', Number.isFinite(Number(shape.offsetY)) ? Number(shape.offsetY) : 0, -50, 50, .05, v => applyColliderShape({offsetY:v}), v => (+v).toFixed(2))));
         sc.body.appendChild(colliderSlider(sliderRow('Collider offset Z', Number.isFinite(Number(shape.offsetZ)) ? Number(shape.offsetZ) : 0, -50, 50, .05, v => applyColliderShape({offsetZ:v}), v => (+v).toFixed(2))));

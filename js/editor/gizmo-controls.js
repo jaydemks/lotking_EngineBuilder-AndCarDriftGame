@@ -60,8 +60,11 @@ function create(deps){
 
   function syncColliderProxyFromSelected(){
     const o = ED.selected;
-    const ref = o && o.userData && o.userData.collider && o.userData.collider.ref;
+    let ref = o && o.userData && o.userData.collider && o.userData.collider.ref;
     if(!colliderProxy || !ref) return false;
+    if(Number.isInteger(ED.colliderPartIndex) && ref.parts && ref.parts[ED.colliderPartIndex]){
+      ref = ref.parts[ED.colliderPartIndex];
+    }
     colliderProxy.position.set(ref.x || 0, ref.y != null ? ref.y : Math.max(.1, ref.hy || .5), ref.z || 0);
     colliderProxy.rotation.set(ref.rotX || 0, ref.rotY != null ? ref.rotY : (ref.rot || 0), ref.rotZ || 0);
     colliderProxy.scale.set(1, 1, 1);
@@ -77,6 +80,7 @@ function create(deps){
       rotX: ref.rotX || 0,
       rotY: ref.rotY != null ? ref.rotY : (ref.rot || 0),
       rotZ: ref.rotZ || 0,
+      partIndex: Number.isInteger(ED.colliderPartIndex) ? ED.colliderPartIndex : null,
     };
     colliderProxy.updateMatrixWorld(true);
     return true;

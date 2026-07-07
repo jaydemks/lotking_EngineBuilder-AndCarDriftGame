@@ -125,9 +125,10 @@ function create(deps){
         const b = new THREE.Mesh(new THREE.BoxGeometry(1.7,1.0,1.7), pillarBaseMat);
         b.position.y = .5; gp.add(b);
         gp.position.set(x, 0, z); scene.add(gp);
-        const col = {x, z, r:1.35};
-        colliders.circle.push(col);
-        tagEntity(gp, 'Pillar ' + (++pillarN), 'mesh', {collider:{kind:'circle', ref:col}});
+        const col = {x, z, hx:.85, hz:.85, hy:2.75, y:2.75};
+        col._boxList = colliders.box;
+        colliders.box.push(col);
+        tagEntity(gp, 'Pillar ' + (++pillarN), 'mesh', {collider:{kind:'box', ref:col}});
       }
     }
 

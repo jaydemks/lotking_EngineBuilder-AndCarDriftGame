@@ -1822,7 +1822,7 @@ function renderPlayerCamera(targetRect){
     clip: !!targetRect,
     clearColor: letterboxColor(),
     render: rect => {
-      if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled))){
+      if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || (VIDEO && VIDEO.volumetricLighting))){
         if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
         POST.render();
         if(rect.scoped || targetRect) POST.composer.setSize(innerWidth, innerHeight);
@@ -1964,8 +1964,10 @@ const POST = window.LK_RUNTIME_POST.createPost({
   camera,
   renderer,
   config: CAM_CFG,
+  video: VIDEO,
   size: () => ({width: innerWidth, height: innerHeight}),
   focusTarget: () => (typeof player !== 'undefined' && player?.car ? player.car : car),
+  volumetricTarget: () => sun,
 });
 
 // ------------------------------------------------ sound (procedural WebAudio)

@@ -237,6 +237,23 @@
       </div>
       <div class="settingsRow">
         <div class="settingsMeta">
+          <div class="settingsName">Renderer</div>
+          <div class="settingsDesc">WebGL normale oppure preset sperimentale raytracing con fallback sicuro.</div>
+        </div>
+        <select id="videoRenderer" class="settingsSelect">
+          <option value="webgl">Three.js WebGL</option>
+          <option value="raytracing">Raytracing experimental</option>
+        </select>
+      </div>
+      <div class="settingsRow">
+        <div class="settingsMeta">
+          <div class="settingsName">Volumetric lighting</div>
+          <div class="settingsDesc">Abilita raggi luce screen-space nel renderer attuale.</div>
+        </div>
+        <label class="settingsToggle"><input id="videoVolumetricLighting" type="checkbox"><span>Enabled</span></label>
+      </div>
+      <div class="settingsRow">
+        <div class="settingsMeta">
           <div class="settingsName">HUD editor</div>
           <div class="settingsDesc">Mostra pannelli e helper dell'editor.</div>
         </div>

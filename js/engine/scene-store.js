@@ -191,7 +191,10 @@ function objectLocalMeshBoxes(obj){
     points[6].set(min.x, max.y, max.z);
     points[7].set(max.x, max.y, max.z);
     points.forEach(p => localBox.expandByPoint(p.applyMatrix4(node.matrixWorld).applyMatrix4(rootInverse)));
-    if(!localBox.isEmpty()) boxes.push(localBox);
+    if(!localBox.isEmpty()) boxes.push({
+      box: localBox,
+      name: node.name || (node.parent && node.parent.name) || ('Mesh ' + (boxes.length + 1)),
+    });
   });
   return boxes;
 }
@@ -211,6 +214,13 @@ function removeCompoundColliderParts(ref){
   }
   ref.parts = [];
   ref.compoundRoot = false;
+}
+function colliderPartShape(shape, index, name){
+  if(!shape) return {};
+  if(!Array.isArray(shape.parts)) shape.parts = [];
+  if(!shape.parts[index]) shape.parts[index] = {};
+  if(name && !shape.parts[index].name) shape.parts[index].name = name;
+  return shape.parts[index];
 }
 
 // ------------------------------------------------ level library (multi-livello, stile Unreal)
@@ -1014,7 +1024,8 @@ function syncCollider(obj){
     col.ref.rot = col.ref.rotY;
     if(mode === 'complex'){
       const list = colliderBoxList(col.ref);
-      const meshBoxes = objectLocalMeshBoxes(obj).filter(partBox => {
+      const meshBoxes = objectLocalMeshBoxes(obj).filter(partInfo => {
+        const partBox = partInfo && partInfo.box ? partInfo.box : partInfo;
         const s = partBox.getSize(new THREE.Vector3());
         return s.x > .03 && s.y > .03 && s.z > .03;
       }).slice(0, 24);
@@ -1022,7 +1033,11 @@ function syncCollider(obj){
         const worldScale = obj.getWorldScale(new THREE.Vector3());
         col.ref.compoundRoot = true;
         col.ref.parts = col.ref.parts || [];
-        meshBoxes.forEach((partBox, i) => {
+        meshBoxes.forEach((partInfo, i) => {
+          const partBox = partInfo && partInfo.box ? partInfo.box : partInfo;
+          const partName = (partInfo && partInfo.name) || ('Collider ' + (i + 1));
+          const partShape = colliderPartShape(shape, i, partName);
+          const partMode = partShape.mode === 'solid' ? 'solid' : (partShape.mode === 'off' ? 'off' : 'complex');
           const pc = partBox.getCenter(new THREE.Vector3());
           const ps = partBox.getSize(new THREE.Vector3());
           ps.set(ps.x * Math.abs(worldScale.x || 1), ps.y * Math.abs(worldScale.y || 1), ps.z * Math.abs(worldScale.z || 1));
@@ -1037,20 +1052,29 @@ function syncCollider(obj){
           part.parentRef = col.ref;
           part.compoundPart = true;
           part._boxList = list;
-          part.enabled = col.ref.enabled !== false;
+          part.partIndex = i;
+          part.partName = partName;
+          part.partMode = partMode;
+          part.enabled = col.ref.enabled !== false && partMode !== 'off';
           part.physics = !!col.ref.physics;
           part.mass = col.ref.mass;
           part.impact = col.ref.impact;
-          part.x = pw.x + (Number.isFinite(offX) ? offX : 0);
-          part.y = pw.y + (Number.isFinite(offY) ? offY : 0);
-          part.z = pw.z + (Number.isFinite(offZ) ? offZ : 0);
-          part.hx = Math.max(.05, ps.x / 2);
-          part.hy = Math.max(.05, ps.y / 2);
-          part.hz = Math.max(.05, ps.z / 2);
-          part.rotX = col.ref.rotX;
-          part.rotY = col.ref.rotY;
-          part.rotZ = col.ref.rotZ;
-          part.rot = col.ref.rotY;
+          const autoX = pw.x + (Number.isFinite(offX) ? offX : 0);
+          const autoY = pw.y + (Number.isFinite(offY) ? offY : 0);
+          const autoZ = pw.z + (Number.isFinite(offZ) ? offZ : 0);
+          part.autoX = autoX;
+          part.autoY = autoY;
+          part.autoZ = autoZ;
+          part.x = autoX + (Number.isFinite(Number(partShape.offsetX)) ? Number(partShape.offsetX) : 0);
+          part.y = autoY + (Number.isFinite(Number(partShape.offsetY)) ? Number(partShape.offsetY) : 0);
+          part.z = autoZ + (Number.isFinite(Number(partShape.offsetZ)) ? Number(partShape.offsetZ) : 0);
+          part.hx = Number.isFinite(Number(partShape.hx)) && Number(partShape.hx) > 0 ? Number(partShape.hx) : Math.max(.05, ps.x / 2);
+          part.hy = Number.isFinite(Number(partShape.hy)) && Number(partShape.hy) > 0 ? Number(partShape.hy) : Math.max(.05, ps.y / 2);
+          part.hz = Number.isFinite(Number(partShape.hz)) && Number(partShape.hz) > 0 ? Number(partShape.hz) : Math.max(.05, ps.z / 2);
+          part.rotX = Number.isFinite(Number(partShape.rotX)) ? Number(partShape.rotX) : col.ref.rotX;
+          part.rotY = Number.isFinite(Number(partShape.rotY != null ? partShape.rotY : partShape.rot)) ? Number(partShape.rotY != null ? partShape.rotY : partShape.rot) : col.ref.rotY;
+          part.rotZ = Number.isFinite(Number(partShape.rotZ)) ? Number(partShape.rotZ) : col.ref.rotZ;
+          part.rot = part.rotY;
           if(!col.ref.parts[i]) col.ref.parts[i] = part;
           if(!list.includes(part)) list.push(part);
         });

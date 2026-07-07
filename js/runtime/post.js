@@ -11,6 +11,8 @@ function createPost(deps){
   const camera = deps.camera;
   const renderer = deps.renderer;
   const config = deps.config;
+  const video = deps.video || null;
+  const volumetricTarget = deps.volumetricTarget || null;
   const size = deps.size || (() => ({width:innerWidth, height:innerHeight}));
   const focusTarget = deps.focusTarget || null;
   const tmpTargetPos = new THREE.Vector3();
@@ -145,6 +147,51 @@ function createPost(deps){
   }) : null;
   if(gradePass) composer.addPass(gradePass);
 
+  const volumetricPass = typeof THREE.ShaderPass !== 'undefined' ? new THREE.ShaderPass({
+    uniforms: {
+      tDiffuse: {value:null},
+      lightUv: {value:new THREE.Vector2(.5, .12)},
+      intensity: {value:0},
+      decay: {value:.92},
+      density: {value:.68},
+      weight: {value:.42},
+    },
+    vertexShader: [
+      'varying vec2 vUv;',
+      'void main(){',
+      '  vUv = uv;',
+      '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+      '}'
+    ].join('\n'),
+    fragmentShader: [
+      'uniform sampler2D tDiffuse;',
+      'uniform vec2 lightUv;',
+      'uniform float intensity;',
+      'uniform float decay;',
+      'uniform float density;',
+      'uniform float weight;',
+      'varying vec2 vUv;',
+      'void main(){',
+      '  vec2 delta = (vUv - lightUv) * density / 36.0;',
+      '  vec2 coord = vUv;',
+      '  float illum = 1.0;',
+      '  vec3 rays = vec3(0.0);',
+      '  for(int i = 0; i < 36; i++){',
+      '    coord -= delta;',
+      '    vec3 sampleColor = texture2D(tDiffuse, coord).rgb;',
+      '    float bright = max(max(sampleColor.r, sampleColor.g), sampleColor.b);',
+      '    rays += sampleColor * bright * illum * weight;',
+      '    illum *= decay;',
+      '  }',
+      '  vec4 base = texture2D(tDiffuse, vUv);',
+      '  float dist = distance(vUv, lightUv);',
+      '  float visible = smoothstep(1.05, 0.05, dist);',
+      '  gl_FragColor = vec4(base.rgb + rays * intensity * visible, base.a);',
+      '}'
+    ].join('\n'),
+  }) : null;
+  if(volumetricPass) composer.addPass(volumetricPass);
+
   addEventListener('resize', () => {
     const s = size();
     composer.setSize(s.width, s.height);
@@ -214,10 +261,25 @@ function createPost(deps){
       gradePass.uniforms.gamma.value = g.gamma == null ? 1 : g.gamma;
     }
 
+    if(volumetricPass){
+      const enabled = !!(video && video.volumetricLighting);
+      volumetricPass.enabled = enabled;
+      if(enabled){
+        tmpTargetPos.set(0, 20, -40);
+        const target = typeof volumetricTarget === 'function' ? volumetricTarget() : volumetricTarget;
+        if(target && target.getWorldPosition) target.getWorldPosition(tmpTargetPos);
+        tmpTargetPos.project(camera);
+        if(isFinite(tmpTargetPos.x) && isFinite(tmpTargetPos.y)){
+          volumetricPass.uniforms.lightUv.value.set(tmpTargetPos.x * .5 + .5, tmpTargetPos.y * .5 + .5);
+        }
+        volumetricPass.uniforms.intensity.value = .032;
+      }
+    }
+
     composer.render();
   }
 
-  return {ok:true, composer, bokeh, dofPass, gradePass, render, hasFailed: () => renderFailed};
+  return {ok:true, composer, bokeh, dofPass, gradePass, volumetricPass, render, hasFailed: () => renderFailed};
 }
 
 window.LK_RUNTIME_POST = Object.freeze({createPost});

@@ -672,6 +672,7 @@ outliner = window.LK_EDITOR_OUTLINER && window.LK_EDITOR_OUTLINER.create({
   requestDeleteEntity,
   bindReplaceDropTarget,
   selectObject,
+  selectColliderPart,
   selectPlayerCollider,
   focusSelected,
   openMenu,
@@ -702,11 +703,13 @@ selectionManager = window.LK_EDITOR_SELECTION_MANAGER && window.LK_EDITOR_SELECT
 });
 function selectObject(o){ return selectionManager.selectObject(o); }
 function selectCollider(o){ return selectionManager.selectCollider(o); }
+function selectColliderPart(o, index){ return selectionManager.selectColliderPart(o, index); }
 function selectPlayerCollider(){
   clearHoverPickHelper();
   ED.multiSelected = null;
   ED.special = null;
   ED.colliderEdit = false;
+  ED.colliderPartIndex = null;
   ED.playerColliderEdit = true;
   ED.selected = GAME.player.car;
   setTool('translate');

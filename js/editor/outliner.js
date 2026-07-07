@@ -12,6 +12,7 @@ function create(deps){
   const $ = deps.$;
   const documentRef = deps.document || document;
   const selectPlayerCollider = deps.selectPlayerCollider;
+  const selectColliderPart = deps.selectColliderPart;
   let sceneDragId = null;
   const linkExpanded = Object.create(null);
   let sceneIndex = new Map();
@@ -64,7 +65,12 @@ function create(deps){
   function renderEntity(o, depth, hasChildren){
     const id = o.userData.editorId;
     const div = documentRef.createElement('div');
-    const isSyntheticSelection = o && o.__lkSpecialSelect === 'playerCollider' && ED.playerColliderEdit;
+    const isSyntheticSelection = o && (
+      (o.__lkSpecialSelect === 'playerCollider' && ED.playerColliderEdit) ||
+      (o.__lkSpecialSelect === 'colliderPart' && ED.colliderEdit && o.userData && ED.selected && ED.selected.userData &&
+        o.userData.linkParentId === ED.selected.userData.editorId &&
+        o.userData.editorId === ED.selected.userData.editorId + '_collider_part_' + ED.colliderPartIndex)
+    );
     div.className = 'lk-item' + ((ED.selected === o || isSyntheticSelection) ? ' sel' : '') + (o.visible ? '' : ' hidden-e');
     div.dataset.id = id;
     div.draggable = o && o.__lkSkipControls ? false : true;
@@ -164,11 +170,41 @@ function create(deps){
   }
 
   function withSyntheticExtras(items){
+    const expanded = items.slice();
+    if(typeof selectColliderPart === 'function'){
+      items.forEach(item => {
+        const ud = item && item.userData;
+        const col = ud && ud.collider;
+        const ref = col && col.ref;
+        const shape = ud && ud.colliderShape || {};
+        if(!ud || !ud.editorId || !ref || ref.enabled === false || shape.mode !== 'complex' || !Array.isArray(ref.parts) || !ref.parts.length) return;
+        ref.parts.forEach((part, index) => {
+          if(!part) return;
+          const partName = part.partName || (shape.parts && shape.parts[index] && shape.parts[index].name) || ('Collider ' + (index + 1));
+          const partMode = part.partMode || (shape.parts && shape.parts[index] && shape.parts[index].mode) || 'complex';
+          expanded.push({
+            __lkSynthetic: true,
+            __lkSpecialSelect: 'colliderPart',
+            __lkSpecialActivate: () => selectColliderPart(item, index),
+            __lkSkipContext: true,
+            __lkSkipControls: true,
+            userData: {
+              editorId: ud.editorId + '_collider_part_' + index,
+              editorName: partName + ' · ' + (partMode === 'off' ? 'Off' : (partMode === 'solid' ? 'Solid' : 'Complex')),
+              editorType: 'colliderPart',
+              builtin: !!ud.builtin,
+              linkParentId: ud.editorId,
+            },
+            visible: part.enabled !== false,
+          });
+        });
+      });
+    }
     const car = GAME.player && GAME.player.car;
-    if(!car || !car.userData || !car.userData.editorId || !GAME.player.collision || typeof selectPlayerCollider !== 'function') return items;
+    if(!car || !car.userData || !car.userData.editorId || !GAME.player.collision || typeof selectPlayerCollider !== 'function') return expanded;
     const collisionId = 'player_collision_' + car.userData.editorId;
-    const hasCollisionRow = items.some(item => item && item.userData && item.userData.editorId === collisionId);
-    if(hasCollisionRow) return items;
+    const hasCollisionRow = expanded.some(item => item && item.userData && item.userData.editorId === collisionId);
+    if(hasCollisionRow) return expanded;
     const collisionRow = {
       __lkSynthetic: true,
       __lkSpecialSelect: 'playerCollider',
@@ -184,7 +220,7 @@ function create(deps){
       },
       visible: true,
     };
-    return items.concat(collisionRow);
+    return expanded.concat(collisionRow);
   }
 
   function renderLinkedTree(box, list, depthBase){

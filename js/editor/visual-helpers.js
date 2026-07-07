@@ -56,8 +56,9 @@ function create(deps){
       }
       refs.forEach(partRef => {
         if(!partRef || partRef.enabled === false || partRef.compoundRoot) return;
-        const color = partRef.physics ? 0x4be3a0 : 0xffd166;
-        const mat = new THREE.MeshBasicMaterial({color, wireframe:true, transparent:true, opacity:partRef.physics ? .56 : .42, depthTest:false});
+        const selectedPart = ED.selected === o && ED.colliderEdit && Number.isInteger(ED.colliderPartIndex) && partRef.compoundPart && partRef.partIndex === ED.colliderPartIndex;
+        const color = selectedPart ? 0x52b7ff : (partRef.physics ? 0x4be3a0 : (partRef.partMode === 'solid' ? 0xff8a4b : 0xffd166));
+        const mat = new THREE.MeshBasicMaterial({color, wireframe:true, transparent:true, opacity:selectedPart ? .88 : (partRef.physics ? .56 : .42), depthTest:false});
         let helper = null;
         if(col.kind === 'circle' && !partRef.compoundPart){
           helper = new THREE.Mesh(new THREE.CylinderGeometry(Math.max(.05, partRef.r || 1), Math.max(.05, partRef.r || 1), Math.max(.1, (partRef.hy || fallbackHy) * 2), 40, 1, true), mat);

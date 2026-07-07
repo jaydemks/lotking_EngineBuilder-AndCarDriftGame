@@ -10,7 +10,7 @@ function clamp01(v){ return Math.max(0, Math.min(1, v)); }
 function createVideo(options){
   const opts = options || {};
   const renderer = opts.renderer;
-  const values = {quality:'High', antialiasing:'High'};
+  const values = {quality:'High', antialiasing:'High', rendererMode:'webgl', volumetricLighting:false};
 
   function apply(){
     if(!renderer) return;
@@ -20,6 +20,14 @@ function createVideo(options){
     const size = opts.size ? opts.size() : {width: window.innerWidth, height: window.innerHeight};
     renderer.setPixelRatio(Math.min(dpr, qualityRatio * aaRatio));
     renderer.setSize(size.width, size.height);
+    renderer.userData = renderer.userData || {};
+    renderer.userData.videoSettings = Object.assign({}, values);
+    document.body.classList.toggle('lk-renderer-raytracing', values.rendererMode === 'raytracing');
+    document.body.classList.toggle('lk-volumetric-lighting', !!values.volumetricLighting);
+    if(values.rendererMode === 'raytracing' && !values._raytracingWarned){
+      values._raytracingWarned = true;
+      console.warn('LotKing video: raytracing experimental selected; generic scene raytracing is not available yet, using Three.js WebGL fallback.');
+    }
   }
 
   return {values, apply};
@@ -60,6 +68,8 @@ function createMenu(options){
     const tuneOpen = document.getElementById('openGameplayTune');
     const quality = document.getElementById('videoQuality');
     const aa = document.getElementById('videoAA');
+    const rendererMode = document.getElementById('videoRenderer');
+    const volumetricLighting = document.getElementById('videoVolumetricLighting');
     const editorHud = document.getElementById('videoEditorHud');
     if(!btn || !overlay || !close || !resume || !backMenu) return;
 
@@ -105,6 +115,20 @@ function createMenu(options){
       if(video) video.antialiasing = aa.value;
       if(opts.applyVideo) opts.applyVideo();
     });
+    if(rendererMode){
+      rendererMode.value = video && video.rendererMode || 'webgl';
+      rendererMode.addEventListener('change', () => {
+        if(video) video.rendererMode = rendererMode.value === 'raytracing' ? 'raytracing' : 'webgl';
+        if(opts.applyVideo) opts.applyVideo();
+      });
+    }
+    if(volumetricLighting){
+      volumetricLighting.checked = !!(video && video.volumetricLighting);
+      volumetricLighting.addEventListener('change', () => {
+        if(video) video.volumetricLighting = !!volumetricLighting.checked;
+        if(opts.applyVideo) opts.applyVideo();
+      });
+    }
     if(editorHud) editorHud.addEventListener('change', () => {
       document.body.classList.toggle('editor-hud-hidden', !editorHud.checked);
     });

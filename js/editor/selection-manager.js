@@ -50,11 +50,12 @@ function create(deps){
   }
 
   function selectObject(o){
-    if(ED.selected === o && ED.special === null && !(ED.multiSelected && ED.multiSelected.length)) return;
+    if(ED.selected === o && ED.special === null && !ED.colliderEdit && !ED.playerColliderEdit && !(ED.multiSelected && ED.multiSelected.length)) return;
     deps.clearHoverPickHelper();
     ED.multiSelected = null;
     ED.special = null;
     ED.colliderEdit = false;
+    ED.colliderPartIndex = null;
     ED.playerColliderEdit = false;
     ED.selected = o;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
@@ -69,6 +70,7 @@ function create(deps){
     deps.clearHoverPickHelper();
     ED.multiSelected = null;
     ED.colliderEdit = false;
+    ED.colliderPartIndex = null;
     ED.playerColliderEdit = false;
     ED.selected = null;
     ED.special = kind;
@@ -86,6 +88,7 @@ function create(deps){
   function deselect(){
     ED.multiSelected = null;
     ED.colliderEdit = false;
+    ED.colliderPartIndex = null;
     ED.playerColliderEdit = false;
     selectObject(null);
   }
@@ -98,6 +101,7 @@ function create(deps){
     ED.playerColliderEdit = false;
     ED.selected = o;
     ED.colliderEdit = true;
+    ED.colliderPartIndex = null;
     if(ED.tool === 'select') ED.tool = 'translate';
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
     syncSelectedGizmo(o);
@@ -105,6 +109,27 @@ function create(deps){
     deps.buildInspector();
     deps.refreshOutliner();
     deps.status('Collider edit: ' + (o.userData.editorName || 'object'));
+  }
+
+  function selectColliderPart(o, index){
+    if(!o || !(o.userData && o.userData.collider && o.userData.collider.ref)) return selectObject(o);
+    STORE.syncCollider(o);
+    const parts = o.userData.collider.ref.parts || [];
+    if(!parts[index]) return selectCollider(o);
+    deps.clearHoverPickHelper();
+    ED.multiSelected = null;
+    ED.special = null;
+    ED.playerColliderEdit = false;
+    ED.selected = o;
+    ED.colliderEdit = true;
+    ED.colliderPartIndex = index;
+    if(ED.tool === 'select') ED.tool = 'translate';
+    if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
+    syncSelectedGizmo(o);
+    deps.refreshSelectionHelpers();
+    deps.buildInspector();
+    deps.refreshOutliner();
+    deps.status('Collider part: ' + (parts[index].partName || ('Collider ' + (index + 1))));
   }
 
   function similarityKey(o){
@@ -141,6 +166,9 @@ function create(deps){
     deps.clearHoverPickHelper();
     ED.special = null;
     ED.selected = unique[0];
+    ED.colliderEdit = false;
+    ED.colliderPartIndex = null;
+    ED.playerColliderEdit = false;
     ED.multiSelected = unique.length > 1 ? unique : null;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
     syncSelectedGizmo(ED.selected);
@@ -485,6 +513,31 @@ function create(deps){
       return;
     }
     if(ED.colliderEdit && colliderProxy && o.userData && o.userData.collider && o.userData.collider.ref){
+      const partIndex = Number.isInteger(ED.colliderPartIndex) ? ED.colliderPartIndex : null;
+      if(partIndex != null && o.userData.collider.ref.parts && o.userData.collider.ref.parts[partIndex]){
+        const part = o.userData.collider.ref.parts[partIndex];
+        const shape = o.userData.colliderShape || (o.userData.colliderShape = {});
+        if(!Array.isArray(shape.parts)) shape.parts = [];
+        const partShape = shape.parts[partIndex] || (shape.parts[partIndex] = {});
+        const base = colliderProxy.userData.colliderBase || {};
+        partShape.mode = 'solid';
+        partShape.name = part.partName || partShape.name;
+        partShape.offsetX = (Number(partShape.offsetX) || 0) + (colliderProxy.position.x - (base.x || part.x || 0));
+        partShape.offsetY = (Number(partShape.offsetY) || 0) + (colliderProxy.position.y - (base.y || part.y || 0));
+        partShape.offsetZ = (Number(partShape.offsetZ) || 0) + (colliderProxy.position.z - (base.z || part.z || 0));
+        partShape.hx = Math.max(.05, (base.hx || part.hx || 1) * Math.abs(colliderProxy.scale.x || 1));
+        partShape.hy = Math.max(.05, (base.hy || part.hy || .5) * Math.abs(colliderProxy.scale.y || 1));
+        partShape.hz = Math.max(.05, (base.hz || part.hz || 1) * Math.abs(colliderProxy.scale.z || 1));
+        partShape.rotX = colliderProxy.rotation.x || 0;
+        partShape.rotY = colliderProxy.rotation.y || 0;
+        partShape.rotZ = colliderProxy.rotation.z || 0;
+        partShape.rot = partShape.rotY;
+        if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
+        STORE.syncCollider(o);
+        if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+        deps.markDirty();
+        return;
+      }
       const box = new THREE.Box3().setFromObject(o);
       const center = box.isEmpty() ? o.position.clone() : box.getCenter(new THREE.Vector3());
       const shape = o.userData.colliderShape || (o.userData.colliderShape = {});
@@ -530,6 +583,7 @@ function create(deps){
   return Object.freeze({
     selectObject,
     selectCollider,
+    selectColliderPart,
     selectMultiObjects,
     selectSimilarObjects,
     selectSpecial,
