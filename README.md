@@ -119,11 +119,35 @@ In short: this project was built with AI from A to Z — concept, implementation
 
 ## Run it locally
 
-Start any static server from the project root, for example:
+There are two normal ways to run the project from the repository root.
+
+For day-to-day local editor work on Windows, use:
+
+```bat
+avvio.bat
+```
+
+This starts the local static server on port `5600` and opens the editor at:
+
+```text
+http://localhost:5600/engine_editor.html
+```
+
+Use this route when you want to keep seeing the same browser-stored projects,
+imported assets, IndexedDB blobs and player-car model that you use during local
+development.
+
+You can also start a plain static server manually, for example:
 
 ```bash
-python3 -m http.server 8000
+python3 -m http.server 5600
 ```
+
+Then open `http://localhost:5600/engine_editor.html` or `http://localhost:5600/`.
+Try to keep the same host and port you normally use: browser storage is tied to
+the exact origin. `localhost:5600`, `127.0.0.1:5600`, `localhost:8000` and a LAN
+IP are different storage buckets, so projects/assets saved under one will not
+automatically appear under another.
 
 For phone/tablet testing on the same Wi-Fi, use the LAN helper instead:
 
@@ -157,18 +181,12 @@ browser under `localhost` will not automatically exist on the phone under the
 LAN IP. Use `Export Project` from the editor and `Import Project` on the target
 browser/device when you need to move the same project across origins or devices.
 
-Then open:
-
-```text
-http://localhost:8000/
-```
-
 Opening the HTML file directly (`file://`) partially works, but a local server is the supported way: models, audio samples and browser storage all behave correctly there.
 
 To open specific surfaces directly:
 
-- `http://localhost:8000/gameplay.html`
-- `http://localhost:8000/engine_editor.html`
+- `http://localhost:5600/gameplay.html`
+- `http://localhost:5600/engine_editor.html`
 
 ## Roadmap
 
