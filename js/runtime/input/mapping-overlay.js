@@ -35,6 +35,8 @@ function create(deps){
   let capturing = null;            // {action, chip, raf}
   let raf = 0;
   let kbVis = null, gpVis = null, touchVis = null;
+  let gamepadLayoutEdit = false;
+  const GP_LAYOUT_KEY = 'lotking.gamepadVisualLayout.v1';
 
   const content = document.createElement('div');
   content.className = 'lk-map';
@@ -74,6 +76,70 @@ function create(deps){
     if(!list.some(d => d.id === curInstance)) curInstance = list[0] ? list[0].id : null;
   }
 
+  function readGamepadLayout(){
+    try {
+      const v = JSON.parse(localStorage.getItem(GP_LAYOUT_KEY) || '{}');
+      return v && typeof v === 'object' ? v : {};
+    } catch(err){ return {}; }
+  }
+  function writeGamepadLayout(data){
+    try { localStorage.setItem(GP_LAYOUT_KEY, JSON.stringify(data || {})); } catch(err){}
+  }
+  function gamepadLayoutId(node){
+    if(!node) return '';
+    if(node.classList.contains('lk-dv-gp-btn')) return 'btn' + node.dataset.index;
+    if(node.classList.contains('lk-dv-gp-stick')) return 'axis' + node.dataset.axis;
+    return '';
+  }
+  function applyStoredGamepadLayout(root){
+    const layout = readGamepadLayout();
+    root.querySelectorAll('.lk-dv-gp-btn, .lk-dv-gp-stick').forEach(node => {
+      const id = gamepadLayoutId(node);
+      const p = layout[id];
+      if(p && Number.isFinite(p.x) && Number.isFinite(p.y)){
+        node.style.left = p.x + '%';
+        node.style.top = p.y + '%';
+      }
+    });
+  }
+  function installGamepadLayoutEditor(root){
+    applyStoredGamepadLayout(root);
+    root.classList.toggle('lk-dv-layout-edit', !!gamepadLayoutEdit);
+    if(!gamepadLayoutEdit) return;
+    const body = root.querySelector('.lk-dv-gp-body');
+    if(!body) return;
+    root.querySelectorAll('.lk-dv-gp-btn, .lk-dv-gp-stick').forEach(node => {
+      node.addEventListener('click', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }, true);
+      node.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = gamepadLayoutId(node);
+        if(!id) return;
+        if(node.setPointerCapture) node.setPointerCapture(ev.pointerId);
+        const move = e => {
+          const r = body.getBoundingClientRect();
+          const x = Math.max(4, Math.min(96, ((e.clientX - r.left) / Math.max(1, r.width)) * 100));
+          const y = Math.max(4, Math.min(96, ((e.clientY - r.top) / Math.max(1, r.height)) * 100));
+          node.style.left = x.toFixed(1) + '%';
+          node.style.top = y.toFixed(1) + '%';
+          const layout = readGamepadLayout();
+          layout[id] = {x:+x.toFixed(1), y:+y.toFixed(1)};
+          writeGamepadLayout(layout);
+        };
+        const up = e => {
+          if(node.releasePointerCapture) node.releasePointerCapture(e.pointerId);
+          window.removeEventListener('pointermove', move, true);
+          window.removeEventListener('pointerup', up, true);
+        };
+        window.addEventListener('pointermove', move, true);
+        window.addEventListener('pointerup', up, true);
+      });
+    });
+  }
+
   // ------------------------------------------------ capture
   function endCapture(){
     if(!capturing) return;
@@ -103,6 +169,14 @@ function create(deps){
           for(let i = 0; i < pad.buttons.length; i++){
             if(pad.buttons[i] && pad.buttons[i].pressed){
               session.remap(curInstance, action, {type: 'button', index: i});
+              endCapture(); render();
+              return;
+            }
+          }
+          for(let i = 0; i < pad.axes.length; i++){
+            const v = pad.axes[i] || 0;
+            if(Math.abs(v) > .65){
+              session.remap(curInstance, action, {type: 'axis', index: i, scale: v < 0 ? -1 : 1, deadzone: .16});
               endCapture(); render();
               return;
             }
@@ -171,6 +245,17 @@ function create(deps){
         rm.addEventListener('click', () => { session.removeInstance(curInstance); curInstance = null; render(); });
         instRow.appendChild(rm);
       }
+      if(curType === 'gamepad'){
+        const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'lk-map-inst-add' + (gamepadLayoutEdit ? ' on' : '');
+        edit.textContent = gamepadLayoutEdit ? t('Done layout', 'Fine layout') : t('Edit layout', 'Modifica layout');
+        edit.title = t('Move the gamepad buttons in this visual overlay', 'Sposta i tasti del gamepad in questo overlay visivo');
+        edit.addEventListener('click', () => { gamepadLayoutEdit = !gamepadLayoutEdit; render(); });
+        instRow.appendChild(edit);
+        const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'lk-map-inst-rm'; reset.textContent = '↺';
+        reset.title = t('Reset gamepad visual layout', 'Reset layout visivo gamepad');
+        reset.addEventListener('click', () => { try { localStorage.removeItem(GP_LAYOUT_KEY); } catch(err){} render(); });
+        instRow.appendChild(reset);
+      }
     }
 
     // diagram
@@ -180,14 +265,24 @@ function create(deps){
     const conflicts = ACT.schemeConflicts(scheme, curType);
     const rev = {};
     if(curType === 'keyboard'){ for(const a in scheme) (scheme[a] || []).forEach(c => { if(!rev[c]) rev[c] = a; }); }
-    else if(curType === 'gamepad'){ for(const a in scheme){ const b = scheme[a]; if(b && b.type === 'button') rev['btn' + b.index] = a; } }
+    else if(curType === 'gamepad'){
+      for(const a in scheme){
+        const b = scheme[a];
+        if(b && b.type === 'button') rev['btn' + b.index] = a;
+        else if(b && b.type === 'axis') rev['axis' + b.index] = a;
+      }
+    }
 
     if(curType === 'keyboard'){
       kbVis = DV.createKeyboard(stage, {keyLabel: ACT.keyLabel, onPick: code => { const a = rev[code]; if(a) beginCapture(a); }});
       kbVis.render(scheme, {conflicts, short: shortLabel});
     } else if(curType === 'gamepad'){
-      gpVis = DV.createGamepad(stage, {onPick: b => { const a = rev['btn' + b.index]; if(a) beginCapture(a); }});
+      gpVis = DV.createGamepad(stage, {onPick: b => {
+        const a = rev[(b.type === 'axis' ? 'axis' : 'btn') + b.index];
+        if(a) beginCapture(a);
+      }});
       gpVis.render(scheme, {conflicts, short: shortLabel});
+      installGamepadLayoutEditor(stage);
     } else {
       touchVis = DV.createTouch(stage);
     }

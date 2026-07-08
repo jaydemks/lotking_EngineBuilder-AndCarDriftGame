@@ -227,6 +227,17 @@ function create(deps){
       if(deps.markDirty) deps.markDirty();
     };
     pc.body.appendChild(deps.el('<div class="lk-hint">' + (selectedCollider ? tr('Collider selection active. Edit this dummy here; it is separate from the player_car object transform.', 'Selezione collider attiva. Modifica qui questo dummy; e separato dalla trasformazione del player_car.') : tr('Dedicated player_car collision. This controls the car body used by physics and the lightweight arcade impact radius.', 'Collisione dedicata del player_car. Controlla la carrozzeria usata dalla fisica e il raggio impatto arcade.')) + '</div>'));
+    const dummyVisibilityRow = deps.el('<div class="lk-row"><label>Dummy visibility</label><select><option value="auto">Auto</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>');
+    const dummyVisibilitySelect = dummyVisibilityRow.querySelector('select');
+    dummyVisibilitySelect.value = o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide' ? o.userData.colliderDummyVisibility : 'auto';
+    dummyVisibilitySelect.addEventListener('change', () => {
+      const mode = dummyVisibilitySelect.value === 'show' || dummyVisibilitySelect.value === 'hide' ? dummyVisibilitySelect.value : 'auto';
+      if(mode === 'auto') delete o.userData.colliderDummyVisibility;
+      else o.userData.colliderDummyVisibility = mode;
+      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      if(deps.markDirty) deps.markDirty();
+    });
+    pc.body.appendChild(dummyVisibilityRow);
     pc.body.appendChild(deps.sliderRow('Half X', collision.hx == null ? .92 : collision.hx, .1, 4, .01, v => setCollision({hx:v}), v => (+v).toFixed(2)).root);
     pc.body.appendChild(deps.sliderRow('Half Y', collision.hy == null ? .42 : collision.hy, .05, 2, .01, v => setCollision({hy:v}), v => (+v).toFixed(2)).root);
     pc.body.appendChild(deps.sliderRow('Half Z', collision.hz == null ? 1.85 : collision.hz, .1, 6, .01, v => setCollision({hz:v}), v => (+v).toFixed(2)).root);

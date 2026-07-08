@@ -42,11 +42,11 @@ The current direction is:
 - **Playable ZIP Export** for publishing a game build without shipping the editor.
 - **Default content** based on bundled/free/self-made assets so the editor opens with a usable starter project.
 
-Recent work closes a major player-car driving milestone and starts the next editor-workflow pass: browser-based Projects, touch UI polish, four-wheel skid mark sources, Free Texture / Decal elements, image assets, EN/IT consolidation, and portable `.lkep.json` project export/import with embedded asset data.
+Recent work closes a collision/editor workflow milestone: complex mesh collision for static GLB/curved primitives, collision-helper visibility controls, optional world-surface collision, asset previews, double-click asset inspection, precision transform modifiers, and multi-selection across Scene, Assets and the viewport.
 
-The same milestone also improves editor workflow around the Scene sidebar/outliner, player-car logic visibility, selected-object autofocus, text objects, warm-up feedback, auto-aspect runtime behavior, touch safe margins, and player-car tuning controls.
+The same milestone expands play/editor input polish with richer Xbox-style gamepad defaults, pause-menu gamepad navigation, free-camera pointer lock/right-stick look, transparent FX render ordering, better default drift/burnout behavior, and vehicle power-curve tuning that can be selectively exposed through the in-game wrench panel.
 
-Known active refinement area: final vehicle feel tuning can continue in smaller passes, especially around high-speed drift control and edge cases on custom drive surfaces. The current direction remains arcade drift first.
+Known active refinement area: final vehicle feel tuning can continue in smaller passes, especially around real-world drift balance and edge cases on custom drive surfaces. The current direction remains arcade drift first.
 
 ## Documentation and release notes
 

@@ -12,6 +12,9 @@
 const ACTION_COLOR = {
   throttle: '#4be3a0', brake: '#ef476f', steerLeft: '#9db4ff', steerRight: '#ffd166',
   steer: '#9db4ff', handbrake: '#ff9e3d', reset: '#c792ea',
+  pauseMenu: '#ffd166', highBeams: '#f8f5b8', radioToggle: '#4be3a0', radioPlay: '#4be3a0',
+  radioNext: '#4be3a0', radioPrev: '#4be3a0', cameraMode: '#9db4ff', lookBack: '#9db4ff',
+  tuningMenu: '#c792ea', mute: '#9aa3b8', legend: '#9aa3b8', cameraLookX: '#9db4ff', cameraLookY: '#9db4ff',
 };
 
 // curated keycap layout (physical e.code + label + grid col/row span)
@@ -91,21 +94,31 @@ function createKeyboard(container, deps){
 
 // ------------------------------------------------ gamepad (schematic)
 const GP_BUTTONS = [
-  ['lt', 6, '12%', '4%', 'LT'], ['rt', 7, '78%', '4%', 'RT'],
-  ['lb', 4, '12%', '20%', 'LB'], ['rb', 5, '78%', '20%', 'RB'],
-  ['up', 12, '22%', '38%', '▲'], ['down', 13, '22%', '70%', '▼'], ['left', 14, '12%', '54%', '◀'], ['right', 15, '32%', '54%', '▶'],
-  ['y', 3, '82%', '38%', 'Y'], ['a', 0, '82%', '70%', 'A'], ['x', 2, '72%', '54%', 'X'], ['b', 1, '92%', '54%', 'B'],
-  ['back', 8, '40%', '42%', '⋯'], ['start', 9, '60%', '42%', '≡'],
+  ['lt', 6, '14%', '8%', 'LT'], ['rt', 7, '76%', '8%', 'RT'],
+  ['lb', 4, '14%', '22%', 'LB'], ['rb', 5, '76%', '22%', 'RB'],
+  ['up', 12, '25%', '43%', '▲'], ['down', 13, '25%', '68%', '▼'], ['left', 14, '15%', '56%', '◀'], ['right', 15, '35%', '56%', '▶'],
+  ['y', 3, '82%', '40%', 'Y'], ['a', 0, '82%', '70%', 'A'], ['x', 2, '72%', '55%', 'X'], ['b', 1, '92%', '55%', 'B'],
+  ['back', 8, '43%', '44%', 'View'], ['start', 9, '57%', '44%', 'Menu'],
+  ['ls', 10, '35%', '93%', 'L3'], ['rs', 11, '65%', '93%', 'R3'],
 ];
 function createGamepad(container, deps){
   deps = deps || {};
   const onPick = deps.onPick || function(){};
   const root = el('div', 'lk-dv lk-dv-gamepad');
   const pad = el('div', 'lk-dv-gp-body');
-  const stick = el('button', 'lk-dv-gp-stick'); stick.type = 'button'; stick.dataset.axis = '0';
-  stick.title = 'Steering axis'; stick.appendChild(el('span', 'lk-dv-gp-stickdot'));
-  stick.style.left = '30%'; stick.style.top = '62%';
-  pad.appendChild(stick);
+  const sticks = {};
+  function makeStick(key, axisX, axisY, left, top, title){
+    const stick = el('button', 'lk-dv-gp-stick'); stick.type = 'button'; stick.dataset.axis = String(axisX);
+    stick.title = title;
+    stick.style.left = left; stick.style.top = top;
+    stick.appendChild(el('span', 'lk-dv-gp-stickdot'));
+    stick.appendChild(el('span', 'lk-dv-gp-tag'));
+    stick.addEventListener('click', () => onPick({type: 'axis', index: axisX, scale: -1, deadzone: .16}));
+    pad.appendChild(stick);
+    sticks[key] = {stick, axisX, axisY, tag: stick.querySelector('.lk-dv-gp-tag')};
+  }
+  makeStick('left', 0, 1, '34%', '78%', 'Left stick / steering');
+  makeStick('right', 2, 3, '66%', '78%', 'Right stick / camera');
   const btns = {};
   GP_BUTTONS.forEach(([key, index, left, top, label]) => {
     const b = el('button', 'lk-dv-gp-btn'); b.type = 'button';
@@ -123,8 +136,12 @@ function createGamepad(container, deps){
   function render(scheme, o){
     o = o || {};
     const byIndex = {};
-    let steerAction = null;
-    for(const a in scheme){ const v = scheme[a]; if(v && v.type === 'button') byIndex[v.index] = a; else if(v && v.type === 'axis') steerAction = a; }
+    const axisActions = {};
+    for(const a in scheme){
+      const v = scheme[a];
+      if(v && v.type === 'button') byIndex[v.index] = a;
+      else if(v && v.type === 'axis') axisActions[v.index] = axisActions[v.index] ? axisActions[v.index] + ' / ' + a : a;
+    }
     for(const i in btns){
       const action = byIndex[i];
       btns[i].b.classList.toggle('bound', !!action);
@@ -132,12 +149,23 @@ function createGamepad(container, deps){
       btns[i].tag.textContent = action ? (o.short ? o.short(action) : action) : '';
       btns[i].b.style.setProperty('--dv', action ? (ACTION_COLOR[action] || '#8ab4ff') : 'transparent');
     }
-    stick.classList.toggle('bound', !!steerAction);
-    stick.style.setProperty('--dv', steerAction ? (ACTION_COLOR[steerAction] || '#9db4ff') : 'transparent');
+    for(const key in sticks){
+      const s = sticks[key];
+      const action = axisActions[s.axisX] || axisActions[s.axisY] || '';
+      s.stick.classList.toggle('bound', !!action);
+      s.tag.textContent = action ? (o.short ? action.split(' / ').map(o.short).join('/') : action) : '';
+      s.stick.style.setProperty('--dv', action ? (ACTION_COLOR[action.split(' / ')[0]] || '#9db4ff') : 'transparent');
+    }
   }
   function highlight(gp){
     for(const i in btns) btns[i].b.classList.toggle('active', !!(gp && gp.pressed(Number(i))));
-    if(gp){ const x = gp.axis(0), y = gp.axis(1); stick.querySelector('.lk-dv-gp-stickdot').style.transform = 'translate(' + (x * 8) + 'px,' + (y * 8) + 'px)'; }
+    for(const key in sticks){
+      const s = sticks[key];
+      const x = gp ? gp.axis(s.axisX) : 0;
+      const y = gp ? gp.axis(s.axisY) : 0;
+      s.stick.classList.toggle('active', Math.abs(x) > .18 || Math.abs(y) > .18);
+      s.stick.querySelector('.lk-dv-gp-stickdot').style.transform = 'translate(' + (x * 8) + 'px,' + (y * 8) + 'px)';
+    }
   }
   return {el: root, render, highlight};
 }

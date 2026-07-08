@@ -57,7 +57,8 @@ function create(options){
       // drive surfaces are real cannon statics now, so they count too
       if(!b || b.enabled === false || b.compoundRoot || b.physics) continue;
       activeBoxes++;
-      parts.push([b.x, b.y || 0, b.z, b.hx, b.hy || 0, b.hz, b.rotX || 0, b.rotY != null ? b.rotY : (b.rot || 0), b.rotZ || 0, colliderMass(b)].map(v => Math.round(v * 100)).join(','));
+      const mode = b.meshCollider || b.colliderMode === 'complex' || b.partMode === 'complex' ? 'mesh' : 'box';
+      parts.push(mode + ':' + [b.x, b.y || 0, b.z, b.hx, b.hy || 0, b.hz, b.rotX || 0, b.rotY != null ? b.rotY : (b.rot || 0), b.rotZ || 0, colliderMass(b)].map(v => Math.round(v * 100)).join(','));
     }
     for(const c of colliders.circle){
       if(!c || c.enabled === false || c.physics || isDriveSurfaceCollider(c)) continue;

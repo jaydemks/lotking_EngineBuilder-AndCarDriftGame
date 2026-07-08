@@ -51,6 +51,24 @@ function create(deps){
   }
 
   function objectMenuItems(o, fromOutliner, gp){
+    const multi = Array.isArray(ED.multiSelected) && ED.multiSelected.includes(o) ? ED.multiSelected.filter(Boolean) : [];
+    if(multi.length > 1){
+      return [
+        {label:'Group tools', icon:'✥', sub: [
+          {label:'Move group  W', icon:'✥', action:() => deps.setTool('translate')},
+          {label:'Rotate group  E', icon:'⟳', action:() => deps.setTool('rotate')},
+          {label:'Scale group  R', icon:'⤢', action:() => deps.setTool('scale')},
+        ]},
+        {label:'Focus selection', icon:'🔍', action:deps.focusSelected},
+        {label:'Select similar to clicked', icon:'☑', action:() => deps.selectSimilarObjects ? deps.selectSimilarObjects(o) : deps.selectObject(o)},
+        {sep:true},
+        {label:'Hide selected', icon:'👁', action:() => multi.forEach(item => { if(item.visible) deps.toggleVisible(item); })},
+        {label:'Show selected', icon:'👁', action:() => multi.forEach(item => { if(!item.visible) deps.toggleVisible(item); })},
+        {label:'Unlink selected from parents', icon:'×', action:() => multi.forEach(item => deps.unlinkObject(item))},
+        {sep:true},
+        {label:tr('Delete selected', 'Elimina selezionati'), icon:'🗑', action:() => deps.requestDeleteSelection ? deps.requestDeleteSelection() : deps.requestDeleteEntity(o)},
+      ];
+    }
     const items = [
       {label:tr('Tool', 'Strumento'), icon:'✥', sub: [
         {label:'Select  Q', icon:'☝', action:() => deps.setTool('select')},

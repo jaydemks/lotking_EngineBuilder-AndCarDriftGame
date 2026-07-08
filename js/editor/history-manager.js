@@ -37,6 +37,30 @@ function create(deps){
     return JSON.stringify(a) === JSON.stringify(b);
   }
 
+  function selectedTransformObjects(){
+    const multi = Array.isArray(ED.multiSelected) ? ED.multiSelected.filter(Boolean) : [];
+    if(multi.length > 1) return multi;
+    return ED.selected ? [ED.selected] : [];
+  }
+
+  function selectTransformObjects(list){
+    const objects = (list || []).filter(Boolean);
+    if(objects.length > 1){
+      ED.selected = objects[0];
+      ED.multiSelected = objects.slice();
+      ED.special = null;
+      ED.colliderEdit = false;
+      ED.playerColliderEdit = false;
+      refreshSelectionHelpers();
+      attachGizmoToSelection();
+      buildInspector();
+      refreshOutliner();
+      return;
+    }
+    if(objects.length === 1) selectObject(objects[0]);
+    else selectObject(null);
+  }
+
   function transformMask(before, after){
     const eq = (aa, bb) => aa.length === bb.length && aa.every((v, i) => Math.abs(v - bb[i]) < 1e-5);
     return {
@@ -230,22 +254,33 @@ function create(deps){
   }
 
   function beginTransformHistory(){
-    transformBefore = ED.selected ? {obj: ED.selected, t: STORE.tOf(ED.selected)} : null;
+    const objects = selectedTransformObjects();
+    transformBefore = objects.length ? {
+      multi: objects.length > 1,
+      items: objects.map(obj => ({obj, t: STORE.tOf(obj)})),
+    } : null;
   }
 
   function commitTransformHistory(label){
-    if(!transformBefore || !transformBefore.obj) return;
-    const obj = transformBefore.obj;
-    const before = transformBefore.t;
-    const after = STORE.tOf(obj);
+    if(!transformBefore || !Array.isArray(transformBefore.items) || !transformBefore.items.length) return;
+    const beforeItems = transformBefore.items;
+    const afterItems = beforeItems.map(item => ({obj: item.obj, t: STORE.tOf(item.obj)}));
     transformBefore = null;
-    if(sameT(before, after)) return;
-    const mask = transformMask(before, after);
-    lastTransformRepeat = {label: label || 'Transform', t: after, mask};
+    const changed = beforeItems.some((item, index) => !sameT(item.t, afterItems[index].t));
+    if(!changed) return;
+    const single = beforeItems.length === 1;
+    const mask = single ? transformMask(beforeItems[0].t, afterItems[0].t) : {p:true, r:true, s:true};
+    lastTransformRepeat = single ? {label: label || 'Transform', t: afterItems[0].t, mask} : null;
     pushHistory({
       label: label || 'Transform',
-      undo: () => applyTransform(obj, before),
-      redo: () => applyTransform(obj, after),
+      undo: () => {
+        beforeItems.forEach(item => applyTransform(item.obj, item.t));
+        selectTransformObjects(beforeItems.map(item => item.obj));
+      },
+      redo: () => {
+        afterItems.forEach(item => applyTransform(item.obj, item.t));
+        selectTransformObjects(afterItems.map(item => item.obj));
+      },
     });
   }
 

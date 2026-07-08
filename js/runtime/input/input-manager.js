@@ -173,7 +173,10 @@ function create(deps){
     else if(inst.type === 'gamepad') d = ACT.resolveGamepad(scheme, src);
     else if(inst.type === 'touch') d = ACT.resolveTouch(src);
     else return false;
-    return Math.abs(d.steer) > 0.4 || d.throttle > 0.4 || d.brake > 0.4 || d.handbrake || d.reset;
+    return Math.abs(d.steer) > 0.4 || d.throttle > 0.4 || d.brake > 0.4 || d.handbrake || d.reset ||
+      d.pauseMenu || d.highBeams || d.radioToggle || d.radioPlay || d.radioNext || d.radioPrev ||
+      d.cameraMode || d.lookBack || d.tuningMenu || d.mute || d.legend ||
+      Math.abs(d.cameraLookX || 0) > 0.35 || Math.abs(d.cameraLookY || 0) > 0.35;
   }
   function pinnedToOtherPlayer(deviceId){
     for(const k in manualAssign) if(Number(k) !== 0 && manualAssign[k] === deviceId) return true;

@@ -33,6 +33,25 @@ function create(deps){
     gizmo.detach();
   }
 
+  function selectedObjects(){
+    const multi = Array.isArray(ED.multiSelected) ? ED.multiSelected.filter(o => o && !isBlueprintPart(o)) : [];
+    if(multi.length) return multi;
+    return ED.selected && !isBlueprintPart(ED.selected) ? [ED.selected] : [];
+  }
+
+  function selectObjectRange(target, rangeObjects){
+    if(!target || !Array.isArray(rangeObjects) || !rangeObjects.length || !ED.lastSceneSelectedId) return false;
+    const targetId = target.userData && target.userData.editorId;
+    const start = rangeObjects.findIndex(o => o && o.userData && o.userData.editorId === ED.lastSceneSelectedId);
+    const end = rangeObjects.findIndex(o => o && o.userData && o.userData.editorId === targetId);
+    if(start < 0 || end < 0) return false;
+    const lo = Math.min(start, end);
+    const hi = Math.max(start, end);
+    selectMultiObjects(rangeObjects.slice(lo, hi + 1));
+    ED.lastSceneSelectedId = targetId || ED.lastSceneSelectedId;
+    return true;
+  }
+
   function revealSelectedInSceneOutliner(){
     const o = ED.selected;
     if(!o || !o.userData || !o.userData.editorId) return;
@@ -58,6 +77,7 @@ function create(deps){
     ED.colliderPartIndex = null;
     ED.playerColliderEdit = false;
     ED.selected = o;
+    ED.lastSceneSelectedId = o && o.userData ? o.userData.editorId || ED.lastSceneSelectedId : ED.lastSceneSelectedId;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
     syncSelectedGizmo(o);
     deps.refreshSelectionHelpers();
@@ -166,6 +186,7 @@ function create(deps){
     deps.clearHoverPickHelper();
     ED.special = null;
     ED.selected = unique[0];
+    ED.lastSceneSelectedId = unique[unique.length - 1] && unique[unique.length - 1].userData ? unique[unique.length - 1].userData.editorId : ED.lastSceneSelectedId;
     ED.colliderEdit = false;
     ED.colliderPartIndex = null;
     ED.playerColliderEdit = false;
@@ -175,7 +196,25 @@ function create(deps){
     deps.refreshSelectionHelpers();
     deps.buildInspector();
     deps.refreshOutliner();
-    deps.status(unique.length > 1 ? ('Selected ' + unique.length + ' similar objects') : 'Selected object');
+    deps.status(unique.length > 1 ? ('Selected ' + unique.length + ' objects') : 'Selected object');
+  }
+
+  function selectObjectWithModifiers(o, opts){
+    opts = opts || {};
+    if(!o || isBlueprintPart(o)) return selectObject(o);
+    if(opts.range && selectObjectRange(o, opts.rangeObjects)) return;
+    const list = selectedObjects();
+    const toggle = !!opts.toggle;
+    const add = !!opts.add || toggle;
+    if(add){
+      let next = list.slice();
+      const idx = next.indexOf(o);
+      if(idx >= 0 && toggle) next.splice(idx, 1);
+      else if(idx < 0) next.push(o);
+      if(!next.length) return deselect();
+      return selectMultiObjects(next);
+    }
+    return selectObject(o);
   }
 
   function selectSimilarObjects(o){
@@ -412,7 +451,31 @@ function create(deps){
     deps.status('Deleted: ' + (o.userData.editorName || ''));
   }
 
+  function performDeleteEntities(list){
+    const removable = (list || []).filter(o => o && !isBlueprintPart(o));
+    const unique = [];
+    removable.forEach(o => { if(!unique.includes(o)) unique.push(o); });
+    if(!unique.length) return;
+    const beforeSelection = unique.slice();
+    unique.forEach(o => {
+      deps.removeEntity(o);
+      if(o.userData && o.userData.editorId) thumbCache.delete(o.userData.editorId);
+    });
+    ED.multiSelected = null;
+    ED.selected = null;
+    deps.pushHistory({
+      label: 'Delete ' + unique.length + ' objects',
+      undo: () => { unique.forEach(o => deps.restoreEntity(o)); selectMultiObjects(beforeSelection); },
+      redo: () => { unique.forEach(o => deps.removeEntity(o)); deselect(); },
+    });
+    deps.markDirty();
+    deps.refreshOutliner();
+    deps.buildInspector();
+    deps.status('Deleted ' + unique.length + ' objects');
+  }
+
   function requestDeleteEntity(o){
+    if(!o) return;
     if(isBlueprintPart(o)){
       deps.status('Componente blueprint non eliminabile');
       return;
@@ -422,6 +485,16 @@ function create(deps){
       message: 'Delete "' + (o.userData.editorName || o.userData.editorId || 'Entity') + '" from the current level?',
       okText: 'Delete object',
     }).then(ok => { if(ok) performDeleteEntity(o); });
+  }
+
+  function requestDeleteSelection(){
+    const list = selectedObjects();
+    if(list.length <= 1) return requestDeleteEntity(list[0] || ED.selected);
+    deps.confirmEditorAction({
+      title: 'Delete selected objects?',
+      message: 'Delete ' + list.length + ' selected object(s) from the current level?',
+      okText: 'Delete objects',
+    }).then(ok => { if(ok) performDeleteEntities(list); });
   }
 
   function cleanClone(o){
@@ -473,7 +546,22 @@ function create(deps){
   }
 
   function focusSelected(){
-    const target = ED.selected || (ED.special === 'env' ? null : null);
+    const multi = Array.isArray(ED.multiSelected) ? ED.multiSelected.filter(Boolean) : [];
+    const target = multi.length > 1 ? null : (ED.selected || (ED.special === 'env' ? null : null));
+    if(multi.length > 1){
+      const box = new THREE.Box3();
+      multi.forEach(item => box.union(new THREE.Box3().setFromObject(item)));
+      if(box.isEmpty()) return;
+      const c = box.getCenter(new THREE.Vector3());
+      const r = Math.max(2.5, box.getSize(new THREE.Vector3()).length() * .8);
+      const dir = new THREE.Vector3().subVectors(camE.position, c).normalize();
+      if(dir.lengthSq() < .01) dir.set(1, .6, 1).normalize();
+      camE.position.copy(c).addScaledVector(dir, r * 1.6).add(new THREE.Vector3(0, r*.35, 0));
+      camE.lookAt(c);
+      const orbit = deps.getOrbit();
+      if(orbit) orbit.target.copy(c);
+      return;
+    }
     if(!target) return;
     if(deps.focusViewportTarget && deps.focusViewportTarget(target)) return;
     const box = new THREE.Box3().setFromObject(target);
@@ -566,6 +654,18 @@ function create(deps){
       deps.markDirty();
       return;
     }
+    if(Array.isArray(ED.multiSelected) && ED.multiSelected.length > 1 && deps.applyMultiGizmoProxyToSelection){
+      deps.applyMultiGizmoProxyToSelection();
+      ED.multiSelected.forEach(item => {
+        if(!item || !item.userData) return;
+        if(item.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(item);
+        if(item.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(item);
+        STORE.syncCollider(item);
+      });
+      deps.markDirty();
+      deps.syncTransformFields();
+      return;
+    }
     deps.applyZUpProxyToSelected();
     if(o.userData.editorType === 'player'){
       GAME.player.physics.pos.copy(o.position);
@@ -589,6 +689,7 @@ function create(deps){
     selectCollider,
     selectColliderPart,
     selectMultiObjects,
+    selectObjectWithModifiers,
     selectSimilarObjects,
     selectSpecial,
     deselect,
@@ -597,7 +698,9 @@ function create(deps){
     setColliderEnabled,
     setPhysicsEnabled,
     performDeleteEntity,
+    performDeleteEntities,
     requestDeleteEntity,
+    requestDeleteSelection,
     duplicateEntity,
     cleanClone,
     focusSelected,

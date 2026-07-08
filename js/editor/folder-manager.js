@@ -57,6 +57,17 @@ function create(deps){
     }
     return false;
   }
+  function idsFromDrop(ev, multiType, singleType){
+    const raw = ev.dataTransfer && ev.dataTransfer.getData(multiType);
+    if(raw){
+      try {
+        const parsed = JSON.parse(raw);
+        if(Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch(err){}
+    }
+    const single = ev.dataTransfer && ev.dataTransfer.getData(singleType);
+    return single ? [single] : [];
+  }
   function folderMenu(kind, folder){
     return [
       {label:'Rename', icon:'✎', action:async () => {
@@ -98,8 +109,8 @@ function create(deps){
     row.addEventListener('dragover', ev => {
       const types = Array.from(ev.dataTransfer.types || []);
       const canDropFolder = types.includes('application/x-lotking-folder');
-      const canDropSceneObject = kind === 'scene' && types.includes('application/x-lotking-scene-object');
-      const canDropAsset = kind === 'assets' && types.includes('application/x-lotking-asset');
+      const canDropSceneObject = kind === 'scene' && (types.includes('application/x-lotking-scene-object') || types.includes('application/x-lotking-scene-objects'));
+      const canDropAsset = kind === 'assets' && (types.includes('application/x-lotking-asset') || types.includes('application/x-lotking-assets'));
       if(canDropFolder || canDropSceneObject || canDropAsset){
         ev.preventDefault(); row.classList.add('drop-ok'); ev.dataTransfer.dropEffect = 'move';
       }
@@ -114,10 +125,14 @@ function create(deps){
           const f = folderById(kind, id); if(f) f.parent = folder.id;
         }
       }
-      const objId = ev.dataTransfer.getData('application/x-lotking-scene-object');
-      if(kind === 'scene' && objId) folderAssignments('scene')[objId] = folder.id;
-      const assetRef = ev.dataTransfer.getData('application/x-lotking-asset');
-      if(kind === 'assets' && assetRef) folderAssignments('assets')[assetRef] = folder.id;
+      if(kind === 'scene'){
+        idsFromDrop(ev, 'application/x-lotking-scene-objects', 'application/x-lotking-scene-object')
+          .forEach(objId => { folderAssignments('scene')[objId] = folder.id; });
+      }
+      if(kind === 'assets'){
+        idsFromDrop(ev, 'application/x-lotking-assets', 'application/x-lotking-asset')
+          .forEach(assetRef => { folderAssignments('assets')[assetRef] = folder.id; });
+      }
       writeFolderState();
       refresh(kind);
     });

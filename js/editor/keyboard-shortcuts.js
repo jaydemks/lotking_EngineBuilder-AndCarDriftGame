@@ -26,6 +26,7 @@ function create(deps){
   const focusSelected = deps.focusSelected || function(){};
   const setGrid = deps.setGrid || function(){};
   const requestDeleteEntity = deps.requestDeleteEntity || function(){};
+  const requestDeleteSelection = deps.requestDeleteSelection || function(){ requestDeleteEntity(ED.selected); };
 
   function onKeyDown(e){
     if(!ED.active) return;
@@ -59,7 +60,12 @@ function create(deps){
     if(mod && key === 'p'){ e.preventDefault(); setProjectsOverlayOpen(!ED.projectsOpen); return; }
     if(mod && key === 'o'){ e.preventDefault(); setLevelsOverlayOpen(!ED.levelsOpen); return; }
     if(mod && e.altKey && key === 'n'){ e.preventDefault(); newTrack(); return; }
-    if(mod && key === 'd'){ e.preventDefault(); duplicateEntity(ED.selected); return; }
+    if(mod && key === 'd'){
+      e.preventDefault();
+      const list = Array.isArray(ED.multiSelected) && ED.multiSelected.length > 1 ? ED.multiSelected.slice() : [ED.selected];
+      list.filter(Boolean).forEach(obj => duplicateEntity(obj));
+      return;
+    }
     if(mod && key === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if(mod && key === 'y'){ e.preventDefault(); redo(); return; }
     if(mod && key === 'r'){ e.preventDefault(); applyLastTransform(); return; }
@@ -70,7 +76,7 @@ function create(deps){
       case 'r': setTool('scale'); break;
       case 'f': focusSelected(); break;
       case 'g': setGrid(!ED.gridOn); break;
-      case 'delete': case 'backspace': requestDeleteEntity(ED.selected); break;
+      case 'delete': case 'backspace': requestDeleteSelection(); break;
     }
   }
   function onKeyUp(e){

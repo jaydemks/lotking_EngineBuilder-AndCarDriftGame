@@ -448,6 +448,19 @@ html,body {
     cursor:pointer; transition:transform .12s ease, border-color .12s ease, color .12s ease;
   }
   .tunePreset:hover, .tunePreset.active { transform:translateY(-1px); border-color:#4be3a0; color:#4be3a0; }
+  .tuneCurveBtn {
+    width:100%; margin:0 0 10px; padding:9px 10px; border-radius:8px;
+    border:1px solid rgba(75,227,160,.38);
+    background:linear-gradient(180deg, rgba(75,227,160,.16), rgba(255,209,102,.07));
+    color:#dfffee; font-size:11px; font-weight:900; letter-spacing:1px; text-transform:uppercase;
+    cursor:pointer; transition:border-color .12s ease, transform .12s ease, color .12s ease;
+  }
+  .tuneCurveBtn:hover { transform:translateY(-1px); border-color:#ffd166; color:#ffd166; }
+  .tuneExportBtn {
+    border-color:rgba(157,180,255,.38);
+    background:linear-gradient(180deg, rgba(157,180,255,.15), rgba(75,227,160,.06));
+    color:#dfe8ff;
+  }
   .tuneRow { padding:10px 0; border-top:1px solid rgba(255,255,255,.08); }
   .tuneMeta { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:start; margin-bottom:7px; }
   .tuneName { font-size:12px; font-weight:800; letter-spacing:1px; color:#fff; }
@@ -459,6 +472,45 @@ html,body {
   .tuneRow input[type="range"] {
     width:100%; accent-color:#4be3a0; cursor:pointer;
   }
+  #tuneCurveOverlay {
+    position:fixed; inset:0; z-index:180; display:flex; align-items:center; justify-content:center;
+    padding:20px; background:rgba(3,6,10,.62); opacity:0; pointer-events:none;
+    transition:opacity .18s ease; backdrop-filter:blur(5px);
+  }
+  #tuneCurveOverlay.open { opacity:1; pointer-events:auto; }
+  .tuneCurvePanel {
+    width:min(720px, calc(100vw - 32px)); max-height:calc(100vh - 36px); overflow:auto;
+    padding:16px; border-radius:8px; color:#dfe8ff;
+    background:linear-gradient(180deg, rgba(18,24,34,.98), rgba(8,12,18,.98));
+    border:1px solid rgba(255,255,255,.14);
+    box-shadow:0 24px 70px rgba(0,0,0,.58), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  .tuneCurveTop { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:12px; }
+  .tuneCurveTop b { display:block; color:#ffd166; font-size:12px; letter-spacing:2px; }
+  .tuneCurveTop span { display:block; margin-top:4px; color:#8f9ab0; font-size:11px; letter-spacing:.6px; }
+  .tuneCurveTop button {
+    width:34px; height:34px; border-radius:8px; border:1px solid rgba(255,255,255,.18);
+    background:rgba(255,255,255,.07); color:#dfe8ff; font-size:22px; font-weight:800; cursor:pointer;
+  }
+  .tuneCurveSelect {
+    display:grid; grid-template-columns:80px 1fr; gap:10px; align-items:center; margin-bottom:12px;
+    color:#9aa6bc; font-size:11px; font-weight:800; letter-spacing:1px; text-transform:uppercase;
+  }
+  .tuneCurveSelect select {
+    width:100%; min-height:34px; border-radius:8px; border:1px solid rgba(255,255,255,.14);
+    background:#101723; color:#dfe8ff; padding:0 10px; font-weight:800;
+  }
+  .tuneCurvePanel canvas {
+    display:block; width:100%; aspect-ratio:640 / 260; height:auto; border-radius:8px;
+    border:1px solid rgba(255,255,255,.12); background:#091019;
+  }
+  .tuneCurveSliders { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-top:12px; }
+  .tuneCurveSliders label {
+    display:grid; grid-template-columns:48px 1fr 52px; gap:8px; align-items:center;
+    color:#9aa6bc; font-size:10px; font-weight:900; letter-spacing:1px;
+  }
+  .tuneCurveSliders input { width:100%; accent-color:#4be3a0; }
+  .tuneCurveSliders output { color:#4be3a0; font-weight:900; text-align:right; font-variant-numeric:tabular-nums; }
   #settingsBtn {
     position:absolute; top:18px; right:84px; width:52px; height:52px; z-index:2;
     border-radius:8px; border:1px solid rgba(255,255,255,.22);
@@ -497,6 +549,13 @@ html,body {
     background:#1b2130; color:#e8ecf5; font-weight:800; letter-spacing:1px; cursor:pointer;
   }
   .pauseActions button:hover, .settingsInlineBtn:hover { border-color:#4be3a0; color:#4be3a0; background:#222b3e; }
+  body.lk-gamepad-menu-nav #settingsOverlay button:focus,
+  body.lk-gamepad-menu-nav #settingsOverlay input:focus,
+  body.lk-gamepad-menu-nav #settingsOverlay select:focus {
+    outline:2px solid #ffd166;
+    outline-offset:2px;
+    box-shadow:0 0 0 4px rgba(255,209,102,.16);
+  }
   #pauseResume { background:linear-gradient(90deg, rgba(47,158,95,.9), rgba(39,179,113,.9)); border-color:transparent; color:#fff; }
   .settingsTabs { display:flex; gap:6px; margin-bottom:8px; }
   .settingsTabs button {
@@ -847,6 +906,14 @@ html,body {
   }
   .lk-dv-gp-stick.bound { border-color:var(--dv); box-shadow:0 0 12px -2px var(--dv); }
   .lk-dv-gp-stickdot { position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%; background:var(--dv); }
+  .lk-dv-layout-edit .lk-dv-gp-btn,
+  .lk-dv-layout-edit .lk-dv-gp-stick {
+    border-style:dashed;
+    cursor:grab;
+  }
+  .lk-dv-layout-edit .lk-dv-gp-btn:active,
+  .lk-dv-layout-edit .lk-dv-gp-stick:active { cursor:grabbing; }
+  .lk-map-inst-add.on { border-color:#4be3a0; color:#4be3a0; background:rgba(75,227,160,.12); }
   .lk-dv-touch { display:flex; align-items:center; justify-content:space-between; gap:20px; width:300px; }
   .lk-dv-touch-pad {
     width:150px; height:64px; border-radius:12px; border:1px dashed rgba(255,255,255,.2);
@@ -876,6 +943,8 @@ html,body {
   /* portrait / phone frame: hide the controls legend (touch UI takes over) */
   body.lk-portrait #hud { --touch-reserve-bottom: 134px; }
   body.lk-portrait #legend { display:none !important; }
+  body.lk-free-camera-cursor-hidden,
+  body.lk-free-camera-cursor-hidden canvas { cursor:none; }
   body.lk-portrait #lkTouchControls {
     gap:10px;
     --touch-safe-x: max(10px, env(safe-area-inset-left));

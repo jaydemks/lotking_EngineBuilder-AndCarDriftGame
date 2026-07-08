@@ -552,12 +552,23 @@ function create(deps){
       sc.body.appendChild(impactRow.root);
       const hint = hasCollider
         ? ((o.userData.colliderShape && o.userData.colliderShape.mode === 'complex')
-          ? 'Complex collision uses child mesh boxes. Select a child dummy in Scene to tune or disable that single collider.'
-          : 'Collision uses one solid box around this object. Switch to Complex for GLB child mesh boxes.')
+          ? 'Complex static collision follows the visible mesh. Select a child dummy in Scene to tune, force solid, or disable that single collider.'
+          : 'Collision uses one solid box around this object. Switch to Complex for mesh-based static collision.')
         : 'No collision. Recommended for large track/map GLB files; add smaller collision primitives where the car must hit something.';
       sc.body.appendChild(el('<div class="lk-hint">' + hint + '</div>'));
       if(hasCollider && c && c.ref){
         const shape = o.userData.colliderShape || (o.userData.colliderShape = {});
+        const applyDummyVisibility = value => {
+          const mode = value === 'show' || value === 'hide' ? value : 'auto';
+          if(mode === 'auto') delete o.userData.colliderDummyVisibility;
+          else o.userData.colliderDummyVisibility = mode;
+          if(o.userData.addedEntry){
+            if(mode === 'auto') delete o.userData.addedEntry.colliderDummyVisibility;
+            else o.userData.addedEntry.colliderDummyVisibility = mode;
+          }
+          if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
+          markDirty();
+        };
         const applyColliderShape = patch => {
           Object.assign(shape, patch || {});
           o.userData.colliderShape = shape;
@@ -567,6 +578,11 @@ function create(deps){
           markDirty();
         };
         sc.body.appendChild(el('<div class="lk-hint">Collider dummy: edit the collision shape independently from the visible mesh.</div>'));
+        const dummyVisibilityRow = el('<div class="lk-row"><label>Dummy visibility</label><select><option value="auto">Auto</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>');
+        const dummyVisibilitySelect = dummyVisibilityRow.querySelector('select');
+        dummyVisibilitySelect.value = o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide' ? o.userData.colliderDummyVisibility : 'auto';
+        dummyVisibilitySelect.addEventListener('change', () => applyDummyVisibility(dummyVisibilitySelect.value));
+        sc.body.appendChild(dummyVisibilityRow);
         const modeRow = el('<div class="lk-row"><label>Collider mode</label><select><option value="simple">Simple</option><option value="complex">Complex</option></select></div>');
         const modeSelect = modeRow.querySelector('select');
         modeSelect.value = shape.mode === 'complex' ? 'complex' : 'simple';
@@ -679,6 +695,11 @@ function create(deps){
       se.body.appendChild(sliderRow(tr('Rise ↑', 'Spinta ↑'), p.rise, 0, 8, .1, v => { p.rise = v; markDirty(); }).root);
       se.body.appendChild(sliderRow(tr('Spread', 'Dispersione'), p.spread, 0, 6, .05, v => { p.spread = v; markDirty(); }).root);
       se.body.appendChild(sliderRow(tr('Opacity', 'Opacita'), p.opacity, .05, 1, .01, v => { p.opacity = v; markDirty(); }).root);
+      se.body.appendChild(sliderRow(tr('Render priority', 'Priorita render'), p.renderOrder == null ? 60 : p.renderOrder, -20, 120, 1, v => {
+        if(o.userData.effectSetRenderOrder) o.userData.effectSetRenderOrder(v);
+        else p.renderOrder = v;
+        markDirty();
+      }, v => String(Math.round(v))).root);
       box.appendChild(se.root);
     }
 

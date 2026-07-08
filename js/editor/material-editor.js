@@ -166,6 +166,7 @@ function create(deps){
     o.userData.materialEditorSlot = target;
     const mat = getMaterialForTarget(o, slots, target);
     if(!mat) return;
+    const activeSlot = target === 'all' ? slots[0] : slots.find(slot => slot.key === target);
 
     const sm = section(tr('EDIT MATERIAL', 'MODIFICA MATERIALE'));
     sm.body.appendChild(el('<div class="lk-hint">' + tr(
@@ -252,6 +253,7 @@ function create(deps){
       {value:'on', label:'On'},
       {value:'off', label:'Off'},
     ], v => patchMat({depthWrite:v === 'on'})).root);
+    sm.body.appendChild(sliderRow(tr('Render priority', 'Priorita render'), activeSlot && activeSlot.mesh ? (activeSlot.mesh.renderOrder || 0) : (o.renderOrder || 0), -20, 120, 1, v => patchMat({renderOrder:v}), v => String(Math.round(v))).root);
     sm.body.appendChild(sliderRow('Normal str.', mat.normalScale ? mat.normalScale.x : 1, 0, 2, .05, v => patchMat({normalScale:v}), v => (+v).toFixed(2)).root);
 
     if(mat.transmission != null){

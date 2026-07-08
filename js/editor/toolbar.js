@@ -111,6 +111,28 @@ function create(deps){
     const slot = ED.viewportMode === 'quad' ? Math.max(0, Math.min(3, ED.activeViewportSlot || 0)) : 0;
     ED.viewportRenderModes[slot] = vpRender.value || 'normal';
   });
+  const vpOptions = $('#lkViewportOptions');
+  const vpOptionsMenu = $('#lkViewportOptionsMenu');
+  const vpOptionsWrap = vpOptions && vpOptions.closest ? vpOptions.closest('.lk-viewport-options') : null;
+  const vpCollisionDummies = $('#lkShowCollisionDummies');
+  function syncViewportOptions(){
+    if(vpCollisionDummies) vpCollisionDummies.checked = ED.showCollisionDummies !== false;
+    if(vpOptions) vpOptions.classList.toggle('on', ED.showCollisionDummies !== false);
+  }
+  if(vpOptions && vpOptionsWrap) vpOptions.addEventListener('click', e => {
+    e.stopPropagation();
+    vpOptionsWrap.classList.toggle('open');
+  });
+  if(vpOptionsMenu) vpOptionsMenu.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => {
+    if(vpOptionsWrap) vpOptionsWrap.classList.remove('open');
+  });
+  if(vpCollisionDummies) vpCollisionDummies.addEventListener('change', () => {
+    ED.showCollisionDummies = !!vpCollisionDummies.checked;
+    syncViewportOptions();
+    if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+  });
+  syncViewportOptions();
   const vpFps = $('#lkViewportFps');
   if(vpFps) vpFps.addEventListener('click', () => {
     ED.showFps = !ED.showFps;

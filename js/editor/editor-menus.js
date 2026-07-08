@@ -16,6 +16,28 @@ function create(deps){
 
   function assetContextMenuItems(item){
     if(!item) return [];
+    const selectedRefs = Array.isArray(ED.selectedAssets) && ED.selectedAssets.includes(item.ref) ? ED.selectedAssets.slice() : [];
+    if(selectedRefs.length > 1 && deps.getAssetByRef){
+      const selectedItems = selectedRefs.map(ref => deps.getAssetByRef(ref)).filter(Boolean);
+      const placeable = selectedItems.filter(asset => ['imported-glb','imported-texture','scene','project-asset'].includes(asset.kind));
+      return [
+        {label:'Add selected to level', icon:'＋', disabled:!placeable.length, action:() => {
+          placeable.forEach((asset, index) => {
+            const at = deps.spawnPointAhead();
+            if(at) at.x += index * 2.5;
+            deps.placeAssetRef(asset, at);
+          });
+        }},
+        {label:'Clear selected from asset folders', icon:'↱', action:() => {
+          const assignments = deps.folderAssignments && deps.folderAssignments('assets');
+          if(assignments){
+            selectedRefs.forEach(ref => { delete assignments[ref]; });
+            if(deps.writeFolderState) deps.writeFolderState();
+            deps.refreshAssetsPanel();
+          }
+        }},
+      ];
+    }
     if(item.kind === 'level'){
       const l = item.raw;
       return [

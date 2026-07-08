@@ -157,6 +157,73 @@ function create(deps){
     });
   }
 
+  function renderObjectPreview(box, object){
+    if(!THREE || !object){
+      box.textContent = 'Preview unavailable.';
+      return;
+    }
+    const w = Math.max(240, box.clientWidth || 420);
+    const h = 240;
+    const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    renderer.setSize(w, h);
+    box.innerHTML = '';
+    box.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(43, w / h, .01, 2000);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.15));
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
+    key.position.set(4, 6, 4.5);
+    scene.add(key);
+    const root = object.clone(true);
+    root.traverse(n => {
+      if(n.isLight || n.isSprite) n.visible = false;
+    });
+    const group = new THREE.Group();
+    group.add(root);
+    scene.add(group);
+    const box3 = new THREE.Box3().setFromObject(group);
+    if(box3.isEmpty()){
+      box.textContent = 'Preview unavailable.';
+      renderer.dispose();
+      return;
+    }
+    const size = box3.getSize(new THREE.Vector3());
+    const center = box3.getCenter(new THREE.Vector3());
+    const radius = Math.max(Math.max(size.x, size.y), size.z, .4) / 2;
+    group.position.sub(center);
+    const dist = Math.max(.7, (radius * 1.45) / Math.tan((camera.fov * Math.PI / 180) / 2));
+    camera.position.set(dist * .65, Math.max(radius * .55, .45), dist);
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+    preview = {renderer, raf:0, controls:null};
+  }
+
+  function openGeneric(item, opts){
+    close();
+    opts = opts || {};
+    overlay = documentRef.createElement('div');
+    overlay.className = 'lk-prop-overlay open';
+    overlay.innerHTML = [
+      '<div class="lk-prop-window">',
+      '  <div class="lk-prop-title"><span>Asset Properties</span><button type="button" title="Close">×</button></div>',
+      '  <div class="lk-prop-body">',
+      '    <div class="lk-prop-preview lk-prop-preview-blueprint"></div>',
+      '    <div class="lk-prop-info"></div>',
+      '  </div>',
+      '</div>',
+    ].join('');
+    overlay.querySelector('.lk-prop-title span').textContent = (opts.title || item && item.name || 'Asset') + ' Properties';
+    overlay.querySelector('button').addEventListener('click', close);
+    overlay.addEventListener('pointerdown', e => { if(e.target === overlay) close(); });
+    const p = overlay.querySelector('.lk-prop-preview');
+    if(opts.previewObject) renderObjectPreview(p, opts.previewObject);
+    else p.textContent = opts.icon || item && item.icon || '▣';
+    const info = overlay.querySelector('.lk-prop-info');
+    (opts.rows || []).forEach(r => info.append(row(r[0], r[1])));
+    documentRef.body.appendChild(overlay);
+  }
+
   function openImportedGlb(asset){
     close();
     overlay = documentRef.createElement('div');
@@ -239,9 +306,86 @@ function create(deps){
 
   function open(item){
     const raw = item && item.raw;
-    if(item && item.kind === 'imported-glb' && raw) openImportedGlb(raw);
-    else if(item && item.kind === 'imported-texture' && raw) openImportedTexture(raw);
-    else if(item && item.kind === 'player-blueprint' && raw) openBlueprint(item, raw);
+    if(item && item.kind === 'imported-glb' && raw){ openImportedGlb(raw); return true; }
+    if(item && item.kind === 'imported-texture' && raw){ openImportedTexture(raw); return true; }
+    if(item && item.kind === 'player-blueprint' && raw){ openBlueprint(item, raw); return true; }
+    if(item && item.kind === 'scene' && raw){
+      openGeneric(item, {
+        title:item.name || raw.name,
+        icon:'▣',
+        previewObject:raw.sample,
+        rows:[
+          ['Name', item.name || raw.name],
+          ['Type', raw.type || item.type || 'Scene asset'],
+          ['Source', raw.source || item.source || 'Scene'],
+          ['Instances', raw.instances ? raw.instances.length : 0],
+          ['Asset key', raw.key || item.key || ''],
+        ],
+      });
+      return true;
+    }
+    if(item && item.kind === 'project-asset' && raw){
+      const entry = raw.entry || {};
+      const asset = entry.asset || {};
+      const props = entry.props || {};
+      const type = item.type || entry.kind || (entry.dbKey || asset.dbKey ? 'glb' : 'project asset');
+      const previewAsset = {
+        id:entry.id || item.id || item.ref,
+        name:item.name || entry.name,
+        source:asset.source || asset.key || item.source,
+        src:entry.src || asset.src || props.src || null,
+        dbKey:entry.dbKey || asset.dbKey || props.dbKey || null,
+        size:entry.size || asset.size || 0,
+        importedAt:entry.importedAt || asset.importedAt,
+      };
+      if(type === 'texture' || entry.kind === 'texture'){
+        openImportedTexture(previewAsset);
+      } else if(type === 'glb' || entry.kind === 'glb' || previewAsset.dbKey){
+        openImportedGlb(previewAsset);
+      } else {
+        openGeneric(item, {
+          title:item.name || entry.name,
+          icon:item.icon || '▣',
+          rows:[
+            ['Name', item.name || entry.name],
+            ['Type', type],
+            ['Source', item.source || asset.source || 'Project'],
+            ['Level', raw.levelName || raw.levelId || ''],
+            ['Asset id', entry.id || ''],
+          ],
+        });
+      }
+      return true;
+    }
+    if(item && item.kind === 'level'){
+      openGeneric(item, {
+        title:item.name || 'Level',
+        icon:'🗺',
+        rows:[
+          ['Name', item.name],
+          ['Type', 'Level'],
+          ['Level id', item.id || ''],
+          ['Active', item.raw && item.raw.active ? 'Yes' : 'No'],
+          ['Saved at', fmtDate(item.raw && item.raw.savedAt)],
+        ],
+      });
+      return true;
+    }
+    if(item && item.kind === 'sound-set'){
+      openGeneric(item, {
+        title:item.name || 'Sound set',
+        icon:'🔊',
+        rows:[
+          ['Name', item.name],
+          ['Type', 'Engine sound set'],
+          ['Sound set id', item.id || ''],
+          ['Saved at', fmtDate(raw && raw.savedAt)],
+          ['Slots', raw && raw.slots ? Object.keys(raw.slots).length : 0],
+        ],
+      });
+      return true;
+    }
+    return false;
   }
 
   function openBlueprint(item, asset){

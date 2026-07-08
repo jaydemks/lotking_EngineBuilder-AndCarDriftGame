@@ -30,6 +30,8 @@ function create(options){
     vehicle: null,
     carMaterial: null,
     groundMaterial: null,
+    groundBody: null,
+    surfaceWorldCollision: true,
     staticBodies: [],
     mass: 1200,
     staticsSignature: '',
@@ -41,7 +43,36 @@ function create(options){
   function bodyBaseY(){ return playerCollision.bodyY == null ? .55 : playerCollision.bodyY; }
 
   function colliderSignature(){
-    return worldState.colliderSignature();
+    return worldState.colliderSignature() + '|surfaceWorld:' + (state.surfaceWorldCollision ? '1' : '0');
+  }
+
+  function ensureGroundBody(){
+    if(!state.world || !state.groundMaterial) return;
+    if(state.groundBody){
+      if(!state.staticBodies.includes(state.groundBody)) state.staticBodies.unshift(state.groundBody);
+      return;
+    }
+    const groundBody = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
+    groundBody.addShape(new CANNONRef.Plane());
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    state.world.addBody(groundBody);
+    state.groundBody = groundBody;
+    if(!state.staticBodies.includes(groundBody)) state.staticBodies.unshift(groundBody);
+  }
+
+  function removeGroundBody(){
+    if(!state.groundBody) return;
+    if(state.world) state.world.removeBody(state.groundBody);
+    const i = state.staticBodies.indexOf(state.groundBody);
+    if(i >= 0) state.staticBodies.splice(i, 1);
+    state.groundBody = null;
+  }
+
+  function setSurfaceWorldCollision(enabled){
+    state.surfaceWorldCollision = enabled !== false;
+    if(state.surfaceWorldCollision) ensureGroundBody();
+    else removeGroundBody();
+    state.staticsSignature = '';
   }
 
   function addPlayerBody(){
@@ -120,11 +151,7 @@ function create(options){
       friction: 0.08, restitution: 0.02, contactEquationStiffness: 1e7, contactEquationRelaxation: 4
     }));
 
-    const groundBody = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
-    groundBody.addShape(new CANNONRef.Plane());
-    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-    world.addBody(groundBody);
-    state.staticBodies.push(groundBody);
+    if(state.surfaceWorldCollision) ensureGroundBody();
 
     addPlayerBody();
     state.active = true;
@@ -186,15 +213,19 @@ function create(options){
     return true;
   }
 
-  // drive-surface models (mountains, sculpted tracks): exact triangle mesh so
-  // the wheel raycasts follow the real geometry
-  function addTrimesh(owner){
+  // complex static models: exact triangle mesh so wheels and chassis follow
+  // hard-surface details and curved primitives instead of their box proxy.
+  function addTrimesh(owner, colliderRef){
     if(!CANNONRef.Trimesh || !window.THREE) return false;
     owner.updateMatrixWorld(true);
     const verts = [], indices = [];
     const v = new THREE.Vector3();
+    const targetUuid = colliderRef && colliderRef.compoundPart ? colliderRef.partMeshUuid : null;
+    const targetName = colliderRef && colliderRef.compoundPart ? colliderRef.partName : null;
     owner.traverse(m => {
       if(!m.isMesh || !m.geometry || (m.userData && m.userData.helperOnly)) return;
+      if(targetUuid && m.uuid !== targetUuid) return;
+      if(!targetUuid && targetName && m.name !== targetName) return;
       const pos = m.geometry.attributes && m.geometry.attributes.position;
       if(!pos) return;
       const base = verts.length / 3;
@@ -207,11 +238,30 @@ function create(options){
       else for(let i = 0; i < pos.count; i++) indices.push(base + i);
     });
     if(!indices.length || verts.length > 300000) return false;
+    const faceCount = indices.length;
+    for(let i = 0; i + 2 < faceCount; i += 3) indices.push(indices[i + 2], indices[i + 1], indices[i]);
     const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
     body.addShape(new CANNONRef.Trimesh(verts, indices));
     state.world.addBody(body);
     state.staticBodies.push(body);
     return true;
+  }
+
+  function ownerHasMeshGeometry(owner){
+    if(!owner || !owner.traverse) return false;
+    let found = false;
+    owner.traverse(m => {
+      if(found || !m.isMesh || !m.geometry || (m.userData && m.userData.helperOnly)) return;
+      const pos = m.geometry.attributes && m.geometry.attributes.position;
+      found = !!(pos && pos.count >= 3);
+    });
+    return found;
+  }
+
+  function isComplexMeshCollider(col){
+    if(!col || col.physics || !col.owner) return false;
+    if(col.compoundPart) return col.partMode === 'complex' || col.meshCollider === true || col.colliderMode === 'complex';
+    return col.meshCollider === true || col.colliderMode === 'complex';
   }
 
   function staticShapeKind(col){
@@ -220,6 +270,7 @@ function create(options){
     const e = ud.addedEntry || {};
     const prim = e.primitive || e.prim;
     if(prim === 'ramp') return 'wedge';
+    if(isComplexMeshCollider(col) && prim !== 'box' && prim !== 'plane' && ownerHasMeshGeometry(owner)) return 'trimesh';
     if(!isDriveSurfaceCollider(col) || prim === 'box' || prim === 'plane') return 'box';
     // models, sculpted meshes or legacy entries without metadata: use the
     // real triangle mesh so the wheel raycasts follow the actual geometry
@@ -228,8 +279,10 @@ function create(options){
 
   function rebuildStatics(){
     if(!state.world) return;
-    for(const body of state.staticBodies.slice(1)) state.world.removeBody(body);
-    state.staticBodies.length = 1;
+    for(const body of state.staticBodies.slice()) if(body !== state.groundBody) state.world.removeBody(body);
+    state.staticBodies.length = 0;
+    if(state.surfaceWorldCollision) ensureGroundBody();
+    else removeGroundBody();
 
     const addStaticBox = (x, y, z, hx, hy, hz, rotX, rotY, rotZ) => {
       const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
@@ -239,14 +292,15 @@ function create(options){
       state.world.addBody(body);
       state.staticBodies.push(body);
     };
-    const specialOwners = new Set();
+    const specialStatics = new Set();
     for(const box of colliders.box || []){
       if(!box || box.enabled === false || box.compoundRoot || box.physics) continue;
       const kind = staticShapeKind(box);
       if(kind !== 'box' && box.owner){
-        if(specialOwners.has(box.owner)) continue;
-        specialOwners.add(box.owner);
-        if(kind === 'wedge' ? addWedge(box.owner) : addTrimesh(box.owner)) continue;
+        const key = kind + ':' + ((box.owner && box.owner.uuid) || box.owner) + ':' + (box.compoundPart ? ('part:' + (box.partMeshUuid || box.partName || box.partIndex)) : 'root');
+        if(specialStatics.has(key)) continue;
+        specialStatics.add(key);
+        if(kind === 'wedge' ? addWedge(box.owner) : addTrimesh(box.owner, box)) continue;
       }
       addStaticBox(box.x, box.y != null ? box.y : Math.max(.1, box.hy || 1.1), box.z, box.hx || 1, box.hy || 1.1, box.hz || 1, box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0);
     }
@@ -301,6 +355,7 @@ function create(options){
     state.world = null;
     state.carMaterial = null;
     state.groundMaterial = null;
+    state.groundBody = null;
     state.staticBodies.length = 0;
     state.staticsSignature = '';
     state.lastImpact = 0;
@@ -314,6 +369,7 @@ function create(options){
     syncPlayer,
     rebuildPlayer,
     applySuspension,
+    setSurfaceWorldCollision,
     dispose,
     colliderSignature,
     cannonVec,

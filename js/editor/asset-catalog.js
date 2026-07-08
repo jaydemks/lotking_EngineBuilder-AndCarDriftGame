@@ -214,6 +214,9 @@ function create(deps){
         return;
       }
       const ref = 'project:' + (clampText(compactString(entry.id || entry.key || assetKey || entry.src || 'asset'), 80) + '-' + (levelId || 'project'));
+      const entryAsset = entry.asset || {};
+      const previewSrc = entry.src || entryAsset.src || (type === 'texture' && entry.props && entry.props.src) || '';
+      const previewDbKey = entry.dbKey || entryAsset.dbKey || (type === 'texture' && entry.props && entry.props.dbKey) || '';
       const item = {
         kind:'project-asset',
         ref,
@@ -228,6 +231,15 @@ function create(deps){
 	        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : type === 'texture' ? 'texture' : type === 'camera' ? 'camera' : 'other',
         raw: {entry: clone(entry), levelId: level && level.id, levelName: label},
         icon: entry.kind === 'glb' || type === 'glb' ? '📦' : type === 'texture' ? '▧' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : '▣',
+        thumbUrl: type === 'texture' && previewSrc ? previewSrc : null,
+        thumbDbKey: type === 'texture' && previewDbKey ? previewDbKey : null,
+        thumbAsset: type === 'glb' ? {
+          id: entry.id || entry.key || assetKey,
+          name: entryDisplayName(entry),
+          src: previewSrc || null,
+          dbKey: previewDbKey || null,
+          source: entryAsset.source || entryAsset.key || entry.source || entry.name || null,
+        } : null,
         draggable:true,
         badges: entry.rigged ? [{label:'Rigged', type:'rigged'}] : [],
       };
@@ -273,11 +285,41 @@ function create(deps){
     return 'other';
   }
 
-  function selectAssetItem(ref){
-    ED.selectedAsset = ref;
+  function selectedAssetRefs(){
+    return Array.isArray(ED.selectedAssets) && ED.selectedAssets.length > 1 ? ED.selectedAssets.slice() : (ED.selectedAsset ? [ED.selectedAsset] : []);
+  }
+
+  function normalizeAssetSelection(refs){
+    const unique = [];
+    (refs || []).forEach(ref => { if(ref && !unique.includes(ref)) unique.push(ref); });
+    ED.selectedAsset = unique[0] || null;
+    ED.selectedAssets = unique.length > 1 ? unique : null;
+    if(unique.length) ED.lastAssetSelectedRef = unique[unique.length - 1];
     root.querySelectorAll('#lkAssetsPanel .lk-asset-item').forEach(item => {
-      item.classList.toggle('sel', item.dataset.assetRef === ref);
+      item.classList.toggle('sel', unique.includes(item.dataset.assetRef));
     });
+    return unique;
+  }
+
+  function selectAssetItem(ref, opts){
+    opts = opts || {};
+    if(opts.range && Array.isArray(opts.rangeRefs) && ED.lastAssetSelectedRef){
+      const start = opts.rangeRefs.indexOf(ED.lastAssetSelectedRef);
+      const end = opts.rangeRefs.indexOf(ref);
+      if(start >= 0 && end >= 0){
+        const lo = Math.min(start, end);
+        const hi = Math.max(start, end);
+        return normalizeAssetSelection(opts.rangeRefs.slice(lo, hi + 1));
+      }
+    }
+    if(opts.toggle || opts.add){
+      const current = selectedAssetRefs();
+      const idx = current.indexOf(ref);
+      if(idx >= 0 && opts.toggle) current.splice(idx, 1);
+      else if(idx < 0) current.push(ref);
+      return normalizeAssetSelection(current);
+    }
+    return normalizeAssetSelection([ref]);
   }
 
   function getAssetByRef(ref){
@@ -312,7 +354,7 @@ function create(deps){
     }
     if(ref.indexOf('project:') === 0){
       const item = collectProjectAssets().find(x => x.ref === ref);
-      return item ? {kind:'project-asset', ref, raw:item.raw, name:item.name, source:item.source, levelId:item.levelId, levelName:item.levelName, badges:item.badges || []} : null;
+      return item ? {kind:'project-asset', ref, raw:item.raw, name:item.name, source:item.source, type:item.type, levelId:item.levelId, levelName:item.levelName, badges:item.badges || []} : null;
     }
     if(ref.indexOf('blueprint:') === 0){
       const id = ref.slice(10);
@@ -388,6 +430,7 @@ function create(deps){
     assetMatchesSearch,
     assetFilterKey,
     selectAssetItem,
+    selectedAssetRefs,
     getAssetByRef,
     placeAssetRef,
     requestDeleteAssetInstances,

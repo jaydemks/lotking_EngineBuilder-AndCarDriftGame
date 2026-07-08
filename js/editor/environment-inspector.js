@@ -34,6 +34,19 @@ function create(deps){
     sf.body.appendChild(sliderRow('View distance', cam.far, 100, 1500, 10, v => { cam.far = v; GAME.player.applyCameraCfg(); markDirty(); }).root);
     box.appendChild(sf.root);
 
+    const swc = section('WORLD SURFACE COLLISION');
+    const physics = GAME.systems && GAME.systems.physics;
+    if(physics && physics.getSurfaceWorldCollision && physics.setSurfaceWorldCollision){
+      swc.body.appendChild(checkRow('Surface world collision', physics.getSurfaceWorldCollision(), v => {
+        physics.setSurfaceWorldCollision(v);
+        markDirty();
+      }).root);
+      swc.body.appendChild(el('<div class="lk-hint">Invisible fallback physics plane at world Y=0. Disable it for underground tracks, floating levels, or when your road meshes provide their own Complex collision.</div>'));
+    } else {
+      swc.body.appendChild(el('<div class="lk-empty">Physics world unavailable.</div>'));
+    }
+    box.appendChild(swc.root);
+
     const spe = section('PROCEDURAL ENVIRONMENT');
     if(sky.proceduralEnv){
       spe.body.appendChild(checkRow('Enabled', sky.proceduralEnv.getEnabled(), v => { sky.proceduralEnv.setEnabled(v); markDirty(); }).root);

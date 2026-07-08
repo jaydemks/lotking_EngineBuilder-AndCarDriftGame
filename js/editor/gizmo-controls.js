@@ -21,6 +21,21 @@ function create(deps){
   const zUpGizmoQuat = deps.zUpGizmoQuat;
   const fly = deps.fly;
   let shiftFineMode = false;
+  let ctrlSnapMode = false;
+  const fineDragFactor = 0.001;
+  const modifierSnap = {
+    move: 0.5,
+    rot: THREE.MathUtils.degToRad(5),
+    scale: 0.05,
+  };
+  const advancedDrag = {
+    active: false,
+    object: null,
+    virtualX: 0,
+    virtualY: 0,
+    lastPointerDown: null,
+    cursor: null,
+  };
 
   function spaceLabel(){
     if(ED.space === 'local') return '📍 Local Z-up';
@@ -59,7 +74,70 @@ function create(deps){
   }
 
   function usesZUpGizmoProxy(){
-    return !!(ED.selected && !ED.colliderEdit && ED.space !== 'engine' && ED.tool === 'translate');
+    return !!(ED.selected && !ED.colliderEdit && !ED.playerColliderEdit && ED.space !== 'engine' && ['translate','rotate','scale'].includes(ED.tool));
+  }
+
+  function multiSelection(){
+    return Array.isArray(ED.multiSelected) ? ED.multiSelected.filter(o => o && o.isObject3D) : [];
+  }
+
+  function usesMultiGizmoProxy(){
+    return !!(multiSelection().length > 1 && !ED.colliderEdit && !ED.playerColliderEdit);
+  }
+
+  function syncMultiGizmoProxyFromSelection(){
+    const list = multiSelection();
+    if(!gizmoProxy || list.length < 2) return false;
+    const box = new THREE.Box3();
+    let hasBox = false;
+    list.forEach(o => {
+      o.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(o);
+      if(!b.isEmpty()){
+        box.union(b);
+        hasBox = true;
+      }
+    });
+    if(hasBox) box.getCenter(gizmoProxy.position);
+    else {
+      gizmoProxy.position.set(0, 0, 0);
+      list.forEach(o => gizmoProxy.position.add(o.getWorldPosition(new THREE.Vector3())));
+      gizmoProxy.position.multiplyScalar(1 / list.length);
+    }
+    gizmoProxy.quaternion.identity();
+    gizmoProxy.scale.set(1, 1, 1);
+    gizmoProxy.updateMatrix();
+    gizmoProxy.updateMatrixWorld(true);
+    gizmoProxy.userData.multiTransformBase = {
+      proxyWorld: gizmoProxy.matrixWorld.clone(),
+      objects: list.map(o => {
+        o.updateMatrixWorld(true);
+        return {object: o, world: o.matrixWorld.clone()};
+      }),
+    };
+    return true;
+  }
+
+  function applyMultiGizmoProxyToSelection(){
+    const base = gizmoProxy && gizmoProxy.userData && gizmoProxy.userData.multiTransformBase;
+    if(!base || !Array.isArray(base.objects) || !base.objects.length) return false;
+    gizmoProxy.updateMatrixWorld(true);
+    const invBase = base.proxyWorld.clone().invert();
+    const delta = gizmoProxy.matrixWorld.clone().multiply(invBase);
+    const parentInv = new THREE.Matrix4();
+    const nextWorld = new THREE.Matrix4();
+    const nextLocal = new THREE.Matrix4();
+    base.objects.forEach(item => {
+      const o = item && item.object;
+      if(!o || !o.parent) return;
+      if(o.parent.updateMatrixWorld) o.parent.updateMatrixWorld(true);
+      parentInv.copy(o.parent.matrixWorld).invert();
+      nextWorld.multiplyMatrices(delta, item.world);
+      nextLocal.multiplyMatrices(parentInv, nextWorld);
+      nextLocal.decompose(o.position, o.quaternion, o.scale);
+      o.updateMatrixWorld(true);
+    });
+    return true;
   }
 
   function syncColliderProxyFromSelected(){
@@ -135,17 +213,32 @@ function create(deps){
       gizmoProxy.quaternion.copy(zUpGizmoQuat);
     }
     gizmoProxy.scale.set(1, 1, 1);
+    gizmoProxy.userData.zUpTransformBase = {
+      proxyWorld: null,
+      object: ED.selected,
+      objectWorld: ED.selected.matrixWorld.clone(),
+    };
     gizmoProxy.updateMatrixWorld(true);
+    gizmoProxy.userData.zUpTransformBase.proxyWorld = gizmoProxy.matrixWorld.clone();
   }
 
   function applyZUpProxyToSelected(){
     const o = ED.selected;
     if(!o || !deps.isGizmoUsingZUpProxy()) return;
-    if(o.parent && o.parent.isObject3D && o.parent !== scene){
+    const base = gizmoProxy.userData && gizmoProxy.userData.zUpTransformBase;
+    if(!base || base.object !== o || !base.proxyWorld || !base.objectWorld){
+      syncZUpProxyFromSelected();
+      return;
+    }
+    gizmoProxy.updateMatrixWorld(true);
+    const delta = gizmoProxy.matrixWorld.clone().multiply(base.proxyWorld.clone().invert());
+    const nextWorld = delta.multiply(base.objectWorld);
+    if(o.parent && o.parent.isObject3D){
       o.parent.updateMatrixWorld(true);
-      o.position.copy(o.parent.worldToLocal(gizmoProxy.position.clone()));
+      const nextLocal = o.parent.matrixWorld.clone().invert().multiply(nextWorld);
+      nextLocal.decompose(o.position, o.quaternion, o.scale);
     } else {
-      o.position.copy(gizmoProxy.position);
+      nextWorld.decompose(o.position, o.quaternion, o.scale);
     }
     o.updateMatrixWorld(true);
   }
@@ -156,15 +249,132 @@ function create(deps){
     gizmo.setScaleSnap(ED.snap ? ED.snapScale : null);
   }
 
-  function applyGizmoFineSnap(gizmo, fine){
+  function applyGizmoModifierSnap(gizmo){
     if(!gizmo) return;
-    if(!fine){
+    if(ctrlSnapMode){
+      gizmo.setTranslationSnap(modifierSnap.move);
+      gizmo.setRotationSnap(modifierSnap.rot);
+      gizmo.setScaleSnap(modifierSnap.scale);
+    } else {
       applyGizmoSnap(gizmo);
-      return;
     }
-    gizmo.setTranslationSnap(0.01);
-    gizmo.setRotationSnap(THREE.MathUtils.degToRad(0.1));
-    gizmo.setScaleSnap(0.001);
+  }
+
+  function setTransformModifierState(gizmo, e){
+    if(e){
+      shiftFineMode = !!e.shiftKey;
+      ctrlSnapMode = !!(e.ctrlKey || e.metaKey);
+    }
+    applyGizmoModifierSnap(gizmo);
+  }
+
+  function patchGizmoPointerMove(gizmo){
+    if(!gizmo || gizmo.userData && gizmo.userData.lkAdvancedTransformPatched) return;
+    const basePointerMove = gizmo.pointerMove.bind(gizmo);
+    gizmo.pointerMove = pointer => {
+      applyGizmoModifierSnap(gizmo);
+      basePointerMove(pointer);
+    };
+    gizmo.userData = gizmo.userData || {};
+    gizmo.userData.lkAdvancedTransformPatched = true;
+  }
+
+  function viewportRect(){
+    return controlDom && controlDom.getBoundingClientRect ? controlDom.getBoundingClientRect() : null;
+  }
+
+  function ensureVirtualCursor(){
+    if(advancedDrag.cursor) return advancedDrag.cursor;
+    const c = document.createElement('div');
+    c.className = 'lk-transform-virtual-cursor';
+    c.setAttribute('aria-hidden', 'true');
+    c.innerHTML = '<span></span>';
+    document.body.appendChild(c);
+    advancedDrag.cursor = c;
+    return c;
+  }
+
+  function setVirtualCursorVisible(visible){
+    const c = ensureVirtualCursor();
+    c.classList.toggle('on', !!visible);
+    updateVirtualCursor();
+  }
+
+  function updateVirtualCursor(){
+    const c = advancedDrag.cursor;
+    if(!c || !c.classList.contains('on')) return;
+    c.style.transform = 'translate(' + Math.round(advancedDrag.virtualX) + 'px,' + Math.round(advancedDrag.virtualY) + 'px)';
+  }
+
+  function clampVirtualPointer(){
+    const rect = viewportRect();
+    if(!rect) return;
+    advancedDrag.virtualX = Math.max(rect.left + 2, Math.min(rect.right - 2, advancedDrag.virtualX));
+    advancedDrag.virtualY = Math.max(rect.top + 2, Math.min(rect.bottom - 2, advancedDrag.virtualY));
+  }
+
+  function wrapVirtualPointer(dx, dy){
+    const rect = viewportRect();
+    if(!rect || rect.width <= 2 || rect.height <= 2) return null;
+    const fine = shiftFineMode && !ctrlSnapMode ? fineDragFactor : 1;
+    advancedDrag.virtualX += (dx || 0) * fine;
+    advancedDrag.virtualY += (dy || 0) * fine;
+    const pad = 3;
+    const minX = rect.left + pad, maxX = rect.right - pad;
+    const minY = rect.top + pad, maxY = rect.bottom - pad;
+    if(advancedDrag.virtualX < minX) advancedDrag.virtualX = maxX;
+    else if(advancedDrag.virtualX > maxX) advancedDrag.virtualX = minX;
+    if(advancedDrag.virtualY < minY) advancedDrag.virtualY = maxY;
+    else if(advancedDrag.virtualY > maxY) advancedDrag.virtualY = minY;
+    updateVirtualCursor();
+    return {
+      x: (advancedDrag.virtualX - rect.left) / rect.width * 2 - 1,
+      y: -((advancedDrag.virtualY - rect.top) / rect.height) * 2 + 1,
+      button: -1,
+    };
+  }
+
+  function startAdvancedDrag(gizmo){
+    if(!gizmo || !gizmo.object) return;
+    const rect = viewportRect();
+    const p = advancedDrag.lastPointerDown || {};
+    advancedDrag.active = true;
+    advancedDrag.object = gizmo.object;
+    advancedDrag.virtualX = Number.isFinite(p.clientX) ? p.clientX : (rect ? rect.left + rect.width / 2 : 0);
+    advancedDrag.virtualY = Number.isFinite(p.clientY) ? p.clientY : (rect ? rect.top + rect.height / 2 : 0);
+    clampVirtualPointer();
+    setTransformModifierState(gizmo, p.event);
+    if(controlDom && controlDom.requestPointerLock && p.pointerType !== 'touch'){
+      try {
+        const result = controlDom.requestPointerLock();
+        if(result && result.catch) result.catch(() => {});
+      } catch(err){}
+    }
+  }
+
+  function endAdvancedDrag(gizmo){
+    advancedDrag.active = false;
+    advancedDrag.object = null;
+    setVirtualCursorVisible(false);
+    if(document.pointerLockElement === controlDom && document.exitPointerLock){
+      try { document.exitPointerLock(); } catch(err){}
+    }
+    applyGizmoSnap(gizmo);
+  }
+
+  function handleLockedMove(e){
+    const gizmo = deps.getGizmo();
+    if(!advancedDrag.active || !gizmo || !gizmo.dragging || document.pointerLockElement !== controlDom) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setTransformModifierState(gizmo, e);
+    const pointer = wrapVirtualPointer(e.movementX || 0, e.movementY || 0);
+    if(pointer) gizmo.pointerMove(pointer);
+  }
+
+  function handlePointerLockChange(){
+    const locked = document.pointerLockElement === controlDom && advancedDrag.active;
+    setVirtualCursorVisible(locked);
   }
 
   function attachGizmoToSelection(){
@@ -183,6 +393,13 @@ function create(deps){
       deps.setGizmoUsingZUpProxy(false);
       applyGizmoSnap(gizmo);
       gizmo.attach(colliderProxy);
+      return;
+    }
+    if(usesMultiGizmoProxy() && syncMultiGizmoProxyFromSelection()){
+      gizmo.setSpace('world');
+      deps.setGizmoUsingZUpProxy(false);
+      applyGizmoSnap(gizmo);
+      gizmo.attach(gizmoProxy);
       return;
     }
     if(usesZUpGizmoProxy()){
@@ -218,13 +435,21 @@ function create(deps){
     let gizmo = deps.getGizmo();
     if(!gizmo && THREE.TransformControls){
       gizmo = new THREE.TransformControls(camE, controlDom);
+      patchGizmoPointerMove(gizmo);
       gizmo.setMode(ED.tool);
       gizmo.setSpace(transformControlsSpace());
       applyGizmoSnap(gizmo);
+      controlDom.addEventListener('pointerdown', e => {
+        advancedDrag.lastPointerDown = {clientX:e.clientX, clientY:e.clientY, pointerType:e.pointerType, event:e};
+      }, true);
+      document.addEventListener('pointermove', handleLockedMove, true);
+      document.addEventListener('mousemove', handleLockedMove, true);
+      document.addEventListener('pointerlockchange', handlePointerLockChange);
       gizmo.addEventListener('mouseDown', () => {
         deps.setGizmoPointerActive(true);
         deps.setGizmoSuppressSceneClick(true);
-        applyGizmoFineSnap(gizmo, shiftFineMode);
+        if(deps.isGizmoUsingZUpProxy()) syncZUpProxyFromSelected();
+        startAdvancedDrag(gizmo);
         if(ED.colliderEdit) deps.beginColliderHistory(ED.selected);
         else deps.beginTransformHistory();
         const activeOrbit = deps.getOrbit();
@@ -233,7 +458,7 @@ function create(deps){
       gizmo.addEventListener('mouseUp', () => {
         if(ED.colliderEdit) deps.commitColliderHistory('Collider transform');
         else deps.commitTransformHistory('Transform');
-        applyGizmoSnap(gizmo);
+        endAdvancedDrag(gizmo);
         deps.setGizmoPointerActive(false);
         setTimeout(() => { deps.setGizmoSuppressSceneClick(false); }, 0);
         const activeOrbit = deps.getOrbit();
@@ -247,13 +472,19 @@ function create(deps){
       addEventListener('keydown', e => {
         if(e.key === 'Shift'){
           shiftFineMode = true;
-          if(gizmo.dragging) applyGizmoFineSnap(gizmo, true);
+          if(gizmo.dragging) applyGizmoModifierSnap(gizmo);
+        } else if(e.key === 'Control' || e.key === 'Meta'){
+          ctrlSnapMode = true;
+          if(gizmo.dragging) applyGizmoModifierSnap(gizmo);
         }
       });
       addEventListener('keyup', e => {
         if(e.key === 'Shift'){
           shiftFineMode = false;
-          applyGizmoSnap(gizmo);
+          applyGizmoModifierSnap(gizmo);
+        } else if(e.key === 'Control' || e.key === 'Meta'){
+          ctrlSnapMode = false;
+          applyGizmoModifierSnap(gizmo);
         }
       });
       deps.setGizmo(gizmo);
@@ -291,6 +522,9 @@ function create(deps){
     usesZUpGizmoProxy,
     syncZUpProxyFromSelected,
     applyZUpProxyToSelected,
+    usesMultiGizmoProxy,
+    syncMultiGizmoProxyFromSelection,
+    applyMultiGizmoProxyToSelection,
     attachGizmoToSelection,
     ensureControls,
     setTool,

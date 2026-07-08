@@ -34,6 +34,36 @@
   transition:opacity .16s ease, transform .16s ease;
 }
 .lk-preview-warmup.on { opacity:1; transform:translateY(0); }
+.lk-transform-virtual-cursor {
+  position:fixed;
+  left:0;
+  top:0;
+  z-index:160;
+  width:18px;
+  height:18px;
+  margin:-9px 0 0 -9px;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity .08s ease;
+}
+.lk-transform-virtual-cursor.on { opacity:1; }
+.lk-transform-virtual-cursor::before,
+.lk-transform-virtual-cursor::after {
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  background:#ffd166;
+  box-shadow:0 0 10px rgba(255,209,102,.5);
+}
+.lk-transform-virtual-cursor::before { width:18px; height:2px; transform:translate(-50%, -50%); }
+.lk-transform-virtual-cursor::after { width:2px; height:18px; transform:translate(-50%, -50%); }
+.lk-transform-virtual-cursor span {
+  position:absolute;
+  inset:4px;
+  border:1px solid rgba(255,255,255,.92);
+  border-radius:50%;
+}
 body.editor-hud-hidden #lkTopbar,
 body.editor-hud-hidden #lkLeft,
 body.editor-hud-hidden #lkRight,
@@ -145,6 +175,36 @@ body:has(#lkEditor.active) #levelSelect {
   outline:none;
 }
 #lkViewportToolbar select:hover { border-color:#66d9ff; }
+.lk-viewport-options { position:relative; display:flex; align-items:center; }
+.lk-viewport-options-menu {
+  display:none;
+  position:absolute;
+  top:30px;
+  left:0;
+  min-width:170px;
+  padding:6px;
+  border:1px solid #2b3446;
+  border-radius:6px;
+  background:#111722;
+  box-shadow:0 10px 24px rgba(0,0,0,.38);
+  z-index:90;
+}
+.lk-viewport-options.open .lk-viewport-options-menu { display:flex; flex-direction:column; gap:4px; }
+.lk-viewport-options-menu label {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-height:26px;
+  padding:0 7px;
+  border-radius:4px;
+  color:#cfd6e4;
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+  cursor:pointer;
+}
+.lk-viewport-options-menu label:hover { background:#1b2130; color:#fff; }
+.lk-viewport-options-menu input { width:14px; height:14px; margin:0; accent-color:#66d9ff; }
 .lk-viewport-caption {
   color:#69758d;
   font-size:10px;
@@ -1256,6 +1316,21 @@ body:has(#lkEditor.active) #levelSelect {
   text-align:right;
 }
 .lk-check input { width:16px; height:16px; accent-color:#4a6da8; }
+.lk-tune-param {
+  display:flex; flex-direction:column; gap:5px; padding:4px 0 7px;
+  border-bottom:1px solid rgba(255,255,255,.04);
+}
+.lk-tune-param:last-child { border-bottom:none; }
+.lk-tune-expose {
+  align-self:flex-end; display:inline-flex; align-items:center; gap:6px;
+  color:#7e899f; font-size:11px; font-weight:800; letter-spacing:.4px; cursor:pointer;
+}
+.lk-tune-expose input { width:14px; height:14px; accent-color:#4be3a0; }
+.lk-tune-expose span { user-select:none; }
+.lk-tune-action-expose {
+  align-self:flex-start; margin:0 0 4px; padding:6px 8px;
+  border:1px solid rgba(255,255,255,.07); border-radius:6px; background:rgba(255,255,255,.025);
+}
 .lk-row select { flex:1; min-width:0; height:27px; background:#12161f; color:#dfe5f1; border:1px solid #2b3446; border-radius:4px; padding:0 6px; font-size:13px; }
 
 .lk-vec { display:flex; align-items:center; gap:5px; }

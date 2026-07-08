@@ -60,7 +60,9 @@ function create(deps){
         return;
       }
       const hit = deps.pickAt(e.clientX, e.clientY);
-      if(hit) deps.selectObject(hit.entity);
+      if(hit && deps.selectObjectWithModifiers){
+        deps.selectObjectWithModifiers(hit.entity, {toggle:e.ctrlKey || e.metaKey, add:e.shiftKey});
+      } else if(hit) deps.selectObject(hit.entity);
       else deps.deselect();
     }
     if(e.button === 2 && !wasFlying && dist < 5){

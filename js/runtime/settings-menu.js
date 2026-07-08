@@ -41,6 +41,8 @@ function createMenu(options){
   let currentMode = 'game';
   let setOpen = () => {};
   let toggle = () => {};
+  let navRaf = 0;
+  let navPrev = {buttons: [], axX: 0, axY: 0, repeat: {}};
 
   function applyAudio(){
     if(opts.applyAudio) opts.applyAudio();
@@ -76,6 +78,125 @@ function createMenu(options){
     const setTab = tab => {
       overlay.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('on', b.dataset.settingsTab === tab));
       overlay.querySelectorAll('[data-settings-section]').forEach(s => s.classList.toggle('on', s.dataset.settingsSection === tab));
+      const active = overlay.querySelector('[data-settings-tab="' + tab + '"]');
+      if(active && document.activeElement && document.activeElement.closest && document.activeElement.closest('#settingsOverlay')) active.focus();
+    };
+
+    const focusables = () => Array.from(overlay.querySelectorAll(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    )).filter(el => el.offsetParent !== null && !el.closest('[data-settings-section]:not(.on)'));
+    const focusMove = dir => {
+      const list = focusables();
+      if(!list.length) return;
+      const i = Math.max(0, list.indexOf(document.activeElement));
+      list[(i + dir + list.length) % list.length].focus();
+    };
+    const activeTabIndex = () => {
+      const tabs = Array.from(overlay.querySelectorAll('[data-settings-tab]')).filter(b => b.offsetParent !== null);
+      const i = tabs.findIndex(b => b.classList.contains('on'));
+      return {tabs, index: Math.max(0, i)};
+    };
+    const tabMove = dir => {
+      const cur = activeTabIndex();
+      if(!cur.tabs.length) return;
+      const next = cur.tabs[(cur.index + dir + cur.tabs.length) % cur.tabs.length];
+      if(next) setTab(next.dataset.settingsTab);
+    };
+    const buttonDown = (pad, i) => !!(pad && pad.buttons && pad.buttons[i] && pad.buttons[i].pressed);
+    const snapshotButtons = () => {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      const pad = Array.from(pads).find(Boolean);
+      navPrev.buttons = [];
+      navPrev.repeat = {};
+      if(pad && pad.buttons) pad.buttons.forEach((button, i) => { navPrev.buttons[i] = !!(button && button.pressed); });
+      navPrev.axX = pad && pad.axes ? pad.axes[0] || 0 : 0;
+      navPrev.axY = pad && pad.axes ? pad.axes[1] || 0 : 0;
+    };
+    const buttonEdge = (pad, i) => {
+      const down = buttonDown(pad, i);
+      const edge = down && !navPrev.buttons[i];
+      navPrev.buttons[i] = down;
+      return edge;
+    };
+    const activeMenuControl = () => {
+      const active = document.activeElement && document.activeElement.closest && document.activeElement.closest('#settingsOverlay') ? document.activeElement : null;
+      return active || focusables()[0] || null;
+    };
+    const emit = (el, type) => el && el.dispatchEvent(new Event(type, {bubbles: true}));
+    const adjustRange = (input, dir) => {
+      const min = input.min === '' ? 0 : Number(input.min);
+      const max = input.max === '' ? 100 : Number(input.max);
+      const rawStep = input.step && input.step !== 'any' ? Number(input.step) : 0;
+      const step = rawStep > 0 ? rawStep : Math.max(1, (max - min) / 100);
+      const next = Math.max(min, Math.min(max, Number(input.value || 0) + step * dir));
+      input.value = String(next);
+      emit(input, 'input');
+      emit(input, 'change');
+    };
+    const adjustSelect = (select, dir) => {
+      if(!select.options || !select.options.length) return;
+      const next = Math.max(0, Math.min(select.options.length - 1, select.selectedIndex + dir));
+      if(next === select.selectedIndex) return;
+      select.selectedIndex = next;
+      emit(select, 'change');
+    };
+    const adjustCheckbox = (input, dir) => {
+      const next = dir > 0;
+      if(input.checked === next) return;
+      input.checked = next;
+      emit(input, 'input');
+      emit(input, 'change');
+    };
+    const adjustFocused = dir => {
+      const target = activeMenuControl();
+      if(!target) return false;
+      if(target.matches && target.matches('input[type="range"]')){ adjustRange(target, dir); return true; }
+      if(target.matches && target.matches('select')){ adjustSelect(target, dir); return true; }
+      if(target.matches && target.matches('input[type="checkbox"]')){ adjustCheckbox(target, dir); return true; }
+      const nested = target.querySelector && target.querySelector('input[type="range"], select, input[type="checkbox"]');
+      if(nested && nested.matches('input[type="range"]')){ nested.focus(); adjustRange(nested, dir); return true; }
+      if(nested && nested.matches('select')){ nested.focus(); adjustSelect(nested, dir); return true; }
+      if(nested && nested.matches('input[type="checkbox"]')){ nested.focus(); adjustCheckbox(nested, dir); return true; }
+      return false;
+    };
+    const activateFocused = () => {
+      const target = activeMenuControl();
+      if(!target) return;
+      if(target.matches && target.matches('select')){ adjustSelect(target, 1); return; }
+      if(target.matches && target.matches('input[type="range"]')) return;
+      if(target.click) target.click();
+    };
+    const repeatAction = (key, active, fn) => {
+      if(!active){ delete navPrev.repeat[key]; return; }
+      const now = performance.now();
+      const state = navPrev.repeat[key] || {next: 0, fired: false};
+      if(now >= state.next){
+        fn();
+        state.fired = true;
+        state.next = now + (state.fired ? 135 : 320);
+      }
+      navPrev.repeat[key] = state;
+    };
+    const navTick = () => {
+      navRaf = requestAnimationFrame(navTick);
+      if(!overlay.classList.contains('open')) return;
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      const pad = Array.from(pads).find(Boolean);
+      if(!pad) return;
+      if(buttonEdge(pad, 4)) tabMove(-1);
+      if(buttonEdge(pad, 5)) tabMove(1);
+      if(buttonEdge(pad, 0)) activateFocused();
+      if(buttonEdge(pad, 1) || buttonEdge(pad, 9)) setOpen(false);
+      const axX = pad.axes && pad.axes[0] || 0;
+      const axY = pad.axes && pad.axes[1] || 0;
+      const yDir = (buttonDown(pad, 12) || axY < -.55) ? -1 : ((buttonDown(pad, 13) || axY > .55) ? 1 : 0);
+      const xDir = (buttonDown(pad, 14) || axX < -.55) ? -1 : ((buttonDown(pad, 15) || axX > .55) ? 1 : 0);
+      repeatAction('nav-y-up', yDir < 0, () => focusMove(-1));
+      repeatAction('nav-y-down', yDir > 0, () => focusMove(1));
+      repeatAction('nav-x-left', xDir < 0, () => { if(!adjustFocused(-1)) focusMove(-1); });
+      repeatAction('nav-x-right', xDir > 0, () => { if(!adjustFocused(1)) focusMove(1); });
+      navPrev.axX = axX;
+      navPrev.axY = axY;
     };
 
     const configureMode = mode => {
@@ -92,6 +213,15 @@ function createMenu(options){
       overlay.classList.toggle('open', open);
       btn.classList.toggle('open', open);
       gameState.paused = !!open && currentMode === 'game' && gameState.started;
+      document.body.classList.toggle('lk-gamepad-menu-nav', !!open);
+      if(open){
+        navPrev = {buttons: [], axX: 0, axY: 0, repeat: {}};
+        snapshotButtons();
+        requestAnimationFrame(() => {
+          const first = overlay.querySelector('[data-settings-tab].on') || focusables()[0];
+          if(first && first.focus) first.focus();
+        });
+      }
     };
     toggle = mode => setOpen(!overlay.classList.contains('open'), mode);
 
@@ -147,6 +277,7 @@ function createMenu(options){
       update();
     });
     configureMode('game');
+    navRaf = requestAnimationFrame(navTick);
   }
 
   init();

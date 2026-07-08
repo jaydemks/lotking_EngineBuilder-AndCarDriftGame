@@ -14,17 +14,26 @@
      · PLAYER    a slot mapped to a device instance.
 
    Binding resolution turns the *effective* scheme for a player's device
-   into a normalized drive command {steer, throttle, brake, handbrake, reset}.
+   into a normalized command {steer, throttle, brake, handbrake, reset, ...}.
    ========================================================= */
 (function(){
 'use strict';
 
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const DEVICE_TYPES = ['keyboard', 'gamepad', 'touch'];
 const SINGLE_INSTANCE = {touch: true};   // types that cannot be split
 
-const KEYBOARD_ACTIONS = ['throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'reset'];
-const GAMEPAD_ACTIONS = ['steer', 'throttle', 'brake', 'handbrake', 'reset'];
+const KEYBOARD_ACTIONS = [
+  'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'reset',
+  'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
+  'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
+];
+const GAMEPAD_ACTIONS = [
+  'steer', 'throttle', 'brake', 'handbrake', 'reset',
+  'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
+  'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
+  'cameraLookX', 'cameraLookY',
+];
 
 function clone(v){ return v == null ? v : JSON.parse(JSON.stringify(v)); }
 function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
@@ -40,6 +49,17 @@ function defaultKeyboardScheme(){
     steerRight: ['KeyD', 'ArrowRight'],
     handbrake:  ['Space'],
     reset:      ['KeyR'],
+    pauseMenu:  ['Escape'],
+    highBeams:  ['KeyF'],
+    radioToggle:['Tab'],
+    radioPlay:  ['KeyP'],
+    radioNext:  ['KeyN'],
+    radioPrev:  ['KeyB'],
+    cameraMode: ['KeyC'],
+    lookBack:   ['KeyV'],
+    tuningMenu: ['KeyU'],
+    mute:       ['KeyM'],
+    legend:     ['KeyH'],
   };
 }
 function defaultGamepadScheme(){
@@ -48,7 +68,20 @@ function defaultGamepadScheme(){
     throttle:  {type: 'button', index: 7},
     brake:     {type: 'button', index: 6},
     handbrake: {type: 'button', index: 0},
-    reset:     {type: 'button', index: 8},
+    reset:     {type: 'button', index: 10},
+    pauseMenu: {type: 'button', index: 9},
+    highBeams: {type: 'button', index: 2},
+    radioToggle:{type: 'button', index: 8},
+    radioPlay: {type: 'button', index: 3},
+    radioNext: {type: 'button', index: 15},
+    radioPrev: {type: 'button', index: 13},
+    cameraMode:{type: 'button', index: 11},
+    lookBack:  {type: 'button', index: 1},
+    tuningMenu:{type: 'button', index: 12},
+    mute:      {type: 'button', index: 4},
+    legend:    {type: 'button', index: 14},
+    cameraLookX:{type: 'axis', index: 2, scale: -1, deadzone: 0.16},
+    cameraLookY:{type: 'axis', index: 3, scale: 1, deadzone: 0.16},
   };
 }
 function defaultContext(id){
@@ -122,6 +155,7 @@ function migrateV1(raw){
 function normalizeConfig(raw){
   if(!raw || typeof raw !== 'object') return defaultConfig();
   if(raw.version !== CONFIG_VERSION && !raw.contexts) return migrateV1(raw);
+  const rawVersion = Number(raw.version || 2);
 
   const cfg = defaultConfig();
   if(raw.allowedDevices) for(const d of DEVICE_TYPES) if(typeof raw.allowedDevices[d] === 'boolean') cfg.allowedDevices[d] = raw.allowedDevices[d];
@@ -178,7 +212,31 @@ function normalizeConfig(raw){
       device: (p && typeof p.device === 'string') ? p.device : 'keyboard-1',
     }));
   }
+  migrateV2GamepadDefaults(cfg, rawVersion);
   return cfg;
+}
+
+function sameButtonBinding(bind, index){
+  return !!(bind && bind.type === 'button' && bind.index === index);
+}
+
+function migrateV2GamepadScheme(scheme){
+  if(!scheme || typeof scheme !== 'object') return;
+  if(sameButtonBinding(scheme.radioNext, 5)) scheme.radioNext = {type: 'button', index: 15};
+  if(sameButtonBinding(scheme.radioPrev, 4)) scheme.radioPrev = {type: 'button', index: 13};
+  if(sameButtonBinding(scheme.mute, 13)) scheme.mute = {type: 'button', index: 4};
+}
+
+function migrateV2GamepadDefaults(cfg, rawVersion){
+  if(rawVersion >= 3) return;
+  Object.keys(cfg.contexts || {}).forEach(ctxId => {
+    const ctx = cfg.contexts[ctxId];
+    if(ctx && ctx.schemes) migrateV2GamepadScheme(ctx.schemes.gamepad);
+  });
+  Object.keys(cfg.overrides || {}).forEach(devId => {
+    const byCtx = cfg.overrides[devId];
+    Object.keys(byCtx || {}).forEach(ctxId => migrateV2GamepadScheme(byCtx[ctxId]));
+  });
 }
 
 // make sure at least one instance of each allowed type exists
@@ -303,7 +361,14 @@ function applyDeadzone(v, dz){
   if(Math.abs(v) <= d) return 0;
   return clampAxis((v - Math.sign(v) * d) / (1 - d));
 }
-function neutralDrive(){ return {steer: 0, throttle: 0, brake: 0, handbrake: false, reset: false}; }
+function neutralDrive(){
+  return {
+    steer: 0, throttle: 0, brake: 0, handbrake: false, reset: false,
+    pauseMenu: false, highBeams: false, radioToggle: false, radioPlay: false,
+    radioNext: false, radioPrev: false, cameraMode: false, lookBack: false,
+    tuningMenu: false, mute: false, legend: false, cameraLookX: 0, cameraLookY: 0,
+  };
+}
 // combine two drive commands (keep the stronger analog signal, OR the buttons)
 function mergeDrive(a, b){
   if(!a) return b || neutralDrive();
@@ -314,6 +379,19 @@ function mergeDrive(a, b){
     brake: Math.max(a.brake, b.brake),
     handbrake: a.handbrake || b.handbrake,
     reset: a.reset || b.reset,
+    pauseMenu: a.pauseMenu || b.pauseMenu,
+    highBeams: a.highBeams || b.highBeams,
+    radioToggle: a.radioToggle || b.radioToggle,
+    radioPlay: a.radioPlay || b.radioPlay,
+    radioNext: a.radioNext || b.radioNext,
+    radioPrev: a.radioPrev || b.radioPrev,
+    cameraMode: a.cameraMode || b.cameraMode,
+    lookBack: a.lookBack || b.lookBack,
+    tuningMenu: a.tuningMenu || b.tuningMenu,
+    mute: a.mute || b.mute,
+    legend: a.legend || b.legend,
+    cameraLookX: Math.abs(b.cameraLookX || 0) > Math.abs(a.cameraLookX || 0) ? b.cameraLookX : a.cameraLookX,
+    cameraLookY: Math.abs(b.cameraLookY || 0) > Math.abs(a.cameraLookY || 0) ? b.cameraLookY : a.cameraLookY,
   };
 }
 
@@ -326,6 +404,19 @@ function resolveKeyboard(scheme, kb){
     brake: anyDown(scheme.brake) ? 1 : 0,
     handbrake: anyDown(scheme.handbrake),
     reset: anyDown(scheme.reset),
+    pauseMenu: anyDown(scheme.pauseMenu),
+    highBeams: anyDown(scheme.highBeams),
+    radioToggle: anyDown(scheme.radioToggle),
+    radioPlay: anyDown(scheme.radioPlay),
+    radioNext: anyDown(scheme.radioNext),
+    radioPrev: anyDown(scheme.radioPrev),
+    cameraMode: anyDown(scheme.cameraMode),
+    lookBack: anyDown(scheme.lookBack),
+    tuningMenu: anyDown(scheme.tuningMenu),
+    mute: anyDown(scheme.mute),
+    legend: anyDown(scheme.legend),
+    cameraLookX: 0,
+    cameraLookY: 0,
   };
 }
 function readGamepadValue(bind, gp){
@@ -346,6 +437,19 @@ function resolveGamepad(scheme, gp){
     brake: clamp01(readGamepadValue(scheme.brake, gp)),
     handbrake: readGamepadPressed(scheme.handbrake, gp),
     reset: readGamepadPressed(scheme.reset, gp),
+    pauseMenu: readGamepadPressed(scheme.pauseMenu, gp),
+    highBeams: readGamepadPressed(scheme.highBeams, gp),
+    radioToggle: readGamepadPressed(scheme.radioToggle, gp),
+    radioPlay: readGamepadPressed(scheme.radioPlay, gp),
+    radioNext: readGamepadPressed(scheme.radioNext, gp),
+    radioPrev: readGamepadPressed(scheme.radioPrev, gp),
+    cameraMode: readGamepadPressed(scheme.cameraMode, gp),
+    lookBack: readGamepadPressed(scheme.lookBack, gp),
+    tuningMenu: readGamepadPressed(scheme.tuningMenu, gp),
+    mute: readGamepadPressed(scheme.mute, gp),
+    legend: readGamepadPressed(scheme.legend, gp),
+    cameraLookX: clampAxis(readGamepadValue(scheme.cameraLookX, gp)),
+    cameraLookY: clampAxis(readGamepadValue(scheme.cameraLookY, gp)),
   };
 }
 function resolveTouch(touch){
@@ -357,6 +461,19 @@ function resolveTouch(touch){
     brake: clamp01(a.brake || 0),
     handbrake: !!a.handbrake,
     reset: !!a.reset,
+    pauseMenu: !!a.pauseMenu,
+    highBeams: !!a.highBeams,
+    radioToggle: !!a.radioToggle,
+    radioPlay: !!a.radioPlay,
+    radioNext: !!a.radioNext,
+    radioPrev: !!a.radioPrev,
+    cameraMode: !!a.cameraMode,
+    lookBack: !!a.lookBack,
+    tuningMenu: !!a.tuningMenu,
+    mute: !!a.mute,
+    legend: !!a.legend,
+    cameraLookX: clampAxis(a.cameraLookX || 0),
+    cameraLookY: clampAxis(a.cameraLookY || 0),
   };
 }
 
@@ -372,7 +489,7 @@ function keyLabel(code){
   };
   return map[code] || code;
 }
-const GAMEPAD_BUTTON_LABELS = {0:'A',1:'B',2:'X',3:'Y',4:'LB',5:'RB',6:'LT',7:'RT',8:'Back',9:'Start',10:'L3',11:'R3',12:'▲',13:'▼',14:'◀',15:'▶'};
+const GAMEPAD_BUTTON_LABELS = {0:'A',1:'B',2:'X',3:'Y',4:'LB',5:'RB',6:'LT',7:'RT',8:'View',9:'Menu',10:'L3',11:'R3',12:'▲',13:'▼',14:'◀',15:'▶'};
 function gamepadBindLabel(b){
   if(!b) return '—';
   if(b.type === 'axis') return 'Axis ' + b.index + (b.scale < 0 ? ' −' : '');
@@ -387,6 +504,19 @@ const ACTION_LABELS = {
   steer: {en: 'Steering', it: 'Sterzo'},
   handbrake: {en: 'Handbrake (drift)', it: 'Freno a mano (drift)'},
   reset: {en: 'Reset car', it: 'Reset auto'},
+  pauseMenu: {en: 'Pause menu', it: 'Menu pausa'},
+  highBeams: {en: 'Flash headlights', it: 'Lampeggia fari'},
+  radioToggle: {en: 'Radio open/close', it: 'Apri/chiudi radio'},
+  radioPlay: {en: 'Radio play/pause', it: 'Radio play/pausa'},
+  radioNext: {en: 'Radio next', it: 'Radio avanti'},
+  radioPrev: {en: 'Radio previous', it: 'Radio indietro'},
+  cameraMode: {en: 'Camera mode', it: 'Modalita camera'},
+  lookBack: {en: 'Look back', it: 'Guarda dietro'},
+  tuningMenu: {en: 'Driving setup', it: 'Setup guida'},
+  mute: {en: 'Mute audio', it: 'Muto audio'},
+  legend: {en: 'Help panel', it: 'Pannello aiuto'},
+  cameraLookX: {en: 'Camera look X', it: 'Camera look X'},
+  cameraLookY: {en: 'Camera look Y', it: 'Camera look Y'},
 };
 
 window.LK_RUNTIME_INPUT_ACTIONS = Object.freeze({

@@ -194,6 +194,7 @@ function objectLocalMeshBoxes(obj){
     if(!localBox.isEmpty()) boxes.push({
       box: localBox,
       name: node.name || (node.parent && node.parent.name) || ('Mesh ' + (boxes.length + 1)),
+      uuid: node.uuid,
     });
   });
   return boxes;
@@ -996,6 +997,8 @@ function syncCollider(obj){
   col.ref.y = wc.y + (Number.isFinite(offY) ? offY : 0);
   col.ref.z = wc.z + (Number.isFinite(offZ) ? offZ : 0);
   const mode = shape.mode === 'complex' ? 'complex' : 'simple';
+  col.ref.colliderMode = mode;
+  col.ref.meshCollider = false;
   if(col.kind === 'circle'){
     removeCompoundColliderParts(col.ref);
     const r = Number(shape.r);
@@ -1010,6 +1013,7 @@ function syncCollider(obj){
     col.ref.rotZ = Number.isFinite(rotZ) ? rotZ : obj.rotation.z;
     col.ref.rot = col.ref.rotY;
   } else {
+    col.ref.meshCollider = mode === 'complex';
     const hx = Number(shape.hx);
     const hy = Number(shape.hy);
     const hz = Number(shape.hz);
@@ -1055,7 +1059,10 @@ function syncCollider(obj){
           part._boxList = list;
           part.partIndex = i;
           part.partName = partName;
+          part.partMeshUuid = partInfo && partInfo.uuid;
           part.partMode = partMode;
+          part.colliderMode = partMode;
+          part.meshCollider = partMode === 'complex';
           part.enabled = col.ref.enabled !== false && partMode !== 'off';
           part.physics = !!col.ref.physics;
           part.mass = col.ref.mass;
@@ -1099,6 +1106,62 @@ function physicsMassFrom(value){
 function physicsImpactFrom(value){
   const raw = Number(value);
   return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0.25;
+}
+function colliderKindFrom(value){
+  return value === 'circle' ? 'circle' : 'box';
+}
+function ensureStoredCollider(GAME, obj, kind){
+  if(!GAME || !GAME.world || !GAME.world.colliders || !obj) return null;
+  const kindKey = colliderKindFrom(kind);
+  const old = obj.userData && obj.userData.collider;
+  if(old && old.ref){
+    old.kind = colliderKindFrom(old.kind || kindKey);
+    old.ref.owner = obj;
+    old.ref.enabled = true;
+    if(old.kind === 'circle'){
+      if(!GAME.world.colliders.circle.includes(old.ref)) GAME.world.colliders.circle.push(old.ref);
+    } else {
+      old.ref._boxList = GAME.world.colliders.box;
+      if(!GAME.world.colliders.box.includes(old.ref)) GAME.world.colliders.box.push(old.ref);
+    }
+    return old.ref;
+  }
+  const mass = physicsMassFrom(obj.userData && obj.userData.physicsMass);
+  const impact = physicsImpactFrom(obj.userData && obj.userData.physicsImpact);
+  const ref = kindKey === 'circle'
+    ? {x:0, z:0, r:1, mass, impact, physics:false, enabled:true, owner:obj}
+    : {x:0, z:0, hx:1, hz:1, mass, impact, physics:false, enabled:true, owner:obj, _boxList:GAME.world.colliders.box};
+  if(kindKey === 'circle') GAME.world.colliders.circle.push(ref);
+  else GAME.world.colliders.box.push(ref);
+  obj.userData.collider = {kind: kindKey, ref};
+  return ref;
+}
+function applyBuiltinRuntimeProps(GAME, obj, props){
+  if(!obj || !obj.userData || obj.userData.editorType !== 'mesh' || !props) return;
+  const hasCollisionState = props.collide != null || props.physics != null;
+  if(props.driveSurface != null) obj.userData.driveSurface = props.driveSurface === true;
+  if(props.physicsMass != null) obj.userData.physicsMass = physicsMassFrom(props.physicsMass);
+  if(props.physicsImpact != null) obj.userData.physicsImpact = physicsImpactFrom(props.physicsImpact);
+  if(!hasCollisionState && props.driveSurface == null && props.physicsMass == null && props.physicsImpact == null) return;
+  const wantsPhysics = props.physics === true;
+  const wantsCollider = props.collide === true || wantsPhysics;
+  let ref = obj.userData.collider && obj.userData.collider.ref;
+  if(wantsCollider){
+    ref = ensureStoredCollider(GAME, obj, props.colliderKind);
+    if(ref){
+      ref.enabled = true;
+      ref.physics = wantsPhysics;
+      ref.owner = obj;
+      ref.mass = physicsMassFrom(props.physicsMass != null ? props.physicsMass : ref.mass);
+      ref.impact = physicsImpactFrom(props.physicsImpact != null ? props.physicsImpact : ref.impact);
+      obj.userData.physicsMass = ref.mass;
+      obj.userData.physicsImpact = ref.impact;
+    }
+  } else if(ref){
+    ref.enabled = false;
+    ref.physics = false;
+  }
+  obj.userData.physicsEnabled = wantsPhysics;
 }
 
 // ------------------------------------------------ light props
@@ -2169,23 +2232,27 @@ function softTex(){
   _softTex = new THREE.CanvasTexture(c);
   return _softTex;
 }
+const EFFECT_RENDER_ORDER = 60;
 const EFFECT_PRESETS = {
-  smoke:  {rate:12, size:1.8, life:2.2, rise:2.4, spread:.7, gravity:0,   color:0xbfc3cc, opacity:.4,  additive:false, grow:true},
-  fire:   {rate:38, size:1.3, life:.85, rise:3.2, spread:.7, gravity:0,   color:0xff8830, opacity:.85, additive:true,  grow:false},
-  sparks: {rate:55, size:.28, life:.75, rise:3.5, spread:3,  gravity:-7,  color:0xffd966, opacity:.95, additive:true,  grow:false},
-  steam:  {rate:18, size:1.1, life:1.4, rise:3.6, spread:.4, gravity:0,   color:0xe8f0ff, opacity:.35, additive:false, grow:true},
-  glow:   {rate:2,  size:4.5, life:2.6, rise:.1,  spread:.1, gravity:0,   color:0x66c2ff, opacity:.5,  additive:true,  grow:false},
+  smoke:  {rate:12, size:1.8, life:2.2, rise:2.4, spread:.7, gravity:0,   color:0xbfc3cc, opacity:.4,  additive:false, grow:true,  renderOrder:EFFECT_RENDER_ORDER},
+  fire:   {rate:38, size:1.3, life:.85, rise:3.2, spread:.7, gravity:0,   color:0xff8830, opacity:.85, additive:true,  grow:false, renderOrder:EFFECT_RENDER_ORDER + 12},
+  sparks: {rate:55, size:.28, life:.75, rise:3.5, spread:3,  gravity:-7,  color:0xffd966, opacity:.95, additive:true,  grow:false, renderOrder:EFFECT_RENDER_ORDER + 12},
+  steam:  {rate:18, size:1.1, life:1.4, rise:3.6, spread:.4, gravity:0,   color:0xe8f0ff, opacity:.35, additive:false, grow:true,  renderOrder:EFFECT_RENDER_ORDER},
+  glow:   {rate:2,  size:4.5, life:2.6, rise:.1,  spread:.1, gravity:0,   color:0x66c2ff, opacity:.5,  additive:true,  grow:false, renderOrder:EFFECT_RENDER_ORDER + 8},
 };
 function createEmitter(kind, params){
   const p = Object.assign({kind: kind || 'smoke'}, EFFECT_PRESETS[kind] || EFFECT_PRESETS.smoke, params || {});
+  p.renderOrder = Number.isFinite(Number(p.renderOrder)) ? Number(p.renderOrder) : EFFECT_RENDER_ORDER;
   const gp = new THREE.Group();
+  gp.renderOrder = p.renderOrder;
   const N = Math.min(220, Math.max(16, Math.ceil(p.rate * p.life * 1.5)));
   const parts = [];
   for(let i=0;i<N;i++){
     const s = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: softTex(), color: p.color, transparent: true, opacity: 0, depthWrite: false,
+      map: softTex(), color: p.color, transparent: true, opacity: 0, depthWrite: false, depthTest: true,
       blending: p.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     }));
+    s.renderOrder = p.renderOrder;
     s.visible = false; gp.add(s);
     parts.push({s, life:0, max:1, vel:new THREE.Vector3()});
   }
@@ -2217,6 +2284,11 @@ function createEmitter(kind, params){
     p.color = hex;
     for(const q of parts) q.s.material.color.setHex(hex);
   };
+  gp.userData.effectSetRenderOrder = value => {
+    p.renderOrder = Number.isFinite(Number(value)) ? Number(value) : EFFECT_RENDER_ORDER;
+    gp.renderOrder = p.renderOrder;
+    for(const q of parts) q.s.renderOrder = p.renderOrder;
+  };
   return gp;
 }
 
@@ -2227,13 +2299,37 @@ function loadGlbRaw(src){
     new THREE.GLTFLoader().load(src, g => resolve(g.scene), undefined, err => reject(err));
   });
 }
-function loadGlb(src, fit){
+function vehicleLikeGlbEntry(entry){
+  const text = [
+    entry && entry.name,
+    entry && entry.source,
+    entry && entry.src,
+    entry && entry.asset && entry.asset.name,
+    entry && entry.asset && entry.asset.source,
+    entry && entry.asset && entry.asset.key,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /\b(car|vehicle|auto|truck|van|bus|taxi|coupe|sedan|suv|hatchback|ambulance|police|macchina|veicolo|camion|furgone)\b/.test(text);
+}
+function normalizeVehicleGlbRoot(root){
+  const box = new THREE.Box3().setFromObject(root);
+  if(box.isEmpty()) return false;
+  const size = box.getSize(new THREE.Vector3());
+  if(size.x <= size.z * 1.08) return false;
+  root.rotation.y += Math.PI / 2;
+  root.updateMatrixWorld(true);
+  return true;
+}
+function loadGlb(src, fit, opts){
+  opts = opts || {};
   return new Promise((resolve, reject) => {
     if(typeof THREE.GLTFLoader === 'undefined'){ reject(new Error('GLTFLoader non disponibile')); return; }
     const loader = new THREE.GLTFLoader();
     loader.load(src, g => {
       const root = g.scene;
       root.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
+      if(opts.vehicleLike && normalizeVehicleGlbRoot(root)){
+        root.userData.lkVehicleAxisNormalized = true;
+      }
       // normalize: fit to target size, bottom on ground, centered
       const wrap = new THREE.Group();
       wrap.add(root);
@@ -2252,9 +2348,10 @@ function loadGlb(src, fit){
   });
 }
 function loadGlbEntry(entry){
-  if(entry.src) return loadGlb(entry.src, entry.fit);
+  const opts = {vehicleLike: vehicleLikeGlbEntry(entry)};
+  if(entry.src) return loadGlb(entry.src, entry.fit, opts);
   const dbKey = entry.dbKey || (entry.asset && entry.asset.dbKey);
-  if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey).then(url => loadGlb(url, entry.fit));
+  if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey).then(url => loadGlb(url, entry.fit, opts));
   return Promise.reject(new Error('sorgente GLB non disponibile'));
 }
 
@@ -2303,6 +2400,7 @@ function registerAdded(GAME, obj, entry){
   obj.userData.physicsImpact = defaultImpact;
   if(entry && entry.driveSurface != null) obj.userData.driveSurface = !!entry.driveSurface;
   if(entry && entry.colliderShape) obj.userData.colliderShape = cloneData(entry.colliderShape);
+  if(entry && (entry.colliderDummyVisibility === 'show' || entry.colliderDummyVisibility === 'hide')) obj.userData.colliderDummyVisibility = entry.colliderDummyVisibility;
   if(entry && entry.colliderOnly){
     obj.userData.colliderOnly = true;
     obj.traverse(n => {
@@ -2375,6 +2473,9 @@ function applyEnvironment(GAME, env){
   if(env.sunBloom && GAME.systems.sky.sunBloom) GAME.systems.sky.sunBloom.set(env.sunBloom);
   if(env.volClouds && GAME.systems.sky.volClouds) GAME.systems.sky.volClouds.set(env.volClouds);
   if(env.rain && GAME.systems.rain) GAME.systems.rain.set(env.rain);
+  if(GAME.systems.physics && GAME.systems.physics.setSurfaceWorldCollision && env.surfaceWorldCollision != null){
+    GAME.systems.physics.setSurfaceWorldCollision(env.surfaceWorldCollision !== false);
+  }
   if(GAME.player && GAME.player.updateLights) GAME.player.updateLights();
 }
 
@@ -2399,6 +2500,7 @@ function collectEnvironment(GAME){
   if(GAME.systems.sky.sunBloom) env.sunBloom = GAME.systems.sky.sunBloom.get();
   if(GAME.systems.sky.volClouds && GAME.systems.sky.volClouds.get()) env.volClouds = GAME.systems.sky.volClouds.get();
   if(GAME.systems.rain) env.rain = GAME.systems.rain.get();
+  if(GAME.systems.physics && GAME.systems.physics.getSurfaceWorldCollision) env.surfaceWorldCollision = GAME.systems.physics.getSurfaceWorldCollision();
   return env;
 }
 
@@ -2428,7 +2530,11 @@ function apply(GAME){
     const o = byId[id];
     if(!o) continue;
     applyT(o, data.transforms[id]);
-    if(data.props && data.props[id] && data.props[id].colliderShape) o.userData.colliderShape = cloneData(data.props[id].colliderShape);
+    const storedProps = data.props && data.props[id];
+    if(storedProps && storedProps.colliderShape) o.userData.colliderShape = cloneData(storedProps.colliderShape);
+    if(storedProps) applyBuiltinRuntimeProps(GAME, o, storedProps);
+    if(storedProps && (storedProps.colliderDummyVisibility === 'show' || storedProps.colliderDummyVisibility === 'hide')) o.userData.colliderDummyVisibility = storedProps.colliderDummyVisibility;
+    else delete o.userData.colliderDummyVisibility;
     syncCollider(o);
   }
   for(const id in data.transforms){
@@ -2442,6 +2548,14 @@ function apply(GAME){
     const light = o.isLight ? o : o.userData.light;
     const props = Object.assign({}, data.props[id]);
     delete props.colliderShape;
+    delete props.colliderDummyVisibility;
+    delete props.collide;
+    delete props.physics;
+    delete props.physicsMass;
+    delete props.physicsImpact;
+    delete props.colliderKind;
+    delete props.driveSurface;
+    if(!Object.keys(props).length) continue;
     if(light) applyLightProps(light, props);
     else applyMatProps(o, props);
   }
@@ -2551,7 +2665,27 @@ function collect(GAME){
       const light = o.isLight ? o : null;
       if(light) d.props[id] = lightProps(light);
       else if(o.userData.matProps) d.props[id] = Object.assign({}, o.userData.matProps);
+      const colliderRef = o.userData.collider && o.userData.collider.ref ? o.userData.collider.ref : null;
+      if(colliderRef){
+        d.props[id] = Object.assign({}, d.props[id] || {}, {
+          collide: colliderRef.enabled !== false,
+          physics: !!(o.userData.physicsEnabled || colliderRef.physics),
+          physicsMass: physicsMassFrom(colliderRef.mass != null ? colliderRef.mass : o.userData.physicsMass),
+          physicsImpact: physicsImpactFrom(colliderRef.impact != null ? colliderRef.impact : o.userData.physicsImpact),
+          colliderKind: colliderKindFrom(o.userData.collider && o.userData.collider.kind),
+        });
+      } else if(o.userData.physicsEnabled){
+        d.props[id] = Object.assign({}, d.props[id] || {}, {
+          collide: true,
+          physics: true,
+          physicsMass: physicsMassFrom(o.userData.physicsMass),
+          physicsImpact: physicsImpactFrom(o.userData.physicsImpact),
+          colliderKind: 'box',
+        });
+      }
+      if(o.userData.driveSurface != null) d.props[id] = Object.assign({}, d.props[id] || {}, {driveSurface: !!o.userData.driveSurface});
       if(o.userData.colliderShape) d.props[id] = Object.assign({}, d.props[id] || {}, {colliderShape: cloneData(o.userData.colliderShape)});
+      if(o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide') d.props[id] = Object.assign({}, d.props[id] || {}, {colliderDummyVisibility: o.userData.colliderDummyVisibility});
     } else if(o.userData.addedEntry){
       const e = o.userData.addedEntry;
       const oldEntry = freezeRuntimeTransforms ? oldAddedById.get(e.id) : null;
@@ -2566,6 +2700,8 @@ function collect(GAME){
       if(o.userData.colliderOnly) e.colliderOnly = true;
       if(o.userData.driveSurface != null) e.driveSurface = !!o.userData.driveSurface;
       if(o.userData.colliderShape) e.colliderShape = cloneData(o.userData.colliderShape);
+      if(o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide') e.colliderDummyVisibility = o.userData.colliderDummyVisibility;
+      else delete e.colliderDummyVisibility;
       if(colliderRef && colliderRef.mass != null){
         e.physicsMass = physicsMassFrom(o.userData.collider.ref.mass);
       } else {

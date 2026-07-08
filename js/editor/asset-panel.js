@@ -10,6 +10,24 @@ function create(deps){
   const ED = deps.ED;
   const documentRef = deps.document || document;
   const tr = (en, it) => deps.GAME && deps.GAME.i18n && deps.GAME.i18n.lang === 'it' ? (it || en) : en;
+  let assetOrder = [];
+
+  function selectedAssetRefs(){
+    return Array.isArray(ED.selectedAssets) && ED.selectedAssets.length > 1 ? ED.selectedAssets : (ED.selectedAsset ? [ED.selectedAsset] : []);
+  }
+
+  function assetRefsFromDrop(e){
+    if(!e || !e.dataTransfer) return [];
+    const raw = e.dataTransfer.getData('application/x-lotking-assets');
+    if(raw){
+      try {
+        const parsed = JSON.parse(raw);
+        if(Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch(err){}
+    }
+    const single = e.dataTransfer.getData('application/x-lotking-asset');
+    return single ? [single] : [];
+  }
 
   function button(label, title, fn){
     const b = documentRef.createElement('button');
@@ -20,15 +38,34 @@ function create(deps){
   }
 
   function makeCard(item){
+    if(!assetOrder.includes(item.ref)) assetOrder.push(item.ref);
     const div = documentRef.createElement('div');
-    div.className = 'lk-asset-item lk-asset-' + item.kind + (ED.selectedAsset === item.ref ? ' sel' : '') + (item.active ? ' active' : '');
+    div.className = 'lk-asset-item lk-asset-' + item.kind + (selectedAssetRefs().includes(item.ref) ? ' sel' : '') + (item.active ? ' active' : '');
     div.dataset.assetRef = item.ref;
     div.draggable = true;
 
     const thumb = documentRef.createElement('div');
     thumb.className = 'lk-asset-thumb';
-    if(item.thumbUrl) thumb.style.backgroundImage = 'url(' + item.thumbUrl + ')';
+    const setThumbImage = url => {
+      if(!url) return;
+      thumb.style.backgroundImage = 'url(' + url + ')';
+      Array.from(thumb.childNodes).forEach(node => {
+        if(node.nodeType === 3) node.nodeValue = '';
+      });
+    };
+    if(item.thumbUrl) setThumbImage(item.thumbUrl);
     else thumb.textContent = item.icon || '▣';
+    if(!item.thumbUrl && item.thumbDbKey && window.LK_ASSET_BLOBS){
+      window.LK_ASSET_BLOBS.getUrl(item.thumbDbKey).then(url => {
+        if(!url || !thumb.isConnected) return;
+        setThumbImage(url);
+      }).catch(()=>{});
+    } else if(!item.thumbUrl && item.thumbPromise){
+      item.thumbPromise().then(url => {
+        if(!url || !thumb.isConnected) return;
+        setThumbImage(url);
+      }).catch(()=>{});
+    }
     (item.badges || []).forEach(badge => {
       const tag = documentRef.createElement('span');
       tag.className = 'lk-asset-badge lk-asset-badge-' + String(badge.type || 'info');
@@ -41,10 +78,13 @@ function create(deps){
       const thumbCache = deps.thumbCache;
       if(thumbCache && thumbCache.has(sid)){
         const cached = thumbCache.get(sid);
-        if(cached){ thumb.style.backgroundImage = 'url(' + cached + ')'; thumb.textContent = ''; }
+        if(cached) setThumbImage(cached);
       } else if(deps.queueThumb) {
         deps.queueThumb(item.thumbObject, thumb);
       }
+    }
+    if(item.thumbAsset && deps.queueAssetThumb){
+      deps.queueAssetThumb(item.thumbAsset, thumb);
     }
 
     const meta = documentRef.createElement('div');
@@ -58,16 +98,28 @@ function create(deps){
     (item.actions || []).forEach(a => actions.appendChild(button(a.label, a.title, a.fn)));
     div.append(thumb, meta, actions);
 
-    div.addEventListener('click', () => deps.selectAssetItem(item.ref));
-    div.addEventListener('dblclick', () => { if(item.defaultAction) item.defaultAction(); });
+    div.addEventListener('click', ev => deps.selectAssetItem(item.ref, {
+      toggle: ev.ctrlKey || ev.metaKey,
+      range: ev.shiftKey,
+      rangeRefs: assetOrder,
+    }));
+    div.addEventListener('dblclick', ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const asset = deps.getAssetByRef(item.ref) || item;
+      const opened = deps.openAssetProperties ? deps.openAssetProperties(asset) : false;
+      if(!opened && item.defaultAction) item.defaultAction();
+    });
     div.addEventListener('contextmenu', ev => {
       ev.preventDefault(); ev.stopPropagation();
-      deps.selectAssetItem(item.ref);
+      if(!selectedAssetRefs().includes(item.ref)) deps.selectAssetItem(item.ref);
       deps.openMenu(deps.assetContextMenuItems(deps.getAssetByRef(item.ref)), ev.clientX, ev.clientY);
     });
     div.addEventListener('dragstart', ev => {
+      const refs = selectedAssetRefs().includes(item.ref) ? selectedAssetRefs().slice() : [item.ref];
       deps.setAssetDragRef(item.ref);
       ev.dataTransfer.setData('application/x-lotking-asset', item.ref);
+      ev.dataTransfer.setData('application/x-lotking-assets', JSON.stringify(refs));
       ev.dataTransfer.effectAllowed = item.draggable ? 'copyMove' : 'move';
     });
     div.addEventListener('dragend', () => deps.setAssetDragRef(null));
@@ -105,15 +157,17 @@ function create(deps){
 
   function preparePanel(box){
     box.innerHTML = '';
+    assetOrder = [];
     box.ondragover = e => {
-      if(Array.from(e.dataTransfer.types || []).includes('application/x-lotking-asset')){
+      const types = Array.from(e.dataTransfer.types || []);
+      if(types.includes('application/x-lotking-asset') || types.includes('application/x-lotking-assets')){
         e.preventDefault(); e.dataTransfer.dropEffect = 'move';
       }
     };
     box.ondrop = e => {
-      const ref = e.dataTransfer && e.dataTransfer.getData('application/x-lotking-asset');
-      if(ref && e.target === box){
-        delete deps.folderAssignments('assets')[ref];
+      const refs = assetRefsFromDrop(e);
+      if(refs.length && e.target === box){
+        refs.forEach(ref => { delete deps.folderAssignments('assets')[ref]; });
         deps.writeFolderState();
         deps.refreshAssetsPanel();
       }
@@ -153,8 +207,12 @@ function create(deps){
         source:asset.source || asset.key,
         icon:isTexture ? '▧' : '📦',
         thumbUrl:isTexture ? (asset.src || null) : null,
+        thumbDbKey:isTexture ? (asset.dbKey || null) : null,
+        thumbPromise:isTexture && !asset.src && !asset.dbKey && deps.resolveImportedAssetUrl ? () => deps.resolveImportedAssetUrl(asset) : null,
+        thumbAsset:!isTexture ? asset : null,
         filterType:isTexture ? 'texture' : 'glb',
         draggable:true,
+        raw:asset,
         badges: asset.rigged ? [{label:'Rigged', type:'rigged'}] : [],
       };
       const refItem = () => ({kind:item.kind, ref:item.ref, id:asset.id, name:asset.name, raw:asset});

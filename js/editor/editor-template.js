@@ -66,6 +66,12 @@ function create(){
         <option value="unlit">Unlit</option>
         <option value="reflect">Reflections</option>
       </select>
+      <div class="lk-viewport-options">
+        <button id="lkViewportOptions" type="button" title="Viewport visibility options">☑</button>
+        <div id="lkViewportOptionsMenu" class="lk-viewport-options-menu">
+          <label><input id="lkShowCollisionDummies" type="checkbox"><span>Collision dummies</span></label>
+        </div>
+      </div>
       <button id="lkViewportFps" type="button" title="Toggle FPS status">FPS</button>
       <button id="lkViewportPerf" type="button" title="Toggle performance debug">▤</button>
       <span class="lk-viewport-caption">VIEWPORT</span>
@@ -126,7 +132,7 @@ function create(){
   </section>
   <div id="lkStatus">
     <b>Lot King Engine Editor</b>
-    <span class="lk-status-help"><b>LMB</b> select/orbit · <b>RMB drag</b> fly · <b>RMB click</b> quick menu · <b>MMB</b> pan · <b>Wheel</b> zoom/fly speed · <b>Q/W/E/R</b> select/move/rotate/scale · <b>Ctrl+Z/Y</b> undo/redo · <b>Ctrl+R</b> repeat transform · <b>Ctrl+D</b> duplicate · <b>Del</b> delete</span>
+    <span class="lk-status-help"><b>LMB</b> select/orbit · <b>RMB drag</b> fly · <b>RMB click</b> quick menu · <b>MMB</b> pan · <b>Wheel</b> zoom/fly speed · <b>Q/W/E/R</b> select/move/rotate/scale · <b>Shift drag</b> 0.001 precision · <b>Ctrl drag</b> snap · <b>Ctrl+Z/Y</b> undo/redo · <b>Ctrl+R</b> repeat transform · <b>Ctrl+D</b> duplicate · <b>Del</b> delete</span>
     <span id="lkStatusRightWrap">
       <span id="lkStatusRight"></span>
       <span id="lkStatusWork">

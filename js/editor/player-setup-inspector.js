@@ -25,6 +25,7 @@ function create(deps){
   function buildDrivingTuning(box){
     const sg = section(tr('DRIVING (SETUP)', 'GUIDA (SETUP)'), false);
     const tun = GAME.player.tuning.values;
+    const exposed = tun.exposed || {};
     const applyPreset = (name, label) => {
       const preset = GAME.player.tuning.presets && GAME.player.tuning.presets[name];
       if(!preset) return;
@@ -36,19 +37,68 @@ function create(deps){
     sg.body.appendChild(btnRow([
       {label:'Race mode', action:() => applyPreset('race', 'Race mode')},
       {label:'Drift mode', action:() => applyPreset('drift', 'Drift mode')},
+      {label:'Power curves', action:() => GAME.player.tuning.openCurves && GAME.player.tuning.openCurves()},
+      {label:'Export tuning', action:() => {
+        if(GAME.player.tuning.exportTuning){
+          GAME.player.tuning.exportTuning();
+          if(status) status(tr('Vehicle tuning exported as JSON; clipboard copy is attempted when the browser allows it.', 'Tuning veicolo esportato in JSON; copia negli appunti tentata se il browser la consente.'));
+        }
+      }},
     ]));
-    const tRow = (key, label, min, max) => sliderRow(label, tun[key] == null ? 0 : tun[key], min, max, 1, v => {
+    const exportExpose = document.createElement('label');
+    exportExpose.className = 'lk-tune-expose lk-tune-action-expose';
+    const exportCb = document.createElement('input');
+    exportCb.type = 'checkbox';
+    exportCb.checked = exposed.exportTuning === true;
+    exportCb.addEventListener('change', () => {
+      if(GAME.player.tuning.setExposed) GAME.player.tuning.setExposed('exportTuning', exportCb.checked);
+      else {
+        const next = Object.assign({}, tun.exposed || {});
+        next.exportTuning = exportCb.checked;
+        GAME.player.setTuning({exposed:next});
+      }
+      markDirty();
+    });
+    exportExpose.appendChild(exportCb);
+    exportExpose.appendChild(document.createElement('span'));
+    exportExpose.querySelector('span').textContent = tr('Expose export in wrench', 'Esponi export nella chiave inglese');
+    sg.body.appendChild(exportExpose);
+    const exposeWrap = (key, root) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'lk-tune-param';
+      wrap.appendChild(root);
+      const expose = document.createElement('label');
+      expose.className = 'lk-tune-expose';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = exposed[key] !== false;
+      cb.addEventListener('change', () => {
+        if(GAME.player.tuning.setExposed) GAME.player.tuning.setExposed(key, cb.checked);
+        else {
+          const next = Object.assign({}, tun.exposed || {});
+          next[key] = cb.checked;
+          GAME.player.setTuning({exposed:next});
+        }
+        markDirty();
+      });
+      expose.appendChild(cb);
+      expose.appendChild(document.createElement('span'));
+      expose.querySelector('span').textContent = tr('Expose in wrench', 'Esponi chiave inglese');
+      wrap.appendChild(expose);
+      return wrap;
+    };
+    const tRow = (key, label, min, max) => exposeWrap(key, sliderRow(label, tun[key] == null ? 0 : tun[key], min, max, 1, v => {
       const patch = {}; patch[key] = v;
       GAME.player.setTuning(patch); markDirty();
-    }).root;
-    const tFloatRow = (key, label, min, max, step, fallback) => sliderRow(label, tun[key] == null ? fallback : tun[key], min, max, step, v => {
+    }).root);
+    const tFloatRow = (key, label, min, max, step, fallback) => exposeWrap(key, sliderRow(label, tun[key] == null ? fallback : tun[key], min, max, step, v => {
       const patch = {}; patch[key] = v;
       GAME.player.setTuning(patch); markDirty();
-    }, v => (+v).toFixed(2)).root;
+    }, v => (+v).toFixed(2)).root);
     sg.body.appendChild(tRow('torque', tr('Torque', 'Coppia'), 0, 10));
-    sg.body.appendChild(sliderRow('Horsepower', tun.horsepower == null ? 450 : tun.horsepower, 15, 1500, 5, v => {
+    sg.body.appendChild(exposeWrap('horsepower', sliderRow('Horsepower', tun.horsepower == null ? 450 : tun.horsepower, 15, 1500, 5, v => {
       GAME.player.setTuning({horsepower:v}); markDirty();
-    }, v => Math.round(+v) + ' hp').root);
+    }, v => Math.round(+v) + ' hp').root));
     sg.body.appendChild(tRow('maxSpeed', tr('Top speed', 'Vel. massima'), 0, 10));
     sg.body.appendChild(tRow('oversteer', tr('Oversteer', 'Sovrasterzo'), -10, 10));
     sg.body.appendChild(tRow('handbrake', tr('Handbrake', 'Freno a mano'), -10, 10));

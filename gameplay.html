@@ -20,7 +20,7 @@
         <span><b>S / ↓</b></span><span>Brake / Reverse</span>
         <span><b>A D / ← →</b></span><span>Steer</span>
         <span><b>SPACE</b></span><span>Handbrake (drift!)</span>
-        <span><b>Mouse drag</b></span><span>Look around</span>
+        <span><b>Mouse / RS</b></span><span>Look around</span>
         <span><b>Scroll</b></span><span>Zoom camera</span>
         <span><b>C</b></span><span>Camera mode</span>
         <span><b>R</b></span><span>Reset car</span>
@@ -28,10 +28,10 @@
         <span><b>TAB</b></span><span>Radio (slow-motion)</span>
         <span><b>P / N / B</b></span><span>Play · Next · Prev</span>
         <span><b>U</b></span><span>Driving setup</span>
-        <span><b>ESC</b></span><span>Audio menu</span>
+        <span><b>ESC / Start</b></span><span>Pause menu</span>
         <span><b>H</b></span><span>Toggle controls legend</span>
         <span><b>Drag &amp; drop .glb</b></span><span>Use your own car model</span>
-        <span><b>F</b></span><span>High beams</span>
+        <span><b>F / X</b></span><span>Flash high beams</span>
       </div>
     </div>
         <button id="quickPlayBtn">QUICK PLAY</button>
@@ -88,6 +88,8 @@
         <button class="tunePreset" type="button" data-tune-preset="race">Race mode</button>
         <button class="tunePreset" type="button" data-tune-preset="drift">Drift mode</button>
       </div>
+      <button id="tuneCurveBtn" class="tuneCurveBtn" type="button">Power curves</button>
+      <button id="tuneExportBtn" class="tuneCurveBtn tuneExportBtn" type="button" hidden>Export tuning</button>
 
       <div class="tuneRow">
         <div class="tuneMeta">
@@ -158,9 +160,9 @@
     <div class="lg-title">CONTROLS · [H]</div>
     <div class="lg-body">
       <b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br>
-      <b>Mouse</b> free look · <b>Scroll</b> zoom · <b>V</b> look back · <b>C</b> camera · <b>R</b> reset<br>
-      <b>TAB</b> radio · <b>P</b> play/pause · <b>N</b> next · <b>B</b> prev<br>
-      <b>ESC</b> menu · <b>U</b> driving setup · <b>M</b> mute · <b>F</b> flip model · <b>H</b> show/hide this panel<br>
+      <b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> look back · <b>C / R3</b> camera · <b>R / L3</b> reset<br>
+      <b>TAB / View</b> radio · <b>P / Y</b> play/pause · <b>N / D-pad right</b> next · <b>Keyboard B / D-pad down</b> prev<br>
+      <b>ESC / Start</b> menu · <b>U / D-pad up</b> driving setup · <b>M / LB</b> mute · <b>F / X</b> flash · <b>H</b> help<br>
       <b>Gamepad / touch</b> supported · remap keys from <b>ESC → Controls</b>
     </div>
   </div>

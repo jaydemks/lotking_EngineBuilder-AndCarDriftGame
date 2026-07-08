@@ -16,7 +16,34 @@ function create(deps){
   let sceneDragId = null;
   const linkExpanded = Object.create(null);
   let sceneIndex = new Map();
+  let visibleSceneOrder = [];
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+
+  function selectedSceneObjects(){
+    return Array.isArray(ED.multiSelected) && ED.multiSelected.length > 1 ? ED.multiSelected.filter(Boolean) : (ED.selected ? [ED.selected] : []);
+  }
+
+  function selectedSceneIds(fallback){
+    const ids = selectedSceneObjects()
+      .filter(o => o && o.userData && o.userData.editorId && !o.__lkSynthetic)
+      .map(o => o.userData.editorId);
+    const fallbackId = fallback && fallback.userData && fallback.userData.editorId;
+    if(fallbackId && !ids.includes(fallbackId)) ids.push(fallbackId);
+    return ids;
+  }
+
+  function idsFromDrop(e){
+    if(!e || !e.dataTransfer) return [];
+    const raw = e.dataTransfer.getData('application/x-lotking-scene-objects');
+    if(raw){
+      try {
+        const parsed = JSON.parse(raw);
+        if(Array.isArray(parsed)) return parsed.filter(Boolean);
+      } catch(err){}
+    }
+    const single = e.dataTransfer.getData('application/x-lotking-scene-object');
+    return single ? [single] : [];
+  }
 
   function visibleEntities(){
     return GAME.world.registry.filter(o => {
@@ -72,7 +99,8 @@ function create(deps){
         o.userData.linkParentId === ED.selected.userData.editorId &&
         o.userData.editorId === ED.selected.userData.editorId + '_collider_part_' + ED.colliderPartIndex)
     );
-    div.className = 'lk-item' + ((ED.selected === o || isSyntheticSelection) ? ' sel' : '') + (o.visible ? '' : ' hidden-e');
+    const selected = selectedSceneObjects().includes(o) || isSyntheticSelection;
+    div.className = 'lk-item' + (selected ? ' sel' : '') + (o.visible ? '' : ' hidden-e');
     div.dataset.id = id;
     div.draggable = o && o.__lkSkipControls ? false : true;
     div.style.paddingLeft = ((ED.sceneViewMode === 'list') ? (4 + (depth || 0) * 16) : 4) + 'px';
@@ -119,7 +147,11 @@ function create(deps){
     const del = documentRef.createElement('button');
     del.className = 'lk-del'; del.textContent = '×'; del.title = tr('Delete', 'Elimina');
     if(!o.__lkSkipControls){
-      del.addEventListener('click', ev => { ev.stopPropagation(); deps.requestDeleteEntity(o); });
+      del.addEventListener('click', ev => {
+        ev.stopPropagation();
+        if(selectedSceneObjects().includes(o) && selectedSceneObjects().length > 1 && deps.requestDeleteSelection) deps.requestDeleteSelection();
+        else deps.requestDeleteEntity(o);
+      });
     } else {
       del.style.opacity = '.34';
       del.tabIndex = -1;
@@ -128,13 +160,15 @@ function create(deps){
     div.append(toggle, thumb, name, eye, del);
     div.addEventListener('dragstart', ev => {
       sceneDragId = id;
+      const ids = selectedSceneIds(o);
       ev.dataTransfer.setData('application/x-lotking-scene-object', id);
+      ev.dataTransfer.setData('application/x-lotking-scene-objects', JSON.stringify(ids));
       ev.dataTransfer.effectAllowed = 'move';
     });
     div.addEventListener('dragend', () => { sceneDragId = null; });
     div.addEventListener('dragover', e => {
       const types = Array.from(e.dataTransfer && e.dataTransfer.types || []);
-      if(e.shiftKey && types.includes('application/x-lotking-scene-object')){
+      if(e.shiftKey && (types.includes('application/x-lotking-scene-object') || types.includes('application/x-lotking-scene-objects'))){
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         div.classList.add('link-drop-ok');
@@ -142,19 +176,27 @@ function create(deps){
     });
     div.addEventListener('dragleave', () => { div.classList.remove('link-drop-ok'); });
     div.addEventListener('drop', e => {
-      const fromId = e.dataTransfer && e.dataTransfer.getData('application/x-lotking-scene-object');
-      if(!e.shiftKey || !fromId || fromId === id || !deps.linkToParent) return;
-      const fromObj = sceneIndex.get(fromId);
-      if(!fromObj) return;
+      const ids = idsFromDrop(e).filter(fromId => fromId && fromId !== id);
+      if(!e.shiftKey || !ids.length || !deps.linkToParent) return;
       e.preventDefault();
       e.stopPropagation();
       div.classList.remove('link-drop-ok');
-      deps.linkToParent(fromObj, o);
+      ids.forEach(fromId => {
+        const fromObj = sceneIndex.get(fromId);
+        if(fromObj && fromObj !== o && !fromObj.__lkSynthetic) deps.linkToParent(fromObj, o);
+      });
       refresh();
     });
     deps.bindReplaceDropTarget(div, o);
-    div.addEventListener('click', () => {
+    div.addEventListener('click', ev => {
       if(typeof o.__lkSpecialActivate === 'function') return o.__lkSpecialActivate();
+      if(deps.selectObjectWithModifiers){
+        return deps.selectObjectWithModifiers(o, {
+          toggle: ev.ctrlKey || ev.metaKey,
+          range: ev.shiftKey,
+          rangeObjects: visibleSceneOrder,
+        });
+      }
       return deps.selectObject(o);
     });
     div.addEventListener('dblclick', () => {
@@ -164,7 +206,7 @@ function create(deps){
     div.addEventListener('contextmenu', ev => {
       ev.preventDefault(); ev.stopPropagation();
       if(o && o.__lkSkipContext) return;
-      deps.selectObject(o);
+      if(!selectedSceneObjects().includes(o)) deps.selectObject(o);
       deps.openMenu(deps.objectMenuItems(o, true), ev.clientX, ev.clientY);
     });
     return div;
@@ -246,6 +288,7 @@ function create(deps){
     if(!box) return;
     box.innerHTML = '';
     const items = withSyntheticExtras(visibleEntities());
+    visibleSceneOrder = items.filter(item => item && item.userData && !item.__lkSynthetic);
 
     sceneIndex = new Map();
     items.forEach(item => {
@@ -280,14 +323,15 @@ function create(deps){
     renderLinkedTree(box, byFolder[null] || [], 0);
 
     box.ondragover = e => {
-      if(Array.from(e.dataTransfer.types || []).includes('application/x-lotking-scene-object')){
+      const types = Array.from(e.dataTransfer.types || []);
+      if(types.includes('application/x-lotking-scene-object') || types.includes('application/x-lotking-scene-objects')){
         e.preventDefault(); e.dataTransfer.dropEffect = 'move';
       }
     };
     box.ondrop = e => {
-      const id = e.dataTransfer && e.dataTransfer.getData('application/x-lotking-scene-object');
-      if(id && e.target === box){
-        delete assignments[id];
+      const ids = idsFromDrop(e);
+      if(ids.length && e.target === box){
+        ids.forEach(id => { delete assignments[id]; });
         deps.writeFolderState();
         refresh();
       }

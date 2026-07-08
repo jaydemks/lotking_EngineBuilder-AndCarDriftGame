@@ -23,12 +23,81 @@ function create(deps){
   }
 
   function clearColliderHelpers(){
+    const geometries = new Set();
+    const materials = new Set();
     colliderHelpers.forEach(h => {
       if(helperGroup) helperGroup.remove(h);
-      if(h.geometry) h.geometry.dispose();
-      if(h.material) h.material.dispose();
+      h.traverse && h.traverse(n => {
+        if(n.geometry) geometries.add(n.geometry);
+        if(n.material) materials.add(n.material);
+      });
+      if(h.geometry) geometries.add(h.geometry);
+      if(h.material) materials.add(h.material);
     });
+    geometries.forEach(g => g.dispose && g.dispose());
+    materials.forEach(m => m.dispose && m.dispose());
     colliderHelpers = [];
+  }
+
+  function isComplexMeshRef(ref){
+    if(!ref || ref.enabled === false) return false;
+    if(ref.compoundPart) return ref.partMode === 'complex' || ref.meshCollider === true || ref.colliderMode === 'complex';
+    return ref.meshCollider === true || ref.colliderMode === 'complex';
+  }
+
+  function complexMeshKey(owner, ref){
+    return ((owner && owner.uuid) || 'owner') + ':' + (ref && ref.compoundPart ? (ref.partMeshUuid || ref.partName || ref.partIndex || 'part') : 'root');
+  }
+
+  function addComplexMeshHelper(owner, ref, color, opacity){
+    if(!owner || !owner.traverse || !THREE.WireframeGeometry) return false;
+    owner.updateMatrixWorld(true);
+    const targetUuid = ref && ref.compoundPart ? ref.partMeshUuid : null;
+    const targetName = ref && ref.compoundPart ? ref.partName : null;
+    let vertexCount = 0;
+    owner.traverse(node => {
+      if(!node || !node.isMesh || !node.geometry || (node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle))) return;
+      if(targetUuid && node.uuid !== targetUuid) return;
+      if(!targetUuid && targetName && node.name !== targetName) return;
+      const pos = node.geometry.attributes && node.geometry.attributes.position;
+      if(pos) vertexCount += pos.count;
+    });
+    if(vertexCount < 3 || vertexCount > 50000) return false;
+    const group = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      depthTest: false,
+    });
+    owner.traverse(node => {
+      if(!node || !node.isMesh || !node.geometry || (node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle))) return;
+      if(targetUuid && node.uuid !== targetUuid) return;
+      if(!targetUuid && targetName && node.name !== targetName) return;
+      const pos = node.geometry.attributes && node.geometry.attributes.position;
+      if(!pos) return;
+      const wire = new THREE.LineSegments(new THREE.WireframeGeometry(node.geometry), mat);
+      wire.matrixAutoUpdate = false;
+      wire.matrix.copy(node.matrixWorld);
+      wire.renderOrder = 998;
+      wire.userData.colliderPreview = true;
+      group.add(wire);
+    });
+    if(!group.children.length){
+      mat.dispose();
+      return false;
+    }
+    group.userData.colliderPreview = true;
+    colliderHelpers.push(group);
+    helperGroup.add(group);
+    return true;
+  }
+
+  function colliderDummyVisibility(owner){
+    const mode = owner && owner.userData ? owner.userData.colliderDummyVisibility : null;
+    if(mode === 'show') return true;
+    if(mode === 'hide') return false;
+    return ED.showCollisionDummies !== false;
   }
 
   function rebuildColliderHelpers(){
@@ -39,6 +108,7 @@ function create(deps){
       const col = o && o.userData && o.userData.collider;
       const ref = col && col.ref;
       if(!ref || ref.enabled === false) return;
+      if(!colliderDummyVisibility(o)) return;
       const refs = ref.parts && ref.parts.length ? ref.parts : [ref];
       let fallbackY = .5, fallbackHy = .5, fallbackRotX = 0, fallbackRotY = 0, fallbackRotZ = 0;
       if(o && o.updateMatrixWorld){
@@ -54,9 +124,18 @@ function create(deps){
         fallbackRotY = o.rotation ? o.rotation.y || 0 : 0;
         fallbackRotZ = o.rotation ? o.rotation.z || 0 : 0;
       }
+      const addedComplexMeshHelpers = new Set();
       refs.forEach(partRef => {
         if(!partRef || partRef.enabled === false || partRef.compoundRoot) return;
         const selectedPart = ED.selected === o && ED.colliderEdit && Number.isInteger(ED.colliderPartIndex) && partRef.compoundPart && partRef.partIndex === ED.colliderPartIndex;
+        if(col.kind !== 'circle' && isComplexMeshRef(partRef)){
+          const color = selectedPart || ED.selected === o ? 0x52b7ff : 0xffd166;
+          const key = complexMeshKey(o, partRef);
+          if(addedComplexMeshHelpers.has(key) || addComplexMeshHelper(o, partRef, color, selectedPart || ED.selected === o ? .72 : .4)){
+            addedComplexMeshHelpers.add(key);
+            return;
+          }
+        }
         const color = selectedPart ? 0x52b7ff : (partRef.physics ? 0x4be3a0 : (partRef.partMode === 'solid' ? 0xff8a4b : 0xffd166));
         const mat = new THREE.MeshBasicMaterial({color, wireframe:true, transparent:true, opacity:selectedPart ? .88 : (partRef.physics ? .56 : .42), depthTest:false});
         let helper = null;
@@ -84,7 +163,7 @@ function create(deps){
     });
     const playerCar = GAME && GAME.player && GAME.player.car;
     const playerCollision = GAME && GAME.player && GAME.player.collision;
-    if(ED.selected === playerCar && playerCar && playerCollision){
+    if(ED.selected === playerCar && playerCar && playerCollision && colliderDummyVisibility(playerCar)){
       const hx = playerCollision.hx == null ? .92 : playerCollision.hx;
       const hy = playerCollision.hy == null ? .42 : playerCollision.hy;
       const hz = playerCollision.hz == null ? 1.85 : playerCollision.hz;
