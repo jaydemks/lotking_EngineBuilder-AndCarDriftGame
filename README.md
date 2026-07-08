@@ -170,7 +170,7 @@ The project is not a one-prompt demo anymore. It is an ongoing browser engine/ga
 
 Lot King Engine Editor & Car Drift Game is released under the custom **Lot King Engine Builder & Car Drift Game Source License 0.1**.
 
-In short: you can read, learn from, modify, fork and share project-authored parts, but public uses must credit **Lot King Engine Builder & Car Drift Game by w4k3**. Commercial use is allowed below USD 100,000 gross revenue. Above that threshold, a separate written commercial agreement is required.
+In short: you can read, learn from, modify, fork and share project-authored parts, but public uses must credit **Lot King Engine Builder & Car Drift Game by jaydemks**. Commercial use is allowed below USD 100,000 gross revenue. Above that threshold, a separate written commercial agreement is required.
 
 This is source-available, not OSI-approved open source. See `LICENSE` for the exact terms.
 
