@@ -67,18 +67,11 @@ function create(options){
     });
   }
 
-  function flip(){
-    if(!playerModel) return false;
-    playerModel.rotation.y += Math.PI;
-    return true;
-  }
-
   return {
     prepModel,
     setPlayerModel,
     getPlayerModel: () => playerModel,
     bindDrop,
-    flip,
   };
 }
 

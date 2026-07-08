@@ -15,7 +15,7 @@ const GAME = window.LOT_KING = {
   settings: {},
   actions: {},
   ui: {},
-  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false},
+  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false, playPreviewCursorVisible:false},
   hooks: {frame: [], frameOverride: null},
 };
 const LK_LANG_KEY = 'lotking.lang.v1';
@@ -551,10 +551,10 @@ const PLAYER_DATA_WIDGETS = window.LK_RUNTIME_PLAYER_DATA_WIDGETS.create({
 // - handbrake locks the rear axle only (rear μ collapses) → drift entry
 // - service brake mainly eats front grip, so braking pushes wide instead of spinning like the handbrake.
 // Countersteer and slide-holding emerge naturally from the model.
-const SPAWN = {x: 0, z: 55, heading: Math.PI};   // editable from the engine editor
+const SPAWN = {x: 0, z: 55, heading: 0};   // editable from the engine editor
 const P = {
   pos: new THREE.Vector3(SPAWN.x, 0, SPAWN.z),
-  heading: SPAWN.heading,     // facing -z into the lot
+  heading: SPAWN.heading,
   vel: new THREE.Vector3(),
   yawRate: 0,                 // rad/s
   steer: 0,
@@ -1375,7 +1375,7 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
   else carRenderPos.lerp(carVisTmpV, alpha);
   carRenderHeading = P.heading;
   car.position.copy(carRenderPos);
-  car.quaternion.copy(carRenderQuat);
+  car.quaternion.copy(carRenderQuat).multiply(playerVisualOffsetQuatTmp.setFromAxisAngle(SURFACE_UP, -playerVisualYawOffset()));
   carVisual.position.y = chassisLift;
 
   // per-wheel suspension travel straight from the raycasts
@@ -1931,6 +1931,12 @@ const CAMERA_ASPECTS = PLAYER_CAMERA.ASPECTS;
 const camPos = new THREE.Vector3(0, 6, 65);
 const camFocus = new THREE.Vector3();
 const camLook = new THREE.Vector3();
+const camVisualForward = new THREE.Vector3();
+const camVisualSide = new THREE.Vector3();
+const playerVisualForwardTmp = new THREE.Vector3();
+const playerVisualQuatTmp = new THREE.Quaternion();
+const playerVisualInvQuatTmp = new THREE.Quaternion();
+const playerVisualOffsetQuatTmp = new THREE.Quaternion();
 let camYaw = 0, camPitch = .32, camDist = 9, camMode = 0; // 0 chase, 1 free orbit
 let dragging = false, lastMX = 0, lastMY = 0, userCamTimer = 0, camShake = 0;
 let camDriftSide = 0, camReverseBlend = 0, camCinematicRoll = 0, lastCamVF = 0, lastCamVR = 0, lastCamDrifting = false;
@@ -1942,7 +1948,7 @@ function resetCameraState(){
   camMode = 0;
   camPitch = .32;
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist || CAM_CFG.arcadeDistance || 9));
-  camYaw = -P.heading + Math.PI;
+  camYaw = Math.atan2(-playerCameraForwardVector(camVisualForward).x, -camVisualForward.z);
   camHeading = P.heading;
   camFocus.copy(P.pos);
   camLook.set(P.pos.x, P.pos.y + 1.1, P.pos.z);
@@ -1956,6 +1962,37 @@ function resetCameraState(){
   lastCamDrifting = false;
   userCamTimer = 0;
   camSnapNext = true;
+}
+function playerCameraForwardVector(target){
+  const out = target || new THREE.Vector3();
+  return out.set(Math.sin(P.heading || 0), 0, Math.cos(P.heading || 0)).normalize();
+}
+function playerVisualRoot(){
+  return PLAYER_MODEL && PLAYER_MODEL.getPlayerModel && PLAYER_MODEL.getPlayerModel() || carVisual;
+}
+function playerVisibleForwardVector(target){
+  const out = target || new THREE.Vector3();
+  const heading = car && car.rotation ? (car.rotation.y || 0) : (P.heading || 0);
+  return out.set(Math.sin(heading), 0, Math.cos(heading)).normalize();
+}
+function playerVisibleHeading(){
+  return car && car.rotation ? (car.rotation.y || 0) : (P.heading || 0);
+}
+function setPlayerVisibleHeading(heading){
+  const n = Number(heading);
+  if(!Number.isFinite(n)) return playerVisibleHeading();
+  car.rotation.y = n;
+  P.heading = n;
+  if(GAME.player && GAME.player.physics) GAME.player.physics.heading = n;
+  if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview && GAME.player && GAME.player.spawn) GAME.player.spawn.heading = n;
+  car.updateMatrixWorld(true);
+  return playerVisibleHeading();
+}
+function playerVisualYawOffset(){
+  return 0;
+}
+function applyPlayerRootFromRuntimeHeading(){
+  car.quaternion.copy(playerVisualQuatTmp.setFromAxisAngle(SURFACE_UP, P.heading));
 }
 function cameraAspectValue(){
   return PLAYER_CAMERA.aspectValue(CAM_CFG, innerWidth, innerHeight);
@@ -2040,28 +2077,64 @@ function syncHudRect(css){
   document.body.classList.toggle('lk-portrait', portrait);
   if(GAME.input && GAME.input.setPortrait) GAME.input.setPortrait(portrait);
 }
+function shouldHideForFinalGameplayRender(node){
+  const ud = node && node.userData || {};
+  return !!(
+    ud.helperOnly ||
+    ud.colliderPreview ||
+    ud.editorOnly ||
+    ud.nonExportable ||
+    ud.editorCameraHelper ||
+    ud.editorCameraHelperPick ||
+    ud.editorLightHandle
+  );
+}
+function beginFinalGameplayRender(){
+  const hidden = [];
+  const hideNode = node => {
+    if(!node || !node.visible) return;
+    hidden.push([node, node.visible]);
+    node.visible = false;
+  };
+  scene.traverse(node => {
+    if(shouldHideForFinalGameplayRender(node)) hideNode(node);
+  });
+  return hidden;
+}
+function endFinalGameplayRender(hidden){
+  (hidden || []).forEach(pair => {
+    if(pair && pair[0]) pair[0].visible = pair[1];
+  });
+}
 function renderPlayerCamera(targetRect){
   const area = targetRect || {x:0, y:0, w:innerWidth, h:innerHeight};
-  const rect = PLAYER_CAMERA.renderScoped({
-    config: CAM_CFG,
-    renderer,
-    camera,
-    width: area.w,
-    height: area.h,
-    offsetX: area.x || 0,
-    offsetY: area.y || 0,
-    clip: !!targetRect,
-    clearColor: letterboxColor(),
-    render: rect => {
-      if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || (VIDEO && VIDEO.volumetricLighting))){
-        if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
-        POST.render();
-        if(rect.scoped || targetRect) POST.composer.setSize(innerWidth, innerHeight);
-      } else {
-        renderer.render(scene, camera);
-      }
-    },
-  });
+  const hidden = beginFinalGameplayRender();
+  let rect = null;
+  try {
+    rect = PLAYER_CAMERA.renderScoped({
+      config: CAM_CFG,
+      renderer,
+      camera,
+      width: area.w,
+      height: area.h,
+      offsetX: area.x || 0,
+      offsetY: area.y || 0,
+      clip: !!targetRect,
+      clearColor: letterboxColor(),
+      render: rect => {
+        if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || (VIDEO && VIDEO.volumetricLighting))){
+          if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
+          POST.render();
+          if(rect.scoped || targetRect) POST.composer.setSize(innerWidth, innerHeight);
+        } else {
+          renderer.render(scene, camera);
+        }
+      },
+    });
+  } finally {
+    endFinalGameplayRender(hidden);
+  }
+  if(!rect) return;
   // confine the HUD to the actual rendered frame (letterbox / editor viewport).
   // renderer rects use WebGL bottom-left origin; convert to CSS top-left for the DOM.
   const clipped = rect.scoped || !!targetRect;
@@ -2073,17 +2146,47 @@ function renderPlayerCamera(targetRect){
     syncHudRect(null);
   }
 }
-canvas.addEventListener('pointerdown', e => {
-  if((GAME.state.editorActive && !GAME.state.editorPreview) || e.button > 0) return;
+function requestRuntimeCameraPointerLock(){
+  if(!canvas.requestPointerLock || document.pointerLockElement === canvas) return;
+  try {
+    const result = canvas.requestPointerLock();
+    if(result && result.catch) result.catch(() => {});
+  } catch(err){}
+}
+function pointInRuntimeViewport(e){
+  if(!GAME.state.editorPreview) return true;
+  const rect = GAME.editor && GAME.editor.viewportRect ? GAME.editor.viewportRect() : null;
+  if(!rect) return true;
+  return e.clientX >= rect.x && e.clientX <= rect.x + rect.w && e.clientY >= rect.y && e.clientY <= rect.y + rect.h;
+}
+function runtimePointerLookUiTarget(target){
+  if(!target || !target.closest) return false;
+  return !!target.closest('input, textarea, select, button, #settingsOverlay, #tunePanel, #radio, #overlay, #lkCinemaTimeline, #lkCinemaPreviewFrame, #lkPipFrame, #lkViewportToolbar, #lkViewportOverlays');
+}
+function canStartRuntimeCameraLook(e){
+  if(e.button > 0) return false;
+  if((CAM_CFG.mode || 'free') !== 'free') return false;
+  if(!((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview)) return false;
+  if(GAME.state.editorActive && !GAME.state.editorPreview) return false;
+  if(shouldShowRuntimeCursor()) return false;
+  if(runtimePointerLookUiTarget(e.target)) return false;
+  return pointInRuntimeViewport(e);
+}
+function startRuntimeCameraLook(e){
   dragging = true;
   lastMX = e.clientX;
   lastMY = e.clientY;
-  if((CAM_CFG.mode || 'free') === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) && !isCameraUiTarget(e.target) && canvas.requestPointerLock){
-    try {
-      const result = canvas.requestPointerLock();
-      if(result && result.catch) result.catch(() => {});
-    } catch(err){}
-  }
+  requestRuntimeCameraPointerLock();
+}
+addEventListener('pointerdown', e => {
+  if(e.target === canvas) return;
+  if(!canStartRuntimeCameraLook(e)) return;
+  startRuntimeCameraLook(e);
+}, true);
+canvas.addEventListener('pointerdown', e => {
+  if((GAME.state.editorActive && !GAME.state.editorPreview) || e.button > 0) return;
+  if(!canStartRuntimeCameraLook(e)) return;
+  startRuntimeCameraLook(e);
   if(canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointerup', e => {
@@ -2092,8 +2195,36 @@ canvas.addEventListener('pointerup', e => {
 });
 canvas.addEventListener('pointercancel', () => dragging = false);
 addEventListener('pointerup', () => dragging = false);
+addEventListener('pointerlockchange', () => {
+  if(document.pointerLockElement !== canvas) dragging = false;
+});
 function isCameraUiTarget(target){
-  return !!(target && target.closest && target.closest('#lkEditor, #settingsOverlay, #tunePanel, #radio'));
+  return !!(target && target.closest && target.closest('#lkEditor, #settingsOverlay, #tunePanel, #radio, #overlay'));
+}
+function isGameplayOverlayOpen(){
+  const menu = document.getElementById('overlay');
+  const settings = document.getElementById('settingsOverlay');
+  const tuneDock = document.getElementById('tuneDock');
+  const radio = document.getElementById('radio');
+  return !!(
+    (settings && settings.classList.contains('open')) ||
+    (tuneDock && tuneDock.classList.contains('open')) ||
+    (radio && radio.classList.contains('open')) ||
+    (menu && !menu.classList.contains('hidden'))
+  );
+}
+function shouldShowRuntimeCursor(){
+  if(isGameplayOverlayOpen()) return true;
+  return !!(GAME.state.editorPreview && GAME.state.playPreviewCursorVisible);
+}
+function runtimeCameraAllowsMouseLook(target){
+  if(shouldShowRuntimeCursor()) return false;
+  return !isCameraUiTarget(target);
+}
+function runtimeWheelBelongsToUi(target){
+  if(!target || !target.closest) return false;
+  if(target === canvas) return false;
+  return !!target.closest('#lkEditor, #settingsOverlay, #tunePanel, #radio, #overlay, input, textarea, select, button');
 }
 function viewportOwnsPointerEvent(e){
   if(e.target && e.target.closest && e.target.closest('input,textarea,select,button')) return false;
@@ -2107,7 +2238,7 @@ function viewportOwnsPointerEvent(e){
 });
 addEventListener('pointermove', e => {
   const freeMouseLook = !dragging && (CAM_CFG.mode || 'free') === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
-    !(GAME.state.editorActive && !GAME.state.editorPreview) && !isCameraUiTarget(e.target);
+    !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e.target);
   const locked = document.pointerLockElement === canvas;
   if((!dragging && !freeMouseLook && !locked) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
   const dx = locked ? (e.movementX || 0) : (dragging ? (e.clientX-lastMX) : (e.movementX || 0));
@@ -2120,6 +2251,7 @@ addEventListener('pointermove', e => {
 });
 addEventListener('wheel', e => {
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;
+  if(runtimeWheelBelongsToUi(e.target)) return;
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist + Math.sign(e.deltaY)*1.1));
 }, {passive:true});
 
@@ -2127,8 +2259,10 @@ function updateCamera(dt){
   const snap = camSnapNext;
   camSnapNext = false;
   const mode = CAM_CFG.mode || 'free';
-  const runtimeCameraActive = mode === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused;
+  const cursorVisible = shouldShowRuntimeCursor();
+  const runtimeCameraActive = mode === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
   document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
+  document.body.classList.toggle('lk-game-ui-cursor', cursorVisible && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview));
   if(!runtimeCameraActive && document.pointerLockElement === canvas && document.exitPointerLock){
     try { document.exitPointerLock(); } catch(err){}
   }
@@ -2152,8 +2286,9 @@ function updateCamera(dt){
     userCamTimer -= dt;
     if(userCamTimer <= 0){
       // ease yaw back behind the car
-      let target = -camHeading + Math.PI;
-      camYaw += angleDelta(target, camYaw) * (snap ? 1 : dampAlpha(2.4, dt));
+      const fwd = playerCameraForwardVector(camVisualForward);
+      const targetYaw = Math.atan2(-fwd.x, -fwd.z);
+      camYaw += angleDelta(targetYaw, camYaw) * (snap ? 1 : dampAlpha(2.4, dt));
     }
   }
   let look = new THREE.Vector3(camFocus.x, camFocus.y + 1.1, camFocus.z);
@@ -2164,8 +2299,8 @@ function updateCamera(dt){
     const lookBack = !!(keys['v'] || camInput.lookBack);
     const reverseTarget = (lookBack || camReverseHold > .65) ? 1 : 0;
     camReverseBlend += (reverseTarget - camReverseBlend) * (snap ? 1 : dampAlpha(CAM_CFG.reverseFrontSpeed, dt));
-    const fwd = new THREE.Vector3(Math.sin(camHeading), 0, Math.cos(camHeading));
-    const side = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    const fwd = playerCameraForwardVector(camVisualForward);
+    const side = camVisualSide.set(fwd.z, 0, -fwd.x);
     let dist = Math.max(2, CAM_CFG.arcadeDistance);
     let height = CAM_CFG.arcadeHeight;
     lag = CAM_CFG.arcadeLag;
@@ -2252,6 +2387,25 @@ function setPlayerEngineSound(setId){
 // ------------------------------------------------ input
 const keys = {};
 addEventListener('keydown', e => {
+  if(e.key === 'F1' && e.shiftKey && GAME.state.editorActive && GAME.state.editorPreview){
+    e.preventDefault();
+    GAME.state.playPreviewCursorVisible = !GAME.state.playPreviewCursorVisible;
+    dragging = false;
+    if(GAME.state.playPreviewCursorVisible){
+      document.body.classList.remove('lk-free-camera-cursor-hidden');
+      document.body.classList.add('lk-game-ui-cursor');
+      if(document.pointerLockElement === canvas && document.exitPointerLock){
+        try { document.exitPointerLock(); } catch(err){}
+      }
+    } else {
+      document.body.classList.remove('lk-game-ui-cursor');
+      document.body.classList.add('lk-free-camera-cursor-hidden');
+      userCamTimer = 1.6;
+      requestRuntimeCameraPointerLock();
+    }
+    popup(GAME.state.playPreviewCursorVisible ? 'PREVIEW CURSOR ON' : 'PREVIEW CURSOR OFF', '#9db4ff');
+    return;
+  }
   if(e.key === 'F1'){
     e.preventDefault();
     return;
@@ -2479,9 +2633,19 @@ function resetCar(){
   carRenderPitch = 0;
   carRenderRoll = 0;
   carRenderSnap = true;
-  car.position.copy(P.pos); car.rotation.set(0, P.heading, 0);
+  car.position.copy(P.pos); applyPlayerRootFromRuntimeHeading();
   driftScore = 0; driftMult = 1; driftTime = 0;
   HUD.hideDrift();
+}
+function syncEditorSpawnFromPlayer(){
+  if(!GAME.state.editorActive || GAME.state.editorPreview || !GAME.player || !GAME.player.car) return;
+  SPAWN.x = car.position.x;
+  SPAWN.z = car.position.z;
+  SPAWN.heading = playerVisibleHeading();
+  P.pos.copy(car.position);
+  P.heading = SPAWN.heading;
+  P.vel.set(0, 0, 0);
+  P.yawRate = 0;
 }
 
 // ------------------------------------------------ local 3D models
@@ -2728,6 +2892,7 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   },
   resetTimescale: () => { TS.cur = 1; },
   resetCar,
+  syncEditorSpawnFromPlayer,
   disposePhysicsWorld,
   disposeRenderLists: () => {
     if(renderer && renderer.renderLists) renderer.renderLists.dispose();
@@ -2841,6 +3006,8 @@ Object.assign(GAME.player, {
   tuning: DRIVE_TUNING,
   reset: resetCar,
   spawn: SPAWN,
+  visibleHeading: playerVisibleHeading,
+  setVisibleHeading: setPlayerVisibleHeading,
   setModel: setPlayerModel,
   getModel: PLAYER_MODEL.getPlayerModel,
   headlight: PLAYER_LIGHT_RIG.headlight,

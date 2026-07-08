@@ -54,13 +54,20 @@ function create(deps){
     fly.orthoPan = !!(activeCamera() && activeCamera().isOrthographicCamera);
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = false;
+    if(canvas && canvas.requestPointerLock && e.pointerType !== 'touch'){
+      try {
+        const result = canvas.requestPointerLock();
+        if(result && result.catch) result.catch(() => {});
+      } catch(err){}
+    }
     try { canvas.setPointerCapture(e.pointerId); } catch(err){}
   }
 
   function flyMove(e){
     if(!fly.rmb) return;
-    const dx = e.clientX - fly.lastX;
-    const dy = e.clientY - fly.lastY;
+    const locked = document.pointerLockElement === canvas;
+    const dx = locked ? (e.movementX || 0) : (e.clientX - fly.lastX);
+    const dy = locked ? (e.movementY || 0) : (e.clientY - fly.lastY);
     fly.lastX = e.clientX; fly.lastY = e.clientY; fly.moved += Math.abs(dx) + Math.abs(dy);
     if(fly.orthoPan && deps.panActiveViewport){
       deps.panActiveViewport(dx, dy);
@@ -110,6 +117,9 @@ function create(deps){
     fly.orthoPan = false;
     fly.rotateOnly = false;
     fly.button = null;
+    if(document.pointerLockElement === canvas && document.exitPointerLock){
+      try { document.exitPointerLock(); } catch(err){}
+    }
     if(e && e.pointerId != null){ try { canvas.releasePointerCapture(e.pointerId); } catch(err){} }
     syncOrbitAfterFly();
     const orbit = deps.getOrbit();

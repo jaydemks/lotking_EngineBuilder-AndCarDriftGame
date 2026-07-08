@@ -20,6 +20,12 @@ function createState(){
     pipMinimized: false,
     pipW: 840,
     pipPos: null,
+    cinemaFloatPreviewOn: false,
+    cinemaFloatPreviewMinimized: false,
+    cinemaFloatPreviewW: 640,
+    cinemaFloatPreviewAspect: '16:9',
+    cinemaFloatPreviewPos: null,
+    cinemaPreviewMode: 'final',
     assetsH: 220,
     quickAudioPos: null,
     quickMusicIndex: -1,
@@ -55,6 +61,7 @@ function createState(){
     showCollisionDummies: false,
     showFps: false,
     showPerf: false,
+    gizmoPointerActive: false,
     cinemaPreview: null,
     cinemaTimelineId: null,
     cinemaTimelineOpen: false,
@@ -63,6 +70,10 @@ function createState(){
     cinemaTimelineH: 136,
     cinemaSelectedItem: null,
     cinemaTimelineClosedId: null,
+    cinemaTimelineTargetId: null,
+    cinemaTimelineCameraId: null,
+    cinemaTimelineFocused: false,
+    cinemaForceEditableTargetFrame: false,
   };
 }
 

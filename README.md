@@ -1,193 +1,179 @@
-# LOT KING ENGINE EDITOR & Car Drift Game
+# Lot King Engine Editor & Car Drift Game
 
-LOT KING ENGINE EDITOR & Car Drift Game is a browser drift game and the small game-engine editor used to build it.
+Lot King is a browser drift game with the editor I am building around it.
 
-It started as a single parking lot where you slide a car around and rack up drift points. It is now growing into a small browser-native engine workflow: you open the **Engine Editor**, build or edit a level, tune the vehicle, design how it sounds, save the level as an asset, and then play or export the game built from those levels.
+It began as a small parking-lot drift prototype. Over time it turned into a bigger idea: a lightweight browser-only engine where I can build tracks, tune the player car, set up sounds, add assets, author camera sequences, and then play the result without leaving the browser.
 
-No build step, no install. Plain JavaScript, static HTML entrypoints, browser storage, and a local static server.
+There is no build step right now. It is plain JavaScript, Three.js, Cannon.js, static HTML pages, LocalStorage and IndexedDB.
 
-Current main entrypoints:
+## Main Pages
 
-- `index.html` - landing/menu shell.
-- `gameplay.html` - playable runtime used by the local game and exported builds.
-- `engine_editor.html` - standalone editor.
-- `drift-parking-lot.html` - compatibility redirect to the new landing page.
+- `index.html` - menu / landing page.
+- `gameplay.html` - playable runtime.
+- `engine_editor.html` - the editor.
+- `drift-parking-lot.html` - old compatibility redirect.
 
-## What you can do
+## What Works Now
 
-**Play.** Pick a track from the level select, start the engine and drift. Points for angle and speed, cones to kick around, a working gearbox with a limiter, slow-motion radio mode (TAB), day/night cycle, damage-free arcade physics that's easy to pick up.
+### Gameplay
 
-**Build projects and levels.** The Engine Editor opens with a browser-based Projects overlay so you can choose, create, import, export, rename or delete the editor project you want to work on. Inside a project you can build levels with a free-fly camera, selection and transform gizmos (move/rotate/scale with snapping), an outliner, an inspector, undo/redo, and context menus. You can add primitives, lights, particle effects, collision volumes, text, Free Texture / Decal elements and imported GLB/GLTF models, then lay out a whole new track. Levels are still real assets inside the project: create, save, save-as, rename, duplicate, delete, export to a `.lkep` file and import it back. Every level you save shows up as a playable card in the game's track selection screen.
+The playable side is an arcade drift game: start a track, drive, slide, build score, hit cones and props, use the gearbox, limiter, handbrake, slow motion radio mode, and tune the driving feel from the editor.
 
-**Manage assets.** The Assets tab collects everything reusable in one place: your levels, imported 3D models (stored in IndexedDB so big files survive reloads), scene assets, player car logic assets and engine sound sets. Drag models straight into the viewport, filter by type, right-click for actions, and choose whether a dropped asset should be placed normally or replace the object under the cursor.
+The car handling is not trying to be a simulation. I am aiming for something that feels good for cinematic drift footage and fast testing inside the editor.
 
-**Design your car.** The player vehicle is driven by `player_car (Logic)`: driving setup (torque, grip, oversteer, handbrake, reverse delay...), editable player collision, camera modes (arcade follow, cinematic drift, aspect ratios, DOF and color grading), vehicle lights and underglow neon, hold-to-flash high beams, exhaust smoke/fire anchors, and 3D data widgets floating next to the car. Car logic assets can be copied, promoted to project default, and reused across levels.
+### Engine Editor
 
-**Tune collision and physics.** Scene objects can have static collision, editable collider dummies, simple or lightweight compound collider modes, physics mass, impact force, and drive-surface behavior. This is already useful for cones, props, walls, ramps and custom collision boxes. The vehicle driving feel is intentionally kept arcade-drift first, while the environment physics layer is still being refined.
+The editor runs in the browser. It has projects, levels, an outliner, inspector, transform gizmos, undo/redo, context menus, free camera controls, snapping, multi-selection, collision editing, asset placement and level save/load.
 
-**Design your sound.** The Engine Sound Designer is an interactive illustration of the engine: an SVG tachometer where you drag your RPM loop samples along the arc (separate ON-throttle and OFF-throttle banks, crossfaded in real time), hotspots on the engine for turbo whine, blow-off, backfire, gear shifts, limiter and ignition, plus filters, sine modulation, reverb and a full tester (gas, auto-RPM, ramps) so you can hear everything before you drive. Every slot has a synthetic fallback, so the car always sounds like something even with zero samples loaded. Sound sets are assets too — build several and swap them per vehicle.
+Levels saved in the editor become playable cards in the game.
 
-**Tweak the HUD.** The radio/sound HUD is editable in place: move and scale the frame PNG and the digital interface, position the clickable volume/bass buttons over your own artwork, and it all persists with the project.
+### Assets
 
-**Export a playable game.** From the editor you can export a playable ZIP that includes the gameplay runtime, the selected levels, and the assets referenced by those levels. The exported package does not include the editor. It is meant to be playable locally through a small static server and publishable on ordinary static hosting/FTP.
+The asset browser can manage imported GLB/GLTF models, scene assets, player car logic assets, engine sound sets and level assets. Larger imported files are stored in IndexedDB so they survive reloads.
 
-## Current status
+### Player Car Setup
 
-The project is still experimental and moving quickly. The editor is already useful for building and tuning levels, but the long-term scope is still open: more editor tooling, better default content, security hardening, asset pipeline decisions, and a more polished default starter level are expected.
+The `player_car` is treated as logic, not just a mesh. From the editor I can tune driving values, player collision, camera behavior, lights, underglow, exhaust sources, skid sources, 3D data widgets and reusable car logic presets.
 
-The current direction is:
+### Cinema Studio
 
-- **Engine Editor** for creating projects, levels, player setup, audio, HUD, and assets.
-- **Gameplay Runtime** for playing projects without loading editor code.
-- **Playable ZIP Export** for publishing a game build without shipping the editor.
-- **Default content** based on bundled/free/self-made assets so the editor opens with a usable starter project.
+Cinema Studio is the in-editor timeline system. It is meant for making cinematic footage directly inside the engine.
 
-Recent work closes a collision/editor workflow milestone: complex mesh collision for static GLB/curved primitives, collision-helper visibility controls, optional world-surface collision, asset previews, double-click asset inspection, precision transform modifiers, and multi-selection across Scene, Assets and the viewport.
+Current timeline work includes:
 
-The same milestone expands play/editor input polish with richer Xbox-style gamepad defaults, pause-menu gamepad navigation, free-camera pointer lock/right-stick look, transparent FX render ordering, better default drift/burnout behavior, and vehicle power-curve tuning that can be selectively exposed through the in-game wrench panel.
+- scene cameras used directly from the level
+- camera cuts with trim/move support
+- camera assignment per cut
+- object transform keys
+- camera FOV keys
+- markers
+- named timeline events
+- floating timeline preview
+- Normal / Final preview modes
+- runtime triggering from collision boxes in Play Preview
 
-Known active refinement area: final vehicle feel tuning can continue in smaller passes, especially around real-world drift balance and edge cases on custom drive surfaces. The current direction remains arcade drift first.
+It is still young, but the base idea is now in place: timelines are assets in the scene and can be played manually or triggered during gameplay.
 
-## Documentation and release notes
+### Sound Designer
 
-The README is intentionally kept stable so it does not need to be rewritten for every version.
+The engine sound designer lets me place engine loops along an RPM arc, split ON/OFF throttle samples, test RPM ramps, and tune extra sound layers like turbo, blow-off, backfire, limiter, shifts and ignition.
 
-Version-specific status, completed work, known issues, and roadmap notes live in the project docs and are updated together with each release:
+Every slot has a fallback synth sound, so the car still works even before real samples are added.
 
-- `docs/releases/` - archived release notes for completed milestones.
-- `docs/ARCHITECTURE.md` - high-level editor/runtime architecture notes.
-- `docs/RUNTIME_MODULES.md` - runtime module map and responsibilities.
-- `RELEASE_NOTES_v*.md` - release-preparation notes when a new version is being finalized.
+### Playable Export
 
-## Project layout
+The editor can export a playable ZIP with the gameplay runtime, selected levels and referenced assets. The exported build does not include the editor.
 
-- `index.html` — landing/menu shell.
-- `gameplay.html` — gameplay runtime entrypoint.
-- `engine_editor.html` — standalone editor entrypoint.
-- `drift-parking-lot.html` — compatibility redirect to the landing page.
-- `js/lot-king.js` — the runtime bridge: game setup, main loop, vehicle handling, and the `LOT_KING` API everything talks through.
-- `js/runtime/` — gameplay modules: world state, physics adapters, player light rig, sky, audio, engine sound sets, cameras, HUD, track catalog, session flow, and so on.
-- `js/editor/` — the Engine Editor UI, project/level tools, playable export pipeline, and the Sound Designer overlay.
-- `js/engine/scene-store.js` — persistence: level library, project (LKEP) export/import, asset blobs, player car logic assets, collider data, sound sets.
-- `css/` — game and editor styling.
-- `docs/` — architecture notes, runtime module notes, and versioned release history.
-- `models/`, `media/`, `musics/` — bundled assets (car models, HUD art, engine samples, music).
+## Current Status
 
-## Large Assets
+This is still experimental. The editor is already useful for building and testing levels, but a lot is still moving quickly.
 
-The local working folder may contain large authoring/runtime assets that are not meant for a normal Git commit:
+The main focus right now is:
 
-- `models/player.glb` — player vehicle GLB. The goal is to optimize it below normal repository size limits so it can be included directly with the project.
-- `models_sources/` — local Blender/source authoring files. This folder is not meant to be committed to Git and is ignored by `.gitignore`.
+- making Cinema Studio solid enough for real in-engine footage
+- keeping the editor browser-only
+- improving save/load reliability
+- tightening the player car setup workflow
+- cleaning up release notes and docs as the project grows
+- doing a proper asset provenance pass before any polished public release
 
-The project should include the runtime assets needed to reproduce the public playable/video state of the game. Source authoring files remain local unless a dedicated asset-source publishing strategy is chosen later.
+For detailed version notes, see:
 
-## Credits and asset provenance
+- `RELEASE_NOTES_v*.md`
+- `docs/releases/`
+- `docs/ARCHITECTURE.md`
+- `docs/RUNTIME_MODULES.md`
 
-This project includes a mix of project-authored assets, AI-assisted/generated assets, bundled runtime samples, and third-party or externally sourced material.
+## Project Layout
 
-Known current notes:
+- `js/lot-king.js` - runtime bridge, main game setup and the `LOT_KING` API.
+- `js/runtime/` - gameplay systems: physics, cameras, audio, HUD, track flow, input and related modules.
+- `js/editor/` - editor UI and tools.
+- `js/engine/scene-store.js` - project/level persistence, assets, player logic, sound sets and export data.
+- `css/` - runtime and editor styling.
+- `models/`, `media/`, `musics/` - bundled runtime assets.
+- `docs/` - architecture notes and release history.
 
-- Music tracks bundled with the project are AI-generated by the project owner and are intended to be included with the project.
-- Runtime/editor code is project-authored unless a file clearly comes from an external library or CDN dependency.
-- Some 3D models, samples, textures, or reference assets may require attribution or separate license notes before a fully polished public release.
-- Some assets were chosen directly by the project owner; others were suggested or selected during AI-assisted implementation as the project needed them.
-- A partial verification pass has been done, but not a complete 100% provenance audit yet. The project is large for one person, even with full AI assistance.
-- A dedicated credits/provenance pass is still needed to identify each external asset, its source, its license, and required attribution.
+## Run Locally
 
-The custom project license covers project-authored code and project-authored assets. Third-party assets remain under their own terms.
+For a step-by-step startup guide, see `HOW_TO_START.md`.
 
-## Tech
-
-Three.js r128 for rendering, Cannon.js 0.6.2 for optional physics, WebAudio for all sound (procedural synth plus sample-based engine audio), LocalStorage + IndexedDB for persistence. No frameworks, no bundler.
-
-## License
-
-LOT KING ENGINE EDITOR & Car Drift Game is released under the custom **Lot King Engine Builder & Car Drift Game Source License 0.1**. In short: you can read, learn from, modify, fork and share project-authored parts, but public uses must credit **Lot King Engine Builder & Car Drift Game by w4k3**. Commercial use is allowed below USD 100,000 gross revenue; above that threshold, a separate written commercial agreement must be negotiated.
-
-This is source-available, not OSI-approved open source, because it includes attribution and commercial revenue conditions. See `LICENSE` for the exact terms.
-
-## How this project is made
-
-LOT KING ENGINE EDITOR & Car Drift Game is an experiment in fully AI-assisted development, with a human directing, testing, correcting, and deciding everything.
-
-The very first version (0.0.1) was born from a **single prompt** to Claude (Fable 5) in a normal chat — one shot, one playable parking lot. From 0.0.2 onward the project moved into a real iterative workflow: Claude Code, Claude Opus, Codex, and faster Codex variants working inside VS Code, with the project owner driving the design and playing every build.
-
-The switches between AI tools are not presented as a "lost context" story. They are mainly a practical workflow choice based on model strengths, available context, rate limits, and cost. Claude/Fable is especially useful for strong creative first passes and concept work, but on a large fully AI-assisted project it can burn through a limited plan/context window very quickly. Opus is creative and capable, but at this project scale the available limits still matter. Codex/GPT-5-class sessions have been more practical for long structured implementation, debugging, refactors, and repeated live-test/fix loops because the available usage budget is much larger. Faster Codex variants are useful for small fixes and quick iterations, but are not treated as the right tool for every complex task.
-
-In short: this project was built with AI from A to Z — concept, implementation, refactors, live testing, corrections, more testing, and more corrections — with the owner acting as designer, tester, reviewer, and project director. The testing is substantial but still not enough to call the project finished. The hope is that the work remains useful to someone, and it may continue expanding for a long time.
-
-## Run it locally
-
-There are two normal ways to run the project from the repository root.
-
-For day-to-day local editor work on Windows, use:
+From the repository root on Windows, the normal way I run it is:
 
 ```bat
 avvio.bat
 ```
 
-This starts the local static server on port `5600` and opens the editor at:
+That starts the local static server on port `5600` and opens:
 
 ```text
 http://localhost:5600/engine_editor.html
 ```
 
-Use this route when you want to keep seeing the same browser-stored projects,
-imported assets, IndexedDB blobs and player-car model that you use during local
-development.
-
-You can also start a plain static server manually, for example:
+You can also start any static server yourself, for example:
 
 ```bash
 python3 -m http.server 5600
 ```
 
-Then open `http://localhost:5600/engine_editor.html` or `http://localhost:5600/`.
-Try to keep the same host and port you normally use: browser storage is tied to
-the exact origin. `localhost:5600`, `127.0.0.1:5600`, `localhost:8000` and a LAN
-IP are different storage buckets, so projects/assets saved under one will not
-automatically appear under another.
+Then open:
 
-For phone/tablet testing on the same Wi-Fi, use the LAN helper instead:
-
-```bash
-python3 serve_lan.py
-```
-
-If you are working from WSL2, start the Windows helper instead. WSL2 is behind a
-virtual network, so a phone on Wi-Fi often cannot reach a server started inside
-WSL:
-
-```bat
-serve_lan_windows.bat
-```
-
-It serves the full project on `0.0.0.0`, prints the LAN URLs to open from the
-phone, and keeps local assets such as GLB models, music, textures and engine
-samples available through the same static server. The helper also treats aborted
-large-file transfers, such as a phone cancelling a GLB download during reload,
-as normal client disconnects instead of dumping a Python traceback.
-
-If the phone cannot connect, allow Python through the OS firewall or run this
-from Windows PowerShell in the project folder:
-
-```powershell
-py -3 serve_lan.py --port 8000 --bind 0.0.0.0
-```
-
-Browser storage is per device and per origin: a project saved in the desktop
-browser under `localhost` will not automatically exist on the phone under the
-LAN IP. Use `Export Project` from the editor and `Import Project` on the target
-browser/device when you need to move the same project across origins or devices.
-
-Opening the HTML file directly (`file://`) partially works, but a local server is the supported way: models, audio samples and browser storage all behave correctly there.
-
-To open specific surfaces directly:
-
+- `http://localhost:5600/`
 - `http://localhost:5600/gameplay.html`
 - `http://localhost:5600/engine_editor.html`
 
+Try to keep using the same host and port while working. Browser storage is tied to the exact origin, so `localhost:5600`, `127.0.0.1:5600`, another port, or a LAN IP all have separate saved projects and IndexedDB assets.
+
+Opening files directly with `file://` can partially work, but a local server is the supported path. Models, audio files and browser storage behave much better that way.
+
+## Large Local Assets
+
+Some local files are authoring assets and are not meant for a normal Git commit:
+
+- `models/player.glb` - current player vehicle model.
+- `models_sources/` - Blender/source files, ignored by Git.
+
+The repo should include the runtime assets needed to reproduce the playable state. Source files can stay local until there is a better asset-source publishing plan.
+
+## Credits And Asset Notes
+
+The project contains a mix of:
+
+- project-authored code and assets
+- AI-assisted or AI-generated assets
+- bundled samples
+- third-party or externally sourced references/assets
+
+The music currently bundled with the project is AI-generated by the project owner.
+
+Some assets still need a cleaner provenance pass. Before a polished public release, I want each external asset to have a clear source, license and attribution note.
+
+Project-authored code and assets are covered by the project license. Third-party assets keep their own terms.
+
+## AI-Assisted Development
+
+I use AI coding tools heavily on this project, mostly as implementation help while I direct the design, test the builds, decide what stays, and keep correcting the result in the editor.
+
+The project is not a one-prompt demo anymore. It is an ongoing browser engine/game experiment with a lot of manual testing, refactoring and iteration.
+
+## Tech
+
+- Three.js r128
+- Cannon.js 0.6.2
+- WebAudio
+- LocalStorage
+- IndexedDB
+- plain JavaScript
+- no framework and no bundler
+
+## License
+
+Lot King Engine Editor & Car Drift Game is released under the custom **Lot King Engine Builder & Car Drift Game Source License 0.1**.
+
+In short: you can read, learn from, modify, fork and share project-authored parts, but public uses must credit **Lot King Engine Builder & Car Drift Game by w4k3**. Commercial use is allowed below USD 100,000 gross revenue. Above that threshold, a separate written commercial agreement is required.
+
+This is source-available, not OSI-approved open source. See `LICENSE` for the exact terms.
+
 ## Roadmap
 
-The project is moving toward a future **1.0.0 Stable Beta**. The detailed roadmap is tracked through the active release notes and the archived milestone notes in `docs/releases/`, so GitHub's main README can stay focused on what the project is and how to run it.
+The project is moving toward a future `1.0.0` stable beta. The detailed roadmap lives in the active release notes and archived release docs, so this README can stay focused on what the project is and how to run it.

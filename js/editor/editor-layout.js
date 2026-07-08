@@ -51,6 +51,7 @@ function create(deps){
       floatingLayout.wirePanelResize();
       floatingLayout.wireAssetsResize();
       floatingLayout.wirePipResize();
+      floatingLayout.wireCinemaPreviewResize();
       floatingLayout.wireFloatingPanels();
     }
     ready = true;

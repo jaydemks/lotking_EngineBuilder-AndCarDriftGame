@@ -33,6 +33,8 @@ function create(deps){
     object: null,
     virtualX: 0,
     virtualY: 0,
+    controlX: 0,
+    controlY: 0,
     lastPointerDown: null,
     cursor: null,
   };
@@ -317,8 +319,12 @@ function create(deps){
     const rect = viewportRect();
     if(!rect || rect.width <= 2 || rect.height <= 2) return null;
     const fine = shiftFineMode && !ctrlSnapMode ? fineDragFactor : 1;
-    advancedDrag.virtualX += (dx || 0) * fine;
-    advancedDrag.virtualY += (dy || 0) * fine;
+    const stepX = (dx || 0) * fine;
+    const stepY = (dy || 0) * fine;
+    advancedDrag.controlX += stepX;
+    advancedDrag.controlY += stepY;
+    advancedDrag.virtualX += stepX;
+    advancedDrag.virtualY += stepY;
     const pad = 3;
     const minX = rect.left + pad, maxX = rect.right - pad;
     const minY = rect.top + pad, maxY = rect.bottom - pad;
@@ -328,8 +334,8 @@ function create(deps){
     else if(advancedDrag.virtualY > maxY) advancedDrag.virtualY = minY;
     updateVirtualCursor();
     return {
-      x: (advancedDrag.virtualX - rect.left) / rect.width * 2 - 1,
-      y: -((advancedDrag.virtualY - rect.top) / rect.height) * 2 + 1,
+      x: (advancedDrag.controlX - rect.left) / rect.width * 2 - 1,
+      y: -((advancedDrag.controlY - rect.top) / rect.height) * 2 + 1,
       button: -1,
     };
   }
@@ -343,6 +349,8 @@ function create(deps){
     advancedDrag.virtualX = Number.isFinite(p.clientX) ? p.clientX : (rect ? rect.left + rect.width / 2 : 0);
     advancedDrag.virtualY = Number.isFinite(p.clientY) ? p.clientY : (rect ? rect.top + rect.height / 2 : 0);
     clampVirtualPointer();
+    advancedDrag.controlX = advancedDrag.virtualX;
+    advancedDrag.controlY = advancedDrag.virtualY;
     setTransformModifierState(gizmo, p.event);
     if(controlDom && controlDom.requestPointerLock && p.pointerType !== 'touch'){
       try {
@@ -446,6 +454,7 @@ function create(deps){
       document.addEventListener('mousemove', handleLockedMove, true);
       document.addEventListener('pointerlockchange', handlePointerLockChange);
       gizmo.addEventListener('mouseDown', () => {
+        ED.gizmoPointerActive = true;
         deps.setGizmoPointerActive(true);
         deps.setGizmoSuppressSceneClick(true);
         if(deps.isGizmoUsingZUpProxy()) syncZUpProxyFromSelected();
@@ -459,6 +468,7 @@ function create(deps){
         if(ED.colliderEdit) deps.commitColliderHistory('Collider transform');
         else deps.commitTransformHistory('Transform');
         endAdvancedDrag(gizmo);
+        ED.gizmoPointerActive = false;
         deps.setGizmoPointerActive(false);
         setTimeout(() => { deps.setGizmoSuppressSceneClick(false); }, 0);
         const activeOrbit = deps.getOrbit();
@@ -466,6 +476,7 @@ function create(deps){
       });
       gizmo.addEventListener('objectChange', deps.onGizmoChange);
       gizmo.addEventListener('dragging-changed', e => {
+        ED.gizmoPointerActive = !!e.value;
         const activeOrbit = deps.getOrbit();
         if(activeOrbit) activeOrbit.enabled = !e.value && shouldEnableOrbit();
       });

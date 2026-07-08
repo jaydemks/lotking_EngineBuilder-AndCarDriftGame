@@ -146,6 +146,32 @@ function create(deps){
       addEventListener('pointerup', up, true);
     });
   }
+  function wireCinemaPreviewResize(){
+    const h = $('#lkCinemaPreviewResize');
+    const frame = $('#lkCinemaPreviewFrame');
+    if(!h || !frame) return;
+    h.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = ED.cinemaFloatPreviewW || 640;
+      const startRect = frame.getBoundingClientRect();
+      const move = ev => {
+        const aspect = ED.cinemaFloatPreviewAspect === '21:9' ? 21 / 9 : (ED.cinemaFloatPreviewAspect === '4:3' ? 4 / 3 : (ED.cinemaFloatPreviewAspect === '1:1' ? 1 : (ED.cinemaFloatPreviewAspect === '9:16' ? 9 / 16 : 16 / 9)));
+        const nextW = Math.max(360, Math.min(1280, startW + startX - ev.clientX));
+        const nextH = nextW / aspect;
+        ED.cinemaFloatPreviewW = nextW;
+        ED.cinemaFloatPreviewPos = clampPanelPos({x:startRect.right - nextW, y:startRect.bottom - nextH}, nextW, nextH);
+      };
+      const up = () => {
+        removeEventListener('pointermove', move, true);
+        removeEventListener('pointerup', up, true);
+        status('Timeline preview resized');
+      };
+      addEventListener('pointermove', move, true);
+      addEventListener('pointerup', up, true);
+    });
+  }
   function wireFloatingDrag(el, handle, stateKey, label){
     handle.addEventListener('pointerdown', e => {
       if(e.target.closest && e.target.closest('button,input,select')) return;
@@ -171,6 +197,8 @@ function create(deps){
   function wireFloatingPanels(){
     wireFloatingDrag($('#lkQuickAudio'), $('#lkQuickAudio'), 'quickAudioPos', 'Toolbar audio');
     wireFloatingDrag($('#lkPipFrame'), $('#lkPipFrame .lk-pip-title'), 'pipPos', 'Player camera');
+    const cinemaFrame = $('#lkCinemaPreviewFrame');
+    if(cinemaFrame) wireFloatingDrag(cinemaFrame, $('#lkCinemaPreviewFrame .lk-pip-title'), 'cinemaFloatPreviewPos', 'Timeline preview');
   }
 
   return Object.freeze({
@@ -184,6 +212,7 @@ function create(deps){
     wirePanelResize,
     wireAssetsResize,
     wirePipResize,
+    wireCinemaPreviewResize,
     wireFloatingPanels,
   });
 }

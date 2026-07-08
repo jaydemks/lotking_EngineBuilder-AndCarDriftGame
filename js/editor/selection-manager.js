@@ -14,6 +14,7 @@ function create(deps){
   const camE = deps.camE;
   const thumbCache = deps.thumbCache;
   const colliderProxy = deps.colliderProxy;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function isBlueprintPart(o){
     return !o || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
@@ -437,7 +438,7 @@ function create(deps){
   }
 
   function performDeleteEntity(o){
-    if(isBlueprintPart(o)){ deps.status('Componente blueprint non eliminabile'); return; }
+    if(isBlueprintPart(o)){ deps.status(tr('Blueprint component cannot be deleted', 'Componente blueprint non eliminabile')); return; }
     const wasSelected = ED.selected === o;
     deps.removeEntity(o);
     if(wasSelected) deselect();
@@ -448,7 +449,7 @@ function create(deps){
       redo: () => deps.removeEntity(o),
     });
     deps.markDirty(); deps.refreshOutliner();
-    deps.status('Deleted: ' + (o.userData.editorName || ''));
+    deps.status(tr('Deleted: ', 'Eliminato: ') + (o.userData.editorName || ''));
   }
 
   function performDeleteEntities(list){
@@ -471,19 +472,19 @@ function create(deps){
     deps.markDirty();
     deps.refreshOutliner();
     deps.buildInspector();
-    deps.status('Deleted ' + unique.length + ' objects');
+    deps.status(tr('Deleted ', 'Eliminati ') + unique.length + tr(' objects', ' oggetti'));
   }
 
   function requestDeleteEntity(o){
     if(!o) return;
     if(isBlueprintPart(o)){
-      deps.status('Componente blueprint non eliminabile');
+      deps.status(tr('Blueprint component cannot be deleted', 'Componente blueprint non eliminabile'));
       return;
     }
     deps.confirmEditorAction({
-      title: 'Delete scene object?',
-      message: 'Delete "' + (o.userData.editorName || o.userData.editorId || 'Entity') + '" from the current level?',
-      okText: 'Delete object',
+      title: tr('Delete scene object?', 'Eliminare oggetto scena?'),
+      message: tr('Delete "', 'Eliminare "') + (o.userData.editorName || o.userData.editorId || 'Entity') + tr('" from the current level?', '" dal livello corrente?'),
+      okText: tr('Delete object', 'Elimina oggetto'),
     }).then(ok => { if(ok) performDeleteEntity(o); });
   }
 
@@ -491,9 +492,9 @@ function create(deps){
     const list = selectedObjects();
     if(list.length <= 1) return requestDeleteEntity(list[0] || ED.selected);
     deps.confirmEditorAction({
-      title: 'Delete selected objects?',
-      message: 'Delete ' + list.length + ' selected object(s) from the current level?',
-      okText: 'Delete objects',
+      title: tr('Delete selected objects?', 'Eliminare oggetti selezionati?'),
+      message: tr('Delete ', 'Eliminare ') + list.length + tr(' selected object(s) from the current level?', ' oggetti selezionati dal livello corrente?'),
+      okText: tr('Delete objects', 'Elimina oggetti'),
     }).then(ok => { if(ok) performDeleteEntities(list); });
   }
 
@@ -515,6 +516,13 @@ function create(deps){
     } else if(src){
       entry = JSON.parse(JSON.stringify(src));
       entry.id = id; entry.name = o.userData.editorName + ' copy';
+      if(src.kind === 'cinemaStudio' && o.userData.cinemaProps){
+        entry.props = JSON.parse(JSON.stringify(o.userData.cinemaProps));
+        if(entry.asset){
+          entry.asset.key = 'cinema:studio:' + id;
+          entry.asset.name = entry.name;
+        }
+      }
       obj = null;
     } else {
       entry = {id, kind:'clone', srcId: o.userData.editorId, name: o.userData.editorName + ' copy', collide: !!o.userData.collider};
@@ -668,12 +676,13 @@ function create(deps){
     }
     deps.applyZUpProxyToSelected();
     if(o.userData.editorType === 'player'){
+      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
       GAME.player.physics.pos.copy(o.position);
-      GAME.player.physics.heading = o.rotation.y;
+      GAME.player.physics.heading = heading;
       if(GAME.player.spawn){
         GAME.player.spawn.x = o.position.x;
         GAME.player.spawn.z = o.position.z;
-        GAME.player.spawn.heading = o.rotation.y;
+        GAME.player.spawn.heading = heading;
       }
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }

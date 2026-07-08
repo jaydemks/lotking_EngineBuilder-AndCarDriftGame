@@ -308,6 +308,9 @@ function create(deps){
   }
 
   function sceneItems(q){
+    function sampleEntryKind(item){
+      return item && item.sample && item.sample.userData && item.sample.userData.addedEntry && item.sample.userData.addedEntry.kind || '';
+    }
     function looksLikeGlbAsset(item){
       const entry = item && item.sample && item.sample.userData && item.sample.userData.addedEntry;
       if(!entry || typeof entry !== 'object') return false;
@@ -325,16 +328,17 @@ function create(deps){
     return deps.collectAssets().map(a => ({
       kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name,
       filterType: looksLikeGlbAsset(a) ? 'glb' :
-        (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'light') ? 'light' :
-        (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'effect') ? 'effect' :
-        (a.sample && a.sample.userData && a.sample.userData.addedEntry && a.sample.userData.addedEntry.kind === 'texture') ? 'texture' :
+        sampleEntryKind(a) === 'light' ? 'light' :
+        sampleEntryKind(a) === 'effect' ? 'effect' :
+        sampleEntryKind(a) === 'texture' ? 'texture' :
+        sampleEntryKind(a) === 'cinemaStudio' ? 'scene' :
         'scene',
       type:a.type, sub:a.type + ' · ' + a.instances.length + ' instances · ' + a.source,
       source:a.source, icon:deps.entityIcon(a.sample), thumbObject:a.sample,
-      draggable:['mesh','light','effect'].includes(a.type),
+      draggable:['mesh','light','effect','cinemaStudio'].includes(a.type),
       defaultAction:() => { deps.selectObject(a.instances[0]); deps.setLeftMode('scene'); },
       actions:[
-        {label:'Select', title:'Select the first instance in scene', fn:() => { deps.selectObject(a.instances[0]); deps.setLeftMode('scene'); }},
+        {label:sampleEntryKind(a) === 'cinemaStudio' ? 'Open' : 'Select', title:'Select the first instance in scene', fn:() => { deps.selectObject(a.instances[0]); deps.setLeftMode('scene'); }},
         {label:'+', title:'Duplicate a new instance near the editor camera', fn:() => deps.placeAssetRef({kind:'scene', ref:'scene:' + a.key, key:a.key, name:a.name, type:a.type, raw:a}, deps.spawnPointAhead())},
       ],
     })).filter(item => visible(item, q));

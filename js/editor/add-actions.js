@@ -59,6 +59,7 @@ function create(deps){
     }
     const entry = {id, kind:'primitive', prim: realPrim, name: colliderOnly ? 'Collision Box' : prim[0].toUpperCase()+prim.slice(1), collide: colliderOnly || prim !== 'plane',
       colliderOnly,
+      cinemaTrigger: colliderOnly ? {enabled:false, eventName:'', mode:'once'} : undefined,
       physics: prim === 'cone',
       physicsMass: prim === 'cone' ? .005 : undefined,
       physicsImpact: prim === 'cone' ? .18 : undefined,
@@ -185,11 +186,11 @@ function create(deps){
 
   function addCinemaStudio(at){
     const id = STORE.nextId();
-    const props = {duration:6, fps:24, playback:'one-shot', trigger:'manual', previewCamera:'', movieTrack:[], cameras:[], keyframes:[], objectTracks:[]};
+    const props = {version:2, duration:6, fps:24, playback:'one-shot', trigger:'manual', eventName:'', previewCamera:'', cameraCuts:[], movieTrack:[], cameras:[], keyframes:[], objectTracks:[], lensTracks:[], eventTracks:[], markers:[]};
     const obj = STORE.createCinemaStudio(props);
     const entry = {id, kind:'cinemaStudio', name:'Cinema Studio', collide:false,
       props:Object.assign({}, obj.userData.cinemaProps),
-      asset:{key:'cinema:studio', name:'Cinema Studio', source:'Editor cinema'},
+      asset:{key:'cinema:studio:' + id, name:'Cinema Studio', source:'Editor cinema'},
       t:{p:[at.x, .05, at.z], r:[0,0,0], s:[1,1,1], v:true}};
     STORE.registerAdded(GAME, obj, entry);
     obj.userData.assetKey = entry.asset.key;

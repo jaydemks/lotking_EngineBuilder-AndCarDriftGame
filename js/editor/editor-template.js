@@ -166,19 +166,63 @@ function create(){
       <span id="lkCinemaTlClock"></span>
       <button id="lkCinemaTlLock" type="button" title="Lock sequencer to this Cinema Studio">Lock</button>
       <button id="lkCinemaTlDock" type="button" title="Dock sequencer under the viewport">Dock</button>
+      <button id="lkCinemaTlFloatPreview" type="button" title="Open floating timeline preview">Preview</button>
+      <button id="lkCinemaTlPreviewMode" type="button" title="Toggle timeline preview between editor-normal and final render">Final</button>
+      <select id="lkCinemaTlAspect" title="Floating preview aspect ratio">
+        <option value="16:9">16:9</option>
+        <option value="21:9">21:9</option>
+        <option value="4:3">4:3</option>
+        <option value="1:1">1:1</option>
+        <option value="9:16">9:16</option>
+      </select>
+      <button id="lkCinemaTlZoomOut" type="button" title="Zoom timeline out">−</button>
+      <button id="lkCinemaTlZoomIn" type="button" title="Zoom timeline in">+</button>
+      <button id="lkCinemaTlZoomReset" type="button" title="Reset timeline zoom">1:1</button>
       <button id="lkCinemaTlPlay" type="button">Play</button>
       <button id="lkCinemaTlStop" type="button">Stop</button>
       <select id="lkCinemaTlCamera" title="Shot camera"></select>
       <button id="lkCinemaTlAddCut" type="button">Add shot</button>
+      <button id="lkCinemaTlInsertCut" type="button" title="Split the current camera cut at the playhead">Insert cut</button>
+      <button id="lkCinemaTlAppendCut" type="button" title="Append a camera cut after the last cut">Append</button>
+      <button id="lkCinemaTlAddMarker" type="button" title="Add marker at current time">Add marker</button>
+      <button id="lkCinemaTlAddEvent" type="button" title="Add gameplay/editor event at current time">Add event</button>
       <select id="lkCinemaTlObject" title="Animated target: object or camera"></select>
       <button id="lkCinemaTlAddObject" type="button" title="Add selected object or camera as an animated target">Add target</button>
       <button id="lkCinemaTlKeyObject" type="button" title="Key selected object or camera transform at the current time">Key selected</button>
+      <button id="lkCinemaTlKeyLens" type="button" title="Key selected Scene Camera FOV at the current time">Key FOV</button>
       <button id="lkCinemaTlCurve" type="button" title="Edit selected key curves">∿</button>
+      <button id="lkCinemaTlDuplicate" type="button" title="Duplicate selected timeline item">Duplicate</button>
       <button id="lkCinemaTlDelete" type="button" title="Delete selected timeline item">Delete</button>
       <button id="lkCinemaTlClose" type="button" title="Close sequencer">×</button>
     </div>
-    <input id="lkCinemaTlScrub" type="range" min="0" max="6" step="0.01" value="0">
-    <div id="lkCinemaTlTrack"></div>
+    <div id="lkCinemaTlBody">
+      <div class="lk-cinema-row lk-cinema-ruler-row">
+        <div class="lk-cinema-row-label">TIME</div>
+        <div id="lkCinemaTlRuler" class="lk-cinema-row-lane lk-cinema-ruler"></div>
+      </div>
+      <div class="lk-cinema-row">
+        <div class="lk-cinema-row-label">CAMERA CUTS</div>
+        <div id="lkCinemaTlTrack" class="lk-cinema-row-lane"></div>
+      </div>
+      <div class="lk-cinema-row">
+        <div class="lk-cinema-row-label">MARKERS</div>
+        <div id="lkCinemaTlMarkerTrack" class="lk-cinema-row-lane"></div>
+      </div>
+      <div class="lk-cinema-row">
+        <div class="lk-cinema-row-label">OBJECT KEYS</div>
+        <div id="lkCinemaTlObjectTrack" class="lk-cinema-row-lane"></div>
+      </div>
+      <div class="lk-cinema-row">
+        <div class="lk-cinema-row-label">CAMERA PARAMS</div>
+        <div id="lkCinemaTlLensTrack" class="lk-cinema-row-lane"></div>
+      </div>
+      <div class="lk-cinema-row">
+        <div class="lk-cinema-row-label">EVENTS</div>
+        <div id="lkCinemaTlEventTrack" class="lk-cinema-row-lane"></div>
+      </div>
+      <button id="lkCinemaTlPlayhead" type="button" title="Current time"></button>
+    </div>
+    <div id="lkCinemaViewportHud"></div>
     <div id="lkCinemaCurvePanel">
       <span>Curve</span>
       <select id="lkCinemaCurveMode">
@@ -189,8 +233,10 @@ function create(){
         <option value="manual">Manual</option>
       </select>
     </div>
+    <div id="lkCinemaClipPanel"></div>
   </div>
   <div id="lkPipFrame"><div class="lk-pip-title"><span>PLAYER CAMERA</span><button id="lkPipMinimize" type="button" title="Minimize player camera">−</button></div><div id="lkPipResize"></div></div>
+  <div id="lkCinemaPreviewFrame"><div class="lk-pip-title"><span>TIMELINE PREVIEW</span><button id="lkCinemaPreviewMinimize" type="button" title="Minimize timeline preview">−</button><button id="lkCinemaPreviewClose" type="button" title="Close timeline preview">×</button></div><div id="lkCinemaPreviewMeta"></div><div id="lkCinemaPreviewResize"></div></div>
   <div id="lkLevelsOverlay"><div class="lk-levels-panel">
     <div class="lk-levels-head"><div class="lk-levels-title">🗀 PROJECT LEVELS</div><div class="lk-levels-sub">stored locally</div><button id="lkLevelsClose" type="button">×</button></div>
     <div id="lkLevelsList"></div>

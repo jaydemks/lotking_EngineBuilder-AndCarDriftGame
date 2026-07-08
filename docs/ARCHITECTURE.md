@@ -1,6 +1,6 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture after the editor/runtime split and v0.5.4 playable-export pass.
+This document describes the current project architecture after the editor/runtime split and the v0.6.2 Cinema Studio pass.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, shared UI/input helpers, playable export pipeline, and versioned release documentation.
 
@@ -136,9 +136,11 @@ Major editor areas:
 
 The editor has its own free camera, grid/helpers, transform gizmo, asset dock, outliner, inspector, settings overlay, preview mode, and export flows. During edit mode it guards gameplay input with `LOT_KING.state.editorActive` and can override the canvas viewport rect so picking and editor panels behave correctly.
 
-`editor-runtime.js` is intentionally kept as an orchestration module: editor enter/exit, Play Preview, frame handoff, player-camera preview, and runtime/editor state guards. View-specific behavior lives in `viewport-layout.js`, which owns quad view layout, view selector overlays, per-view render modes, stats overlays, and independent secondary perspective cameras. Input/picking/control helpers still live in `viewport-events.js`, `viewport-picking.js`, `fly-camera.js`, and `gizmo-controls.js`.
+`editor-runtime.js` is intentionally kept as an orchestration module: editor enter/exit, Play Preview, frame handoff, player-camera preview, runtime/editor state guards, and Cinema Studio runtime-trigger scanning during Play Preview. View-specific behavior lives in `viewport-layout.js`, which owns quad view layout, view selector overlays, per-view render modes, stats overlays, and independent secondary perspective cameras. Input/picking/control helpers still live in `viewport-events.js`, `viewport-picking.js`, `fly-camera.js`, and `gizmo-controls.js`.
 
-`cinema-studio.js` owns the early Cinema Studio sequencer surface: dock/lock timeline UI, shot/camera cuts, timeline output evaluation, animated target tracks, transform keyframes, basic curve modes, and selected-item deletion. This is integrated as a foundation but is not considered final; richer clip editing, runtime triggers/events, advanced curves, and multi-property tracks are still future work.
+`cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. It is browser-only and intentionally does not depend on external render/export tooling. Advanced curve editing, blend modes, more camera/lens parameters, and full track controls remain future work.
+
+Cinema Studio data is stored on scene timeline/director objects through normalized `cinemaProps` data. `scene-store.js` keeps `cameraCuts`, `objectTracks`, `lensTracks`, `eventTracks`, and `markers` persistent, while maintaining the legacy `movieTrack` alias during migration. Collision Box trigger settings can call named Cinema Studio runtime events in Play Preview; timeline Event Track playback emits browser `lotking:timelineevent` events for project-specific listeners.
 
 The editor opens with the Projects overlay on top of the editor surface. If the browser project list is empty but an older/current editor project already exists in the legacy active project slot, `project-io.js` seeds that project into the Projects list so existing work remains visible. Loading a project writes it into the active store and reloads the editor surface; saving updates the active browser project and keeps `.lkep.json` export as the explicit portable workflow.
 
@@ -157,7 +159,7 @@ Blueprint-related systems include:
 - model assignment and replacement;
 - spawn/default project settings.
 
-The editor exposes these through player inspector modules and stores them through `LK_STORE`.
+The editor exposes these through player inspector modules and stores them through `LK_STORE`. The player spawn heading is treated as canonical runtime direction: `Direction = 0` is the forward heading used by editor fields, physics sync, save/load, player-camera preview, and Play Preview reset. Model visual orientation is no longer used as the authoritative spawn heading.
 
 ## Audio and Sound Designer
 

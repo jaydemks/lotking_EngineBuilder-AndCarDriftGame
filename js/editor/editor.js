@@ -259,7 +259,8 @@ function cinemaStudioById(id){
 }
 function cinemaShotAt(studio, time){
   const props = studio && studio.userData && studio.userData.cinemaProps || {};
-  const shots = Array.isArray(props.movieTrack) ? props.movieTrack.slice().sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
+  const source = Array.isArray(props.cameraCuts) ? props.cameraCuts : props.movieTrack;
+  const shots = Array.isArray(source) ? source.slice().sort((a,b) => (a.time || 0) - (b.time || 0)) : [];
   return shots.find(shot => time >= (shot.time || 0) && time < (shot.time || 0) + (shot.duration || 0)) ||
     shots.filter(shot => (shot.time || 0) <= time).pop() ||
     shots[0] || null;
@@ -665,6 +666,30 @@ function markDirty(){
   ED.dirty = true;
   $('#lkDirty').classList.add('show');
 }
+function commitNumberInput(target){
+  if(!(target && target.matches && target.matches('input[type="number"]'))) return false;
+  target.dispatchEvent(new Event('input', {bubbles:true}));
+  target.dispatchEvent(new Event('change', {bubbles:true}));
+  if(target.blur) target.blur();
+  return true;
+}
+function shouldCommitNumberInputKey(e){
+  if(!(ED && ED.active)) return;
+  if(e.key !== 'Enter' && e.code !== 'NumpadEnter') return;
+  return !!(e.target && e.target.matches && e.target.matches('input[type="number"]'));
+}
+addEventListener('keydown', e => {
+  if(!shouldCommitNumberInputKey(e)) return;
+  const target = e.target;
+  e.preventDefault();
+  e.stopPropagation();
+  setTimeout(() => commitNumberInput(target), 0);
+}, true);
+addEventListener('keyup', e => {
+  if(!shouldCommitNumberInputKey(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
 projectIo = window.LK_EDITOR_PROJECT_IO && window.LK_EDITOR_PROJECT_IO.create({
   GAME,
   STORE,
@@ -1369,6 +1394,8 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   refreshOutliner,
   selectObject,
   focusSelected,
+  activeViewportCamera,
+  setCameraViewSlot: cameraId => { ED.viewportMode = 'quad'; ED.viewportSlots[1] = 'cam:' + cameraId; setActiveViewportSlot(1); },
   beginTransformHistory,
   commitTransformHistory,
   beginColliderHistory,
@@ -1536,6 +1563,7 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
   refreshOutliner,
   refreshAssetsPanel,
   buildInspector,
+  selectObject,
   status,
   clearHoverPickHelper,
   clearReplaceDropHelper,
@@ -1553,6 +1581,16 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
         const oldEntry = added.get(o.userData.addedEntry.id);
         if(oldEntry && oldEntry.t) STORE.applyT(o, oldEntry.t);
       }
+      if(o.userData.editorType === 'player'){
+        const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
+        GAME.player.physics.pos.copy(o.position);
+        GAME.player.physics.heading = heading;
+        if(GAME.player.spawn){
+          GAME.player.spawn.x = o.position.x;
+          GAME.player.spawn.z = o.position.z;
+          GAME.player.spawn.heading = heading;
+        }
+      }
       STORE.syncCollider(o);
       if(o.userData.physicsVel) o.userData.physicsVel = null;
       if(o.userData.physicsAng) o.userData.physicsAng = null;
@@ -1565,6 +1603,7 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
   markDirty,
   updateEditorControls,
   editorViewportRect,
+  pushHistory,
   setActiveViewportSlot,
   cameraForView: editorCameraForView,
   updateCameraRigHelper,
@@ -1594,6 +1633,6 @@ addEventListener('lotking:radiohudchange', e => {
   if(d.before && d.after) queueHudHistory(d.before, d.after, hudPatchLabel(d.patch));
 });
 
-GAME.editor = {enter: enterEditor, exit: exitEditor, state: ED, requestWarmup: requestEditorWarmup, markDirty};
+GAME.editor = {enter: enterEditor, exit: exitEditor, state: ED, requestWarmup: requestEditorWarmup, markDirty, viewportRect: editorViewportRect};
 console.info('LotKing: engine editor ready');
 })();

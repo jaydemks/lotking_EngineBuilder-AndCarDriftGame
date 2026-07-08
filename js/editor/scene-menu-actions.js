@@ -162,15 +162,19 @@ function create(deps){
 
   function setSpawnHere(){
     const car = GAME.player.car;
+    const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : car.rotation.y;
     if(GAME.player.spawn){
       GAME.player.spawn.x = car.position.x;
       GAME.player.spawn.z = car.position.z;
-      GAME.player.spawn.heading = car.rotation.y;
+      GAME.player.spawn.heading = heading;
     }
     GAME.player.physics.pos.copy(car.position);
-    GAME.player.physics.heading = car.rotation.y;
+    GAME.player.physics.heading = heading;
     if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
-    deps.markDirty(); deps.status(tr('Player spawn updated', 'Spawn del player aggiornato'));
+    deps.markDirty();
+    if(deps.syncTransformFields) deps.syncTransformFields();
+    if(deps.buildInspector) deps.buildInspector();
+    deps.status(tr('Player spawn updated', 'Spawn del player aggiornato'));
   }
 
   return Object.freeze({

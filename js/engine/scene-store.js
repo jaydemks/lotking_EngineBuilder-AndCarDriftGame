@@ -559,7 +559,24 @@ function collectPlayerBlueprint(GAME){
     skids: cloneData(GAME.player.skids || {}),
     collision: cloneData(GAME.player.collision || {}),
   };
-  if(GAME.player.spawn) player.spawn = cloneData(GAME.player.spawn);
+  if(GAME.player.spawn){
+    player.spawn = cloneData(GAME.player.spawn);
+    if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview && GAME.player.car){
+      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : (GAME.player.car.rotation ? (GAME.player.car.rotation.y || 0) : 0);
+      player.spawn.x = GAME.player.car.position.x || 0;
+      player.spawn.z = GAME.player.car.position.z || 0;
+      player.spawn.heading = heading;
+      GAME.player.spawn.x = player.spawn.x;
+      GAME.player.spawn.z = player.spawn.z;
+      GAME.player.spawn.heading = player.spawn.heading;
+    }
+  } else if(GAME.player.car){
+    player.spawn = {
+      x: GAME.player.car.position.x || 0,
+      z: GAME.player.car.position.z || 0,
+      heading: GAME.player.visibleHeading ? GAME.player.visibleHeading() : (GAME.player.car.rotation ? (GAME.player.car.rotation.y || 0) : 0),
+    };
+  }
   if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
   if(GAME.player.car && GAME.player.car.userData.modelDbKey) player.modelDbKey = GAME.player.car.userData.modelDbKey;
   if(GAME.player.car && GAME.player.car.userData.modelName) player.modelName = GAME.player.car.userData.modelName;
@@ -2127,17 +2144,31 @@ function createSceneCamera(props){
 }
 
 function normalizeCinemaStudioProps(props){
-  return Object.assign({
+  const out = Object.assign({
+    version:2,
     duration:6,
     fps:24,
     playback:'one-shot',
     trigger:'manual',
+    eventName:'',
     previewCamera:'',
+    cameraCuts:[],
     movieTrack:[],
     cameras:[],
     keyframes:[],
     objectTracks:[],
+    lensTracks:[],
+    eventTracks:[],
+    markers:[],
   }, props || {});
+  out.version = Math.max(2, Number(out.version) || 1);
+  if(!Array.isArray(out.cameraCuts)) out.cameraCuts = Array.isArray(out.movieTrack) ? out.movieTrack : [];
+  out.movieTrack = out.cameraCuts;
+  if(!Array.isArray(out.objectTracks)) out.objectTracks = [];
+  if(!Array.isArray(out.lensTracks)) out.lensTracks = [];
+  if(!Array.isArray(out.eventTracks)) out.eventTracks = [];
+  if(!Array.isArray(out.markers)) out.markers = [];
+  return out;
 }
 
 function createCinemaStudio(props){
@@ -2403,6 +2434,7 @@ function registerAdded(GAME, obj, entry){
   if(entry && (entry.colliderDummyVisibility === 'show' || entry.colliderDummyVisibility === 'hide')) obj.userData.colliderDummyVisibility = entry.colliderDummyVisibility;
   if(entry && entry.colliderOnly){
     obj.userData.colliderOnly = true;
+    obj.userData.cinemaTrigger = cloneData(entry.cinemaTrigger || {enabled:false, eventName:'', mode:'once'});
     obj.traverse(n => {
       if(!n.isMesh) return;
       n.material = new THREE.MeshBasicMaterial({color:0x4be3a0, wireframe:true, transparent:true, opacity:.28, depthTest:false});
@@ -2583,12 +2615,21 @@ function apply(GAME){
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
   // player blueprint
   if(data.player){
+    const playerTransform = data.transforms && data.transforms.player;
+    if(!data.player.spawn && playerTransform && playerTransform.p){
+      data.player.spawn = Object.assign({}, data.player.spawn || {}, {
+        x: playerTransform.p[0] || 0,
+        z: playerTransform.p[2] || 0,
+        heading: data.player.spawn && data.player.spawn.heading != null ? data.player.spawn.heading : (playerTransform.r ? (playerTransform.r[1] || 0) : 0),
+      });
+    }
     if(data.player.spawn){
       Object.assign(GAME.player.spawn, data.player.spawn);
       GAME.player.physics.pos.set(GAME.player.spawn.x, 0, GAME.player.spawn.z);
       GAME.player.physics.heading = GAME.player.spawn.heading;
       GAME.player.car.position.copy(GAME.player.physics.pos);
-      GAME.player.car.rotation.y = GAME.player.physics.heading;
+      if(GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(GAME.player.physics.heading);
+      else GAME.player.car.rotation.y = GAME.player.physics.heading;
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
     if(data.player.modelSrc || data.player.modelDbKey){
@@ -2601,6 +2642,7 @@ function apply(GAME){
           GAME.player.car.userData.modelSrc = data.player.modelSrc || null;
           GAME.player.car.userData.modelDbKey = data.player.modelDbKey || null;
           GAME.player.car.userData.modelName = data.player.modelName || null;
+          if(data.player.spawn && GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(data.player.spawn.heading || 0);
           if(data.player.materials) applyPlayerMaterialProps(GAME, data.player.materials);
         }))
         .catch(err => console.warn('LotKing store: modello player non ricaricato', err));
@@ -2698,6 +2740,7 @@ function collect(GAME){
       e.physics = !!hasPhysics;
       e.collide = !!hasCollider;
       if(o.userData.colliderOnly) e.colliderOnly = true;
+      if(o.userData.colliderOnly && o.userData.cinemaTrigger) e.cinemaTrigger = cloneData(o.userData.cinemaTrigger);
       if(o.userData.driveSurface != null) e.driveSurface = !!o.userData.driveSurface;
       if(o.userData.colliderShape) e.colliderShape = cloneData(o.userData.colliderShape);
       if(o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide') e.colliderDummyVisibility = o.userData.colliderDummyVisibility;
@@ -2714,7 +2757,7 @@ function collect(GAME){
 	      else if(e.kind === 'text') e.props = Object.assign({}, o.userData.textProps || e.props || {});
 	      else if(e.kind === 'texture') e.props = Object.assign({}, o.userData.textureProps || e.props || {});
 	      else if(e.kind === 'camera') e.props = Object.assign({}, o.userData.cameraProps || e.props || {});
-	      else if(e.kind === 'cinemaStudio') e.props = Object.assign({}, o.userData.cinemaProps || e.props || {});
+	      else if(e.kind === 'cinemaStudio') e.props = normalizeCinemaStudioProps(cloneData(o.userData.cinemaProps || e.props || {}));
 	      else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
       if(o.userData.assetKey) e.asset = Object.assign({}, e.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
       d.added.push(e);

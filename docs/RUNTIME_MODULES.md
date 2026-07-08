@@ -1,6 +1,6 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Runtime Modules
 
-This document maps the current runtime and runtime-adjacent modules. It is meant to stay version-neutral; release-specific details belong in `docs/releases/` and active `Release_Notes_v*.md` files.
+This document maps the current runtime and runtime-adjacent modules. It is meant to stay version-neutral; release-specific details belong in `docs/releases/` and active `RELEASE_NOTES_v*.md` files.
 
 The gameplay runtime still composes through `js/lot-king.js`, but the project now has separate HTML entrypoints for landing/menu, gameplay, and editor. Most systems live in focused modules that register `window.LK_RUNTIME_*` factories. The editor also reuses some runtime modules, especially input, audio/HUD, and floating-window helpers.
 
@@ -63,7 +63,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   GLB/GLTF loading, model normalization, wheel rig detection, wheel animation helpers, and player model preparation.
 
 - `js/runtime/player-model.js`
-  Player GLB assignment, current model access, model flip support, drag/drop replacement support, and runtime model state.
+  Player GLB assignment, current model access, drag/drop replacement support, and runtime model state.
 
 - `js/runtime/player-light-rig.js`
   Vehicle-mounted lighting only: front headlights, rear/brake/reverse lights, auxiliary vehicle lights, neon, high beams, warm light slots, and the player-light bridge used by the editor inspector.
@@ -164,13 +164,13 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
   Project input settings UI. Edits allowed devices, touch mode, player defaults, device instances, base bindings, and mapping overlay data stored in `meta.input`.
 
 - `js/editor/editor-runtime.js`
-  Editor enter/exit, Play Preview, frame-loop handoff, editor camera sync, player-camera preview rendering, and runtime/editor state guards. It should remain an orchestration layer; viewport layout and Cinema Studio behavior are delegated to focused modules.
+  Editor enter/exit, Play Preview, frame-loop handoff, editor camera sync, player-camera preview rendering, runtime/editor state guards, Cinema Studio runtime-trigger scanning, and runtime camera handoff when a Cinema Studio is active in Play Preview. It should remain an orchestration layer; viewport layout and Cinema Studio authoring behavior are delegated to focused modules.
 
 - `js/editor/viewport-layout.js`
   Runtime-adjacent editor viewport module. Owns quad/single viewport rendering, secondary view selectors, independent secondary perspective cameras, orthographic view cameras, per-view render modes, split handles, viewport overlays, and FPS/performance stats. It is loaded before `editor-runtime.js` and is used by the runtime frame handoff while editing.
 
 - `js/editor/cinema-studio.js`
-  Runtime-adjacent editor sequencer module. Owns the early Cinema Studio timeline UI, dock/lock state, playback preview, shot/camera cuts, timeline output evaluation, animated target tracks, transform keyframes, selected-item deletion, and basic curve modes. It is integrated as an editor preview foundation; final runtime trigger/event playback and richer timeline editing are future work.
+  Runtime-adjacent editor timeline module. Owns Cinema Studio timeline UI, dock/lock state, playhead/ruler controls, real Scene Camera camera cuts, floating preview, Normal/Final preview modes, timeline output evaluation, object transform tracks, camera FOV lens tracks, markers, event tracks, validation, selected-item deletion, undo-aware edits, and the internal play/stop/runtime API. Runtime event triggering and outbound `lotking:timelineevent` dispatch are implemented for Play Preview; advanced curve editing, blend modes, more camera parameters, and full track controls remain future work.
 
 - `js/editor/playable-export.js`
   Coordinates playable ZIP export.

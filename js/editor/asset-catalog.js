@@ -61,6 +61,10 @@ function create(deps){
   }
 
   function assetKeyOf(o){
+    if(o.userData && o.userData.editorType === 'cinemaStudio'){
+      const id = o.userData.editorId || (o.userData.addedEntry && o.userData.addedEntry.id) || o.uuid || 'cinema';
+      return 'cinema:studio:' + id;
+    }
     if(o.userData.assetKey) return o.userData.assetKey;
     if(o.userData.addedEntry) return 'added:' + (o.userData.addedEntry.kind || 'object') + ':' + (o.userData.addedEntry.prim || o.userData.addedEntry.light || o.userData.addedEntry.effect || o.userData.editorName || 'asset');
     const name = o.userData.editorName || o.userData.editorId || 'object';
@@ -68,6 +72,7 @@ function create(deps){
   }
 
   function assetNameOf(o){
+    if(o.userData && o.userData.editorType === 'cinemaStudio') return o.userData.editorName || 'Cinema Studio';
     if(o.userData.assetName) return o.userData.assetName;
     if(o.userData.addedEntry) return o.userData.addedEntry.name || o.userData.editorName || o.userData.addedEntry.kind;
     return (o.userData.editorName || 'Object').replace(/\s+\d+$/,'');
@@ -104,7 +109,7 @@ function create(deps){
     for(const o of GAME.world.registry){
       if(o.userData.editorType === 'player') continue;
       if(o.userData.builtin) continue;
-      if(!isPrimitiveLikeObject(o)) continue;
+      if(!isPrimitiveLikeObject(o) && o.userData.editorType !== 'cinemaStudio') continue;
       const key = assetKeyOf(o);
       if(!map.has(key)){
         map.set(key, {
@@ -228,9 +233,9 @@ function create(deps){
         source: (entry.asset && (entry.asset.source || entry.asset.key)) || label || 'Project',
         levels: label ? [label] : [],
         type,
-	        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : type === 'texture' ? 'texture' : type === 'camera' ? 'camera' : 'other',
+        filterType: type === 'glb' ? 'glb' : type === 'light' ? 'light' : type === 'effect' ? 'effect' : type === 'texture' ? 'texture' : type === 'camera' ? 'camera' : type === 'scene' ? 'scene' : 'other',
         raw: {entry: clone(entry), levelId: level && level.id, levelName: label},
-        icon: entry.kind === 'glb' || type === 'glb' ? '📦' : type === 'texture' ? '▧' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : '▣',
+        icon: entry.kind === 'glb' || type === 'glb' ? '📦' : type === 'texture' ? '▧' : entry.kind === 'light' ? '💡' : entry.kind === 'effect' ? '✨' : entry.kind === 'cinemaStudio' ? '▤' : '▣',
         thumbUrl: type === 'texture' && previewSrc ? previewSrc : null,
         thumbDbKey: type === 'texture' && previewDbKey ? previewDbKey : null,
         thumbAsset: type === 'glb' ? {

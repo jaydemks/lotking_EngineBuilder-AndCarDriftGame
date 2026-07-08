@@ -22,6 +22,12 @@ function create(deps){
       if(item.kind === 'p') item.input.value = f(o.position[item.prop]);
       else if(item.kind === 'r') item.input.value = f(THREE.MathUtils.radToDeg(o.rotation[item.prop]));
       else if(item.kind === 's') item.input.value = f(o.scale[item.prop]);
+      else if(item.kind === 'player-p') item.input.value = f(o.position[item.prop]);
+      else if(item.kind === 'player-dir'){
+        const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : (o.rotation.y || 0);
+        const deg = THREE.MathUtils.radToDeg(heading);
+        item.input.value = f(((deg + 180) % 360 + 360) % 360 - 180);
+      }
     });
   }
 
@@ -187,33 +193,60 @@ function create(deps){
 
     const st = deps.section(tr('POSITION / SPAWN', 'POSIZIONE / SPAWN'));
     st.body.appendChild(deps.el('<div class="lk-hint">' + tr('Move the car with the gizmo: its position becomes the spawn.', 'Muovi l\'auto con il gizmo: la sua posizione diventa lo spawn.') + '</div>'));
+    const syncPlayerSpawnFromInspector = () => {
+      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : (o.rotation.y || 0);
+      o.updateMatrixWorld(true);
+      if(GAME.player.physics){
+        GAME.player.physics.pos.copy(o.position);
+        GAME.player.physics.heading = heading;
+      }
+      if(GAME.player.spawn){
+        GAME.player.spawn.x = o.position.x;
+        GAME.player.spawn.z = o.position.z;
+        GAME.player.spawn.heading = heading;
+      }
+      if(GAME.systems && GAME.systems.physics) GAME.systems.physics.syncPlayer();
+      STORE.syncCollider(o);
+      if(deps.markDirty) deps.markDirty();
+      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+    };
     const row = deps.el('<div class="lk-vec"><label>' + tr('Position', 'Posizione') + '</label></div>');
     const ins = [];
     ['x','y','z'].forEach(ax => {
       const i = deps.el('<input type="number" step="0.5">');
       i.value = +o.position[ax].toFixed(2);
       i.addEventListener('focus', deps.beginTransformHistory);
-      i.addEventListener('input', () => { o.position[ax] = parseFloat(i.value) || 0; deps.onGizmoChange(); });
+      i.addEventListener('input', () => { o.position[ax] = parseFloat(i.value) || 0; syncPlayerSpawnFromInspector(); });
       i.addEventListener('change', () => deps.commitTransformHistory('Player spawn'));
       row.appendChild(i);
-      ins.push(i);
+      ins.push({input:i, prop:ax, kind:'player-p'});
     });
     st.body.appendChild(row);
 
     const rowR = deps.el('<div class="lk-vec"><label>' + tr('Direction°', 'Direzione°') + '</label></div>');
     const rI = deps.el('<input type="number" step="5">');
-    rI.value = +THREE.MathUtils.radToDeg(o.rotation.y).toFixed(1);
+    const playerDirection = () => {
+      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : (o.rotation.y || 0);
+      const deg = THREE.MathUtils.radToDeg(heading);
+      return ((deg + 180) % 360 + 360) % 360 - 180;
+    };
+    const setPlayerDirection = value => {
+      const heading = THREE.MathUtils.degToRad(value || 0);
+      if(GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(heading);
+      else o.rotation.y = heading;
+    };
+    rI.value = +playerDirection().toFixed(1);
     rI.addEventListener('focus', deps.beginTransformHistory);
-    rI.addEventListener('input', () => { o.rotation.y = THREE.MathUtils.degToRad(parseFloat(rI.value) || 0); deps.onGizmoChange(); });
+    rI.addEventListener('input', () => { setPlayerDirection(parseFloat(rI.value) || 0); syncPlayerSpawnFromInspector(); });
     rI.addEventListener('change', () => deps.commitTransformHistory('Player direction'));
     rowR.appendChild(rI);
     st.body.appendChild(rowR);
 
-    tf.inputs = [ins[0], ins[1], ins[2], {set value(v){}, get value(){return 0;}}, rI, {set value(v){}, get value(){return 0;}}, {set value(v){}}, {set value(v){}}, {set value(v){}}];
+    tf.inputs = [...ins, {input:rI, kind:'player-dir'}];
     st.body.appendChild(deps.btnRow([{label:tr('📍 Spawn here', '📍 Spawn qui'), action: deps.setSpawnHere}, {label:tr('↺ Default spawn', '↺ Spawn default'), action:() => {
       o.position.set(0,0,55);
-      o.rotation.y = Math.PI;
-      deps.onGizmoChange();
+      setPlayerDirection(0);
+      syncPlayerSpawnFromInspector();
       buildInspector();
     }}]));
     box.appendChild(st.root);

@@ -944,7 +944,15 @@ html,body {
   body.lk-portrait #hud { --touch-reserve-bottom: 134px; }
   body.lk-portrait #legend { display:none !important; }
   body.lk-free-camera-cursor-hidden,
-  body.lk-free-camera-cursor-hidden canvas { cursor:none; }
+  body.lk-free-camera-cursor-hidden *,
+  body.lk-free-camera-cursor-hidden canvas { cursor:none !important; }
+  body.lk-game-ui-cursor,
+  body.lk-game-ui-cursor canvas { cursor:crosshair; }
+  body.lk-game-ui-cursor button,
+  body.lk-game-ui-cursor input,
+  body.lk-game-ui-cursor select,
+  body.lk-game-ui-cursor textarea,
+  body.lk-game-ui-cursor [role="button"] { cursor:pointer; }
   body.lk-portrait #lkTouchControls {
     gap:10px;
     --touch-safe-x: max(10px, env(safe-area-inset-left));

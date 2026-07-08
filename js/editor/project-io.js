@@ -348,6 +348,12 @@ function create(deps){
     opts = opts || {};
     const progressToken = beginStatusWork(tr('Saving level', 'Salvataggio livello'), tr('Checking current state', 'Verifica stato corrente'), 'loading');
     updateStatusWork(progressToken, 10, tr('Preparing data', 'Preparazione dati'), 'loading');
+    const active = document.activeElement;
+    if(active && active.matches && active.matches('input[type="number"]')){
+      active.dispatchEvent(new Event('input', {bubbles:true}));
+      active.dispatchEvent(new Event('change', {bubbles:true}));
+      if(active.blur) active.blur();
+    }
     flushHudHistory();
     const input = $('#lkTrackName');
     if(input && input.value.trim()){
@@ -640,15 +646,15 @@ function create(deps){
       refreshProjectsOverlay();
       status('Project renamed ✓');
     } catch(err) {
-      status('Rename failed: ' + (err && err.message ? err.message : err));
+      status(tr('Rename failed: ', 'Rinomina fallita: ') + (err && err.message ? err.message : err));
     }
   }
 
   function deleteBrowserProject(id, currentName){
     confirmEditorAction({
-      title:'Delete project?',
-      message:'Delete "' + (currentName || id) + '" permanently?',
-      okText:'Delete project',
+      title:tr('Delete project?', 'Eliminare progetto?'),
+      message:tr('Delete "', 'Eliminare "') + (currentName || id) + tr('" permanently?', '" definitivamente?'),
+      okText:tr('Delete project', 'Elimina progetto'),
     }).then(ok => {
       if(!ok) return;
       try {
@@ -665,9 +671,9 @@ function create(deps){
           try { localStorage.removeItem(BROWSER_PROJECT_MARKER); } catch(err){}
         }
         refreshProjectsOverlay();
-        status('Project deleted');
+        status(tr('Project deleted', 'Progetto eliminato'));
       } catch(err) {
-        status('Delete failed: ' + (err && err.message ? err.message : err));
+        status(tr('Delete failed: ', 'Eliminazione fallita: ') + (err && err.message ? err.message : err));
       }
     });
   }

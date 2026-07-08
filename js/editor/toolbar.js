@@ -150,6 +150,20 @@ function create(deps){
     pipMin.textContent = ED.pipMinimized ? '+' : '−';
     pipMin.title = ED.pipMinimized ? 'Expand player camera' : 'Minimize player camera';
   });
+  const cinemaPreviewMin = $('#lkCinemaPreviewMinimize');
+  if(cinemaPreviewMin) cinemaPreviewMin.addEventListener('click', e => {
+    e.stopPropagation();
+    ED.cinemaFloatPreviewMinimized = !ED.cinemaFloatPreviewMinimized;
+    cinemaPreviewMin.textContent = ED.cinemaFloatPreviewMinimized ? '+' : '−';
+    cinemaPreviewMin.title = ED.cinemaFloatPreviewMinimized ? 'Expand timeline preview' : 'Minimize timeline preview';
+  });
+  const cinemaPreviewClose = $('#lkCinemaPreviewClose');
+  if(cinemaPreviewClose) cinemaPreviewClose.addEventListener('click', e => {
+    e.stopPropagation();
+    ED.cinemaFloatPreviewOn = false;
+    const frame = $('#lkCinemaPreviewFrame');
+    if(frame) frame.classList.remove('on');
+  });
 
   $('#lkAddMenu').addEventListener('click', e => deps.openMenu(deps.addMenuItems(deps.spawnPointAhead()), e.clientX, e.clientY));
   root.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => deps.setTool(b.dataset.tool)));

@@ -79,6 +79,8 @@ function create(options){
   function enterGameplayMode(){
     call('exitEditor', true);
     gameState.editorActive = false;
+    gameState.playPreviewCursorVisible = false;
+    document.body.classList.remove('lk-game-ui-cursor');
     call('clearFrameOverride');
     gameState.paused = false;
     call('setDragging', false);
@@ -92,6 +94,9 @@ function create(options){
 
   function beginGameplaySession(editorPreview){
     gameState.paused = false;
+    gameState.playPreviewCursorVisible = false;
+    if(editorPreview) call('syncEditorSpawnFromPlayer');
+    call('resetCar');
     call('resetGameplayCamera');
     call('initGameplayPhysics');
     setHudVisible(true);
@@ -102,6 +107,9 @@ function create(options){
 
   function stopEditorPreview(){
     if(!gameState.editorPreview) return;
+    gameState.playPreviewCursorVisible = false;
+    document.body.classList.remove('lk-free-camera-cursor-hidden');
+    document.body.classList.remove('lk-game-ui-cursor');
     session.markStopped();
     call('setDragging', false);
     call('clearInput');
@@ -127,6 +135,9 @@ function create(options){
     unloadCurrentLevel();
     gameState.paused = false;
     call('clearInput');
+    gameState.playPreviewCursorVisible = false;
+    document.body.classList.remove('lk-free-camera-cursor-hidden');
+    document.body.classList.remove('lk-game-ui-cursor');
     setHudVisible(false);
     hideLevelSelect();
     showMenuOverlay();

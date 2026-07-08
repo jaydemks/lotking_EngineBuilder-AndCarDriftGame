@@ -25,6 +25,8 @@ function create(deps){
   const refreshOutliner = deps.refreshOutliner;
   const selectObject = deps.selectObject;
   const focusSelected = deps.focusSelected;
+  const activeViewportCamera = deps.activeViewportCamera || function(){ return null; };
+  const setCameraViewSlot = deps.setCameraViewSlot || function(){};
   const beginTransformHistory = deps.beginTransformHistory;
   const commitTransformHistory = deps.commitTransformHistory;
   const resetTransform = deps.resetTransform;
@@ -208,25 +210,61 @@ function create(deps){
         if(STORE.updateSceneCameraObject) STORE.updateSceneCameraObject(o, props);
         markDirty();
       };
+      const alignCameraToView = () => {
+        const cam = activeViewportCamera();
+        if(!cam) return;
+        beginTransformHistory(o);
+        cam.updateMatrixWorld(true);
+        const pos = new THREE.Vector3();
+        const quat = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+        cam.matrixWorld.decompose(pos, quat, scale);
+        const parent = o.parent && o.parent !== scene ? o.parent : null;
+        if(parent){
+          parent.updateMatrixWorld(true);
+          parent.worldToLocal(pos);
+          const parentQuat = new THREE.Quaternion();
+          parent.getWorldQuaternion(parentQuat);
+          quat.premultiply(parentQuat.invert());
+        }
+        o.position.copy(pos);
+        o.quaternion.copy(quat);
+        o.updateMatrixWorld(true);
+        if(o.userData.addedEntry) o.userData.addedEntry.t = STORE.tOf(o);
+        commitTransformHistory('Align camera to view');
+        syncTransformFields();
+        markDirty();
+      };
       camSec.body.appendChild(sliderRow('FOV', props.fov || 50, 10, 140, 1, v => updateCamera({fov:Math.round(v)}), v => Math.round(v) + '°').root);
       camSec.body.appendChild(sliderRow('Near clip', props.near || .05, .01, 5, .01, v => updateCamera({near:Math.max(.01, v)}), v => (+v).toFixed(2) + 'm').root);
       camSec.body.appendChild(sliderRow('Far clip', props.far || 800, 10, 3000, 10, v => updateCamera({far:Math.max(10, v)}), v => Math.round(v) + 'm').root);
       camSec.body.appendChild(sliderRow('Helper size', props.helperSize || 1.2, .25, 8, .05, v => updateCamera({helperSize:v}), v => (+v).toFixed(2) + 'm').root);
       camSec.body.appendChild(checkRow('Show helper', props.preview !== false, v => updateCamera({preview:v})).root);
-      camSec.body.appendChild(btnRow([{label:'Use in quad view B', action:() => { ED.viewportSlots[1] = 'cam:' + o.userData.editorId; markDirty(); }}]));
+      camSec.body.appendChild(btnRow([
+        {label:'Align to view', action:alignCameraToView},
+        {label:'Look through', action:() => setCameraViewSlot(o.userData.editorId)},
+      ]));
       box.appendChild(camSec.root);
     }
 
     if(o.userData.editorType === 'cinemaStudio'){
       const cinemaSec = section('CINEMA STUDIO', true);
-      const props = Object.assign({duration:6, fps:24, playback:'one-shot', trigger:'manual', previewCamera:'', movieTrack:[], cameras:[], keyframes:[], objectTracks:[]}, o.userData.cinemaProps || {});
-      if(!Array.isArray(props.movieTrack)) props.movieTrack = [];
+      const props = Object.assign({version:2, duration:6, fps:24, playback:'one-shot', trigger:'manual', eventName:'', previewCamera:'', cameraCuts:[], movieTrack:[], cameras:[], keyframes:[], objectTracks:[], lensTracks:[], eventTracks:[], markers:[]}, o.userData.cinemaProps || {});
+      props.version = Math.max(2, Number(props.version) || 1);
+      if(!Array.isArray(props.cameraCuts)) props.cameraCuts = Array.isArray(props.movieTrack) ? props.movieTrack : [];
+      props.movieTrack = props.cameraCuts;
       if(!Array.isArray(props.cameras)) props.cameras = [];
       if(!Array.isArray(props.keyframes)) props.keyframes = [];
       if(!Array.isArray(props.objectTracks)) props.objectTracks = [];
+      if(!Array.isArray(props.lensTracks)) props.lensTracks = [];
+      if(!Array.isArray(props.eventTracks)) props.eventTracks = [];
+      if(!Array.isArray(props.markers)) props.markers = [];
       o.userData.cinemaProps = props;
       const saveCinema = patch => {
+        if(patch && patch.movieTrack && !patch.cameraCuts) patch.cameraCuts = patch.movieTrack;
+        if(patch && patch.cameraCuts) patch.movieTrack = patch.cameraCuts;
         Object.assign(props, patch || {});
+        props.movieTrack = props.cameraCuts;
         o.userData.cinemaProps = props;
         if(o.userData.addedEntry) o.userData.addedEntry.props = Object.assign({}, props);
         markDirty();
@@ -243,6 +281,12 @@ function create(deps){
         {value:'on-play', label:'On Play Preview'},
         {value:'runtime-event', label:'Runtime event'},
       ], v => saveCinema({trigger:v})).root);
+      const eventRow = el('<div class="lk-row"><label>Event name</label><input type="text"></div>');
+      const eventInput = eventRow.querySelector('input');
+      eventInput.value = props.eventName || '';
+      eventInput.placeholder = 'garage_entry';
+      eventInput.addEventListener('change', () => saveCinema({eventName:eventInput.value.trim()}));
+      cinemaSec.body.appendChild(eventRow);
       cinemaSec.body.appendChild(selectRow('Default shot camera', props.previewCamera || '', sceneCameraOptions(), v => saveCinema({previewCamera:v})).root);
       const trackList = el('<div class="lk-cinema-track"></div>');
       const renderTrack = () => {
@@ -558,6 +602,33 @@ function create(deps){
       sc.body.appendChild(el('<div class="lk-hint">' + hint + '</div>'));
       if(hasCollider && c && c.ref){
         const shape = o.userData.colliderShape || (o.userData.colliderShape = {});
+        if(o.userData.colliderOnly){
+          const trigger = Object.assign({enabled:false, eventName:'', mode:'once'}, o.userData.cinemaTrigger || {});
+          o.userData.cinemaTrigger = trigger;
+          const saveTrigger = patch => {
+            Object.assign(trigger, patch || {});
+            trigger.mode = trigger.mode === 'repeat' ? 'repeat' : 'once';
+            trigger.eventName = String(trigger.eventName || '').trim();
+            o.userData.cinemaTrigger = trigger;
+            if(o.userData.addedEntry) o.userData.addedEntry.cinemaTrigger = Object.assign({}, trigger);
+            markDirty();
+            refreshOutliner();
+          };
+          const trigSec = section('CINEMA TRIGGER');
+          trigSec.body.appendChild(checkRow('Enabled', !!trigger.enabled, v => saveTrigger({enabled:v})).root);
+          const eventRow = el('<div class="lk-row"><label>Event name</label><input type="text"></div>');
+          const eventInput = eventRow.querySelector('input');
+          eventInput.value = trigger.eventName || '';
+          eventInput.placeholder = 'garage_entry';
+          eventInput.addEventListener('change', () => saveTrigger({eventName:eventInput.value}));
+          trigSec.body.appendChild(eventRow);
+          trigSec.body.appendChild(selectRow('Mode', trigger.mode || 'once', [
+            {value:'once', label:'Once per preview'},
+            {value:'repeat', label:'Repeat on enter'},
+          ], v => saveTrigger({mode:v})).root);
+          trigSec.body.appendChild(el('<div class="lk-hint">Starts Cinema Studio timelines set to Runtime event with the same Event name when the player car enters this box.</div>'));
+          box.appendChild(trigSec.root);
+        }
         const applyDummyVisibility = value => {
           const mode = value === 'show' || value === 'hide' ? value : 'auto';
           if(mode === 'auto') delete o.userData.colliderDummyVisibility;

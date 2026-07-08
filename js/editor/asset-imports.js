@@ -137,16 +137,16 @@ function create(deps){
   function deleteImportedAsset(asset){
     if(!asset) return;
     confirmEditorAction({
-      title: 'Delete imported asset?',
-      message: 'Remove "' + asset.name + '" from the imported asset library? Scene instances already placed will stay.',
-      okText: 'Delete asset',
+      title: tr('Delete imported asset?', 'Eliminare asset importato?'),
+      message: tr('Remove "', 'Rimuovere "') + asset.name + tr('" from the imported asset library? Scene instances already placed will stay.', '" dalla libreria asset importati? Le istanze gia piazzate nella scena resteranno.'),
+      okText: tr('Delete asset', 'Elimina asset'),
     }).then(ok => {
       if(!ok) return;
       const next = assetLibraryLoad().filter(a => a.id !== asset.id);
       if(assetLibrarySave(next)){
         if(asset.dbKey && window.LK_ASSET_BLOBS) window.LK_ASSET_BLOBS.remove(asset.dbKey).catch(()=>{});
         refreshAssetsPanel();
-        status('Asset removed from library');
+        status(tr('Asset removed from library', 'Asset rimosso dalla libreria'));
       }
     });
   }
