@@ -578,6 +578,7 @@ function replacePlayerModelWithFile(file){ if(assetImports) assetImports.replace
 levelManager = window.LK_EDITOR_LEVEL_MANAGER && window.LK_EDITOR_LEVEL_MANAGER.create({
   GAME, STORE, ED, $, status, promptEditorAction, confirmEditorAction, beginStatusWork, updateStatusWork,
   finishStatusWork, setLevelLoading, flushHudHistory, setTrackMeta, refreshAssetsPanel, projectFilename, el,
+  assetLibraryLoad,
 });
 function levelsApi(){ return levelManager ? levelManager.levelsApi() : (STORE.levels || null); }
 function reopenEditorAndReload(msg, levelName){ if(levelManager) levelManager.reopenEditorAndReload(msg, levelName); }
@@ -1066,6 +1067,14 @@ function selectObject(o){
   }
   return selectionManager.selectObject(o);
 }
+function openCinemaTimeline(o){
+  if(!(o && o.userData && o.userData.editorType === 'cinemaStudio')) return;
+  ED.cinemaTimelineClosedId = null;
+  ED.cinemaTimelineId = o.userData.editorId;
+  ED.cinemaTimelineOpen = true;
+  selectObject(o);
+  status((editorLang() === 'it' ? 'Timeline Cinema aperta: ' : 'Cinema timeline opened: ') + (o.userData.editorName || 'Cinema Studio'));
+}
 function selectCollider(o){
   if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== o) clearLiveMaterialSelection();
   return selectionManager.selectCollider(o);
@@ -1249,6 +1258,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   openGlbImportAt,
   setTool,
   selectObject,
+  openCinemaTimeline,
   selectCollider,
   selectPlayerCollider,
   selectSimilarObjects,
@@ -1582,13 +1592,16 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
         if(oldEntry && oldEntry.t) STORE.applyT(o, oldEntry.t);
       }
       if(o.userData.editorType === 'player'){
-        const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
-        GAME.player.physics.pos.copy(o.position);
-        GAME.player.physics.heading = heading;
-        if(GAME.player.spawn){
-          GAME.player.spawn.x = o.position.x;
-          GAME.player.spawn.z = o.position.z;
-          GAME.player.spawn.heading = heading;
+        if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();
+        else {
+          const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
+          GAME.player.physics.pos.copy(o.position);
+          GAME.player.physics.heading = heading;
+          if(GAME.player.spawn){
+            GAME.player.spawn.x = o.position.x;
+            GAME.player.spawn.z = o.position.z;
+            GAME.player.spawn.heading = heading;
+          }
         }
       }
       STORE.syncCollider(o);
@@ -1616,7 +1629,7 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
 });
 function enterEditor(){ return editorRuntime.enterEditor(); }
 function setPlayPreview(on){ return editorRuntime.setPlayPreview(on); }
-function startPlayPreview(){ return editorRuntime.startPlayPreview(); }
+function startPlayPreview(mode){ return editorRuntime.startPlayPreview(mode); }
 function stopPlayPreview(){ return editorRuntime.stopPlayPreview(); }
 function exitEditor(toPlay){ return editorRuntime.exitEditor(toPlay); }
 function editorFrame(dt){ return editorRuntime.editorFrame(dt); }

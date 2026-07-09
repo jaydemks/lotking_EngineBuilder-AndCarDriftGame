@@ -31,15 +31,24 @@ function create(deps){
   function onKeyDown(e){
     if(!ED.active) return;
     if(ED.playPreview){
-      if(e.key.toLowerCase() === 'escape'){
+      if(e.key === 'F8' || (e.shiftKey && e.key.toLowerCase() === 'escape')){
         e.preventDefault();
         stopPlayPreview();
       }
       return;
     }
+    if(ED.simulatePreview && (e.key === 'F8' || (e.shiftKey && e.key.toLowerCase() === 'escape'))){
+      e.preventDefault();
+      stopPlayPreview();
+      return;
+    }
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
     const key = e.key.toLowerCase();
+    if(ED.simulatePreview && !typing && key === 'tab'){
+      e.preventDefault();
+      return;
+    }
     fly.keys[key] = true;
     fly.keys['shift'] = e.shiftKey;
     if(e.key === 'F10'){ e.preventDefault(); setPrefsOpen(!ED.prefsOpen); return; }

@@ -136,10 +136,14 @@ function create(deps){
 
     const car = GAME.player.car;
     car.position.copy(GAME.player.physics.pos);
-    car.rotation.y = GAME.player.physics.heading;
+    const visibleHeading = GAME.player.visibleHeadingFromRuntime
+      ? GAME.player.visibleHeadingFromRuntime(GAME.player.physics.heading)
+      : GAME.player.physics.heading;
+    if(GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(visibleHeading);
+    else car.rotation.y = visibleHeading;
 
     if(!GAME.state.started){
-      const h = GAME.player.physics.heading;
+      const h = visibleHeading;
       const off = new THREE.Vector3(Math.sin(-h + Math.PI) * Math.cos(.32), Math.sin(.32), Math.cos(-h + Math.PI) * Math.cos(.32)).multiplyScalar(9);
       gameCam.position.copy(car.position).add(off);
       gameCam.lookAt(car.position.x, car.position.y + 1.1, car.position.z);
@@ -183,35 +187,56 @@ function create(deps){
     deps.status('Editor active');
   }
 
-  function setPlayPreview(on){
-    ED.playPreview = !!on;
+  function previewModeLabel(mode){
+    return mode === 'simulate' ? 'Simulate' : 'Play preview';
+  }
+
+  function setPlayPreview(on, mode){
+    mode = mode === 'simulate' ? 'simulate' : 'play';
+    ED.playPreview = !!on && mode === 'play';
+    ED.simulatePreview = !!on && mode === 'simulate';
+    ED.playPreviewMode = on ? mode : 'play';
     if(ED.playPreview) deps.clearHoverPickHelper();
     if(ED.playPreview && viewportLayout) viewportLayout.updateOverlays(null);
     if(ED.playPreview && cinemaStudio) cinemaStudio.hideTimeline();
     root.classList.toggle('play-preview', ED.playPreview);
+    root.classList.toggle('simulate-preview', ED.simulatePreview);
+    document.body.classList.toggle('lk-editor-simulate-preview', ED.simulatePreview);
     const btn = $('#lkPlay');
-    if(btn) btn.textContent = ED.playPreview ? '■ STOP' : '▶ PREVIEW';
-    $('#lkPipFrame').classList.remove('on');
+    const simBtn = $('#lkSimulate');
+    if(btn){
+      btn.textContent = ED.playPreview && ED.playPreviewMode === 'play' ? '■ STOP' : '▶ PREVIEW';
+      btn.disabled = ED.simulatePreview;
+    }
+    if(simBtn){
+      simBtn.textContent = ED.simulatePreview ? '■ STOP' : '▶ SIMULATE';
+      simBtn.disabled = ED.playPreview;
+    }
+    if(ED.playPreview) $('#lkPipFrame').classList.remove('on');
     const gizmo = deps.getGizmo();
     if(gizmo) gizmo.visible = !ED.playPreview;
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : (ED.active && !ED.playPreview);
   }
 
-  function startPlayPreview(){
-    if(!deps.saveScene()) return;
+  function startPlayPreview(mode){
+    mode = mode === 'simulate' ? 'simulate' : 'play';
+    const onlineDemo = window.LK_PROJECT_WORKSPACE
+      && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode
+      && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
+    if(!onlineDemo && !deps.saveScene()) return;
     deps.closeMenu();
     showPreviewWarmup();
-    deps.status('Warm-up preview...');
+    deps.status(mode === 'simulate' ? 'Warm-up simulation...' : 'Warm-up preview...');
     requestAnimationFrame(() => {
-      if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview();
+      if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview(mode);
       if(GAME.player.updateLights) GAME.player.updateLights();
       if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
       if(GAME.player.updateSkids) GAME.player.updateSkids();
-      setPlayPreview(true);
+      setPlayPreview(true, mode);
       cinemaTriggerState.clear();
       startOnPlayCinematics();
-      deps.status('Play preview running — Esc to stop');
+      deps.status(previewModeLabel(mode) + ' running - F8 or Shift+Esc to stop');
     });
   }
 
@@ -219,10 +244,11 @@ function create(deps){
     stopRuntimeCinematics();
     cinemaTriggerState.clear();
     if(GAME.actions.stopEditorPreview) GAME.actions.stopEditorPreview();
+    const stoppedMode = ED.playPreviewMode;
     setPlayPreview(false);
     if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
     if(GAME.player.updateSkids) GAME.player.updateSkids();
-    if(deps.restorePreviewTransforms) deps.restorePreviewTransforms();
+    if(stoppedMode !== 'simulate' && deps.restorePreviewTransforms) deps.restorePreviewTransforms();
     const orbit = deps.getOrbit();
     if(orbit){
       orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : true;
@@ -230,12 +256,12 @@ function create(deps){
     }
     const gizmo = deps.getGizmo();
     if(gizmo) gizmo.visible = true;
-    deps.status('Play preview stopped');
+    deps.status(previewModeLabel(stoppedMode) + ' stopped');
   }
 
   function exitEditor(toPlay){
     if(!ED.active) return;
-    if(ED.playPreview) stopPlayPreview();
+    if(ED.playPreview || ED.simulatePreview) stopPlayPreview();
     if(!toPlay && window.__LK_STANDALONE_EDITOR){
       location.href = 'index.html';
       return;
@@ -280,16 +306,17 @@ function create(deps){
       renderPlayPreview(dt);
       return;
     }
+    if(ED.simulatePreview) stepSimulationPreview(dt);
     deps.updateEditorControls(dt);
     const viewRect = deps.editorViewportRect();
     camE.aspect = viewRect.w / viewRect.h;
     camE.updateProjectionMatrix();
 
     for(const h of GAME.hooks.frame) h(dt);
-    if(GAME.player.updateExhaust) GAME.player.updateExhaust(dt);
-    if(GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
+    if(!ED.simulatePreview && GAME.player.updateExhaust) GAME.player.updateExhaust(dt);
+    if(!ED.simulatePreview && GAME.player.updateDataWidgets) GAME.player.updateDataWidgets();
 
-    if(cinemaStudio) cinemaStudio.updatePreview(dt);
+    if(cinemaStudio && !ED.simulatePreview) cinemaStudio.updatePreview(dt);
     syncGamePreviewCamera();
     updateCameraHelpers();
     deps.updateViewportPickingHelpers();
@@ -302,6 +329,21 @@ function create(deps){
     renderCinemaFloatingPreview(viewRect);
     if(viewportLayout) viewportLayout.updateStats(dt, viewRect);
     if(cinemaStudio) cinemaStudio.syncTimeline(viewRect);
+  }
+
+  function stepSimulationPreview(dt){
+    suppressSimulationRuntimeUi();
+    if(GAME.actions.stepGameplayPreview) GAME.actions.stepGameplayPreview(dt);
+    scanCinemaTriggerVolumes();
+    if(cinemaStudio) cinemaStudio.updatePreview(dt);
+    suppressSimulationRuntimeUi();
+  }
+
+  function suppressSimulationRuntimeUi(){
+    const radio = GAME.systems && GAME.systems.radio;
+    if(radio && radio.toggleOpen) radio.toggleOpen(false);
+    if(GAME.actions && GAME.actions.closePause) GAME.actions.closePause();
+    if(GAME.settings && GAME.settings.setTuningOpen) GAME.settings.setTuningOpen(false);
   }
 
   function renderPlayPreview(dt){

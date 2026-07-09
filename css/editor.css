@@ -401,7 +401,7 @@ body:has(#lkEditor.active) #levelSelect {
   background:rgba(8,12,18,.88);
   color:#dfe5f1;
   pointer-events:auto;
-  z-index:57;
+  z-index:240;
   box-shadow:0 12px 32px rgba(0,0,0,.38);
 }
 #lkCinemaTimeline.on { display:block; }
@@ -1782,7 +1782,7 @@ body:has(#lkEditor.active) #levelSelect {
   background:rgba(5,8,13,.22); box-shadow:0 12px 30px rgba(0,0,0,.42);
   border-radius:7px; overflow:hidden;
 }
-#lkCinemaPreviewFrame { z-index:220; }
+#lkCinemaPreviewFrame { z-index:245; }
 #lkPipFrame { z-index:95; }
 #lkPipFrame.on { display:block; }
 #lkCinemaPreviewFrame.on { display:block; }

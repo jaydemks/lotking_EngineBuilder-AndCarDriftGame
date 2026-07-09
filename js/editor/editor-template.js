@@ -50,6 +50,7 @@ function create(){
     <button id="lkImportProject" type="button" title="Import LKEP">⇧ Import project</button>
     <button id="lkResetScene" type="button">↺ Reset</button>
     <button id="lkPlay" type="button">▶ PREVIEW</button>
+    <button id="lkSimulate" type="button" title="Run events without driving the player vehicle">▶ SIMULATE</button>
     <button id="lkExit" type="button" title="Exit editor">×</button>
   </div>
   <div id="lkViewportToolbar">

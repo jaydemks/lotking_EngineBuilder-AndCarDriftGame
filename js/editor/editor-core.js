@@ -49,6 +49,8 @@ function createState(){
     trackId: 'parking-lot',
     trackName: 'Parking Lot',
     playPreview: false,
+    simulatePreview: false,
+    playPreviewMode: 'play',
     viewportMode: 'single',
     viewportToolbarCollapsed: false,
     viewportSlots: ['perspective', 'top', 'right', 'front'],

@@ -15,6 +15,11 @@ function create(deps){
   const thumbCache = deps.thumbCache;
   const colliderProxy = deps.colliderProxy;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+  const isOnlineDemo = () => window.LK_PROJECT_WORKSPACE && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
+  function blockOnlineDemoAction(){
+    deps.status(tr('Online demo only. Run the project locally to edit this scene.', 'Demo online: avvia il progetto in locale per modificare la scena.'));
+    return true;
+  }
 
   function isBlueprintPart(o){
     return !o || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
@@ -438,6 +443,7 @@ function create(deps){
   }
 
   function performDeleteEntity(o){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     if(isBlueprintPart(o)){ deps.status(tr('Blueprint component cannot be deleted', 'Componente blueprint non eliminabile')); return; }
     const wasSelected = ED.selected === o;
     deps.removeEntity(o);
@@ -453,6 +459,7 @@ function create(deps){
   }
 
   function performDeleteEntities(list){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const removable = (list || []).filter(o => o && !isBlueprintPart(o));
     const unique = [];
     removable.forEach(o => { if(!unique.includes(o)) unique.push(o); });
@@ -476,6 +483,7 @@ function create(deps){
   }
 
   function requestDeleteEntity(o){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     if(!o) return;
     if(isBlueprintPart(o)){
       deps.status(tr('Blueprint component cannot be deleted', 'Componente blueprint non eliminabile'));
@@ -489,6 +497,7 @@ function create(deps){
   }
 
   function requestDeleteSelection(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const list = selectedObjects();
     if(list.length <= 1) return requestDeleteEntity(list[0] || ED.selected);
     deps.confirmEditorAction({
@@ -505,6 +514,7 @@ function create(deps){
   }
 
   function duplicateEntity(o, offset){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     if(isBlueprintPart(o)) return;
     const id = STORE.nextId();
     let obj, entry;
@@ -676,15 +686,18 @@ function create(deps){
     }
     deps.applyZUpProxyToSelected();
     if(o.userData.editorType === 'player'){
-      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
-      GAME.player.physics.pos.copy(o.position);
-      GAME.player.physics.heading = heading;
-      if(GAME.player.spawn){
-        GAME.player.spawn.x = o.position.x;
-        GAME.player.spawn.z = o.position.z;
-        GAME.player.spawn.heading = heading;
+      if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();
+      else {
+        const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
+        GAME.player.physics.pos.copy(o.position);
+        GAME.player.physics.heading = heading;
+        if(GAME.player.spawn){
+          GAME.player.spawn.x = o.position.x;
+          GAME.player.spawn.z = o.position.z;
+          GAME.player.spawn.heading = heading;
+        }
+        if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
       }
-      if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
     if(o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);
     if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);

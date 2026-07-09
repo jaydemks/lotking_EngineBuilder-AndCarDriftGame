@@ -6,7 +6,7 @@
 'use strict';
 
 const GAME = window.LOT_KING = {
-  version: '0.5.6',
+  version: '0.6.3',
   assets: null,
   core: {},
   world: {},
@@ -15,7 +15,7 @@ const GAME = window.LOT_KING = {
   settings: {},
   actions: {},
   ui: {},
-  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false, playPreviewCursorVisible:false},
+  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false, editorPreviewMode:null, playPreviewCursorVisible:false},
   hooks: {frame: [], frameOverride: null},
 };
 const LK_LANG_KEY = 'lotking.lang.v1';
@@ -1062,7 +1062,7 @@ function applyPlayerVisual(vF, vR, steerAngle, up, down, dt){
   carRenderRoll += ((SURFACE.roll - vR * 0.008) - carRenderRoll) * tiltAlpha;
   carRenderPitch += ((SURFACE.pitch + (up ? -.02 : 0) + (down ? .025 : 0)) - carRenderPitch) * tiltAlpha;
   car.position.copy(carRenderPos);
-  car.rotation.set(carRenderPitch, carRenderHeading, carRenderRoll);
+  car.rotation.set(playerVisualBaseRotation.x + carRenderPitch, visibleHeadingFromRuntime(carRenderHeading), playerVisualBaseRotation.z + carRenderRoll);
 
   const visSteer = steerAngle * 1.25;
   for(const w of wheels){
@@ -1375,7 +1375,10 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
   else carRenderPos.lerp(carVisTmpV, alpha);
   carRenderHeading = P.heading;
   car.position.copy(carRenderPos);
-  car.quaternion.copy(carRenderQuat).multiply(playerVisualOffsetQuatTmp.setFromAxisAngle(SURFACE_UP, -playerVisualYawOffset()));
+  car.quaternion.copy(carRenderQuat)
+    .multiply(playerDriveOffsetQuatTmp.setFromAxisAngle(SURFACE_UP, -playerDriveHeadingOffset))
+    .multiply(playerVisualQuatTmp.setFromEuler(playerVisualBaseEulerTmp.set(playerVisualBaseRotation.x, 0, playerVisualBaseRotation.z)))
+    .multiply(playerVisualOffsetQuatTmp.setFromAxisAngle(SURFACE_UP, -playerVisualYawOffset()));
   carVisual.position.y = chassisLift;
 
   // per-wheel suspension travel straight from the raycasts
@@ -1937,6 +1940,10 @@ const playerVisualForwardTmp = new THREE.Vector3();
 const playerVisualQuatTmp = new THREE.Quaternion();
 const playerVisualInvQuatTmp = new THREE.Quaternion();
 const playerVisualOffsetQuatTmp = new THREE.Quaternion();
+const playerDriveOffsetQuatTmp = new THREE.Quaternion();
+const playerVisualBaseEulerTmp = new THREE.Euler();
+const playerVisualBaseRotation = {x:0, z:0};
+let playerDriveHeadingOffset = 0;
 let camYaw = 0, camPitch = .32, camDist = 9, camMode = 0; // 0 chase, 1 free orbit
 let dragging = false, lastMX = 0, lastMY = 0, userCamTimer = 0, camShake = 0;
 let camDriftSide = 0, camReverseBlend = 0, camCinematicRoll = 0, lastCamVF = 0, lastCamVR = 0, lastCamDrifting = false;
@@ -1982,8 +1989,8 @@ function setPlayerVisibleHeading(heading){
   const n = Number(heading);
   if(!Number.isFinite(n)) return playerVisibleHeading();
   car.rotation.y = n;
-  P.heading = n;
-  if(GAME.player && GAME.player.physics) GAME.player.physics.heading = n;
+  P.heading = runtimeHeadingFromVisible(n);
+  if(GAME.player && GAME.player.physics) GAME.player.physics.heading = P.heading;
   if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview && GAME.player && GAME.player.spawn) GAME.player.spawn.heading = n;
   car.updateMatrixWorld(true);
   return playerVisibleHeading();
@@ -1991,8 +1998,38 @@ function setPlayerVisibleHeading(heading){
 function playerVisualYawOffset(){
   return 0;
 }
+function nearHalfTurn(value){
+  return Math.abs(angleDelta(Math.PI, Number(value) || 0)) < 0.01;
+}
+function runtimeHeadingFromVisible(heading){
+  return (Number(heading) || 0) + playerDriveHeadingOffset;
+}
+function visibleHeadingFromRuntime(heading){
+  return (Number(heading) || 0) - playerDriveHeadingOffset;
+}
+function setPlayerVisualBaseRotation(x, z){
+  const nx = Number(x);
+  const nz = Number(z);
+  playerVisualBaseRotation.x = Number.isFinite(nx) ? nx : 0;
+  playerVisualBaseRotation.z = Number.isFinite(nz) ? nz : 0;
+  playerDriveHeadingOffset = nearHalfTurn(playerVisualBaseRotation.x) && nearHalfTurn(playerVisualBaseRotation.z) ? Math.PI : 0;
+  return playerVisualBaseRotation;
+}
 function applyPlayerRootFromRuntimeHeading(){
-  car.quaternion.copy(playerVisualQuatTmp.setFromAxisAngle(SURFACE_UP, P.heading));
+  car.rotation.set(playerVisualBaseRotation.x, visibleHeadingFromRuntime(P.heading), playerVisualBaseRotation.z);
+}
+function syncPlayerSpawnFromVisibleTransform(){
+  if(!GAME.player || !GAME.player.car) return SPAWN;
+  const heading = playerVisibleHeading();
+  SPAWN.x = car.position.x;
+  SPAWN.z = car.position.z;
+  SPAWN.heading = heading;
+  P.pos.copy(car.position);
+  setPlayerVisibleHeading(heading);
+  P.vel.set(0, 0, 0);
+  P.yawRate = 0;
+  if(GAME.systems && GAME.systems.physics) GAME.systems.physics.syncPlayer();
+  return SPAWN;
 }
 function cameraAspectValue(){
   return PLAYER_CAMERA.aspectValue(CAM_CFG, innerWidth, innerHeight);
@@ -2164,6 +2201,7 @@ function runtimePointerLookUiTarget(target){
   return !!target.closest('input, textarea, select, button, #settingsOverlay, #tunePanel, #radio, #overlay, #lkCinemaTimeline, #lkCinemaPreviewFrame, #lkPipFrame, #lkViewportToolbar, #lkViewportOverlays');
 }
 function canStartRuntimeCameraLook(e){
+  if(isEditorSimulationPreview()) return false;
   if(e.button > 0) return false;
   if((CAM_CFG.mode || 'free') !== 'free') return false;
   if(!((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview)) return false;
@@ -2187,11 +2225,15 @@ canvas.addEventListener('pointerdown', e => {
   if((GAME.state.editorActive && !GAME.state.editorPreview) || e.button > 0) return;
   if(!canStartRuntimeCameraLook(e)) return;
   startRuntimeCameraLook(e);
-  if(canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
+  if(canvas.setPointerCapture){
+    try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+  }
 });
 canvas.addEventListener('pointerup', e => {
   dragging = false;
-  if(canvas.releasePointerCapture) canvas.releasePointerCapture(e.pointerId);
+  if(canvas.releasePointerCapture){
+    try { canvas.releasePointerCapture(e.pointerId); } catch(err){}
+  }
 });
 canvas.addEventListener('pointercancel', () => dragging = false);
 addEventListener('pointerup', () => dragging = false);
@@ -2214,6 +2256,7 @@ function isGameplayOverlayOpen(){
   );
 }
 function shouldShowRuntimeCursor(){
+  if(isEditorSimulationPreview()) return false;
   if(isGameplayOverlayOpen()) return true;
   return !!(GAME.state.editorPreview && GAME.state.playPreviewCursorVisible);
 }
@@ -2228,7 +2271,7 @@ function runtimeWheelBelongsToUi(target){
 }
 function viewportOwnsPointerEvent(e){
   if(e.target && e.target.closest && e.target.closest('input,textarea,select,button')) return false;
-  return e.target === canvas || (SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview;
+  return e.target === canvas || (SESSION && SESSION.isStarted && SESSION.isStarted()) || (GAME.state.editorPreview && !isEditorSimulationPreview());
 }
 ['contextmenu','selectstart','dragstart'].forEach(type => {
   addEventListener(type, e => {
@@ -2237,6 +2280,7 @@ function viewportOwnsPointerEvent(e){
   }, true);
 });
 addEventListener('pointermove', e => {
+  if(isEditorSimulationPreview()) return;
   const freeMouseLook = !dragging && (CAM_CFG.mode || 'free') === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
     !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e.target);
   const locked = document.pointerLockElement === canvas;
@@ -2250,6 +2294,7 @@ addEventListener('pointermove', e => {
   userCamTimer = (freeMouseLook || locked) ? 1.6 : 2.2;
 });
 addEventListener('wheel', e => {
+  if(isEditorSimulationPreview()) return;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;
   if(runtimeWheelBelongsToUi(e.target)) return;
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist + Math.sign(e.deltaY)*1.1));
@@ -2260,7 +2305,7 @@ function updateCamera(dt){
   camSnapNext = false;
   const mode = CAM_CFG.mode || 'free';
   const cursorVisible = shouldShowRuntimeCursor();
-  const runtimeCameraActive = mode === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
+  const runtimeCameraActive = !isEditorSimulationPreview() && mode === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
   document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
   document.body.classList.toggle('lk-game-ui-cursor', cursorVisible && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview));
   if(!runtimeCameraActive && document.pointerLockElement === canvas && document.exitPointerLock){
@@ -2387,6 +2432,7 @@ function setPlayerEngineSound(setId){
 // ------------------------------------------------ input
 const keys = {};
 addEventListener('keydown', e => {
+  if(isEditorSimulationPreview()) return;
   if(e.key === 'F1' && e.shiftKey && GAME.state.editorActive && GAME.state.editorPreview){
     e.preventDefault();
     GAME.state.playPreviewCursorVisible = !GAME.state.playPreviewCursorVisible;
@@ -2410,7 +2456,6 @@ addEventListener('keydown', e => {
     e.preventDefault();
     return;
   }
-  if(GAME.state.editorActive && GAME.state.editorPreview && e.key.toLowerCase() === 'escape') return;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;      // editor owns the keyboard outside play preview
   const key = e.key.toLowerCase();
   if(key === 'escape'){
@@ -2426,7 +2471,7 @@ addEventListener('keydown', e => {
   }
   keys[key] = true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) e.preventDefault();
-  if(key === 'r') resetCar();
+  if(key === 'r' && !isEditorSimulationPreview()) resetCar();
   if(key === 'c'){
     if(CAM_CFG.mode === 'free'){
       camMode = 1-camMode; userCamTimer = camMode ? 1e9 : 0;
@@ -2436,7 +2481,7 @@ addEventListener('keydown', e => {
     }
   }
   if(key === 'm'){ const m = SFX.toggleMute(); popup(m?'MUTED':'SOUND ON','#9aa3b8'); }
-  if(key === 'f'){
+  if(key === 'f' && !isEditorSimulationPreview()){
     PLAYER_LIGHT_RIG.setHighBeams(true);
   }
   if(e.key === 'Tab'){ e.preventDefault(); RADIO.toggleOpen(); }
@@ -2446,6 +2491,7 @@ addEventListener('keydown', e => {
   if(key === 'h'){ document.getElementById('legend').classList.toggle('collapsed'); }
 });
 addEventListener('keyup', e => {
+  if(isEditorSimulationPreview()) return;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;
   if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
   const key = e.key.toLowerCase();
@@ -2487,12 +2533,19 @@ function neutralPlayerDrive(){
     cameraLookY: 0,
   };
 }
+function isEditorSimulationPreview(){
+  return !!(GAME.state.editorPreview && GAME.state.editorPreviewMode === 'simulate');
+}
 
 function readDriveInput(){
   if(GAME.state.paused) return neutralPlayerDrive();
-  if(INPUT) return INPUT.player(0).drive();
+  if(isEditorSimulationPreview()) return neutralPlayerDrive();
+  if(INPUT){
+    const drive = INPUT.player(0).drive();
+    return drive;
+  }
   // fallback if the input modules failed to load: legacy keyboard
-  return {
+  const legacyDrive = {
     steer: ((keys['a']||keys['arrowleft']) ? 1 : 0) - ((keys['d']||keys['arrowright']) ? 1 : 0),
     throttle: (keys['w']||keys['arrowup']) ? 1 : 0,
     brake: (keys['s']||keys['arrowdown']) ? 1 : 0,
@@ -2512,8 +2565,10 @@ function readDriveInput(){
     cameraLookX: 0,
     cameraLookY: 0,
   };
+  return legacyDrive;
 }
 function gamepadActions(){
+  if(isEditorSimulationPreview()) return null;
   if(!INPUT) return null;
   const p = INPUT.player(0);
   if(!p || p.deviceType() !== 'gamepad') return null;
@@ -2555,12 +2610,12 @@ function handleGamepadActions(){
       }
     }
   }
-  PLAYER_LIGHT_RIG.setHighBeams(!GAME.state.paused && !!(keys['f'] || (state && state.highBeams)));
+  PLAYER_LIGHT_RIG.setHighBeams(!GAME.state.paused && !isEditorSimulationPreview() && !!(keys['f'] || (state && state.highBeams)));
   lastGamepadActions = state ? Object.assign({}, state) : {};
 }
 function checkResetEdge(){
   if(!INPUT) return;
-  const held = !!INPUT.player(0).drive().reset;
+  const held = !isEditorSimulationPreview() && !!INPUT.player(0).drive().reset;
   if(held && !lastResetHeld) resetCar();
   lastResetHeld = held;
 }
@@ -2579,7 +2634,7 @@ let MAPPING = null;
 function touchControlsRuntimeVisible(){
   const settings = document.getElementById('settingsOverlay');
   if(settings && settings.classList.contains('open')) return false;
-  if(GAME.state.editorActive) return !!GAME.state.editorPreview;
+  if(GAME.state.editorActive) return !!GAME.state.editorPreview && !isEditorSimulationPreview();
   if(!(SESSION && SESSION.isStarted && SESSION.isStarted())) return false;
   return !(overlay && !overlay.classList.contains('hidden'));
 }
@@ -2617,7 +2672,7 @@ if(INPUT){
 }
 
 function resetCar(){
-  P.pos.set(SPAWN.x, 0, SPAWN.z); P.heading = SPAWN.heading; P.vel.set(0,0,0);
+  P.pos.set(SPAWN.x, 0, SPAWN.z); P.heading = runtimeHeadingFromVisible(SPAWN.heading); P.vel.set(0,0,0);
   P.yawRate = 0; P.steer = 0;
   SURFACE.y = 0;
   SURFACE.vy = 0;
@@ -2639,13 +2694,7 @@ function resetCar(){
 }
 function syncEditorSpawnFromPlayer(){
   if(!GAME.state.editorActive || GAME.state.editorPreview || !GAME.player || !GAME.player.car) return;
-  SPAWN.x = car.position.x;
-  SPAWN.z = car.position.z;
-  SPAWN.heading = playerVisibleHeading();
-  P.pos.copy(car.position);
-  P.heading = SPAWN.heading;
-  P.vel.set(0, 0, 0);
-  P.yawRate = 0;
+  syncPlayerSpawnFromVisibleTransform();
 }
 
 // ------------------------------------------------ local 3D models
@@ -2674,7 +2723,11 @@ const PLAYER_MODEL = window.LK_RUNTIME_PLAYER_MODEL.create({
   canDropReplace: () => GAME.state.started && !GAME.state.editorActive && !GAME.state.editorPreview,
 });
 const prepModel = PLAYER_MODEL.prepModel;
-const setPlayerModel = PLAYER_MODEL.setPlayerModel;
+function setPlayerModel(sceneRoot){
+  const result = PLAYER_MODEL.setPlayerModel(sceneRoot);
+  applyPlayerRootFromRuntimeHeading();
+  return result;
+}
 PLAYER_MODEL.bindDrop(window);
 
 // ------------------------------------------------ RADIO (soundhud) + slow-motion
@@ -2684,6 +2737,7 @@ const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
   clamp,
   popup,
   telemetry: () => ({speedKmh, lastLatG}),
+  isRuntimeUiSuppressed: () => isEditorSimulationPreview(),
 });
 
 // slow-motion state (radio open → super slow-mo)
@@ -2745,11 +2799,11 @@ function unloadCurrentLevel(){ if(GAME_FLOW) GAME_FLOW.unloadCurrentLevel(); }
 function prepareEditorLevel(){ return GAME_FLOW ? GAME_FLOW.prepareEditorLevel() : null; }
 function setEditorTrack(track){ if(GAME_FLOW) GAME_FLOW.setEditorTrack(track); }
 function enterGameplayMode(){ if(GAME_FLOW) GAME_FLOW.enterGameplayMode(); }
-function beginGameplaySession(editorPreview){ if(GAME_FLOW) GAME_FLOW.beginGameplaySession(editorPreview); }
+function beginGameplaySession(editorPreview, editorPreviewMode){ if(GAME_FLOW) GAME_FLOW.beginGameplaySession(editorPreview, editorPreviewMode); }
 function stopEditorPreview(){ if(GAME_FLOW) GAME_FLOW.stopEditorPreview(); }
 function backToMainMenu(){ if(GAME_FLOW) GAME_FLOW.backToMainMenu(); }
 function startGame(){ if(GAME_FLOW) { GAME_FLOW.startGame(); } }
-function startEditorPreview(){ if(GAME_FLOW) GAME_FLOW.startEditorPreview(); }
+function startEditorPreview(mode){ if(GAME_FLOW) GAME_FLOW.startEditorPreview(mode); }
 function launchLevel(levelId){
   // livelli della libreria editor: se serve, lo store attiva il livello
   // scelto (ed eventualmente ricarica la pagina quando la scena è già applicata)
@@ -2878,6 +2932,7 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   isRuntimeReady: RUNTIME_LOADER.isReady,
   clearInput: () => { for(const k of Object.keys(keys)) keys[k] = false; },
   pauseRadio: () => {
+    RADIO.toggleOpen(false);
     RADIO.audio.pause();
     try { RADIO.audio.currentTime = 0; } catch(err){}
     ENGINE_AUDIO.stop();
@@ -3007,7 +3062,10 @@ Object.assign(GAME.player, {
   reset: resetCar,
   spawn: SPAWN,
   visibleHeading: playerVisibleHeading,
+  visibleHeadingFromRuntime,
   setVisibleHeading: setPlayerVisibleHeading,
+  setVisualBaseRotation: setPlayerVisualBaseRotation,
+  syncSpawnFromVisibleTransform: syncPlayerSpawnFromVisibleTransform,
   setModel: setPlayerModel,
   getModel: PLAYER_MODEL.getPlayerModel,
   headlight: PLAYER_LIGHT_RIG.headlight,

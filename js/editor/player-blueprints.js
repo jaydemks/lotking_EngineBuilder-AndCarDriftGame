@@ -71,9 +71,11 @@ function create(deps){
       GAME.player.spawn.heading = bp.spawn.heading || 0;
       GAME.player.car.position.set(GAME.player.spawn.x, 0, GAME.player.spawn.z);
       if(GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(GAME.player.spawn.heading);
-      else GAME.player.car.rotation.y = GAME.player.spawn.heading;
+      else {
+        GAME.player.car.rotation.y = GAME.player.spawn.heading;
+        GAME.player.physics.heading = GAME.player.spawn.heading;
+      }
       GAME.player.physics.pos.copy(GAME.player.car.position);
-      GAME.player.physics.heading = GAME.player.spawn.heading;
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
     loadBlueprintModel(bp);

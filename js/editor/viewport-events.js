@@ -80,7 +80,7 @@ function create(deps){
       const gp = hit ? hit.point.clone().setY(0) : deps.groundPointAt(e.clientX, e.clientY);
       const isGround = hit && deps.isGroundLikeEntity(hit.entity);
       if(hit && !isGround && hit.entity.userData.editorType !== 'player'){
-        deps.selectObject(hit.entity);
+        if(hit.entity.userData.editorType !== 'cinemaStudio') deps.selectObject(hit.entity);
         deps.openMenu(deps.objectMenuItems(hit.entity, false, gp), e.clientX, e.clientY);
       } else if(hit && hit.entity.userData.editorType === 'player'){
         deps.selectObject(hit.entity);

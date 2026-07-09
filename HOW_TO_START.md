@@ -47,6 +47,22 @@ If a project seems missing, first check that you opened the same host and port y
 
 To move a project between origins or devices, use the editor's project export/import tools.
 
+## Project Workspace And Online Demo
+
+The Project Workspace button is an optional bridge. It does not replace the current local browser database workflow, but it can use a `.lkep.json` file as the portable project document.
+
+- On `localhost`, the editor keeps working as before with localStorage and IndexedDB. The Workspace panel opens automatically in the editor so you can choose the local browser database or open/sync an LKEP project file.
+- On a published site, the project runs as an online demo with the bundled/default assets. Import, save, delete, duplicate and rename actions are disabled. LKEP export is allowed only as a browser download, so it does not write to the server.
+- To publish your authored online demo level, export a portable LKEP locally and upload it as:
+
+```text
+demo/demo-project.lkep.json
+```
+
+The published site loads that file automatically as the read-only demo level.
+- In Chrome or Edge on `localhost`, `Project Workspace -> Open / sync LKEP file` can link a portable project file. The editor imports the file, and the normal Save button writes the portable `.lkep.json` file again.
+- Portable LKEP export/import is responsible for carrying imported asset blobs inside the project data when possible.
+
 ## Phone Or Tablet On The Same Wi-Fi
 
 Run:

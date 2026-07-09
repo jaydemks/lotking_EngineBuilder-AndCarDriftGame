@@ -27,6 +27,14 @@ The editor runs in the browser. It has projects, levels, an outliner, inspector,
 
 Levels saved in the editor become playable cards in the game.
 
+Play Preview runs the authored level inside the editor viewport. Simulate uses the same runtime/event/physics path while keeping the editor viewport, gizmo, panels and save workflow active, so level logic can be tested without taking control away from the editor.
+
+### Project Workspace And Online Demo
+
+The editor is local-first. On `localhost`, existing LocalStorage and IndexedDB projects continue to work, and the Project Workspace overlay can also sync a portable `.lkep.json` file where the browser supports file handles.
+
+On hosted/static FTP deployments, the same project becomes a read-only online demo. The site owner can publish a bundled project at `demo/demo-project.lkep.json`; visitors can inspect, play and export the demo, but imports, uploads, saves, deletes and asset mutations are blocked so the server is not used as shared storage.
+
 ### Assets
 
 The asset browser can manage imported GLB/GLTF models, scene assets, player car logic assets, engine sound sets and level assets. Larger imported files are stored in IndexedDB so they survive reloads.
@@ -90,6 +98,7 @@ For detailed version notes, see:
 - `js/runtime/` - gameplay systems: physics, cameras, audio, HUD, track flow, input and related modules.
 - `js/editor/` - editor UI and tools.
 - `js/engine/scene-store.js` - project/level persistence, assets, player logic, sound sets and export data.
+- `demo/` - optional bundled online demo project loaded on hosted origins.
 - `css/` - runtime and editor styling.
 - `models/`, `media/`, `musics/` - bundled runtime assets.
 - `docs/` - architecture notes and release history.

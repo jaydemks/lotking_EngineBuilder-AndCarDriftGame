@@ -22,15 +22,16 @@ function create(options){
   function resetRuntimeState(){
     started = false;
     levelLoaded = false;
-    sync({activeLevel:null, editorPreview:false, paused:false});
+    sync({activeLevel:null, editorPreview:false, editorPreviewMode:null, paused:false});
   }
 
-  function markStarted(editorPreview){
+  function markStarted(editorPreview, editorPreviewMode){
     started = true;
     levelLoaded = true;
     const current = trackCatalog && trackCatalog.current ? trackCatalog.current() : null;
     sync({
       editorPreview: !!editorPreview,
+      editorPreviewMode: editorPreview ? (editorPreviewMode || 'play') : null,
       activeLevel: current && current.id,
       paused: false,
     });
@@ -39,7 +40,7 @@ function create(options){
   function markStopped(){
     started = false;
     levelLoaded = false;
-    sync({editorPreview:false, paused:false});
+    sync({editorPreview:false, editorPreviewMode:null, paused:false});
   }
 
   function setPending(value){

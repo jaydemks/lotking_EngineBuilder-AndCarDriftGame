@@ -58,6 +58,7 @@ function create(deps){
     ['#lkLevels', 'text', {en:'🗀 Levels', it:'🗀 Livelli'}],
     ['#lkResetScene', 'text', {en:'↺ Reset', it:'↺ Reset'}],
     ['#lkPlay', 'text', {en:'▶ PREVIEW', it:'▶ PROVA'}],
+    ['#lkSimulate', 'text', {en:'▶ SIMULATE', it:'▶ SIMULA'}],
     ['.lk-levels-title', 'text', {en:'🗀 PROJECT LEVELS', it:'🗀 LIVELLI DEL PROGETTO'}],
     ['.lk-levels-sub', 'text', {en:'stored locally · LKEP format', it:'salvati localmente · formato LKEP'}],
     ['#lkLevelsNew', 'text', {en:'＋ New level', it:'＋ Nuovo livello'}],

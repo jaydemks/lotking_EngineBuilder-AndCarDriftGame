@@ -13,7 +13,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Gameplay runtime page. Loads the runtime, HUD, settings, radio, audio, scene store, track catalog, and game flow without loading editor modules.
 
 - `engine_editor.html`
-  Standalone editor page. Loads the runtime/editor DOM and editor module stack required by editor preview, HUD editing, Sound Designer, asset management, viewport tools, Cinema Studio, and project export. Its direct script order must stay aligned with `js/editor/loader.js`.
+  Standalone editor page. Loads the runtime/editor DOM and editor module stack required by editor preview, HUD editing, Sound Designer, asset management, viewport tools, Cinema Studio, project workspace selection, and project export. Its direct script order must stay aligned with `js/editor/loader.js`.
 
 - `drift-parking-lot.html`
   Compatibility redirect to `index.html`.
@@ -21,7 +21,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## Composition Root
 
 - `js/lot-king.js`
-  Creates `window.LOT_KING`, owns the main runtime composition, initializes Three.js, creates module instances, applies projects/levels, wires the editor bridge, runs the frame loop, and keeps fallback behavior for critical paths.
+  Creates `window.LOT_KING`, owns the main runtime composition, initializes Three.js, creates module instances, applies projects/levels, wires the editor bridge, runs the frame loop, and keeps fallback behavior for critical paths. It also exposes the player bridge used by editor save/load: visible heading, runtime heading conversion, visual base rotation, and `syncSpawnFromVisibleTransform()`.
 
 ## Assets, Loading, and Session Flow
 
@@ -38,7 +38,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Gameplay/editor session state for launched tracks, editor preview, pending loads, selected project, and loaded-level flags.
 
 - `js/runtime/game-flow.js`
-  Track launch, editor preview launch, unload/back-to-menu behavior, HUD visibility, session transitions, and play-state orchestration.
+  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, and play-state orchestration. In online-demo mode, editor preview skips the local save/sync mutation path and uses the loaded demo project as the authoritative state.
 
 - `js/runtime/track-catalog.js`
   Available track list, current track state, level-select card rendering, and runtime track catalog updates from saved levels.
@@ -99,6 +99,9 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 
 ## Runtime UI Helpers
 
+- `js/runtime/project-workspace.js`
+  Editor-only workspace overlay and online-demo guard. Detects local/private-network origins vs hosted origins, presents local/browser/project-file workspace choices, labels the online demo state, and blocks unsafe online authoring actions such as imports, uploads, saves, deletes, renames, duplicates, and asset mutation. LKEP export remains a download-only operation.
+
 - `js/runtime/ui/window-manager.js`
   Shared floating-window manager for runtime/editor overlays. Supports centered windows, drag, resize, persisted geometry, viewport clamping, magnetic snapping, z-ordering, and attaching to existing panels.
 
@@ -142,7 +145,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## Persistence and Store
 
 - `js/engine/scene-store.js`
-  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, sound sets, and shared scene/entity factories.
+  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, sound sets, and shared scene/entity factories. It also loads `demo/demo-project.lkep.json` on hosted origins as the bundled online demo, localizes embedded `data:` model/texture assets into IndexedDB, and preserves the player `headingMode`/`transform` data needed for stable visible heading and runtime driving direction.
 
 This file is runtime-adjacent rather than inside `js/runtime/`, but it is part of runtime boot because saved projects are applied before play and editor preview.
 
@@ -158,16 +161,19 @@ The editor loader is included here because it controls when runtime-shared modul
 These files live under `js/editor/`, but they directly coordinate with runtime/store systems and should be understood when tracing behavior:
 
 - `js/editor/project-io.js`
-  Editor project metadata, browser-based Projects overlay, active project save/load, import/export, and active level/project round-trip. Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data, while project storage in the editor remains scoped to the current browser origin.
+  Editor project metadata, browser-based Projects overlay, active project save/load, import/export, and active level/project round-trip. Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data, while project storage in the editor remains scoped to the current browser origin. In online-demo mode, export is allowed as a browser download, while imports and saves are blocked.
 
 - `js/editor/input-settings.js`
   Project input settings UI. Edits allowed devices, touch mode, player defaults, device instances, base bindings, and mapping overlay data stored in `meta.input`.
 
 - `js/editor/editor-runtime.js`
-  Editor enter/exit, Play Preview, frame-loop handoff, editor camera sync, player-camera preview rendering, runtime/editor state guards, Cinema Studio runtime-trigger scanning, and runtime camera handoff when a Cinema Studio is active in Play Preview. It should remain an orchestration layer; viewport layout and Cinema Studio authoring behavior are delegated to focused modules.
+  Editor enter/exit, Play Preview/Simulate, frame-loop handoff, editor camera sync, player-camera preview rendering, runtime/editor state guards, Cinema Studio runtime-trigger scanning, and runtime camera handoff when a Cinema Studio is active in Play Preview. It converts runtime player heading back to visible editor heading when returning from preview and should remain an orchestration layer; viewport layout and Cinema Studio authoring behavior are delegated to focused modules. Simulate uses the same runtime stepping path as Play Preview while keeping editor viewport/input/save behavior active; `LOT_KING.state.editorPreviewMode = "simulate"` tells runtime input/camera/touch handling to stay passive.
 
 - `js/editor/viewport-layout.js`
-  Runtime-adjacent editor viewport module. Owns quad/single viewport rendering, secondary view selectors, independent secondary perspective cameras, orthographic view cameras, per-view render modes, split handles, viewport overlays, and FPS/performance stats. It is loaded before `editor-runtime.js` and is used by the runtime frame handoff while editing.
+  Runtime-adjacent editor viewport module. Owns quad/single viewport rendering, secondary view selectors, independent secondary perspective cameras, orthographic view cameras, per-view render modes, split handles, viewport overlays, and FPS/performance stats. The performance overlay reports draw calls, triangle counts, memory counters, heap where available, max frame time, frame spikes over 100 ms, and browser long-task counters. It is loaded before `editor-runtime.js` and is used by the runtime frame handoff while editing.
+
+- `js/editor/scene-menu-actions.js`, `js/editor/selection-manager.js`, `js/editor/history-manager.js`, `js/editor/inspector-controller.js`, `js/editor/player-blueprints.js`
+  Editor modules that can mutate player position/direction. These should route player spawn updates through `GAME.player.syncSpawnFromVisibleTransform()` instead of writing runtime physics heading directly, so visible editor heading, saved spawn, and runtime driving heading remain stable.
 
 - `js/editor/cinema-studio.js`
   Runtime-adjacent editor timeline module. Owns Cinema Studio timeline UI, dock/lock state, playhead/ruler controls, real Scene Camera camera cuts, floating preview, Normal/Final preview modes, timeline output evaluation, object transform tracks, camera FOV lens tracks, markers, event tracks, validation, selected-item deletion, undo-aware edits, and the internal play/stop/runtime API. Runtime event triggering and outbound `lotking:timelineevent` dispatch are implemented for Play Preview; advanced curve editing, blend modes, more camera parameters, and full track controls remain future work.

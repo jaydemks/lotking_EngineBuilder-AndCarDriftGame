@@ -204,6 +204,313 @@ html,body {
     border-radius:5px; cursor:pointer; transition:all .15s;
   }
   #editorBtn:hover { background:rgba(157,180,255,.12); border-color:#9db4ff; transform:scale(1.04); }
+
+  .lk-workspace-entry {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border-radius:6px;
+    border:1px solid rgba(75,227,160,.38);
+    background:rgba(75,227,160,.08);
+    color:#a8ffd4;
+    font-weight:900;
+    cursor:pointer;
+    transition:all .15s;
+  }
+  .lk-workspace-entry b,
+  .lk-workspace-entry span {
+    font-size:12px;
+    letter-spacing:1px;
+  }
+  .lk-workspace-entry small {
+    padding:2px 6px;
+    border-radius:4px;
+    background:rgba(255,255,255,.08);
+    color:#bfd0dd;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:0;
+    text-transform:uppercase;
+  }
+  .lk-workspace-entry:hover {
+    background:rgba(75,227,160,.14);
+    border-color:#4be3a0;
+    transform:translateY(-1px);
+  }
+  .lk-workspace-entry.demo {
+    color:#ffe0a0;
+    border-color:rgba(255,209,102,.5);
+    background:rgba(255,209,102,.1);
+  }
+  .lk-workspace-entry.demo small { color:#ffe0a0; background:rgba(255,209,102,.14); }
+  .lk-workspace-entry.demo:hover {
+    border-color:#ffd166;
+    background:rgba(255,209,102,.16);
+  }
+  #workspaceBtn.lk-workspace-entry {
+    min-height:42px;
+    padding:9px 20px;
+  }
+  #lkTopbar #lkWorkspaceBtn.lk-workspace-entry {
+    height:32px;
+    padding:0 10px;
+    margin-left:4px;
+    background:rgba(75,227,160,.08);
+  }
+  #lkTopbar #lkWorkspaceBtn.lk-workspace-entry.demo {
+    background:rgba(255,209,102,.1);
+  }
+
+  #lkWorkspaceBadge {
+    position:fixed;
+    right:14px;
+    bottom:14px;
+    z-index:80;
+    min-width:150px;
+    height:30px;
+    border-radius:6px;
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(11,15,24,.88);
+    color:#dfe5f1;
+    font-size:12px;
+    font-weight:800;
+    cursor:pointer;
+    box-shadow:0 10px 30px rgba(0,0,0,.32);
+  }
+  #lkWorkspaceBadge.folder {
+    border-color:rgba(75,227,160,.45);
+    color:#a8ffd4;
+    background:rgba(12,32,27,.9);
+  }
+  #lkWorkspaceBadge.demo {
+    border-color:rgba(255,209,102,.5);
+    color:#ffe0a0;
+    background:rgba(38,29,11,.92);
+  }
+  .lk-online-demo .lk-demo-locked,
+  .lk-online-demo button.lk-demo-locked,
+  .lk-online-demo .lk-demo-locked:hover {
+    opacity:.42;
+    cursor:not-allowed;
+    border-color:rgba(255,255,255,.12);
+    color:#7d8798;
+    transform:none;
+  }
+  .lk-online-demo #lkStatus:before {
+    content:"ONLINE DEMO";
+    display:inline-flex;
+    align-items:center;
+    height:20px;
+    padding:0 7px;
+    margin-right:8px;
+    border-radius:4px;
+    border:1px solid rgba(255,209,102,.38);
+    color:#ffe0a0;
+    background:rgba(255,209,102,.1);
+    font-size:11px;
+    font-weight:900;
+  }
+
+  .lk-workspace-overlay {
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:130;
+    align-items:center;
+    justify-content:center;
+    padding:26px;
+    color:#e8ecf5;
+    background:
+      linear-gradient(rgba(6,8,13,.54), rgba(6,8,13,.86)),
+      radial-gradient(circle at 50% 22%, rgba(255,209,102,.24), transparent 30%),
+      radial-gradient(circle at 62% 44%, rgba(239,71,111,.26), transparent 36%),
+      image-set(url("../media/images/menu_bg.png") type("image/png")),
+      linear-gradient(145deg, #171119 0%, #101522 42%, #07080c 100%);
+    background-size:cover, auto, auto, cover, auto;
+    background-position:center, center, center, center, center;
+    backdrop-filter:blur(5px);
+  }
+  .lk-workspace-overlay.open { display:flex; }
+  .lk-workspace-panel {
+    width:min(760px, 100%);
+    max-height:min(760px, calc(100vh - 44px));
+    overflow:auto;
+    border:0;
+    border-radius:0;
+    background:transparent;
+    color:#e8ecf5;
+    box-shadow:none;
+  }
+  .lk-workspace-head {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    padding:0 42px 18px;
+    border-bottom:0;
+    background:transparent;
+    text-align:center;
+    position:relative;
+  }
+  .lk-workspace-kicker {
+    color:#8b93a7;
+    font-size:12px;
+    font-weight:900;
+    letter-spacing:3px;
+    text-transform:uppercase;
+  }
+  .lk-workspace-head h2 {
+    margin:8px 0 0;
+    font-size:42px;
+    line-height:1.02;
+    letter-spacing:5px;
+    font-weight:900;
+    text-transform:uppercase;
+    background:linear-gradient(180deg,#ffd166,#ef476f);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  #lkWorkspaceClose {
+    position:absolute;
+    right:0;
+    top:0;
+    width:38px;
+    height:38px;
+    border-radius:6px;
+    border:1px solid rgba(255,255,255,.22);
+    background:rgba(8,11,18,.46);
+    color:#c6cddd;
+    cursor:pointer;
+    font-weight:900;
+    font-size:15px;
+    backdrop-filter:blur(10px);
+  }
+  #lkWorkspaceClose:hover { border-color:#ff6b7a; color:#ff9db1; }
+  .lk-workspace-grid {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:12px;
+    padding:8px 0 12px;
+  }
+  .lk-workspace-card {
+    width:min(540px, 100%);
+    min-height:72px;
+    padding:13px 20px;
+    border-radius:6px;
+    border:1px solid rgba(157,180,255,.32);
+    background:rgba(8,11,18,.46);
+    color:#c6cddd;
+    text-align:center;
+    cursor:pointer;
+    backdrop-filter:blur(10px);
+    transition:transform .15s, border-color .15s, background .15s, filter .15s;
+  }
+  #lkWorkspaceFile { order:1; }
+  #lkWorkspaceBrowser { order:2; }
+  #lkWorkspaceGuide { order:3; }
+  .lk-online-demo #lkWorkspaceBrowser { order:1; }
+  .lk-online-demo #lkWorkspaceFile { order:2; }
+  .lk-workspace-card.primary {
+    color:#0b0d12;
+    border:0;
+    background:linear-gradient(90deg,#ffd166,#ef476f);
+  }
+  .lk-workspace-card b {
+    display:block;
+    color:inherit;
+    font-size:15px;
+    letter-spacing:2px;
+    margin-bottom:5px;
+    text-transform:uppercase;
+  }
+  .lk-workspace-card span {
+    display:block;
+    color:inherit;
+    opacity:.82;
+    font-size:13px;
+    line-height:1.45;
+  }
+  .lk-workspace-card:hover {
+    transform:scale(1.035);
+    border-color:#9db4ff;
+    background:rgba(157,180,255,.12);
+  }
+  .lk-workspace-card.primary:hover { filter:saturate(1.08); background:linear-gradient(90deg,#ffd166,#ef476f); }
+  .lk-workspace-card.disabled,
+  .lk-workspace-card:disabled {
+    opacity:.55;
+    cursor:not-allowed;
+    transform:none;
+  }
+  .lk-workspace-status {
+    width:min(540px, 100%);
+    margin:6px auto 0;
+    padding:10px 13px;
+    border-radius:6px;
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(8,11,18,.48);
+    color:#8b93a7;
+    font-size:13px;
+    line-height:1.45;
+    text-align:center;
+    backdrop-filter:blur(10px);
+  }
+  .lk-workspace-actions {
+    display:flex;
+    justify-content:center;
+    gap:8px;
+    padding:14px 0 0;
+  }
+  .lk-workspace-actions button {
+    height:34px;
+    padding:0 12px;
+    border-radius:6px;
+    border:1px solid rgba(157,180,255,.32);
+    background:rgba(8,11,18,.46);
+    color:#9db4ff;
+    cursor:pointer;
+    font-weight:800;
+    backdrop-filter:blur(10px);
+  }
+  .lk-workspace-actions button:hover:not(:disabled) {
+    border-color:#9db4ff;
+    color:#e8ecf5;
+    transform:translateY(-1px);
+  }
+  .lk-workspace-actions button:disabled {
+    opacity:.45;
+    cursor:not-allowed;
+  }
+  #lkWorkspaceToast {
+    position:fixed;
+    left:50%;
+    bottom:54px;
+    z-index:160;
+    max-width:min(560px, calc(100vw - 30px));
+    padding:10px 14px;
+    border-radius:7px;
+    border:1px solid rgba(75,227,160,.35);
+    background:rgba(10,18,27,.94);
+    color:#dfe5f1;
+    font-size:13px;
+    font-weight:800;
+    opacity:0;
+    transform:translate(-50%, 10px);
+    pointer-events:none;
+    transition:opacity .16s ease, transform .16s ease;
+  }
+  #lkWorkspaceToast.show {
+    opacity:1;
+    transform:translate(-50%, 0);
+  }
+
+  @media (max-width: 760px) {
+    .lk-workspace-grid { grid-template-columns:1fr; }
+    #lkWorkspaceBadge { right:10px; bottom:10px; min-width:130px; }
+    .lk-workspace-head h2 { font-size:19px; }
+  }
   #menuMusicBtn {
     padding:8px 22px; font-size:12px; letter-spacing:2px; font-weight:600;
     color:#c6cddd; background:transparent; border:1px solid rgba(255,255,255,.25);
@@ -325,6 +632,17 @@ html,body {
   #radioViewport.player-hover { cursor:pointer; }
   #radioViewport.editor-preview {
     overflow:visible; pointer-events:auto; z-index:120;
+  }
+  body.lk-editor-simulate-preview #radioViewport.interactive,
+  body.lk-editor-simulate-preview #radioViewport.editor-preview {
+    pointer-events:none;
+  }
+  body.lk-editor-simulate-preview #radio.open,
+  body.lk-editor-simulate-preview #radio.editor-preview,
+  body.lk-editor-simulate-preview #radio .radioPlayerHit,
+  body.lk-editor-simulate-preview #radio .radioKnob,
+  body.lk-editor-simulate-preview #radio .radioEditBox {
+    pointer-events:none;
   }
   #score {
     position:absolute; top:18px; left:50%; transform:translateX(-50%); text-align:center; color:#fff;

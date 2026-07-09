@@ -161,6 +161,8 @@ function create(deps){
   if(cinemaPreviewClose) cinemaPreviewClose.addEventListener('click', e => {
     e.stopPropagation();
     ED.cinemaFloatPreviewOn = false;
+    ED.cinemaFloatPreviewMinimized = false;
+    if(ED.cinemaPreview && !ED.cinemaPreview.runtime) ED.cinemaPreview = null;
     const frame = $('#lkCinemaPreviewFrame');
     if(frame) frame.classList.remove('on');
   });
@@ -197,7 +199,8 @@ function create(deps){
     const playableExport = getPlayableExport();
     if(playableExport) playableExport.exportCurrentPlayableProjectZip();
   });
-  $('#lkPlay').addEventListener('click', () => ED.playPreview ? deps.stopPlayPreview() : deps.startPlayPreview());
+  $('#lkPlay').addEventListener('click', () => ED.playPreview ? deps.stopPlayPreview() : deps.startPlayPreview('play'));
+  $('#lkSimulate').addEventListener('click', () => ED.simulatePreview ? deps.stopPlayPreview() : deps.startPlayPreview('simulate'));
   $('#lkExit').addEventListener('click', () => deps.exitEditor(false));
 
   const hudToggle = document.getElementById('videoEditorHud');

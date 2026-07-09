@@ -194,16 +194,19 @@ function create(deps){
     const st = deps.section(tr('POSITION / SPAWN', 'POSIZIONE / SPAWN'));
     st.body.appendChild(deps.el('<div class="lk-hint">' + tr('Move the car with the gizmo: its position becomes the spawn.', 'Muovi l\'auto con il gizmo: la sua posizione diventa lo spawn.') + '</div>'));
     const syncPlayerSpawnFromInspector = () => {
-      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : (o.rotation.y || 0);
       o.updateMatrixWorld(true);
-      if(GAME.player.physics){
-        GAME.player.physics.pos.copy(o.position);
-        GAME.player.physics.heading = heading;
-      }
-      if(GAME.player.spawn){
-        GAME.player.spawn.x = o.position.x;
-        GAME.player.spawn.z = o.position.z;
-        GAME.player.spawn.heading = heading;
+      if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();
+      else {
+        const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : (o.rotation.y || 0);
+        if(GAME.player.physics){
+          GAME.player.physics.pos.copy(o.position);
+          GAME.player.physics.heading = heading;
+        }
+        if(GAME.player.spawn){
+          GAME.player.spawn.x = o.position.x;
+          GAME.player.spawn.z = o.position.z;
+          GAME.player.spawn.heading = heading;
+        }
       }
       if(GAME.systems && GAME.systems.physics) GAME.systems.physics.syncPlayer();
       STORE.syncCollider(o);

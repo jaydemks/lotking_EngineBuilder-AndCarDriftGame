@@ -204,15 +204,18 @@ function create(deps){
     restoreEntity(o);
     STORE.applyT(o, t);
     if(o.userData.editorType === 'player'){
-      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
-      GAME.player.physics.pos.copy(o.position);
-      GAME.player.physics.heading = heading;
-      if(GAME.player.spawn){
-        GAME.player.spawn.x = o.position.x;
-        GAME.player.spawn.z = o.position.z;
-        GAME.player.spawn.heading = heading;
+      if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();
+      else {
+        const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : o.rotation.y;
+        GAME.player.physics.pos.copy(o.position);
+        GAME.player.physics.heading = heading;
+        if(GAME.player.spawn){
+          GAME.player.spawn.x = o.position.x;
+          GAME.player.spawn.z = o.position.z;
+          GAME.player.spawn.heading = heading;
+        }
+        if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
       }
-      if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
     if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
     if(o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);

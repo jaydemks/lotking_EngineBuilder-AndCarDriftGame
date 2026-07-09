@@ -55,12 +55,16 @@ function create(deps){
     return null;
   }
 
-  async function normalizePlayableAssetRef(owner, prop, label, dbCache, library, warnings){
-    if(!owner || !Object.prototype.hasOwnProperty.call(owner, prop)) return;
+  async function normalizePlayableAssetRef(owner, prop, label, dbCache, library, warnings, dbProp){
+    if(!owner) return;
+    const explicitDbProp = dbProp || 'dbKey';
+    const hasProp = Object.prototype.hasOwnProperty.call(owner, prop);
+    const hasDbProp = Object.prototype.hasOwnProperty.call(owner, explicitDbProp);
+    if(!hasProp && !hasDbProp && !(owner.asset && owner.asset.dbKey)) return;
     const fallbackName = owner.name || owner.id || label || 'asset';
     const meta = {
       src: owner[prop],
-      dbKey: owner.dbKey || (owner.asset && owner.asset.dbKey),
+      dbKey: owner[explicitDbProp] || owner.dbKey || (owner.asset && owner.asset.dbKey),
       key: owner.key || owner.id || (owner.asset && owner.asset.key),
     };
     if((!meta.src || /^blob:/i.test(meta.src)) && !meta.dbKey){
@@ -89,6 +93,7 @@ function create(deps){
       return;
     }
     owner[prop] = resolved;
+    if(owner[explicitDbProp]) owner[explicitDbProp] = null;
     if(owner.dbKey) owner.dbKey = null;
     if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
   }
@@ -121,8 +126,8 @@ function create(deps){
     const dbCache = new Map();
     const library = assetLibraryLoad();
 
-    if(scene && scene.player && typeof scene.player.modelSrc === 'string'){
-      await normalizePlayableAssetRef(scene.player, 'modelSrc', 'player.modelSrc', dbCache, library, warnings);
+    if(scene && scene.player && (typeof scene.player.modelSrc === 'string' || scene.player.modelDbKey)){
+      await normalizePlayableAssetRef(scene.player, 'modelSrc', 'player.modelSrc', dbCache, library, warnings, 'modelDbKey');
     }
     if(Array.isArray(scene && scene.added)){
       for(const entry of scene.added){

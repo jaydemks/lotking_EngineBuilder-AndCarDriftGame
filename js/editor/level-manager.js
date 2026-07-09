@@ -22,12 +22,33 @@ function create(deps){
   const setTrackMeta = deps.setTrackMeta || function(){};
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
   const projectFilename = deps.projectFilename || function(){ return 'lot-king-level.lkep.json'; };
+  const projectExportAssets = window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS && window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS.create({
+    assetLibraryLoad: deps.assetLibraryLoad || function(){ return []; },
+  });
   const el = deps.el || function(html){
     const t = document.createElement('template');
     t.innerHTML = String(html || '').trim();
     return t.content.firstChild;
   };
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+  const isOnlineDemo = () => window.LK_PROJECT_WORKSPACE && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
+  function blockOnlineDemoAction(){
+    status(tr('Online demo only. Run the project locally to import, save or edit assets.', 'Demo online: avvia il progetto in locale per importare, salvare o modificare asset.'));
+    return true;
+  }
+  async function preparePortableProject(project){
+    if(!projectExportAssets) return {project: JSON.parse(JSON.stringify(project || {})), warnings: []};
+    return projectExportAssets.preparePlayableProject(project);
+  }
+  function downloadProject(project){
+    const blob = new Blob([JSON.stringify(project, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = projectFilename(project);
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
 
   function levelsApi(){ return STORE.levels || null; }
   function reopenEditorAndReload(msg, levelName){
@@ -40,6 +61,7 @@ function create(deps){
     setTimeout(() => location.reload(), 420);
   }
   async function saveAsTrack(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const LV = levelsApi();
     if(!LV){ status(tr('⚠ Level library unavailable', '⚠ Libreria livelli non disponibile')); return; }
     const next = await promptEditorAction({title:tr('Save level as', 'Salva livello come'), message:tr('Save level with name:', 'Salva livello con nome:'), value:(ED.trackName || 'Parking Lot') + ' Copy', okText:tr('Save', 'Salva')});
@@ -65,6 +87,7 @@ function create(deps){
     refreshAssetsPanel();
   }
   async function newTrack(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const LV = levelsApi();
     if(!LV){ status(tr('⚠ Level library unavailable', '⚠ Libreria livelli non disponibile')); return; }
     const next = await promptEditorAction({title:tr('New level', 'Nuovo livello'), message:tr('New level name:', 'Nome del nuovo livello:'), value:'New Level', okText:tr('Create', 'Crea')});
@@ -106,6 +129,7 @@ function create(deps){
     reopenEditorAndReload(tr('Loading "', 'Carico "') + (name || id) + '"', name || id);
   }
   async function renameLevel(id, currentName){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const LV = levelsApi();
     if(!LV) return;
     const next = await promptEditorAction({title:tr('Rename level', 'Rinomina livello'), message:tr('New level name:', 'Nuovo nome livello:'), value:currentName || '', okText:tr('Rename', 'Rinomina')});
@@ -117,6 +141,7 @@ function create(deps){
     status(tr('Level renamed to "', 'Livello rinominato in "') + next.trim() + '"');
   }
   function duplicateLevel(id, currentName){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const LV = levelsApi();
     if(!LV) return;
     const newId = LV.duplicate(id);
@@ -126,6 +151,7 @@ function create(deps){
     status('"' + (currentName || id) + tr('" duplicated ✓', '" duplicato ✓'));
   }
   function deleteLevel(id, currentName){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const LV = levelsApi();
     if(!LV) return;
     const isActive = id === LV.activeId();
@@ -146,14 +172,13 @@ function create(deps){
     const LV = levelsApi();
     const project = LV && LV.get(id);
     if(!project){ status(tr('⚠ Level not readable', '⚠ Livello non leggibile')); return; }
-    const blob = new Blob([JSON.stringify(project, null, 2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = projectFilename(project);
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
-    status(tr('LKEP exported', 'LKEP esportato'));
+    preparePortableProject(project).then(result => {
+      downloadProject(result.project);
+      if(result.warnings && result.warnings.length) status(tr('LKEP exported with warnings: ', 'LKEP esportato con avvisi: ') + result.warnings[0]);
+      else status(tr('LKEP exported', 'LKEP esportato'));
+    }).catch(err => {
+      status(tr('Export failed: ', 'Export fallito: ') + (err && err.message ? err.message : err));
+    });
   }
   function setLevelsOverlayOpen(open){
     ED.levelsOpen = !!open;
@@ -195,7 +220,7 @@ function create(deps){
       if(!l.active) actions.appendChild(mkBtn(tr('▶ Load', '▶ Carica'), tr('Open this level in the editor', "Apri questo livello nell'editor"), () => loadLevel(l.id, l.name), 'lk-level-load'));
       actions.appendChild(mkBtn('✎', tr('Rename', 'Rinomina'), () => renameLevel(l.id, l.name)));
       actions.appendChild(mkBtn('⧉', tr('Duplicate', 'Duplica'), () => duplicateLevel(l.id, l.name)));
-      actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportLevel(l.id)));
+      actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportLevel(l.id), 'lk-level-export'));
       actions.appendChild(mkBtn('🗑', tr('Delete', 'Elimina'), () => deleteLevel(l.id, l.name), 'lk-level-del'));
       row.append(meta, actions);
       box.appendChild(row);

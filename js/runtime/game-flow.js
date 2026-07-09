@@ -19,6 +19,12 @@ function create(options){
     return !!(editor && editor.classList.contains('active'));
   }
 
+  function onlineDemoMode(){
+    return !!(window.LK_PROJECT_WORKSPACE &&
+      window.LK_PROJECT_WORKSPACE.isOnlineDemoMode &&
+      window.LK_PROJECT_WORKSPACE.isOnlineDemoMode());
+  }
+
   function call(name){
     if(opts[name]) return opts[name].apply(null, Array.prototype.slice.call(arguments, 1));
     return undefined;
@@ -92,15 +98,15 @@ function create(options){
     document.body.classList.remove('editor-hud-hidden');
   }
 
-  function beginGameplaySession(editorPreview){
+  function beginGameplaySession(editorPreview, editorPreviewMode){
     gameState.paused = false;
     gameState.playPreviewCursorVisible = false;
-    if(editorPreview) call('syncEditorSpawnFromPlayer');
+    if(editorPreview && !onlineDemoMode()) call('syncEditorSpawnFromPlayer');
     call('resetCar');
     call('resetGameplayCamera');
     call('initGameplayPhysics');
     setHudVisible(true);
-    session.markStarted(editorPreview);
+    session.markStarted(editorPreview, editorPreviewMode);
     call('pauseMenuMusic');
     call('beginRadio');
   }
@@ -181,21 +187,22 @@ function create(options){
     beginGameplaySession(false);
   }
 
-  function startEditorPreview(){
+  function startEditorPreview(mode){
+    mode = mode === 'simulate' ? 'simulate' : 'play';
     if(session.isStarted() || session.isPending()) return;
     prepareEditorLevel();
     if(!opts.isRuntimeReady || !opts.isRuntimeReady()){
       session.setPending(true);
       opts.ensureRuntimeReady('game').then(() => {
         session.setPending(false);
-        startEditorPreview();
+        startEditorPreview(mode);
       }).catch(() => runtimeFailed('track preview failed'));
       return;
     }
     hideMenuOverlay();
     const currentLevel = trackCatalog.current();
-    if(loadText) loadText.textContent = currentLevel ? 'previewing track: ' + currentLevel.name : 'previewing track';
-    beginGameplaySession(true);
+    if(loadText) loadText.textContent = currentLevel ? (mode === 'simulate' ? 'simulating track: ' : 'previewing track: ') + currentLevel.name : (mode === 'simulate' ? 'simulating track' : 'previewing track');
+    beginGameplaySession(true, mode);
   }
 
   function launchLevel(levelId){

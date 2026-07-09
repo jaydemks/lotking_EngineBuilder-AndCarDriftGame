@@ -16,8 +16,15 @@ function create(deps){
   const $ = deps.$;
   const t = (key, fallback) => GAME && GAME.i18n ? GAME.i18n.t(key, fallback) : fallback;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+  const isOnlineDemo = () => window.LK_PROJECT_WORKSPACE && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
+  function blockOnlineDemoAction(){
+    deps.status(tr('Online demo only. Run the project locally to edit this scene.', 'Demo online: avvia il progetto in locale per modificare la scena.'));
+  }
 
   function addMenuItems(at){
+    if(isOnlineDemo()) return [
+      {label:tr('Online demo: additions disabled', 'Demo online: aggiunte disabilitate'), icon:'◇', disabled:true},
+    ];
     const P = at ? {x: at.x, y: at.y, z: at.z} : deps.spawnPointAhead();
     const prim = k => ({label: k[0].toUpperCase()+k.slice(1), icon:'▣', action: () => deps.addPrimitive(k, P)});
     return [
@@ -51,6 +58,20 @@ function create(deps){
   }
 
   function objectMenuItems(o, fromOutliner, gp){
+    const isCinemaStudio = !!(o && o.userData && o.userData.editorType === 'cinemaStudio');
+    if(isOnlineDemo()){
+      const demoItems = [
+        {label:'Select', icon:'◎', action:() => deps.selectObject(o)},
+        {label:'Focus', icon:'🔍', action: deps.focusSelected},
+      ];
+      if(isCinemaStudio && deps.openCinemaTimeline){
+        demoItems.push({label:tr('Open Cinema timeline', 'Apri timeline Cinema'), icon:'▤', action:() => deps.openCinemaTimeline(o)});
+      }
+      demoItems.push(
+        {label:tr('Online demo: editing disabled', 'Demo online: modifica disabilitata'), icon:'◇', disabled:true},
+      );
+      return demoItems;
+    }
     const multi = Array.isArray(ED.multiSelected) && ED.multiSelected.includes(o) ? ED.multiSelected.filter(Boolean) : [];
     if(multi.length > 1){
       return [
@@ -81,6 +102,7 @@ function create(deps){
         {label:'Collider', icon:'▧', disabled:!(o.userData && o.userData.collider && o.userData.collider.ref), action:() => { deps.selectCollider ? deps.selectCollider(o) : deps.selectObject(o); deps.setTool('translate'); }},
       ]},
       {label:'Focus', icon:'🔍', action: deps.focusSelected},
+      ...(isCinemaStudio && deps.openCinemaTimeline ? [{label:tr('Open Cinema timeline', 'Apri timeline Cinema'), icon:'▤', action:() => deps.openCinemaTimeline(o)}] : []),
       {label:'Select similar', icon:'☑', action:() => deps.selectSimilarObjects ? deps.selectSimilarObjects(o) : deps.selectObject(o)},
       {label:tr('Duplicate', 'Duplica'), icon:'⧉', sub: [
         {label:tr('Duplicate  Ctrl+D', 'Duplica  Ctrl+D'), icon:'⧉', action:() => deps.duplicateEntity(o)},
@@ -109,6 +131,7 @@ function create(deps){
   }
 
   function duplicateLine(o, count){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     if(!o) return;
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camE.quaternion).setY(0);
     if(right.lengthSq() < .01) right.set(1, 0, 0);
@@ -119,6 +142,13 @@ function create(deps){
   }
 
   function playerMenuItems(){
+    if(isOnlineDemo()){
+      return [
+        {label:'Select', icon:'◎', action:() => deps.selectObject(GAME.player.car)},
+        {label:'Focus', icon:'🔍', action: deps.focusSelected},
+        {label:tr('Online demo: player editing disabled', 'Demo online: modifica player disabilitata'), icon:'◇', disabled:true},
+      ];
+    }
     return [
       {label:'Select', icon:'◎', sub: [
         {label:'Object', icon:'▣', action:() => deps.selectObject(GAME.player.car)},
@@ -133,22 +163,26 @@ function create(deps){
   }
 
   function canvasMenuItems(gp){
-    return [
+    const items = [
       {label:'Add', icon:'＋', sub: addMenuItems(gp)},
       {sep:true},
       {label:tr('Deselect', 'Deseleziona'), icon:'✕', action: deps.deselect},
       {label: ED.gridOn ? tr('Hide grid', 'Nascondi griglia') : tr('Show grid', 'Mostra griglia'), icon:'▦', action:() => deps.setGrid(!ED.gridOn)},
       {label:tr('Go to player', 'Vai al player'), icon:'🚗', action:() => { deps.selectObject(GAME.player.car); deps.focusSelected(); }},
-      {label:'Save track', icon:'💾', action: deps.saveScene},
     ];
+    if(!isOnlineDemo()) items.push({label:'Save track', icon:'💾', action: deps.saveScene});
+    else items.push({label:tr('Online demo: save disabled', 'Demo online: salvataggio disabilitato'), icon:'◇', disabled:true});
+    return items;
   }
 
   async function renameEntity(o){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const n = await deps.promptEditorAction({title:tr('Rename object', 'Rinomina oggetto'), message:tr('New name:', 'Nuovo nome:'), value:o.userData.editorName || '', okText:tr('Rename', 'Rinomina')});
     if(n){ o.userData.editorName = n; deps.markDirty(); deps.refreshOutliner(); deps.buildInspector(); }
   }
 
   function resetTransform(o){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const prev = ED.selected;
     if(ED.selected !== o) ED.selected = o;
     deps.withTransformHistory('Reset transform', target => {
@@ -161,16 +195,20 @@ function create(deps){
   }
 
   function setSpawnHere(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const car = GAME.player.car;
-    const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : car.rotation.y;
-    if(GAME.player.spawn){
-      GAME.player.spawn.x = car.position.x;
-      GAME.player.spawn.z = car.position.z;
-      GAME.player.spawn.heading = heading;
+    if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();
+    else {
+      const heading = GAME.player.visibleHeading ? GAME.player.visibleHeading() : car.rotation.y;
+      if(GAME.player.spawn){
+        GAME.player.spawn.x = car.position.x;
+        GAME.player.spawn.z = car.position.z;
+        GAME.player.spawn.heading = heading;
+      }
+      GAME.player.physics.pos.copy(car.position);
+      GAME.player.physics.heading = heading;
+      if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
-    GAME.player.physics.pos.copy(car.position);
-    GAME.player.physics.heading = heading;
-    if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     deps.markDirty();
     if(deps.syncTransformFields) deps.syncTransformFields();
     if(deps.buildInspector) deps.buildInspector();

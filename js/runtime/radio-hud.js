@@ -11,6 +11,9 @@ function createRadioHud(deps){
   const clamp = deps.clamp;
   const popup = deps.popup;
   const telemetry = deps.telemetry;
+  const isRuntimeUiSuppressed = typeof deps.isRuntimeUiSuppressed === 'function'
+    ? deps.isRuntimeUiSuppressed
+    : function(){ return false; };
   const musicLib = window.LK_RUNTIME_MUSIC_LIBRARY;
 
   const cfg = {
@@ -139,7 +142,7 @@ function createRadioHud(deps){
     el.radio.classList.toggle('hud-edit-screen', editorPreview && cfg.editTarget === 'screen');
     el.radio.classList.toggle('hud-edit-buttons', editorPreview && cfg.editTarget === 'buttons');
     viewport.classList.toggle('editor-preview', editorPreview);
-    viewport.classList.toggle('interactive', open || editorPreview);
+    viewport.classList.toggle('interactive', (open || editorPreview) && !isRuntimeUiSuppressed());
     knobWrap.style.setProperty('--knob-alpha', String(cfg.buttonOpacity == null ? .22 : clamp(cfg.buttonOpacity, 0, 1)));
     for(const k in knobs){
       const b = cfg.buttons && cfg.buttons[k];
@@ -456,10 +459,11 @@ function createRadioHud(deps){
     }
   }
   function toggleOpen(force){
+    if(isRuntimeUiSuppressed() && force !== false) force = false;
     if(!cfg.enabled && !editorPreview && force !== false) return;
     open = force == null ? !open : !!force;
     el.radio.classList.toggle('open', open);
-    viewport.classList.toggle('interactive', open || editorPreview);
+    viewport.classList.toggle('interactive', (open || editorPreview) && !isRuntimeUiSuppressed());
     requestAnimationFrame(syncPlayerHitboxes);
     canvas.classList.toggle('slowmo', open && !editorPreview);
   }
@@ -480,6 +484,7 @@ function createRadioHud(deps){
     hit.addEventListener('pointerenter', () => { if(visual) visual.classList.add('radio-hover'); });
     hit.addEventListener('pointerleave', () => { if(visual) visual.classList.remove('radio-hover'); });
     hit.addEventListener('click', e => {
+      if(isRuntimeUiSuppressed()) return;
       e.preventDefault();
       e.stopPropagation();
       if(consumeSuppressedPlayerClick(e)) return;
@@ -492,6 +497,7 @@ function createRadioHud(deps){
   bindPlayerHit(playerHits.next, el.next, next);
   bindPlayerHit(playerHits.shuffle, el.shuf, toggleShuffle);
   window.addEventListener('pointerdown', e => {
+    if(isRuntimeUiSuppressed()) return;
     if(!(open || editorPreview) || e.button > 0) return;
     const hit = controlFromPoint(e.clientX, e.clientY);
     if(!hit) return;
@@ -501,6 +507,10 @@ function createRadioHud(deps){
     hit.action();
   }, true);
   window.addEventListener('pointermove', e => {
+    if(isRuntimeUiSuppressed()){
+      setPlayerControlHover(null);
+      return;
+    }
     if(!(open || editorPreview)){
       setPlayerControlHover(null);
       return;
@@ -509,6 +519,7 @@ function createRadioHud(deps){
   }, true);
   window.addEventListener('pointerup', () => setPlayerControlHover(null), true);
   viewport.addEventListener('click', e => {
+    if(isRuntimeUiSuppressed()) return;
     if(!(open || editorPreview) || (e.target && e.target.closest && e.target.closest('.rs-controls button'))) return;
     if(consumeSuppressedPlayerClick(e)) return;
     const hit = controlFromPoint(e.clientX, e.clientY);

@@ -1,0 +1,193 @@
+# v0.6.3
+
+## v0.6.3 - Online demo, local workspace, player spawn, and editor stability
+
+### Release Status
+
+- Status: ready for tag.
+- Tag: `v0.6.3`.
+- Date: 2026-07-09.
+- Scope: static-host online demo publishing, local-first project workflow, player transform/spawn reliability, editor preview fixes, and diagnostics.
+
+### Headline
+
+`v0.6.3` turns the project into a safer local-first editor that can also be published as a static online demo. Hosted users can inspect/play/export the bundled demo level without uploading assets or writing to the server, while local users keep the full editor workflow, imported assets, IndexedDB asset storage, and portable `.lkep.json` export/import.
+
+### Added
+
+- Added `js/runtime/project-workspace.js`.
+  - Shows the editor workspace overlay only on the editor entrypoint.
+  - Detects local/private-network origins vs hosted origins.
+  - Presents local/browser/project-file workspace choices.
+  - Labels hosted mode as an online demo instead of browser-storage authoring.
+  - Blocks unsafe hosted editing actions while keeping read-only demo inspection/play/export available.
+
+- Added bundled online demo loading.
+  - Hosted origins automatically fetch `demo/demo-project.lkep.json`.
+  - The loaded project is installed into a browser-local demo level with the fixed id `online-demo`.
+  - Fetch uses cache-busting so FTP updates are easier to verify.
+  - Console logging reports the bundled LKEP source, added object count, and whether a player model is present.
+
+- Added `demo/README.md`.
+  - Documents the required demo filename: `demo/demo-project.lkep.json`.
+  - Explains the read-only online demo model and FTP upload flow.
+
+- Added portable demo asset localization.
+  - Embedded `data:` GLB/texture references inside online demo LKEP files are moved into `LK_ASSET_BLOBS`.
+  - Player model data can be restored from the bundled LKEP without needing server-side uploads.
+
+- Added runtime/editor player heading bridge.
+  - `GAME.player.visibleHeadingFromRuntime()`.
+  - `GAME.player.setVisualBaseRotation()`.
+  - `GAME.player.syncSpawnFromVisibleTransform()`.
+  - These keep visible editor heading, saved spawn, and runtime driving heading aligned when an imported GLB needs corrective X/Z root rotations.
+
+- Added viewport performance diagnostics.
+  - The `▤` viewport performance overlay now reports max frame time, frame spikes above 100 ms, browser Long Task count, and max Long Task duration.
+  - This helps separate GPU/render pressure from main-thread stalls caused by DOM refresh, JSON serialization, localStorage, thumbnails, or garbage collection.
+
+### Improved
+
+- Online demo mode is read-only by design.
+  - Imports, uploads, saves, deletes, renames, duplicates, and asset mutation are blocked on hosted origins.
+  - `.lkep.json` export is still allowed as a browser download.
+  - Editor Play Preview online no longer requires saving to local project storage first.
+
+- Project export and level export now preserve blob-backed assets more reliably.
+  - Player `modelDbKey` is included in portable asset normalization.
+  - Level export uses the same portable asset preparation path as project export.
+
+- Player project serialization now stores stronger player data.
+  - `player.headingMode: "runtime-v2"`.
+  - `player.transform`.
+  - Player model name/source/db key.
+  - Spawn position and visible heading.
+
+- Player spawn synchronization is centralized.
+  - Scene menu "Spawn here", gizmo movement, inspector edits, undo/redo, player blueprint application, preview restore, save, and export now use the runtime player sync bridge instead of each writing physics/spawn fields differently.
+
+- Editor return from Play Preview now converts runtime heading back to visible editor heading before restoring the editor view.
+
+- Cinema Studio timeline behavior was refined.
+  - Timeline preview z-order was raised above viewport split handles and view selectors.
+  - Opening/using the timeline no longer automatically forces the editor into quad view.
+  - Cinema Studio objects now expose an "Open Cinema timeline" command from their context menu.
+
+- Online editor Play Preview can run from the bundled demo without granting write access.
+
+- The editor toolbar now includes `Simulate`.
+  - Simulate uses the same runtime/event/cinema/physics path as Play Preview, but keeps the editor viewport, gizmo, menus, and save workflow active.
+  - Runtime input, runtime camera control, touch controls, and vehicle control are suppressed during Simulate so the editor remains fully usable.
+
+- Landing page version badge and runtime `LOT_KING.version` now report `v0.6.3`.
+  - Remember to update both whenever a new version is prepared.
+
+- The workspace button/overlay copy was adjusted to make hosted "Online Demo" semantics clearer.
+
+### Fixed
+
+- Fixed online demo player GLB restoration from exported LKEP projects containing embedded portable asset data.
+
+- Fixed the player vehicle appearing correct in the editor but driving in the opposite direction during Play Preview.
+  - Imported GLBs with X/Z half-turn corrective rotations now keep the visible direction while runtime driving heading applies the required internal offset.
+
+- Fixed player position/rotation not persisting reliably after rotating the player and using "Spawn here".
+  - Save/export now forces player spawn sync before serializing the scene.
+  - Editor modules no longer compete over `physics.heading` and `spawn.heading`.
+
+- Fixed a legacy player-heading migration path that could overwrite its own corrected heading.
+
+- Fixed hosted editor Play Preview being blocked by read-only/demo save guards.
+
+- Fixed Play Preview swallowing gameplay keys such as `Esc`, `Tab`, and camera/look-back bindings.
+  - `Esc` now reaches the runtime pause menu in preview; stop preview remains available via `F8` or `Shift+Esc`.
+
+- Fixed the Radio TAB/HUD overlay capturing editor clicks during Simulate; runtime radio controls are suppressed while the editor remains usable.
+
+- Fixed `setPointerCapture`/`releasePointerCapture` throwing `InvalidStateError` during some canvas pointer interactions.
+
+- Fixed Cinema timeline preview overlay sitting below viewport split/view selector UI.
+
+- Fixed the Cinema timeline reopening itself after closing the floating timeline preview or returning from Play Preview.
+
+- Fixed right-clicking a Cinema Studio unexpectedly reopening the timeline before showing the context menu.
+
+- Fixed online project/level export controls being blocked together with unsafe demo mutations.
+
+### Known Limitations / Follow-up
+
+- `media/images/menu_bg.png` is still referenced by the menu CSS/runtime preload. If the image is not uploaded, the browser logs a 404. This does not block editor/runtime loading.
+
+- Hosted online demo remains intentionally read-only.
+  - There is no shared server upload path.
+  - There is no hosted multi-user database.
+  - Users who want full authoring should run the project locally or import/export LKEP files locally.
+
+- Browser performance can still stutter in the editor with large projects or embedded GLB/base64 data.
+  - The new viewport `▤` diagnostics are the first step.
+  - Follow-up work should reduce automatic thumbnail rendering, avoid unnecessary outliner/asset refreshes, and keep heavy JSON serialization out of interaction frames.
+
+- Chrome/hosting cache may still require hard refresh after FTP uploads.
+
+- Some default model fallback requests such as `models/player.glb` or `models/player/scene.gltf` can still appear in logs when those files are missing on a hosted server. Demo player models embedded in LKEP are separate from those fallback attempts.
+
+### Testing Checklist
+
+- Local editor:
+  - Open `engine_editor.html`.
+  - Rotate/move the player.
+  - Use `Spawn here`.
+  - Save/export LKEP.
+  - Reload/import and confirm player position, visible direction, and Play Preview driving direction are preserved.
+
+- Online demo:
+  - Upload `demo/demo-project.lkep.json`.
+  - Upload updated `js/lot-king.js`, `js/engine/scene-store.js`, `js/runtime/project-workspace.js`, `js/runtime/game-flow.js`, and updated editor modules.
+  - Hard refresh.
+  - Confirm console logs `bundled LKEP loaded ... player model present`.
+  - Confirm unsafe edit/import/upload/save/delete actions are blocked.
+  - Confirm LKEP export downloads locally.
+  - Confirm editor Play Preview works without server writes.
+
+- Player model:
+  - Test a GLB that requires X/Z half-turn root rotations.
+  - Confirm editor visual heading and Play Preview driving direction match.
+
+- Cinema Studio:
+  - Open timeline in single view.
+  - Confirm the timeline does not force quad view.
+  - Open floating timeline preview and confirm it appears above viewport split/view selector UI.
+
+- Performance diagnostics:
+  - Toggle `FPS` and `▤` in the editor viewport.
+  - Watch `Max frame`, `Spike>100`, `Long tasks`, and `Max` while reproducing editor stutters.
+
+### Files/Areas Touched
+
+- `js/runtime/project-workspace.js`
+- `js/runtime/game-flow.js`
+- `js/engine/scene-store.js`
+- `js/lot-king.js`
+- `js/editor/project-io.js`
+- `js/editor/level-manager.js`
+- `js/editor/playable-export-assets.js`
+- `js/editor/scene-menu-actions.js`
+- `js/editor/selection-manager.js`
+- `js/editor/history-manager.js`
+- `js/editor/inspector-controller.js`
+- `js/editor/player-blueprints.js`
+- `js/editor/editor-runtime.js`
+- `js/editor/editor.js`
+- `js/editor/cinema-studio.js`
+- `js/editor/viewport-layout.js`
+- `css/lot-king.css`
+- `css/editor.css`
+- `engine_editor.html`
+- `demo/README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RUNTIME_MODULES.md`
+
+### Notes
+
+- `v0.6.2` release notes are archived in `docs/releases/v0.6.2.md`.
+- The old root `RELEASE_NOTES_v0.6.2.md` is no longer the active release note file for this pass.

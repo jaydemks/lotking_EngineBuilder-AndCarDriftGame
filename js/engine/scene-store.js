@@ -18,7 +18,15 @@ const HUD_TEMPLATE_KEY = 'lotking.radioHudDefault.v1';
 const PLAYER_BLUEPRINT_ASSETS_KEY = 'lotking.playerBlueprintAssets.v1';
 const ASSET_DB_NAME = 'lotking-assets';
 const ASSET_DB_STORE = 'blobs';
+const BUNDLED_DEMO_PROJECT_URL = 'demo/demo-project.lkep.json';
+const BUNDLED_DEMO_LEVEL_ID = 'online-demo';
 const assetUrlCache = new Map();
+let bundledDemoReady = null;
+
+function bundledDemoProjectUrl(){
+  const sep = BUNDLED_DEMO_PROJECT_URL.indexOf('?') >= 0 ? '&' : '?';
+  return BUNDLED_DEMO_PROJECT_URL + sep + 'v=' + Date.now().toString(36);
+}
 
 function assetDbOpen(){
   return new Promise((resolve, reject) => {
@@ -128,6 +136,62 @@ function importProject(project){
 }
 function cloneData(value){
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+function normalizeAngle(value){
+  let n = Number(value) || 0;
+  while(n <= -Math.PI) n += Math.PI * 2;
+  while(n > Math.PI) n -= Math.PI * 2;
+  return n;
+}
+function angleDistance(a, b){
+  return Math.abs(normalizeAngle((Number(a) || 0) - (Number(b) || 0)));
+}
+function isDataUrl(value){
+  return typeof value === 'string' && /^data:/i.test(value);
+}
+function dataUrlToBlob(dataUrl){
+  return fetch(dataUrl).then(response => response.blob());
+}
+function demoAssetDbKey(label, dataUrl){
+  const mimeMatch = /^data:([^;,]+)/i.exec(dataUrl || '');
+  const mime = mimeMatch ? mimeMatch[1].toLowerCase() : '';
+  const ext = mime.indexOf('gltf') >= 0 || mime.indexOf('model') >= 0 ? '.glb'
+    : mime.indexOf('png') >= 0 ? '.png'
+    : mime.indexOf('jpeg') >= 0 || mime.indexOf('jpg') >= 0 ? '.jpg'
+    : mime.indexOf('webp') >= 0 ? '.webp'
+    : mime.indexOf('gif') >= 0 ? '.gif'
+    : '.asset';
+  return 'online-demo:' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2, 8) + ':' + normalizeName(label || 'asset').replace(/\s+/g, '-') + ext;
+}
+async function moveDataUrlToAssetDb(owner, prop, label, dbProp){
+  if(!owner || !isDataUrl(owner[prop])) return;
+  const dataUrl = owner[prop];
+  const dbKey = demoAssetDbKey(label, dataUrl);
+  const blob = await dataUrlToBlob(dataUrl);
+  await assetBlobPut(dbKey, blob);
+  owner[prop] = null;
+  owner[dbProp || 'dbKey'] = dbKey;
+  if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = dbKey;
+}
+async function localizePortableProjectAssets(project){
+  const scene = project && sceneFromProject(project);
+  if(!scene) return project;
+  if(scene.player) await moveDataUrlToAssetDb(scene.player, 'modelSrc', scene.player.modelName || 'player-model', 'modelDbKey');
+  if(Array.isArray(scene.added)){
+    for(const entry of scene.added){
+      if(!entry) continue;
+      if(entry.kind === 'glb') await moveDataUrlToAssetDb(entry, 'src', entry.name || entry.id || 'glb', 'dbKey');
+      if(entry.kind === 'texture' && entry.props) await moveDataUrlToAssetDb(entry.props, 'src', entry.name || entry.id || 'texture', 'dbKey');
+    }
+  }
+  return project;
+}
+function isLocalOrigin(){
+  const host = location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+}
+function shouldUseBundledDemoProject(){
+  return !isLocalOrigin();
 }
 function normalizeName(s){
   return String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -307,6 +371,60 @@ function repairIndexFromStoredLevels(idx){
   }
   if(changed) writeIndex(idx);
   return idx;
+}
+
+async function installBundledDemoProject(project){
+  if(!project) return null;
+  const parsed = parseProject(project);
+  await localizePortableProjectAssets(parsed);
+  const meta = parsed.meta || {};
+  const name = meta.trackName || meta.levelName || 'Online Demo';
+  const id = BUNDLED_DEMO_LEVEL_ID;
+  const savedAt = parsed.savedAt || new Date().toISOString();
+  parsed.meta = Object.assign({}, meta, {trackId:id, trackName:name, onlineDemo:true});
+  parsed.savedAt = savedAt;
+  const idx = readIndex();
+  let entry = levelEntry(idx, id);
+  if(!entry){
+    entry = {id, name, savedAt};
+    idx.levels.unshift(entry);
+  }
+  entry.name = name;
+  entry.savedAt = savedAt;
+  entry.tag = 'ONLINE DEMO';
+  idx.activeId = id;
+  try { localStorage.setItem(KEY, JSON.stringify(parsed)); } catch(err){}
+  writeLevelProject(id, parsed);
+  writeIndex(idx);
+  syncCatalog();
+  return parsed;
+}
+
+function ensureBundledDemoProject(){
+  if(!shouldUseBundledDemoProject()) return Promise.resolve(null);
+  if(bundledDemoReady) return bundledDemoReady;
+  const url = bundledDemoProjectUrl();
+  bundledDemoReady = fetch(url, {cache:'reload'})
+    .then(response => {
+      if(!response.ok) return null;
+      return response.text();
+    })
+    .then(async text => {
+      if(!text) return null;
+      const project = await installBundledDemoProject(text);
+      if(project){
+        const scene = sceneFromProject(project);
+        const player = scene && scene.player;
+        const playerRef = player && (player.modelSrc || player.modelDbKey) ? 'player model present' : 'player model missing';
+        console.info('LotKing demo: bundled LKEP loaded from ' + url + ' · ' + ((scene && scene.added && scene.added.length) || 0) + ' added · ' + playerRef);
+      }
+      return project;
+    })
+    .catch(err => {
+      console.warn('LotKing demo: bundled LKEP not loaded', err);
+      return null;
+    });
+  return bundledDemoReady;
 }
 
 // migrazione: il vecchio salvataggio single-slot diventa il primo livello della libreria
@@ -550,7 +668,11 @@ const SOUND_SETS = {
 
 function collectPlayerBlueprint(GAME){
   if(!GAME || !GAME.player) return null;
+  if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview && GAME.player.syncSpawnFromVisibleTransform){
+    GAME.player.syncSpawnFromVisibleTransform();
+  }
   const player = {
+    headingMode: 'runtime-v2',
     tuning: cloneData(GAME.player.tuning && GAME.player.tuning.values || {}),
     cam: cloneData(GAME.player.cameraCfg || {}),
     lights: cloneData(GAME.player.lights || {}),
@@ -577,6 +699,7 @@ function collectPlayerBlueprint(GAME){
       heading: GAME.player.visibleHeading ? GAME.player.visibleHeading() : (GAME.player.car.rotation ? (GAME.player.car.rotation.y || 0) : 0),
     };
   }
+  if(GAME.player.car) player.transform = tOf(GAME.player.car);
   if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
   if(GAME.player.car && GAME.player.car.userData.modelDbKey) player.modelDbKey = GAME.player.car.userData.modelDbKey;
   if(GAME.player.car && GAME.player.car.userData.modelName) player.modelName = GAME.player.car.userData.modelName;
@@ -2615,7 +2738,19 @@ function apply(GAME){
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
   // player blueprint
   if(data.player){
-    const playerTransform = data.transforms && data.transforms.player;
+    const playerTransform = data.player.transform || (data.transforms && data.transforms.player);
+    if(playerTransform && playerTransform.r && GAME.player.setVisualBaseRotation) GAME.player.setVisualBaseRotation(playerTransform.r[0], playerTransform.r[2]);
+    else if(GAME.player.setVisualBaseRotation) GAME.player.setVisualBaseRotation(0, 0);
+    let migratedLegacyPlayerHeading = false;
+    if(data.player.headingMode !== 'runtime-v2' && data.player.spawn && playerTransform && playerTransform.r && (data.player.modelSrc || data.player.modelDbKey)){
+      const rawHeading = Number(playerTransform.r[1] || 0);
+      const spawnHeading = Number(data.player.spawn.heading);
+      if(Number.isFinite(spawnHeading) && angleDistance(spawnHeading, rawHeading) < 0.001){
+        data.player.spawn.heading = normalizeAngle(rawHeading + Math.PI);
+        migratedLegacyPlayerHeading = true;
+      }
+      data.player.headingMode = 'runtime-v2';
+    }
     if(!data.player.spawn && playerTransform && playerTransform.p){
       data.player.spawn = Object.assign({}, data.player.spawn || {}, {
         x: playerTransform.p[0] || 0,
@@ -2623,13 +2758,25 @@ function apply(GAME){
         heading: data.player.spawn && data.player.spawn.heading != null ? data.player.spawn.heading : (playerTransform.r ? (playerTransform.r[1] || 0) : 0),
       });
     }
+    if(data.player.headingMode === 'runtime-v2' && data.player.spawn && playerTransform){
+      if(playerTransform.p){
+        data.player.spawn.x = Number(playerTransform.p[0] || 0);
+        data.player.spawn.z = Number(playerTransform.p[2] || 0);
+      }
+      if(playerTransform.r && !migratedLegacyPlayerHeading) data.player.spawn.heading = Number(playerTransform.r[1] || 0);
+    }
     if(data.player.spawn){
       Object.assign(GAME.player.spawn, data.player.spawn);
       GAME.player.physics.pos.set(GAME.player.spawn.x, 0, GAME.player.spawn.z);
-      GAME.player.physics.heading = GAME.player.spawn.heading;
       GAME.player.car.position.copy(GAME.player.physics.pos);
-      if(GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(GAME.player.physics.heading);
-      else GAME.player.car.rotation.y = GAME.player.physics.heading;
+      if(GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(GAME.player.spawn.heading);
+      else {
+        GAME.player.physics.heading = GAME.player.spawn.heading;
+        GAME.player.car.rotation.y = GAME.player.physics.heading;
+      }
+      if(playerTransform){
+        applyT(GAME.player.car, playerTransform);
+      }
       if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
     }
     if(data.player.modelSrc || data.player.modelDbKey){
@@ -2642,7 +2789,10 @@ function apply(GAME){
           GAME.player.car.userData.modelSrc = data.player.modelSrc || null;
           GAME.player.car.userData.modelDbKey = data.player.modelDbKey || null;
           GAME.player.car.userData.modelName = data.player.modelName || null;
-          if(data.player.spawn && GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(data.player.spawn.heading || 0);
+          if(playerTransform){
+            applyT(GAME.player.car, playerTransform);
+          }
+          else if(data.player.spawn && GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(data.player.spawn.heading || 0);
           if(data.player.materials) applyPlayerMaterialProps(GAME, data.player.materials);
         }))
         .catch(err => console.warn('LotKing store: modello player non ricaricato', err));
@@ -2781,7 +2931,7 @@ let applied = false;
 function ensureApplied(GAME){
   if(applied) return ready;
   applied = true;
-  ready = apply(GAME || window.LOT_KING);
+  ready = ensureBundledDemoProject().then(() => apply(GAME || window.LOT_KING));
   window.LK_STORE.ready = ready;
   return ready;
 }
@@ -2797,6 +2947,7 @@ window.LK_STORE = {
 	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, collect, nextId,
+  ensureBundledDemoProject,
   builtinIds: () => builtinIds.slice(),
   ready,
 };
@@ -2843,6 +2994,7 @@ window.LK_STORE = {
     setTimeout(() => syncCatalogNow(attempt + 1), 80);
   }
   syncCatalogNow();
+  ensureBundledDemoProject().then(() => syncCatalogNow()).catch(() => {});
   let auto = null;
   try {
     auto = sessionStorage.getItem('lk.autolaunch');

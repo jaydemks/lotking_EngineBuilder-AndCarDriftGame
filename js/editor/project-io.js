@@ -40,6 +40,11 @@ function create(deps){
   let projectsLanguageBound = false;
   let projectImportTarget = 'project';
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+  const isOnlineDemo = () => window.LK_PROJECT_WORKSPACE && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
+  function blockOnlineDemoAction(){
+    status(tr('Online demo only. Run the project locally to import, save or edit assets.', 'Demo online: avvia il progetto in locale per importare, salvare o modificare asset.'));
+    return true;
+  }
 
   function slugifyTrackName(name){
     return (name || 'track').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'track';
@@ -98,6 +103,20 @@ function create(deps){
   async function preparePortableProject(project){
     if(!projectExportAssets) return {project: JSON.parse(JSON.stringify(project || {})), warnings: []};
     return projectExportAssets.preparePlayableProject(project);
+  }
+
+  function saveWorkspaceProjectCopy(project){
+    const workspace = window.LK_PROJECT_WORKSPACE;
+    const linked = workspace && ((workspace.isFileMode && workspace.isFileMode()) || (workspace.isFolderMode && workspace.isFolderMode()));
+    if(!workspace || !linked || !workspace.saveProject) return;
+    preparePortableProject(project).then(result => {
+      return workspace.saveProject(result.project, {name:browserProjectName(result.project)}).then(info => ({result, info}));
+    }).then(bundle => {
+      const warning = bundle.result.warnings && bundle.result.warnings.length ? ' (' + bundle.result.warnings[0] + ')' : '';
+      status('Workspace copy saved: ' + bundle.info.file + warning);
+    }).catch(err => {
+      status('Workspace copy failed: ' + (err && err.message ? err.message : err));
+    });
   }
 
   async function writeProjectFile(handle, project){
@@ -332,6 +351,7 @@ function create(deps){
   }
 
   function importProjectAsBrowserProject(file, raw, progressToken){
+    if(isOnlineDemo()) throw new Error('Online demo is read-only');
     const project = STORE.parseProject ? STORE.parseProject(raw) : JSON.parse(raw);
     const name = importedProjectName(file, project);
     updateStatusWork(progressToken, 42, tr('Preparing local assets', 'Preparazione asset locali'), 'loading');
@@ -345,6 +365,7 @@ function create(deps){
   }
 
   function saveScene(opts){
+    if(isOnlineDemo()) return !blockOnlineDemoAction();
     opts = opts || {};
     const progressToken = beginStatusWork(tr('Saving level', 'Salvataggio livello'), tr('Checking current state', 'Verifica stato corrente'), 'loading');
     updateStatusWork(progressToken, 10, tr('Preparing data', 'Preparazione dati'), 'loading');
@@ -383,6 +404,7 @@ function create(deps){
     try {
       writeBrowserProject(project);
       status('Project saved ✓');
+      saveWorkspaceProjectCopy(project);
     } catch(err) {
       saveProjectFileAsync(project, {allowPicker: !!opts.projectFile, allowDownloadFallback: !!opts.projectFile});
       if(!projectFileHandle) status('Track saved locally ✓');
@@ -399,7 +421,7 @@ function create(deps){
     const project = createProjectSnapshot(sceneData);
     let picked;
     try {
-      picked = canPickProjectFile() ? pickProjectFile(project) : Promise.resolve(null);
+      picked = (!isOnlineDemo() && canPickProjectFile()) ? pickProjectFile(project) : Promise.resolve(null);
     } catch(err) {
       picked = Promise.reject(err);
     }
@@ -415,7 +437,7 @@ function create(deps){
     }).then(result => {
       const warningText = result.warnings && result.warnings.length ? tr('With warnings: ', 'Con avvisi: ') + result.warnings[0] : tr('Operation complete', 'Operazione completata');
       finishStatusWork(progressToken, tr('LKEP exported', 'LKEP esportato'), warningText, result.warnings && result.warnings.length ? 'warning' : 'success');
-      status(projectFileHandle ? 'LKEP saved and linked to Save ✓' : 'LKEP exported');
+      status(projectFileHandle && !isOnlineDemo() ? 'LKEP saved and linked to Save ✓' : 'LKEP exported');
     }).catch(err => {
       if(err && err.name === 'AbortError'){
         finishStatusWork(progressToken, tr('Export cancelled', 'Export annullato'), tr('No file written', 'Nessun file scritto'), 'warning');
@@ -429,6 +451,7 @@ function create(deps){
 
   function importProjectFile(file){
     $('#lkProjectInput').value = '';
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     if(!file) return;
     const importTarget = projectImportTarget;
     projectImportTarget = 'project';
@@ -564,7 +587,7 @@ function create(deps){
       };
       if(!project.active) actions.appendChild(mkBtn(tr('▶ Load', '▶ Carica'), tr('Open this project', 'Apri questo progetto'), () => loadBrowserProject(project.id, project.name), 'lk-level-load'));
       actions.appendChild(mkBtn('✎', tr('Rename', 'Rinomina'), () => renameBrowserProject(project.id, project.name)));
-      actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportBrowserProject(project.id)));
+      actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportBrowserProject(project.id), 'lk-level-export'));
       actions.appendChild(mkBtn('🗑', tr('Delete', 'Elimina'), () => deleteBrowserProject(project.id, project.name), 'lk-level-del'));
       row.append(meta, actions);
       box.appendChild(row);
@@ -572,6 +595,7 @@ function create(deps){
   }
 
   async function createBrowserProject(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const next = await promptEditorAction({title:tr('New project', 'Nuovo progetto'), message:tr('New project name:', 'Nome del nuovo progetto:'), value:'New Project', okText:tr('Create', 'Crea')});
     if(!next || !next.trim()) return;
     if(ED.dirty){
@@ -631,6 +655,7 @@ function create(deps){
   }
 
   async function renameBrowserProject(id, currentName){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const next = await promptEditorAction({title:tr('Rename project', 'Rinomina progetto'), message:tr('New project name:', 'Nuovo nome progetto:'), value:currentName || '', okText:tr('Rename', 'Rinomina')});
     if(!next || !next.trim() || next.trim() === currentName) return;
     try {
@@ -651,6 +676,7 @@ function create(deps){
   }
 
   function deleteBrowserProject(id, currentName){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     confirmEditorAction({
       title:tr('Delete project?', 'Eliminare progetto?'),
       message:tr('Delete "', 'Eliminare "') + (currentName || id) + tr('" permanently?', '" definitivamente?'),
@@ -690,11 +716,24 @@ function create(deps){
     }).catch(err => status('Export failed: ' + (err && err.message ? err.message : err)));
   }
 
+  function bindWorkspaceProjectImport(){
+    if(bindWorkspaceProjectImport.done) return;
+    bindWorkspaceProjectImport.done = true;
+    window.addEventListener('lot-king:workspace-project-loaded', event => {
+      const detail = event.detail || {};
+      if(!detail.text) return;
+      const progressToken = beginStatusWork(tr('Workspace import', 'Importazione workspace'), tr('Reading local project', 'Lettura progetto locale'), 'loading');
+      importProjectAsBrowserProject({name:detail.name || 'workspace-project.lkep.json'}, detail.text, progressToken);
+    });
+  }
+
   const el = deps.el || function(html){
     const t = document.createElement('template');
     t.innerHTML = String(html || '').trim();
     return t.content.firstChild;
   };
+
+  bindWorkspaceProjectImport();
 
   return Object.freeze({
     slugifyTrackName, setTrackMeta, currentTrackMeta, loadTrackMeta, saveScene, projectFilename, exportProject, importProjectFile,

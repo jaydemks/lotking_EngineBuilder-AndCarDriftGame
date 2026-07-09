@@ -20,6 +20,24 @@ function create(deps){
   const statsBox = root.querySelector('#lkViewportStats');
   let viewOptionSig = '';
   let fpsAvg = 0;
+  let maxFrameMs = 0;
+  let frameSpikeCount = 0;
+  let lastFrameSpikeAt = 0;
+  let longTaskCount = 0;
+  let longTaskMaxMs = 0;
+
+  if(typeof PerformanceObserver !== 'undefined'){
+    try {
+      const observer = new PerformanceObserver(list => {
+        list.getEntries().forEach(entry => {
+          const ms = entry.duration || 0;
+          longTaskCount++;
+          if(ms > longTaskMaxMs) longTaskMaxMs = ms;
+        });
+      });
+      observer.observe({type:'longtask', buffered:true});
+    } catch(err){}
+  }
 
   root.querySelectorAll('.lk-view-corner select').forEach(select => {
     select.addEventListener('change', () => {
@@ -349,6 +367,12 @@ function create(deps){
     statsBox.classList.toggle('on', on);
     if(!on) return;
     const fps = dt > 0 ? 1 / dt : 0;
+    const frameMs = dt * 1000;
+    if(frameMs > maxFrameMs) maxFrameMs = frameMs;
+    if(frameMs > 100 && performance.now() - lastFrameSpikeAt > 250){
+      frameSpikeCount++;
+      lastFrameSpikeAt = performance.now();
+    }
     fpsAvg = fpsAvg ? fpsAvg * .9 + fps * .1 : fps;
     const info = renderer.info || {};
     const render = info.render || {};
@@ -365,6 +389,10 @@ function create(deps){
         ' <span>Tri</span> ' + (render.triangles || 0) +
         '<br><span>Geom</span> ' + (memory.geometries || 0) +
         ' <span>Tex</span> ' + (memory.textures || 0) +
+        '<br><span>Max frame</span> ' + maxFrameMs.toFixed(0) + ' ms' +
+        ' <span>Spike&gt;100</span> ' + frameSpikeCount +
+        '<br><span>Long tasks</span> ' + longTaskCount +
+        ' <span>Max</span> ' + longTaskMaxMs.toFixed(0) + ' ms' +
         heap
       : '');
   }

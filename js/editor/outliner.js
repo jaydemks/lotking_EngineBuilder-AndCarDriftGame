@@ -206,7 +206,7 @@ function create(deps){
     div.addEventListener('contextmenu', ev => {
       ev.preventDefault(); ev.stopPropagation();
       if(o && o.__lkSkipContext) return;
-      if(!selectedSceneObjects().includes(o)) deps.selectObject(o);
+      if(!selectedSceneObjects().includes(o) && !(o.userData && o.userData.editorType === 'cinemaStudio')) deps.selectObject(o);
       deps.openMenu(deps.objectMenuItems(o, true), ev.clientX, ev.clientY);
     });
     return div;

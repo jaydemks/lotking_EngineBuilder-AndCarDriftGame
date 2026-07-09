@@ -278,7 +278,7 @@ function create(deps){
       ], v => saveCinema({playback:v})).root);
       cinemaSec.body.appendChild(selectRow('Trigger', props.trigger || 'manual', [
         {value:'manual', label:'Manual'},
-        {value:'on-play', label:'On Play Preview'},
+        {value:'on-play', label:'On Preview/Simulate'},
         {value:'runtime-event', label:'Runtime event'},
       ], v => saveCinema({trigger:v})).root);
       const eventRow = el('<div class="lk-row"><label>Event name</label><input type="text"></div>');

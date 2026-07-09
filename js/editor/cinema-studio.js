@@ -79,10 +79,14 @@ function create(deps){
     const studio = activeStudio();
     if(!studio) return;
     ED.cinemaFloatPreviewOn = !ED.cinemaFloatPreviewOn;
-    ED.cinemaTimelineId = studio.userData.editorId;
-    ED.cinemaTimelineOpen = true;
-    if(!ED.cinemaPreview || ED.cinemaPreview.id !== studio.userData.editorId){
+    if(ED.cinemaFloatPreviewOn){
+      ED.cinemaTimelineId = studio.userData.editorId;
+      ED.cinemaTimelineClosedId = null;
+    }
+    if(ED.cinemaFloatPreviewOn && (!ED.cinemaPreview || ED.cinemaPreview.id !== studio.userData.editorId)){
       ED.cinemaPreview = {id:studio.userData.editorId, time:selectedTime(studio), playing:false};
+    } else if(!ED.cinemaFloatPreviewOn && ED.cinemaPreview && !ED.cinemaPreview.playing){
+      ED.cinemaPreview = null;
     }
     syncTimeline(currentViewportRect());
   });
@@ -105,6 +109,9 @@ function create(deps){
     ED.cinemaTimelineId = null;
     ED.cinemaSelectedItem = null;
     ED.cinemaTimelineFocused = false;
+    ED.cinemaFloatPreviewOn = false;
+    ED.cinemaFloatPreviewMinimized = false;
+    ED.cinemaPreview = null;
     hideTimeline();
   });
   if(cinemaDuplicateBtn) cinemaDuplicateBtn.addEventListener('click', () => duplicateSelectedItem());
@@ -195,7 +202,7 @@ function create(deps){
       const locked = GAME.world.registry.find(o => o && o.userData && o.userData.editorId === ED.cinemaTimelineId && o.userData.editorType === 'cinemaStudio');
       if(locked) return locked;
     }
-    if(ED.cinemaPreview && ED.cinemaPreview.id){
+    if(ED.cinemaPreview && ED.cinemaPreview.id && (ED.cinemaPreview.playing || ED.cinemaFloatPreviewOn || ED.cinemaTimelineOpen || ED.cinemaTimelineLocked)){
       return GAME.world.registry.find(o => o && o.userData && o.userData.editorId === ED.cinemaPreview.id && o.userData.editorType === 'cinemaStudio') || null;
     }
     return null;
@@ -1031,7 +1038,7 @@ function create(deps){
   }
   function startTimeline(studio, playing){
     const current = ED.cinemaPreview && ED.cinemaPreview.id === studio.userData.editorId ? ED.cinemaPreview.time : 0;
-    playStudio(studio, {time:current, playing:!!playing, setViewport:true, source:'timeline-ui'});
+    playStudio(studio, {time:current, playing:!!playing, source:'timeline-ui'});
   }
   function playStudio(studio, opts){
     if(!studio) return null;
@@ -1043,9 +1050,11 @@ function create(deps){
       ED.viewportMode = 'quad';
       ED.viewportSlots[1] = 'timeline:' + studio.userData.editorId;
     }
-    ED.cinemaTimelineClosedId = null;
-    ED.cinemaTimelineId = studio.userData.editorId;
-    ED.cinemaTimelineOpen = true;
+    if(!opts.runtime){
+      ED.cinemaTimelineClosedId = null;
+      ED.cinemaTimelineId = studio.userData.editorId;
+      ED.cinemaTimelineOpen = true;
+    }
     ED.cinemaPreview = {
       id:studio.userData.editorId,
       time:Math.max(0, Math.min(props.duration, Number(time) || 0)),
@@ -1554,7 +1563,7 @@ function create(deps){
   function syncTimeline(viewRect){
     if(!cinemaTimeline) return;
     const studio = activeStudio();
-    const on = !!(studio && ED.active && !ED.playPreview);
+    const on = !!(studio && ED.active && !ED.playPreview && ED.cinemaTimelineOpen);
     ED.cinemaTimelineOpen = on;
     cinemaTimeline.classList.toggle('on', on);
     if(!on){
@@ -2209,10 +2218,6 @@ function create(deps){
         dispatchTimelineEventsBetween(studio, props, beforeTime, state.time, state, false);
       }
       state.lastEventTime = state.time;
-    }
-    if(cut && cut.cameraId && !state.runtime && ED.viewportSlots[1] !== 'timeline:' + studio.userData.editorId){
-      ED.viewportMode = 'quad';
-      ED.viewportSlots[1] = 'timeline:' + studio.userData.editorId;
     }
     return cut;
   }
