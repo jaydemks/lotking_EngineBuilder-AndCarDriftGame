@@ -32,7 +32,7 @@ function create(deps){
 
   let curType = 'keyboard';
   let curInstance = null;          // selected device instance id
-  let capturing = null;            // {action, chip, raf}
+  let capturing = null;            // {action, chip, raf, mode, index}
   let raf = 0;
   let kbVis = null, gpVis = null, touchVis = null;
   let gamepadLayoutEdit = false;
@@ -46,8 +46,10 @@ function create(deps){
       '<div class="lk-map-tabs"></div>' +
     '</div>' +
     '<div class="lk-map-instrow"></div>' +
-    '<div class="lk-map-stage"></div>' +
-    '<div class="lk-map-actions"></div>' +
+    '<div class="lk-map-work">' +
+      '<div class="lk-map-stage"></div>' +
+      '<div class="lk-map-actions"></div>' +
+    '</div>' +
     '<div class="lk-map-hint"></div>';
   const ctxSel = content.querySelector('.lk-map-ctxsel');
   const tabsEl = content.querySelector('.lk-map-tabs');
@@ -59,7 +61,7 @@ function create(deps){
   const win = wm.create({
     id: deps.windowId || 'lk-mapping',
     title: t('Mapping', 'Mappatura'),
-    width: 560, height: 520, minWidth: 420, minHeight: 380,
+    width: 760, height: 620, minWidth: 520, minHeight: 460,
     content,
     onOpen: () => { render(); startLive(); },
     onClose: () => { endCapture(); stopLive(); },
@@ -148,15 +150,54 @@ function create(deps){
     if(capturing.chip) capturing.chip.classList.remove('capturing');
     capturing = null;
   }
-  function beginCapture(action, chip){
+  function keyboardBinding(action){
+    const cfg = config();
+    const scheme = ACT.effectiveScheme(cfg, cfg.activeContext, curType, curInstance);
+    return Array.isArray(scheme && scheme[action]) ? scheme[action].slice() : [];
+  }
+  function uniqueKeys(list){
+    const seen = {};
+    return (list || []).filter(code => {
+      if(!code || seen[code]) return false;
+      seen[code] = true;
+      return true;
+    }).slice(0, 4);
+  }
+  function setKeyboardBinding(action, list){
+    session.remap(curInstance, action, uniqueKeys(list));
+  }
+  function removeKeyboardBinding(action, index){
+    const list = keyboardBinding(action);
+    list.splice(index, 1);
+    setKeyboardBinding(action, list);
+    render();
+  }
+  function applyCapturedKeyboard(action, code, capture){
+    const mode = capture && capture.mode || 'replace';
+    const list = keyboardBinding(action);
+    if(mode === 'add'){
+      setKeyboardBinding(action, list.indexOf(code) >= 0 ? list : list.concat(code));
+      return;
+    }
+    if(mode === 'replaceIndex'){
+      const index = Math.max(0, capture.index || 0);
+      list[index] = code;
+      setKeyboardBinding(action, list.length ? list : [code]);
+      return;
+    }
+    setKeyboardBinding(action, [code]);
+  }
+  function beginCapture(action, chip, opts){
     endCapture();
-    capturing = {action, chip};
+    opts = opts || {};
+    capturing = {action, chip, mode:opts.mode || 'replace', index:opts.index || 0};
     if(chip) chip.classList.add('capturing');
-    hint.textContent = curType === 'gamepad' ? t('Press a button on the gamepad…', 'Premi un pulsante sul gamepad…') : t('Press a key… (Esc to cancel)', 'Premi un tasto… (Esc annulla)');
+    const addText = opts.mode === 'add' ? t('Press a key to add it… (Esc to cancel)', 'Premi un tasto da aggiungere… (Esc annulla)') : t('Press a key… (Esc to cancel)', 'Premi un tasto… (Esc annulla)');
+    hint.textContent = curType === 'gamepad' ? t('Press a button on the gamepad…', 'Premi un pulsante sul gamepad…') : addText;
     if(curType === 'keyboard'){
       capturing.kbHandler = e => {
         e.preventDefault(); e.stopPropagation();
-        if(e.code !== 'Escape') session.remap(curInstance, action, [e.code]);
+        if(e.code !== 'Escape') applyCapturedKeyboard(action, e.code, capturing);
         endCapture(); render();
       };
       window.addEventListener('keydown', capturing.kbHandler, true);
@@ -296,14 +337,43 @@ function create(deps){
         const row = elc('div', 'lk-map-arow' + (conflicts[a] ? ' conflict' : ''));
         row.appendChild(elc('span', 'lk-map-adot', '', ACT_COLOR(a)));
         row.appendChild(elc('span', 'lk-map-aname', actionLabel(a)));
-        const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'lk-map-chip';
-        chip.textContent = bindText(curType, scheme[a]);
-        chip.addEventListener('click', () => beginCapture(a, chip));
-        row.appendChild(chip);
+        if(curType === 'keyboard'){
+          const group = elc('div', 'lk-map-bindings');
+          const keys = Array.isArray(scheme[a]) ? scheme[a] : [];
+          if(!keys.length) group.appendChild(elc('span', 'lk-map-emptybind', '—'));
+          keys.forEach((code, index) => {
+            const wrap = elc('span', 'lk-map-keywrap');
+            const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'lk-map-chip lk-map-keychip';
+            chip.textContent = ACT.keyLabel(code);
+            chip.title = t('Replace this key', 'Sostituisci questo tasto');
+            chip.addEventListener('click', () => beginCapture(a, chip, {mode:'replaceIndex', index}));
+            const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'lk-map-bind-remove';
+            rm.textContent = 'x';
+            rm.title = t('Remove this key', 'Rimuovi questo tasto');
+            rm.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); removeKeyboardBinding(a, index); });
+            wrap.appendChild(chip);
+            wrap.appendChild(rm);
+            group.appendChild(wrap);
+          });
+          const add = document.createElement('button'); add.type = 'button'; add.className = 'lk-map-addbind';
+          add.textContent = keys.length ? '+' : t('Set key', 'Imposta');
+          add.title = t('Add an alternate key for this action', 'Aggiungi un tasto alternativo per questa azione');
+          add.disabled = keys.length >= 4;
+          add.addEventListener('click', () => beginCapture(a, add, {mode:'add'}));
+          group.appendChild(add);
+          row.appendChild(group);
+        } else {
+          const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'lk-map-chip';
+          chip.textContent = bindText(curType, scheme[a]);
+          chip.addEventListener('click', () => beginCapture(a, chip));
+          row.appendChild(chip);
+        }
         actionsEl.appendChild(row);
       });
     }
-    hint.textContent = t('Click an action or a control, then press the input.', 'Clicca un\'azione o un controllo, poi premi l\'input.');
+    hint.textContent = curType === 'keyboard'
+      ? t('Click a key chip to replace it, + to add an alternate key, x to remove one.', 'Clicca un tasto per sostituirlo, + per aggiungere un\'alternativa, x per rimuoverlo.')
+      : t('Click an action or a control, then press the input.', 'Clicca un\'azione o un controllo, poi premi l\'input.');
   }
 
   function bindText(type, v){

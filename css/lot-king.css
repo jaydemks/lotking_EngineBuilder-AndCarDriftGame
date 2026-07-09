@@ -1143,14 +1143,22 @@ html,body {
     background:rgba(255,255,255,.05); color:#dfe5f1; cursor:pointer; font-size:16px; line-height:1;
   }
   .lk-win-close:hover { border-color:#ef476f; color:#ff9db1; }
-  .lk-win-body { flex:1; overflow:auto; padding:14px; }
+  .lk-win-body { flex:1; overflow:auto; padding:14px; scrollbar-width:thin; scrollbar-color:rgba(157,180,255,.45) rgba(255,255,255,.05); }
+  .lk-win-body::-webkit-scrollbar,
+  .lk-map-actions::-webkit-scrollbar { width:9px; height:9px; }
+  .lk-win-body::-webkit-scrollbar-track,
+  .lk-map-actions::-webkit-scrollbar-track { background:rgba(255,255,255,.04); border-radius:9px; }
+  .lk-win-body::-webkit-scrollbar-thumb,
+  .lk-map-actions::-webkit-scrollbar-thumb { background:rgba(157,180,255,.38); border-radius:9px; border:2px solid rgba(13,16,23,.95); }
+  .lk-win-body::-webkit-scrollbar-thumb:hover,
+  .lk-map-actions::-webkit-scrollbar-thumb:hover { background:rgba(157,180,255,.58); }
   .lk-win-resize {
     position:absolute; right:2px; bottom:2px; width:16px; height:16px; cursor:nwse-resize; touch-action:none;
     background:linear-gradient(135deg,transparent 50%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.28) 62%,transparent 62%);
   }
 
   /* ================= Mapping overlay ================= */
-  .lk-map { display:flex; flex-direction:column; gap:12px; height:100%; }
+  .lk-map { display:flex; flex-direction:column; gap:12px; height:100%; min-height:0; overflow:hidden; }
   .lk-map-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
   .lk-map-ctx { font-size:11px; color:#9aa3b8; font-weight:700; letter-spacing:.5px; display:flex; align-items:center; gap:6px; }
   .lk-map-ctxsel, .lk-map-instsel {
@@ -1168,62 +1176,90 @@ html,body {
     background:rgba(255,255,255,.05); color:#dfe5f1; cursor:pointer; font-weight:700;
   }
   .lk-map-inst-add:hover { border-color:#4be3a0; color:#4be3a0; }
-  .lk-map-stage { display:flex; align-items:center; justify-content:center; padding:10px; background:rgba(0,0,0,.22); border-radius:10px; border:1px solid rgba(255,255,255,.06); min-height:120px; }
-  .lk-map-actions { display:flex; flex-direction:column; gap:4px; }
-  .lk-map-arow { display:flex; align-items:center; gap:10px; padding:5px 4px; border-radius:7px; }
+  .lk-map-work { flex:1; min-height:0; display:grid; grid-template-rows:auto minmax(0, 1fr); gap:10px; }
+  .lk-map-stage {
+    display:flex; align-items:center; justify-content:center; padding:12px; background:rgba(0,0,0,.22);
+    border-radius:8px; border:1px solid rgba(255,255,255,.06); min-height:170px; max-height:290px; overflow:hidden;
+  }
+  .lk-map-actions {
+    min-height:0; overflow:auto; display:flex; flex-direction:column; gap:4px; padding:2px 8px 2px 0;
+    scrollbar-width:thin; scrollbar-color:rgba(157,180,255,.45) rgba(255,255,255,.05);
+  }
+  .lk-map-arow { display:flex; align-items:center; gap:10px; padding:5px 4px; border-radius:7px; min-width:0; }
   .lk-map-arow.conflict { background:rgba(239,71,111,.12); }
   .lk-map-adot { width:10px; height:10px; border-radius:3px; flex:none; }
-  .lk-map-aname { flex:1; font-size:12px; color:#dfe5f1; }
+  .lk-map-aname { flex:1 1 160px; min-width:120px; font-size:12px; color:#dfe5f1; }
+  .lk-map-bindings { flex:0 1 56%; min-width:230px; display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:5px; }
+  .lk-map-keywrap { display:inline-flex; align-items:center; min-width:0; }
   .lk-map-chip {
     min-width:92px; height:30px; padding:0 12px; border-radius:7px; border:1px solid rgba(255,255,255,.16);
     background:rgba(255,255,255,.05); color:#fff; font-weight:800; letter-spacing:1px; cursor:pointer;
   }
+  .lk-map-keychip { min-width:48px; max-width:96px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:7px 0 0 7px; }
+  .lk-map-bind-remove, .lk-map-addbind {
+    height:30px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05);
+    color:#cfd6e4; font-weight:800; cursor:pointer;
+  }
+  .lk-map-bind-remove { width:24px; border-left:none; border-radius:0 7px 7px 0; color:#ff9db1; }
+  .lk-map-bind-remove:hover { border-color:#ef476f; background:rgba(239,71,111,.16); }
+  .lk-map-addbind { min-width:30px; padding:0 9px; border-radius:7px; color:#9db4ff; }
+  .lk-map-addbind:hover:not(:disabled) { border-color:#9db4ff; background:rgba(157,180,255,.12); color:#dbe6ff; }
+  .lk-map-addbind:disabled { opacity:.4; cursor:not-allowed; }
+  .lk-map-emptybind { height:30px; display:inline-flex; align-items:center; color:#6f7a91; font-weight:800; padding:0 4px; }
   .lk-map-chip:hover { border-color:#ffd166; }
   .lk-map-chip.capturing { border-color:#4be3a0; color:#4be3a0; animation:lkCapPulse 1s ease-in-out infinite; }
+  .lk-map-addbind.capturing { border-color:#4be3a0; color:#4be3a0; animation:lkCapPulse 1s ease-in-out infinite; }
   .lk-map-note, .lk-map-hint { font-size:11px; color:#8b93a7; }
   .lk-map-hint { margin-top:auto; padding-top:6px; border-top:1px solid rgba(255,255,255,.07); }
 
   /* ================= Device visuals ================= */
   .lk-dv { --dv:transparent; }
-  .lk-dv-keyboard { display:flex; align-items:flex-start; gap:16px; }
+  .lk-dv-keyboard { display:flex; align-items:flex-end; justify-content:center; gap:14px; width:100%; flex-wrap:wrap; }
   .lk-dv-kb-main, .lk-dv-kb-arrows { display:flex; flex-direction:column; gap:5px; }
-  .lk-dv-kb-row { display:grid; grid-auto-flow:column; grid-auto-columns:34px; gap:5px; }
+  .lk-dv-kb-row { display:grid; grid-auto-flow:column; grid-auto-columns:27px; gap:4px; }
+  .lk-dv-kb-extra { margin-top:3px; grid-auto-columns:minmax(40px, auto); }
   .lk-dv-key {
-    position:relative; height:34px; min-width:34px; border-radius:7px; cursor:pointer;
+    position:relative; height:35px; min-width:27px; border-radius:6px; cursor:pointer;
     border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.05); color:#cfd6e4;
-    font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; padding:0;
+    font-size:9px; font-weight:800; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:2px 2px;
+    overflow:hidden;
   }
   .lk-dv-key.ghost { border:none; background:transparent; cursor:default; }
   .lk-dv-key.bound { border-color:var(--dv); box-shadow:inset 0 0 0 1px var(--dv), 0 0 10px -3px var(--dv); color:#fff; }
   .lk-dv-key.conflict { border-color:#ef476f; box-shadow:inset 0 0 0 1px #ef476f; }
   .lk-dv-key.active { background:var(--dv); color:#0b0e14; transform:translateY(1px); }
   .lk-dv-keytag {
-    position:absolute; bottom:-8px; left:50%; transform:translateX(-50%); font-size:7px; letter-spacing:.5px;
-    color:var(--dv); font-weight:800; text-transform:uppercase; white-space:nowrap; pointer-events:none;
+    display:block; max-width:100%; min-height:9px; overflow:hidden; text-overflow:ellipsis;
+    font-size:6px; line-height:1; letter-spacing:.2px; color:var(--dv); font-weight:800; text-transform:uppercase; white-space:nowrap; pointer-events:none;
   }
-  .lk-dv-gamepad { padding:8px; }
+  .lk-dv-gamepad { padding:4px; }
   .lk-dv-gp-body {
-    position:relative; width:300px; height:190px; border-radius:60px/50px;
+    position:relative; width:320px; height:214px; border-radius:64px/54px;
     background:radial-gradient(circle at 50% 30%, #232a38, #12161f); border:1px solid rgba(255,255,255,.14);
   }
   .lk-dv-gp-btn {
-    position:absolute; transform:translate(-50%,-50%); width:30px; height:30px; border-radius:50%; cursor:pointer; padding:0;
+    position:absolute; transform:translate(-50%,-50%); width:36px; height:36px; border-radius:50%; cursor:pointer; padding:0;
     border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.06); color:#cfd6e4; font-size:10px; font-weight:800;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; overflow:hidden;
   }
   .lk-dv-gp-btn.bound { border-color:var(--dv); box-shadow:0 0 10px -2px var(--dv), inset 0 0 0 1px var(--dv); color:#fff; }
   .lk-dv-gp-btn.conflict { border-color:#ef476f; }
   .lk-dv-gp-btn.active { background:var(--dv); color:#0b0e14; }
   .lk-dv-gp-lbl { pointer-events:none; }
   .lk-dv-gp-tag {
-    position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:1px; font-size:7px;
-    color:var(--dv); font-weight:800; text-transform:uppercase; white-space:nowrap; pointer-events:none;
+    display:block; max-width:32px; min-height:8px; overflow:hidden; text-overflow:ellipsis;
+    font-size:7px; line-height:1; color:var(--dv); font-weight:800; text-transform:uppercase; white-space:nowrap; pointer-events:none;
   }
   .lk-dv-gp-stick {
     position:absolute; transform:translate(-50%,-50%); width:46px; height:46px; border-radius:50%; cursor:pointer; padding:0;
     border:1px solid rgba(255,255,255,.2); background:radial-gradient(circle,#2a3245,#171c27);
+    overflow:visible;
   }
   .lk-dv-gp-stick.bound { border-color:var(--dv); box-shadow:0 0 12px -2px var(--dv); }
   .lk-dv-gp-stickdot { position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%; background:var(--dv); }
+  .lk-dv-gp-stick .lk-dv-gp-tag {
+    position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:2px; max-width:74px;
+  }
   .lk-dv-layout-edit .lk-dv-gp-btn,
   .lk-dv-layout-edit .lk-dv-gp-stick {
     border-style:dashed;
@@ -1232,7 +1268,7 @@ html,body {
   .lk-dv-layout-edit .lk-dv-gp-btn:active,
   .lk-dv-layout-edit .lk-dv-gp-stick:active { cursor:grabbing; }
   .lk-map-inst-add.on { border-color:#4be3a0; color:#4be3a0; background:rgba(75,227,160,.12); }
-  .lk-dv-touch { display:flex; align-items:center; justify-content:space-between; gap:20px; width:300px; }
+  .lk-dv-touch { display:flex; align-items:center; justify-content:space-between; gap:20px; width:min(100%,360px); }
   .lk-dv-touch-pad {
     width:150px; height:64px; border-radius:12px; border:1px dashed rgba(255,255,255,.2);
     display:flex; align-items:center; justify-content:center; color:#8b93a7; font-size:10px; font-weight:800; letter-spacing:2px;
@@ -1266,6 +1302,8 @@ html,body {
   body.lk-free-camera-cursor-hidden canvas { cursor:none !important; }
   body.lk-game-ui-cursor,
   body.lk-game-ui-cursor canvas { cursor:crosshair; }
+  body.lk-game-ui-cursor #settingsOverlay,
+  body.lk-game-ui-cursor #settingsPanel { cursor:default; }
   body.lk-game-ui-cursor button,
   body.lk-game-ui-cursor input,
   body.lk-game-ui-cursor select,

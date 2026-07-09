@@ -43,6 +43,7 @@ function createMenu(options){
   let toggle = () => {};
   let navRaf = 0;
   let navPrev = {buttons: [], axX: 0, axY: 0, repeat: {}};
+  let lastButtonPointer = 'mouse';
 
   function applyAudio(){
     if(opts.applyAudio) opts.applyAudio();
@@ -208,12 +209,34 @@ function createMenu(options){
       if(currentMode === 'editor' && activeTab && activeTab.dataset.settingsTab === 'gameplay') setTab('audio');
     };
 
-    setOpen = (open, mode) => {
+    function menuCursorAllowed(open, source){
+      if(!open) return false;
+      if(source === 'gamepad' || source === 'touch') return false;
+      if(opts.shouldShowMenuCursor) return !!opts.shouldShowMenuCursor(source, currentMode);
+      return true;
+    }
+
+    function syncMenuCursor(open, source){
+      const visible = menuCursorAllowed(open, source);
+      gameState.menuCursorVisible = visible;
+      document.body.classList.toggle('lk-gamepad-menu-nav', !!open && !visible);
+      if(opts.applyRuntimeCursor) opts.applyRuntimeCursor();
+    }
+
+    function restoreFocusAfterClose(){
+      const active = document.activeElement;
+      if(active && active.closest && active.closest('#settingsOverlay') && active.blur) active.blur();
+      if(opts.restoreRuntimeFocus) opts.restoreRuntimeFocus(currentMode);
+    }
+
+    setOpen = (open, mode, options) => {
+      const wasOpen = overlay.classList.contains('open');
       configureMode(mode);
+      const source = options && options.source;
       overlay.classList.toggle('open', open);
       btn.classList.toggle('open', open);
       gameState.paused = !!open && currentMode === 'game' && gameState.started;
-      document.body.classList.toggle('lk-gamepad-menu-nav', !!open);
+      syncMenuCursor(!!open, source);
       if(open){
         navPrev = {buttons: [], axX: 0, axY: 0, repeat: {}};
         snapshotButtons();
@@ -221,11 +244,14 @@ function createMenu(options){
           const first = overlay.querySelector('[data-settings-tab].on') || focusables()[0];
           if(first && first.focus) first.focus();
         });
+      } else if(wasOpen){
+        restoreFocusAfterClose();
       }
     };
-    toggle = mode => setOpen(!overlay.classList.contains('open'), mode);
+    toggle = (mode, options) => setOpen(!overlay.classList.contains('open'), mode, options);
 
-    btn.addEventListener('click', () => toggle('game'));
+    btn.addEventListener('pointerdown', e => { lastButtonPointer = e.pointerType || 'mouse'; }, {passive: true});
+    btn.addEventListener('click', () => toggle('game', {source: lastButtonPointer === 'touch' ? 'touch' : 'mouse'}));
     close.addEventListener('click', () => setOpen(false));
     resume.addEventListener('click', () => setOpen(false));
     backMenu.addEventListener('click', () => {

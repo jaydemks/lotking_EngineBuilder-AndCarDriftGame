@@ -51,7 +51,7 @@ Important `LOT_KING` areas include:
 - `LOT_KING.input` / `GAME.input` - the v0.5.2 input manager, player device assignment, remap persistence, mapping overlay hooks, and drive-command resolution.
 - `LOT_KING.ui` - popups, HUD helpers, loading overlays, and menu-facing UI hooks.
 - `LOT_KING.actions` - launch/unload level, prepare editor level, play preview, apply project, and session-flow actions.
-- `LOT_KING.state` - started/editor/editor-preview/loading flags used by runtime and editor guards.
+- `LOT_KING.state` - started/editor/editor-preview/loading flags used by runtime and editor guards, plus pause-menu cursor state needed by runtime/editor preview focus handoff.
 - `LOT_KING.hooks.frameOverride` - lets the editor take over rendering while editing.
 - `LOT_KING.hooks.frame` - shared per-frame hooks that still run during editor and game loops.
 
@@ -104,6 +104,10 @@ Runtime input modules:
 - `device-visuals.js` - schematic keyboard/gamepad/touch diagrams.
 - `mapping-overlay.js` - shared visual mapper used by editor and game.
 
+The mapping overlay is intentionally shared by the runtime and editor. It renders a compact real keyboard layout instead of a loose list of pressed keys, keeps gamepad/touch previews visually separated from the action list, and uses an internal styled scroll area for long binding lists. Keyboard actions can have multiple bindings, for example `W` and `ArrowUp`: clicking an existing key replaces that one binding, `+` adds an alternate key, and `x` removes a single binding without resetting the whole action.
+
+Pause/menu input uses the same action layer, but cursor behavior is source-aware. Opening the pause menu from keyboard/mouse temporarily releases pointer lock and shows a UI cursor so the user can interact with menu controls. Opening it from gamepad or touch keeps cursor-hidden/gamepad navigation semantics. Closing the menu restores focus to the runtime canvas so gameplay shortcuts such as `U`, `Tab`, `M`, and remapped actions immediately work again in both normal gameplay and editor Play Preview.
+
 Editor-side input:
 
 - `js/editor/input-settings.js` edits `meta.input` from Settings -> Controls.
@@ -150,6 +154,8 @@ The editor has its own free camera, grid/helpers, transform gizmo, asset dock, o
 `editor-runtime.js` is intentionally kept as an orchestration module: editor enter/exit, Play Preview/Simulate, frame handoff, player-camera preview, runtime/editor state guards, and Cinema Studio runtime-trigger scanning during editor runtime previews. View-specific behavior lives in `viewport-layout.js`, which owns quad/single view layout, view selector overlays, per-view render modes, stats overlays, performance counters, long-task diagnostics, and independent secondary perspective cameras. Input/picking/control helpers still live in `viewport-events.js`, `viewport-picking.js`, `fly-camera.js`, and `gizmo-controls.js`.
 
 Play Preview and Simulate share the same runtime launch path. Simulate marks `LOT_KING.state.editorPreviewMode = "simulate"` and keeps runtime events, cinema playback, and physics stepping active while leaving the editor viewport, gizmo, menus, and save workflow available. Runtime keyboard/mouse/gamepad/touch controls are suppressed in Simulate so the user continues to control the editor, not the gameplay camera or vehicle.
+
+Play Preview uses the normal runtime pause/settings overlay. `Esc` opens/closes that menu, temporarily restores the mouse cursor when the menu was opened by keyboard/mouse, and returns focus to the canvas after closing so runtime shortcuts continue without requiring an extra click. Stopping preview remains separate through `F8` or `Shift+Esc`.
 
 In online-demo mode, editor Play Preview skips the local save step and uses the already loaded bundled LKEP project as the authoritative level state. This allows hosted demos to be played without granting write access to the server or browser project library.
 

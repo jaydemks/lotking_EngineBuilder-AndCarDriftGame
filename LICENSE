@@ -3,7 +3,7 @@ Lot King Engine Builder & Car Drift Game Source License 0.1
 Copyright (c) 2026 jaydemks / Lot King Engine Builder & Car Drift Game contributors.
 
 This project is source-available for learning, modification, private use,
-research, streaming, reviewing, and non-commercial distribution.
+research, streaming, reviewing, distribution, and commercial use.
 
 Permission is granted, free of charge, to any person obtaining a copy of this
 software and associated files (the "Project") to use, copy, modify, merge,
@@ -21,19 +21,14 @@ must give visible credit to:
 The credit must be reasonably discoverable by users or readers. In software
 repositories, keeping this LICENSE file and attribution in the README is enough.
 
-2. Commercial Revenue Threshold
+2. Commercial Use
 
-Commercial use is allowed without a separate agreement while total gross
-revenue attributable to the Project or a derivative work remains below
-USD 100,000.
+Commercial use is allowed under this license, subject to the attribution,
+notice preservation, asset, third-party license, and no-misrepresentation
+conditions in this document.
 
-If a person or organization earns USD 100,000 or more in total gross revenue
-from this Project or a derivative work, they must contact the original project
-owner and negotiate a separate commercial agreement in good faith before
-continuing commercial distribution or monetization.
-
-The exact revenue share, if any, is not fixed by this license and must be agreed
-in writing by the parties.
+A separate written agreement is required only if a person or organization wants
+permissions beyond the rights granted by this license.
 
 3. No Misrepresentation
 
@@ -64,5 +59,5 @@ IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
 CONNECTION WITH THE PROJECT OR THE USE OR OTHER DEALINGS IN THE PROJECT.
 
 Note: this is a custom source-available license. It is intentionally not an
-OSI-approved open-source license because it includes attribution and commercial
-revenue conditions.
+OSI-approved open-source license because it includes custom attribution and
+notice conditions.

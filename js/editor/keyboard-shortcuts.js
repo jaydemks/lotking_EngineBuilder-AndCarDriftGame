@@ -59,7 +59,7 @@ function create(deps){
       if(ED.projectsOpen){ setProjectsOverlayOpen(false); return; }
       if(ED.levelsOpen){ setLevelsOverlayOpen(false); return; }
       if(document.getElementById('settingsOverlay').classList.contains('open')) GAME.actions.closePause();
-      else GAME.actions.openPause('editor');
+      else GAME.actions.openPause('editor', {source: 'keyboard'});
       return;
     }
     if(typing) return;

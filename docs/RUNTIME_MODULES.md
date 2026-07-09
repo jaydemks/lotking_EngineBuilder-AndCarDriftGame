@@ -92,10 +92,10 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   In-game Controls tab for connected devices, player assignment, touch mode, auto-assign, and opening the visual mapper.
 
 - `js/runtime/input/device-visuals.js`
-  Device diagrams for keyboard, gamepad, and touch controls used by the mapping overlay.
+  Device diagrams for keyboard, gamepad, and touch controls used by the mapping overlay. The keyboard visual is a compact QWERTY-style layout that includes the default runtime keys instead of stacking extra bound keys vertically. Gamepad and touch previews stay inside the shared mapping preview area.
 
 - `js/runtime/input/mapping-overlay.js`
-  Shared visual mapping overlay. Shows device diagrams, lights live inputs, warns on binding conflicts, and supports click-action/control-then-press remapping. Used by both game and editor.
+  Shared visual mapping overlay. Shows device diagrams, lights live inputs, warns on binding conflicts, and supports click-action/control-then-press remapping. Used by both game and editor. Keyboard actions support multiple bindings per action: individual key chips can be replaced, `+` adds alternate bindings, and `x` removes one binding without discarding the others. The preview area and action list are separated so long binding lists scroll without overlapping keyboard/gamepad/touch diagrams.
 
 ## Runtime UI Helpers
 
@@ -112,7 +112,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Soundhud/radio UI, TAB radio interactions, editor HUD handles, player radio volume, bass boost, imported radio tracks, and runtime/editor HUD layout state.
 
 - `js/runtime/settings-menu.js`
-  Settings and pause-menu DOM bindings, audio sliders, video quality controls, and editor/game menu mode handling.
+  Settings and pause-menu DOM bindings, audio sliders, video quality controls, editor/game menu mode handling, source-aware cursor behavior, gamepad menu navigation, and focus restoration after closing the menu. Keyboard/mouse-opened menus release pointer lock and show the UI cursor; gamepad/touch-opened menus keep cursor-hidden navigation semantics.
 
 ## Audio and Music
 

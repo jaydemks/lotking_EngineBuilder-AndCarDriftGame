@@ -6,7 +6,7 @@
 'use strict';
 
 const GAME = window.LOT_KING = {
-  version: '0.6.3',
+  version: '0.6.4',
   assets: null,
   core: {},
   world: {},
@@ -15,7 +15,7 @@ const GAME = window.LOT_KING = {
   settings: {},
   actions: {},
   ui: {},
-  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false, editorPreviewMode:null, playPreviewCursorVisible:false},
+  state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false, editorPreviewMode:null, playPreviewCursorVisible:false, menuCursorVisible:false},
   hooks: {frame: [], frameOverride: null},
 };
 const LK_LANG_KEY = 'lotking.lang.v1';
@@ -148,6 +148,7 @@ GAME.assets = {dirs: ASSET_DIR, paths: ASSETS, isFileMode: IS_FILE_MODE};
 
 // ------------------------------------------------ basics
 const canvas = document.getElementById('c');
+if(canvas && !canvas.hasAttribute('tabindex')) canvas.tabIndex = -1;
 const renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -815,6 +816,28 @@ function setAudioChannel(channel, value){
   applyAudioSettings();
 }
 
+function shouldShowMenuCursorForSource(source){
+  if(source === 'gamepad' || source === 'touch') return false;
+  if(source === 'keyboard' || source === 'mouse' || source === 'pen' || source === 'pointer') return true;
+  if(INPUT && INPUT.describe){
+    const info = INPUT.describe();
+    const player = info && info.players && info.players[0];
+    if(player && (player.deviceType === 'gamepad' || player.deviceType === 'touch')) return false;
+    if(info && info.touchEnabled) return false;
+  }
+  return true;
+}
+
+function restoreRuntimeFocusAfterMenuClose(){
+  requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if(active && active.closest && active.closest('#settingsOverlay') && active.blur) active.blur();
+    if(!canvas || !canvas.focus) return;
+    try { canvas.focus({preventScroll: true}); }
+    catch(err){ try { canvas.focus(); } catch(err2){} }
+  });
+}
+
 function initSettingsMenu(){
   SETTINGS_MENU = window.LK_RUNTIME_SETTINGS_MENU.createMenu({
     gameState: GAME.state,
@@ -822,6 +845,9 @@ function initSettingsMenu(){
     video: VIDEO,
     applyAudio: applyAudioSettings,
     applyVideo: applyVideoSettings,
+    shouldShowMenuCursor: shouldShowMenuCursorForSource,
+    applyRuntimeCursor: syncRuntimeCursorState,
+    restoreRuntimeFocus: restoreRuntimeFocusAfterMenuClose,
     onEditorExit: () => {
       if(GAME.editor) GAME.editor.exit(false);
     },
@@ -2255,10 +2281,40 @@ function isGameplayOverlayOpen(){
     (menu && !menu.classList.contains('hidden'))
   );
 }
+function isSettingsOverlayOpen(){
+  const settings = document.getElementById('settingsOverlay');
+  return !!(settings && settings.classList.contains('open'));
+}
+function isNonSettingsGameplayOverlayOpen(){
+  const menu = document.getElementById('overlay');
+  const tuneDock = document.getElementById('tuneDock');
+  const radio = document.getElementById('radio');
+  return !!(
+    (tuneDock && tuneDock.classList.contains('open')) ||
+    (radio && radio.classList.contains('open')) ||
+    (menu && !menu.classList.contains('hidden'))
+  );
+}
+function runtimeSessionActive(){
+  return !!(((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview));
+}
 function shouldShowRuntimeCursor(){
   if(isEditorSimulationPreview()) return false;
-  if(isGameplayOverlayOpen()) return true;
+  if(isSettingsOverlayOpen()) return !!GAME.state.menuCursorVisible;
+  if(isNonSettingsGameplayOverlayOpen()) return true;
   return !!(GAME.state.editorPreview && GAME.state.playPreviewCursorVisible);
+}
+function syncRuntimeCursorState(){
+  const cursorVisible = shouldShowRuntimeCursor() && runtimeSessionActive();
+  document.body.classList.toggle('lk-game-ui-cursor', cursorVisible);
+  if(cursorVisible){
+    document.body.classList.remove('lk-free-camera-cursor-hidden');
+    if(document.pointerLockElement === canvas && document.exitPointerLock){
+      try { document.exitPointerLock(); } catch(err){}
+    }
+  } else if(isSettingsOverlayOpen() && runtimeSessionActive()){
+    document.body.classList.add('lk-free-camera-cursor-hidden');
+  }
 }
 function runtimeCameraAllowsMouseLook(target){
   if(shouldShowRuntimeCursor()) return false;
@@ -2305,9 +2361,9 @@ function updateCamera(dt){
   camSnapNext = false;
   const mode = CAM_CFG.mode || 'free';
   const cursorVisible = shouldShowRuntimeCursor();
-  const runtimeCameraActive = !isEditorSimulationPreview() && mode === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
+  const runtimeCameraActive = !isEditorSimulationPreview() && mode === 'free' && runtimeSessionActive() && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
   document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
-  document.body.classList.toggle('lk-game-ui-cursor', cursorVisible && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview));
+  syncRuntimeCursorState();
   if(!runtimeCameraActive && document.pointerLockElement === canvas && document.exitPointerLock){
     try { document.exitPointerLock(); } catch(err){}
   }
@@ -2460,7 +2516,7 @@ addEventListener('keydown', e => {
   const key = e.key.toLowerCase();
   if(key === 'escape'){
     e.preventDefault();
-    toggleSettingsMenu('game');
+    toggleSettingsMenu('game', {source: 'keyboard'});
     return;
   }
   if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
@@ -2584,7 +2640,7 @@ function handleGamepadActions(){
   }
   const state = gamepadActions();
   if(state){
-    if(!GAME.state.paused && gamepadEdge(state, 'pauseMenu')) toggleSettingsMenu('game');
+    if(!GAME.state.paused && gamepadEdge(state, 'pauseMenu')) toggleSettingsMenu('game', {source: 'gamepad'});
     if(!GAME.state.paused){
       if(gamepadEdge(state, 'radioToggle')) RADIO.toggleOpen();
       if(gamepadEdge(state, 'radioPlay')) RADIO.togglePlay();
@@ -3143,9 +3199,9 @@ Object.assign(GAME.actions, {
   unloadLevel: unloadCurrentLevel,
   prepareEditorLevel,
   backToMenu: backToMainMenu,
-  openPause: mode => setSettingsOpen(true, mode),
+  openPause: (mode, options) => setSettingsOpen(true, mode, options || {source: 'keyboard'}),
   closePause: () => setSettingsOpen(false),
-  togglePause: mode => toggleSettingsMenu(mode),
+  togglePause: (mode, options) => toggleSettingsMenu(mode, options),
   toggleMenuMusic: MENU_MUSIC.toggle,
 });
 Object.assign(GAME.ui, {

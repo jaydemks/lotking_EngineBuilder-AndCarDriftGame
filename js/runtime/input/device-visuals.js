@@ -17,12 +17,13 @@ const ACTION_COLOR = {
   tuningMenu: '#c792ea', mute: '#9aa3b8', legend: '#9aa3b8', cameraLookX: '#9db4ff', cameraLookY: '#9db4ff',
 };
 
-// curated keycap layout (physical e.code + label + grid col/row span)
+// curated keycap layout (physical e.code + label + grid col span)
 const KEY_LAYOUT = [
-  [['Tab','Tab',2],['KeyQ','Q'],['KeyW','W'],['KeyE','E'],['KeyR','R'],['KeyT','T']],
-  [['KeyA','A'],['KeyS','S'],['KeyD','D'],['KeyF','F'],['KeyG','G']],
-  [['ShiftLeft','⇧',2],['KeyZ','Z'],['KeyX','X'],['KeyC','C'],['KeyV','V']],
-  [['Space','SPACE',5]],
+  [['Escape','Esc'],['Digit1','1'],['Digit2','2'],['Digit3','3'],['Digit4','4'],['Digit5','5'],['Digit6','6'],['Digit7','7'],['Digit8','8'],['Digit9','9'],['Digit0','0'],['Backspace','Bksp',2]],
+  [['Tab','Tab',2],['KeyQ','Q'],['KeyW','W'],['KeyE','E'],['KeyR','R'],['KeyT','T'],['KeyY','Y'],['KeyU','U'],['KeyI','I'],['KeyO','O'],['KeyP','P'],['BracketLeft','['],['BracketRight',']']],
+  [['CapsLock','Caps',2],['KeyA','A'],['KeyS','S'],['KeyD','D'],['KeyF','F'],['KeyG','G'],['KeyH','H'],['KeyJ','J'],['KeyK','K'],['KeyL','L'],['Semicolon',';'],['Quote',"'"],['Enter','Enter',2]],
+  [['ShiftLeft','Shift',2],['KeyZ','Z'],['KeyX','X'],['KeyC','C'],['KeyV','V'],['KeyB','B'],['KeyN','N'],['KeyM','M'],['Comma',','],['Period','.'],['Slash','/'],['ShiftRight','Shift',2]],
+  [['ControlLeft','Ctrl'],['AltLeft','Alt'],['Space','Space',7],['AltRight','Alt'],['ControlRight','Ctrl']],
 ];
 const ARROW_LAYOUT = [
   [null,['ArrowUp','↑'],null],
@@ -69,9 +70,12 @@ function createKeyboard(container, deps){
 
   function ensureExtra(code){
     if(caps[code]) return;
-    const r = el('div', 'lk-dv-kb-row');
+    let r = board.querySelector('.lk-dv-kb-extra');
+    if(!r){
+      r = el('div', 'lk-dv-kb-row lk-dv-kb-extra');
+      board.appendChild(r);
+    }
     r.appendChild(keycap(code, keyLabel(code)));
-    board.appendChild(r);
   }
   function render(scheme, o){
     o = o || {};

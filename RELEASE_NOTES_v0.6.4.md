@@ -1,0 +1,98 @@
+# v0.6.4
+
+## v0.6.4 - Controls mapping, pause-menu cursor handoff, and preview input polish
+
+### Release Status
+
+- Status: ready for tag.
+- Tag: `v0.6.4`.
+- Date: 2026-07-09.
+- Scope: controls mapping UI, multi-binding remap ergonomics, pause-menu cursor/focus behavior, and editor/runtime input polish.
+
+### Headline
+
+`v0.6.4` starts as an input and controls polish pass. The shared keyboard/gamepad/touch mapping window is easier to read, keyboard actions can keep multiple bindings, and the runtime pause menu now behaves correctly when opened from keyboard/mouse versus gamepad/touch in both normal gameplay and editor Play Preview.
+
+### Added
+
+- Added multi-key keyboard binding management in the shared mapping overlay.
+  - Existing key chips replace only that specific binding.
+  - `+` adds an alternate key for the same action.
+  - `x` removes a single key binding without resetting the whole action.
+  - Default-style combinations such as `W` plus `ArrowUp` can be restored from the UI.
+
+- Added source-aware pause-menu cursor handling.
+  - Keyboard/mouse-opened menus temporarily show the UI cursor and release pointer lock.
+  - Gamepad/touch-opened menus keep cursor-hidden navigation semantics.
+  - The same behavior applies in gameplay and editor Play Preview.
+
+### Improved
+
+- Reworked the visual mapping overlay layout.
+  - Keyboard preview now uses a compact QWERTY-style layout with common runtime keys included.
+  - Extra keyboard bindings no longer stack vertically over the action list.
+  - Gamepad and touch previews share the same separated preview area.
+  - Long action/binding lists scroll inside their own styled area instead of using the default browser scrollbar over the whole window.
+
+- Improved pause-menu focus handoff.
+  - Closing the menu blurs active menu buttons/tabs.
+  - Focus returns to the runtime canvas.
+  - Gameplay shortcuts such as `U`, `Tab`, `M`, and other remapped actions work again immediately after closing the menu.
+
+- Improved menu cursor styling so pause/settings controls use a normal UI cursor while the runtime camera can still use hidden/crosshair cursor states outside menu interaction.
+
+### Fixed
+
+- Fixed the mapping preview overlapping the action rows when several keys were shown.
+
+- Fixed default keyboard bindings such as `Esc`, `U`, `M`, `N`, `P`, and `B` appearing as loose stacked rows instead of part of a keyboard layout.
+
+- Fixed remapping a keyboard action replacing all alternate keys with a single key and leaving no direct way to rebuild multi-key bindings.
+
+- Fixed Play Preview/gameplay pause menus hiding the cursor after `Esc` even when the user needed to interact with menu controls.
+
+- Fixed shortcut focus not returning after closing the pause menu, which could make `U` and other runtime shortcuts appear unresponsive until clicking the game again.
+
+### Known Limitations / Follow-up
+
+- Browser-side JS syntax verification still depends on having a local JS runtime available. In the current workspace shell, `node`, `qjs`, `deno`, `bun`, and `js` were not available.
+
+- Mapping overlay visuals are now structurally separated, but final spacing should still be visually checked in browser across desktop, small windows, touch layout, and gamepad layout-edit mode.
+
+- Performance settings, renderer options, and smartphone/low-end PC presets remain the next planned update pass.
+
+### Testing Checklist
+
+- Open `engine_editor.html`.
+- Open Settings -> Controls -> mapping overlay.
+- Confirm keyboard preview renders as a compact keyboard, not a vertical stack of bound keys.
+- Confirm action rows scroll inside the mapping window without overlapping the keyboard/gamepad/touch preview.
+- Confirm `W` and `ArrowUp` can both be bound to accelerate.
+- Confirm clicking an existing key replaces that key only.
+- Confirm `+` adds an alternate key and `x` removes only one key.
+- Start editor Play Preview.
+- Press `Esc` and confirm the cursor appears for the pause menu.
+- Close the menu with `Esc`, `Resume`, or `X`.
+- Confirm `U` immediately opens the driving setup without clicking the canvas again.
+- Repeat the pause-menu flow in normal `gameplay.html`.
+- With a gamepad connected, open the pause menu from Start and confirm cursor-hidden/gamepad menu navigation remains active.
+- On touch/mobile mode, confirm opening menu does not force a mouse cursor.
+
+### Files/Areas Touched
+
+- `js/runtime/input/mapping-overlay.js`
+- `js/runtime/input/device-visuals.js`
+- `js/runtime/settings-menu.js`
+- `js/lot-king.js`
+- `js/editor/keyboard-shortcuts.js`
+- `css/lot-king.css`
+- `index.html`
+- `docs/ARCHITECTURE.md`
+- `docs/RUNTIME_MODULES.md`
+- `docs/releases/v0.6.4.md`
+- `RELEASE_NOTES_v0.6.4.md`
+
+### Notes
+
+- `v0.6.3` release notes are archived in `docs/releases/v0.6.3.md`.
+- The old root `RELEASE_NOTES_v0.6.3.md` is no longer the active release note file for this pass.
