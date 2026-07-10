@@ -631,7 +631,7 @@ html,body {
   #radioViewport.interactive { pointer-events:auto; }
   #radioViewport.player-hover { cursor:pointer; }
   #radioViewport.editor-preview {
-    overflow:visible; pointer-events:auto; z-index:120;
+    overflow:visible; pointer-events:none; z-index:120;
   }
   body.lk-editor-simulate-preview #radioViewport.interactive,
   body.lk-editor-simulate-preview #radioViewport.editor-preview {

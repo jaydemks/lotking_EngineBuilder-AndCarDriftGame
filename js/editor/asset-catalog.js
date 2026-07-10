@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', texture:'▧', camera:'🎥', cinemaStudio:'▤', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerSkid:'▰', playerDataWidget:'◫'};
+const TYPE_ICON = {mesh:'▣', light:'💡', effect:'✨', text:'T', texture:'▧', camera:'🎥', cinemaStudio:'▤', logicElement:'◇', player:'🚗', playerLight:'🔆', playerEffect:'☁', playerSkid:'▰', playerDataWidget:'◫'};
 
 function create(deps){
   deps = deps || {};
@@ -15,6 +15,7 @@ function create(deps){
   const root = deps.root;
   const $ = deps.$;
   const placeProjectAsset = deps.placeProjectAsset || function(){ return Promise.resolve(false); };
+  const addLogicElement = deps.addLogicElement || function(){};
   const LEVEL_PREFIX = 'lotking.level.';
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
@@ -279,7 +280,7 @@ function create(deps){
 
   function assetFilterKey(item){
     if(item.filterType) return item.filterType;
-    if(item.kind === 'player-blueprint') return 'blueprint';
+    if(item.kind === 'player-blueprint' || item.kind === 'logic-blueprint') return 'blueprint';
     if(item.kind === 'sound-set') return 'sound';
     if(item.kind === 'level') return 'levels';
     if(item.kind === 'imported-glb') return 'glb';
@@ -370,6 +371,16 @@ function create(deps){
       const asset = STORE.playerBlueprints && STORE.playerBlueprints.list().find(x => x.id === id);
       return asset ? {kind:'player-blueprint', ref, id:asset.id, name:asset.name, raw:asset} : null;
     }
+    if(ref.indexOf('logic-blueprint:') === 0){
+      const id = ref.slice(16);
+      const asset = STORE.logicElementAssets && STORE.logicElementAssets.get(id);
+      return asset ? {kind:'logic-blueprint', ref, id:asset.id, name:asset.name, raw:asset} : null;
+    }
+    if(ref.indexOf('logic-template:') === 0){
+      const id = ref.slice(15);
+      const template = window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.get(id);
+      return template ? {kind:'logic-template', ref, id:template.id, name:template.name, raw:template} : null;
+    }
     return null;
   }
 
@@ -395,6 +406,11 @@ function create(deps){
     }
     if(item.kind === 'project-asset'){
       placeProjectAsset(item.raw, at || deps.spawnPointAhead());
+      return;
+    }
+    if(item.kind === 'logic-blueprint' || item.kind === 'logic-template'){
+      addLogicElement(at || deps.spawnPointAhead(), item.raw);
+      deps.setLeftMode('scene');
       return;
     }
     if(item.kind === 'level'){ deps.status('Drag a model asset into the viewport, not a level'); return; }

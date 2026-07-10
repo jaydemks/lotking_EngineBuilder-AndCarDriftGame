@@ -19,7 +19,7 @@ function create(deps){
     const selectedRefs = Array.isArray(ED.selectedAssets) && ED.selectedAssets.includes(item.ref) ? ED.selectedAssets.slice() : [];
     if(selectedRefs.length > 1 && deps.getAssetByRef){
       const selectedItems = selectedRefs.map(ref => deps.getAssetByRef(ref)).filter(Boolean);
-      const placeable = selectedItems.filter(asset => ['imported-glb','imported-texture','scene','project-asset'].includes(asset.kind));
+      const placeable = selectedItems.filter(asset => ['imported-glb','imported-texture','scene','project-asset','logic-blueprint'].includes(asset.kind));
       return [
         {label:'Add selected to level', icon:'＋', disabled:!placeable.length, action:() => {
           placeable.forEach((asset, index) => {
@@ -107,6 +107,11 @@ function create(deps){
         {label:'Promote to Base car logic', icon:'★', disabled:!!item.base, action:() => deps.setDefaultPlayerBlueprintAsset(asset)},
         {sep:true},
         {label:'Delete copied car logic', icon:'🗑', disabled:!!item.base, action:() => deps.deletePlayerBlueprintAsset(asset)},
+      ];
+    }
+    if(item.kind === 'logic-blueprint'){
+      return [
+        {label:'Place linked instance', icon:'＋', action:() => deps.placeAssetRef(item, deps.spawnPointAhead())},
       ];
     }
     return [];

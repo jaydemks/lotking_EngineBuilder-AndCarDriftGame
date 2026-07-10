@@ -17,13 +17,13 @@ function create(){
   const gear = byId('gearHud');
   let popupTimer = null;
 
-  function popup(txt, color){
+  function popup(txt, color, duration){
     if(!popupEl) return;
     popupEl.textContent = txt;
     popupEl.style.color = color || '#fff';
     popupEl.classList.add('show');
     clearTimeout(popupTimer);
-    popupTimer = setTimeout(() => popupEl.classList.remove('show'), 900);
+    popupTimer = setTimeout(() => popupEl.classList.remove('show'), Math.max(250, Number(duration) || 900));
   }
 
   function setTotal(value){

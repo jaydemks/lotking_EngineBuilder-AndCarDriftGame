@@ -50,7 +50,7 @@ function create(deps){
       if(!o || !o.userData) return false;
       if(ED.filter === 'added' && o.userData.builtin) return false;
       if(ED.filter === 'builtin' && !o.userData.builtin) return false;
-	      if(['mesh','light','effect','camera','cinemaStudio'].includes(ED.filter) && o.userData.editorType !== ED.filter) return false;
+	      if(['mesh','light','effect','camera','cinemaStudio','logicElement'].includes(ED.filter) && o.userData.editorType !== ED.filter) return false;
       if(ED.search && !(o.userData.editorName || '').toLowerCase().includes(ED.search)) return false;
       return true;
     });

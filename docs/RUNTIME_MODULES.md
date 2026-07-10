@@ -54,6 +54,57 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 - `js/runtime/physics-world.js`
   Cannon world adapter: player body creation, static collider rebuild, body sync, physics stepping, and teardown.
 
+## Logic Element Runtime
+
+- `js/logic/logic-graph.js`
+  Pure graph JSON helpers. Creates and normalizes Level Logic and Logic Element graphs while preserving variables, nodes, edges, comments, reusable subgraphs/macros, and the internal Logic Element scene model. Also exposes the Logic Element definition version, dependency manifest collection, and reusable definition asset migration/normalization used by the store and exporter.
+
+- `js/logic/logic-exporter.js`
+  Safe JS/TS exporter for Logic Element graphs. Emits portable graph JSON plus metadata and dependencies, can emit a runtime-wrapper helper that creates a `LK_LOGIC_RUNTIME` instance from the exported graph, and includes a bounded imperative runner foundation for a safe subset of nodes. The exporter does not use `eval`; full imperative coverage for every node remains future work.
+
+- `js/logic/logic-registry.js`
+  Registry for node metadata and behavior. Every executable/evaluable node must be registered here through a definition supplied by a node catalog.
+
+- `js/logic/logic-validator.js`
+  Shared structural and authoring diagnostics. Returns blocking `errors`, non-blocking `warnings`, and a combined `diagnostics` list with node/edge/pin references for editor presentation. It also validates reusable subgraph internals and `Call Subgraph` references. Runtime creation checks `ok` and skips graphs with structural errors.
+
+- `js/logic/logic-runtime.js`
+  Controlled graph interpreter. Resolves data wires, follows execution wires, keeps per-runtime variables/timers, dispatches events, executes reusable subgraphs through the `Entry` custom event convention, enforces a maximum execution-step count without dynamic JavaScript evaluation, supports pause/resume/step on marked breakpoints, and exposes lightweight runtime profiling stats plus a compact event/node/error/breakpoint timeline.
+
+- `js/logic/logic-services.js`
+  Capability boundary used by node implementations to access scene objects, Three.js transforms/materials, Cannon bodies, input, audio, camera, animation, and debug output. Material/audio services also resolve supported asset-ref objects, including blob-backed `dbKey` values through `LK_ASSET_BLOBS`.
+
+- `js/logic/logic-nodes-mvp.js`
+  Catalog with 108 registered node definitions for events, flow, variables/data, math/vector, scene/transform, physics/collision, material, raycast, camera, audio, animation, and debug, plus the Part 2 `Call Subgraph`, Function Input/Return, dynamic pins and multi-output return foundations.
+
+- `js/logic/logic-templates.js`
+  Built-in Logic Element starter templates used by the Assets panel, including gameplay, interaction, debug and physics starters. Templates are placed as local editable Logic Element copies, not as hidden linked definitions.
+
+- `js/runtime/logic-elements-runner.js`
+  Runtime lifecycle bridge for Level Logic and scene Logic Elements. Builds validated runtimes, routes start/update/fixed-update/input/gamepad/resize/collision/custom/destroy events, starts internal animations, aggregates profiling stats across active graph runtimes, toggles pause-on-breakpoint for all active runtimes, resumes or steps paused breakpoints, and disposes timers and runtime state.
+
+`js/engine/scene-store.js` resolves reusable Logic Element definitions before runtime creation. Linked instances share their definition and apply only exposed-variable overrides; saved entries embed the definition and resolved fallback so runtime/playable imports do not depend on another browser's local asset library.
+
+- `tests/logic-core.test.js`
+  Standalone Node regression suite for clean graph validation, contextual warning/error codes, runtime start/update execution, variable persistence, `Tick Every` timing, reusable subgraph execution, and built-in template integrity. Browser/Three.js/Cannon integration remains a separate test layer.
+
+- `docs/logic-element-test-matrix.md`
+  Implementation-side verification matrix for core graph tests, browser editor coverage, save/reload/export scenarios, and built-in template behavior.
+
+## Plugin Host
+
+- `js/plugins/plugin-api.js`
+  Stable registration API passed to plugins. Supports commands, menu entries, scene types, asset types, inspector providers, runtime hooks, export hooks, and declared capabilities.
+
+- `js/plugins/plugin-manager.js`
+  Editor/runtime plugin registry. Tracks built-in and future external plugins, enabled state, commands and extension entries. Built-in plugins cannot be disabled from the current UI.
+
+- `js/plugins/logic-element-plugin.js`
+  Built-in `Logic Element (Experimental)` plugin descriptor. Declares Logic Element capabilities and registers the scene object type, reusable asset type, inspector provider, runtime runner hook, export hook, and Level Logic command while the implementation remains in the existing Logic Element modules.
+
+- `js/editor/editor-menu-bar.js`
+  Software-style top application menu (`File`, `Edit`, `View`, `Tools`, `Plugins`), non-modal Plugin Manager panel, and Logic Profiler panel for active runtime stats, pause/resume/step breakpoint controls, filtered timeline samples, and filtered/total sample counts.
+
 ## Player, Vehicle, Models, and Camera
 
 - `js/runtime/drive-tuning.js`
@@ -145,7 +196,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## Persistence and Store
 
 - `js/engine/scene-store.js`
-  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, sound sets, and shared scene/entity factories. It also loads `demo/demo-project.lkep.json` on hosted origins as the bundled online demo, localizes embedded `data:` model/texture assets into IndexedDB, and preserves the player `headingMode`/`transform` data needed for stable visible heading and runtime driving direction.
+  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, reusable Logic Element definitions/instances, sound sets, and shared scene/entity factories. It also loads `demo/demo-project.lkep.json` on hosted origins as the bundled online demo, localizes embedded `data:` model/texture assets into IndexedDB, and preserves the player `headingMode`/`transform` data needed for stable visible heading and runtime driving direction.
 
 This file is runtime-adjacent rather than inside `js/runtime/`, but it is part of runtime boot because saved projects are applied before play and editor preview.
 
@@ -162,6 +213,9 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
 
 - `js/editor/project-io.js`
   Editor project metadata, browser-based Projects overlay, active project save/load, import/export, and active level/project round-trip. Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data, while project storage in the editor remains scoped to the current browser origin. In online-demo mode, export is allowed as a browser download, while imports and saves are blocked.
+
+- `js/editor/logic-elements-inspector.js`
+  Runtime-adjacent Logic Element authoring surface. Owns Graph/Viewport tabs, hierarchy/components/variables/functions, dependency list inspection, asset-ref picker/relink controls, shared-definition editing, exposed instance overrides, contextual validator diagnostics, and local graph Play/Stop without duplicating the runtime interpreter.
 
 - `js/editor/input-settings.js`
   Project input settings UI. Edits allowed devices, touch mode, player defaults, device instances, base bindings, and mapping overlay data stored in `meta.input`.

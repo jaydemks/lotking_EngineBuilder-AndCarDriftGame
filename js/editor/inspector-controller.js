@@ -165,6 +165,7 @@ function create(deps){
     tf.inputs = null;
     if(ED.special === 'env') return deps.environmentInspector.build(box);
     if(ED.special === 'hud') return deps.hudInspector.build(box);
+    if(ED.special === 'logic' && deps.logicInspector) return deps.logicInspector.buildLevel(box);
     const multi = selectedList();
     if(multi.length > 1) return buildMultiInspector(box, multi);
     const o = ED.selected;
@@ -173,6 +174,7 @@ function create(deps){
       return;
     }
     if(o.userData.editorType === 'player') return buildPlayerInspector(box, o);
+    if(o.userData.editorType === 'logicElement' && deps.logicInspector) return deps.logicInspector.buildElement(box, o);
     return deps.objectInspector.build(box, o);
   }
 

@@ -137,10 +137,31 @@ function create(deps){
         if(entry && entry.kind === 'texture' && entry.props && typeof entry.props === 'object'){
           await normalizePlayableAssetRef(entry.props, 'src', 'added.texture' + (entry.name ? ' "' + entry.name + '"' : ''), dbCache, library, warnings);
         }
+        if(entry && entry.kind === 'logicElement'){
+          const logicScene = entry.graph && entry.graph.logicScene;
+          const elements = logicScene ? [logicScene.root].concat(logicScene.elements || []) : [];
+          for(const element of elements){
+            if(element && element.asset) await normalizePlayableAssetRef(element.asset, 'src', 'logicElement.' + (element.name || element.id || 'mesh'), dbCache, library, warnings);
+          }
+          const assetScene = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.logicScene;
+          const assetElements = assetScene ? [assetScene.root].concat(assetScene.elements || []) : [];
+          for(const element of assetElements){
+            if(element && element.asset) await normalizePlayableAssetRef(element.asset, 'src', 'logicElementAsset.' + (element.name || element.id || 'mesh'), dbCache, library, warnings);
+          }
+        }
       }
     }
     if(scene && scene.player && scene.player.engineAudio && scene.player.engineAudio.set){
       await normalizePlayableObjectBlobs(scene.player.engineAudio.set, 'player.engineAudio.set', dbCache, library, warnings, 0);
+    }
+    const musicLibraries = scene && scene.ui && scene.ui.musicLibraries;
+    if(musicLibraries){
+      for(const groupName of ['radio', 'menu']){
+        const tracks = Array.isArray(musicLibraries[groupName]) ? musicLibraries[groupName] : [];
+        for(const track of tracks){
+          await normalizePlayableAssetRef(track, 'url', 'music.' + groupName + '.' + (track.fileName || track.title || track.id || 'track'), dbCache, library, warnings);
+        }
+      }
     }
     return {
       project: prepared,

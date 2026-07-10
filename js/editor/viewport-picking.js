@@ -61,6 +61,15 @@ function create(opts){
     return type === 'mesh' && /(^|[\s_-])(ground|floor|apron|asphalt|parking|lot)([\s_-]|$)/.test(name + ' ' + id);
   }
 
+  function logicElementOwnerOf(o){
+    let n = o;
+    while(n){
+      if(n.userData && (n.userData.editorType === 'logicElement' || n.userData.addedEntry && n.userData.addedEntry.kind === 'logicElement')) return n;
+      n = n.parent;
+    }
+    return null;
+  }
+
   function pickAt(clientX, clientY, pickOpts){
     if(!pointerToNdc(clientX, clientY)) return null;
     ray.setFromCamera(ptr, camera(clientX, clientY));
@@ -69,6 +78,9 @@ function create(opts){
     const seen = new Set();
     for(const h of hits){
       let n = h.object;
+      if(n && n.userData && n.userData.logicElementInternal){
+        n = logicElementOwnerOf(n);
+      }
       while(n && !n.userData.editorId) n = n.parent;
       if(!n || seen.has(n) || !isEntityWorldVisible(n)) continue;
       seen.add(n);

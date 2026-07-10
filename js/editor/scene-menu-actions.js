@@ -52,6 +52,9 @@ function create(deps){
 	      ]},
 	      {label:'Camera', icon:'🎥', action:() => deps.addCamera(P)},
 	      {label:'Cinema Studio', icon:'▤', action:() => deps.addCinemaStudio(P)},
+	      {label:'Logic', icon:'◇', sub: [
+	        {label:'Logic Element', icon:'◇', action:() => deps.addLogicElement(P)},
+	      ]},
 	      {sep:true},
       {label:tr('Import GLB/texture asset...', 'Importa asset GLB/Texture...'), icon:'📦', action:() => deps.openGlbImportAt(P)},
     ];

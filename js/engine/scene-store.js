@@ -16,11 +16,13 @@ const PLAYER_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level';
 const PLAYER_TEMPLATE_KEY = 'lotking.playerBlueprintDefault.v1';
 const HUD_TEMPLATE_KEY = 'lotking.radioHudDefault.v1';
 const PLAYER_BLUEPRINT_ASSETS_KEY = 'lotking.playerBlueprintAssets.v1';
+const LOGIC_ELEMENT_ASSETS_KEY = 'lotking.logicElementAssets.v1';
 const ASSET_DB_NAME = 'lotking-assets';
 const ASSET_DB_STORE = 'blobs';
 const BUNDLED_DEMO_PROJECT_URL = 'demo/demo-project.lkep.json';
 const BUNDLED_DEMO_LEVEL_ID = 'online-demo';
 const assetUrlCache = new Map();
+const logicElementAssetCache = new Map();
 let bundledDemoReady = null;
 
 function bundledDemoProjectUrl(){
@@ -100,8 +102,440 @@ function save(data, meta){
   catch(err){ console.warn('LotKing store: salvataggio fallito (quota?)', err); return false; }
 }
 function clear(){ localStorage.removeItem(KEY); }
+function defaultLevelLogicGraph(){
+  return window.LK_LOGIC_GRAPH
+    ? window.LK_LOGIC_GRAPH.createEmptyGraph('Level Logic', 'level')
+    : {version:1, name:'Level Logic', scope:'level', enabled:true, variables:[], nodes:[], edges:[]};
+}
+function normalizeLogicGraph(graph, name, scope){
+  return window.LK_LOGIC_GRAPH
+    ? window.LK_LOGIC_GRAPH.normalizeGraph(graph || defaultLevelLogicGraph(), name, scope)
+    : (graph || {version:1, name:name || 'Logic Graph', scope:scope || 'element', enabled:true, variables:[], nodes:[], edges:[]});
+}
+function ensureLogicElementScene(graph){
+  graph = normalizeLogicGraph(graph, 'Logic Element', 'element');
+  if(!graph.logicScene || typeof graph.logicScene !== 'object') graph.logicScene = {};
+  const scene = graph.logicScene;
+  if(!scene.root) scene.root = {};
+  scene.root = Object.assign({id:'root', name:'Root', type:'mesh', linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#7dd3fc'}, scene.root || {});
+  scene.root.id = 'root';
+  if(!Array.isArray(scene.elements)) scene.elements = [];
+  scene.elements.forEach(element => {
+    if(!element || typeof element !== 'object') return;
+    if(!Array.isArray(element.position)) element.position = [0,0,0];
+    if(!Array.isArray(element.rotation)) element.rotation = [0,0,0];
+    if(!Array.isArray(element.scale)) element.scale = [1,1,1];
+    if(!element.color) element.color = '#7dd3fc';
+    if(!element.type) element.type = 'mesh';
+    if(!element.parentId) element.parentId = 'root';
+  });
+  if(!Array.isArray(scene.components)) scene.components = [];
+  const oldDefault = scene.elements.find(item => item && item.id === 'default_mesh');
+  if(oldDefault){
+    scene.root = Object.assign({}, oldDefault, scene.root, {id:'root', name:scene.root.name || 'Root'});
+    scene.elements = scene.elements.filter(item => item && item.id !== 'default_mesh');
+    scene.components = scene.components.filter(item => item && item.elementId !== 'default_mesh');
+  }
+  if(!scene.components.some(item => item && item.elementId === 'root' && item.type === 'transform')){
+    scene.components.push({id:'root_transform', elementId:'root', name:'Transform', type:'transform', linked:true});
+  }
+  if(!scene.components.some(item => item && item.elementId === 'root' && item.type === 'render')){
+    scene.components.push({id:'root_render', elementId:'root', name:'Render Mesh', type:'render', linked:true});
+  }
+  return graph;
+}
+function logicElementSceneElements(graph){
+  const g = ensureLogicElementScene(graph);
+  return [g.logicScene.root].concat(g.logicScene.elements || []);
+}
+function disposeObject3D(node){
+  if(!node) return;
+  node.traverse(child => {
+    if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+    if(child.material){
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      mats.forEach(mat => mat && mat.dispose && mat.dispose());
+    }
+  });
+}
+function logicElementElementPosition(element){
+  const p = Array.isArray(element && element.position) ? element.position : [0,0,0];
+  return [Number(p[0]) || 0, Number.isFinite(Number(p[1])) ? Number(p[1]) : 0, Number(p[2]) || 0];
+}
+function logicElementElementRotation(element){
+  const r = Array.isArray(element && element.rotation) ? element.rotation : [0,0,0];
+  return [Number(r[0]) || 0, Number(r[1]) || 0, Number(r[2]) || 0];
+}
+function logicElementElementScale(element){
+  const s = Array.isArray(element && element.scale) ? element.scale : [1,1,1];
+  return [
+    Number.isFinite(Number(s[0])) ? Number(s[0]) : 1,
+    Number.isFinite(Number(s[1])) ? Number(s[1]) : 1,
+    Number.isFinite(Number(s[2])) ? Number(s[2]) : 1,
+  ];
+}
+function logicElementMaterial(THREERef, element, opts){
+  opts = opts || {};
+  const color = new THREERef.Color(element && element.color || (opts.helper ? '#facc15' : '#7dd3fc'));
+  if(opts.line) return new THREERef.LineBasicMaterial({color, transparent:true, opacity:opts.opacity == null ? .9 : opts.opacity, depthTest:false});
+  if(opts.basic) return new THREERef.MeshBasicMaterial({color, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity, depthTest:opts.depthTest !== false});
+  if(THREERef.MeshStandardMaterial) return new THREERef.MeshStandardMaterial({color, roughness:.55, metalness:.08, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity});
+  return new THREERef.MeshBasicMaterial({color, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity});
+}
+function createLogicElementPreviewNode(THREERef, element){
+  const type = String(element && element.type || 'mesh');
+  let node;
+  if(type === 'empty'){
+    const geo = new THREERef.SphereGeometry(.18, 16, 8);
+    node = new THREERef.Mesh(geo, logicElementMaterial(THREERef, element, {basic:true, transparent:true, opacity:.72}));
+  } else if(type === 'light'){
+    const group = new THREERef.Group();
+    const bulb = new THREERef.Mesh(new THREERef.SphereGeometry(.16, 16, 8), logicElementMaterial(THREERef, element, {basic:true, helper:true}));
+    const glow = new THREERef.PointLight(element && element.color || '#facc15', .75, 4);
+    group.add(bulb, glow);
+    node = group;
+  } else if(type === 'camera'){
+    const group = new THREERef.Group();
+    const mat = logicElementMaterial(THREERef, element, {line:true, helper:true});
+    const pts = [
+      new THREERef.Vector3(-.28,-.18,0), new THREERef.Vector3(.28,-.18,0),
+      new THREERef.Vector3(.28,-.18,0), new THREERef.Vector3(.28,.18,0),
+      new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(-.28,.18,0),
+      new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.28,-.18,0),
+      new THREERef.Vector3(-.28,-.18,0), new THREERef.Vector3(-.55,-.35,-.65),
+      new THREERef.Vector3(.28,-.18,0), new THREERef.Vector3(.55,-.35,-.65),
+      new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(.55,.35,-.65),
+      new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.55,.35,-.65),
+    ];
+    group.add(new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat));
+    node = group;
+  } else if(element && element.asset) {
+    node = new THREERef.Group();
+    const placeholder = new THREERef.Mesh(
+      new THREERef.BoxGeometry(.8, .8, .8),
+      logicElementMaterial(THREERef, element, {basic:true, transparent:true, opacity:.22})
+    );
+    placeholder.userData.logicElementAssetPlaceholder = true;
+    node.add(placeholder);
+  } else {
+    const geo = new THREERef.BoxGeometry(.8, .8, .8);
+    node = new THREERef.Mesh(geo, logicElementMaterial(THREERef, element));
+  }
+  return node;
+}
+
+function logicElementAssetKey(asset){
+  if(!asset) return '';
+  return [asset.id || '', asset.key || '', asset.dbKey || '', asset.src || '', Number(asset.fit) || 1].join(':');
+}
+function cloneLogicElementAsset(template){
+  const copy = window.THREE && THREE.SkeletonUtils && THREE.SkeletonUtils.clone
+    ? THREE.SkeletonUtils.clone(template)
+    : template.clone(true);
+  copy.animations = (template.animations || []).map(clip => clip && clip.clone ? clip.clone() : clip);
+  copy.traverse(child => {
+    if(child.geometry && child.geometry.clone) child.geometry = child.geometry.clone();
+    if(child.material){
+      child.material = Array.isArray(child.material)
+        ? child.material.map(material => material && material.clone ? material.clone() : material)
+        : (child.material.clone ? child.material.clone() : child.material);
+    }
+  });
+  return copy;
+}
+function logicAnimationConfig(element){
+  return Object.assign({enabled:true, clip:'', autoplay:true, loop:'repeat', speed:1, playInEditor:true}, element && element.animation || {});
+}
+function animationTargetNode(target){
+  if(!target) return null;
+  if(target.userData && target.userData.logicAnimationMixer) return target;
+  let found = null;
+  if(target.traverse) target.traverse(child => {
+    if(!found && child.userData && child.userData.logicAnimationMixer) found = child;
+  });
+  return found;
+}
+function playLogicElementAnimation(target, clipName, options){
+  const node = animationTargetNode(target);
+  if(!node || !node.userData.logicAnimationMixer) return null;
+  const clips = node.userData.logicAnimationClips || [];
+  const wanted = String(clipName || '').trim();
+  const clip = clips.find(item => item && item.name === wanted) || clips[0];
+  if(!clip) return null;
+  const opts = options || {};
+  const mixer = node.userData.logicAnimationMixer;
+  if(node.userData.logicAnimationAction) node.userData.logicAnimationAction.stop();
+  const action = mixer.clipAction(clip);
+  const loop = String(opts.loop || 'repeat').toLowerCase();
+  action.enabled = true;
+  action.clampWhenFinished = loop === 'once';
+  action.setLoop(loop === 'once' ? THREE.LoopOnce : (loop === 'pingpong' ? THREE.LoopPingPong : THREE.LoopRepeat), loop === 'once' ? 1 : Infinity);
+  action.setEffectiveTimeScale(Number.isFinite(Number(opts.speed)) ? Number(opts.speed) : 1);
+  action.reset().play();
+  node.userData.logicAnimationAction = action;
+  node.userData.logicAnimationClipName = clip.name || '';
+  return action;
+}
+function stopLogicElementAnimation(target){
+  const node = animationTargetNode(target);
+  if(!node || !node.userData.logicAnimationMixer) return false;
+  node.userData.logicAnimationMixer.stopAllAction();
+  node.userData.logicAnimationAction = null;
+  return true;
+}
+function setLogicElementAnimationSpeed(target, speed){
+  const node = animationTargetNode(target);
+  if(!node || !node.userData.logicAnimationMixer) return false;
+  const value = Number.isFinite(Number(speed)) ? Number(speed) : 1;
+  node.userData.logicAnimationMixer.timeScale = 1;
+  if(node.userData.logicAnimationAction) node.userData.logicAnimationAction.setEffectiveTimeScale(value);
+  else node.userData.logicAnimationMixer.timeScale = value;
+  return true;
+}
+function startLogicElementAnimations(target, runtimeMode){
+  if(!target || !target.traverse) return 0;
+  let started = 0;
+  target.traverse(node => {
+    const config = node.userData && node.userData.logicAnimationConfig;
+    if(!config || config.enabled === false || config.autoplay === false) return;
+    if(!runtimeMode && config.playInEditor === false) return;
+    if(playLogicElementAnimation(node, config.clip, config)) started++;
+  });
+  return started;
+}
+function stopLogicElementAnimations(target){
+  if(!target || !target.traverse) return 0;
+  let stopped = 0;
+  target.traverse(node => {
+    if(!node.userData || !node.userData.logicAnimationMixer) return;
+    node.userData.logicAnimationMixer.stopAllAction();
+    node.userData.logicAnimationAction = null;
+    stopped++;
+  });
+  return stopped;
+}
+function configureLogicElementAnimation(node, model, element, owner){
+  const clips = (model && model.animations || []).filter(Boolean);
+  node.userData.logicAnimationClips = clips;
+  node.userData.logicAnimationClipNames = clips.map(clip => clip.name || 'Animation');
+  if(!clips.length || !window.THREE || !THREE.AnimationMixer) return null;
+  const mixer = new THREE.AnimationMixer(model);
+  node.userData.logicAnimationMixer = mixer;
+  const entry = {mixer, node};
+  if(owner && owner.userData){
+    owner.userData.logicElementMixers = owner.userData.logicElementMixers || [];
+    owner.userData.logicElementMixers.push(entry);
+  }
+  const config = logicAnimationConfig(element);
+  node.userData.logicAnimationConfig = config;
+  const GAME = window.LOT_KING;
+  const inEditor = !!(GAME && GAME.state && GAME.state.editorActive && !GAME.state.editorPreview);
+  if(config.enabled !== false && config.autoplay !== false && (!inEditor || config.playInEditor !== false)){
+    playLogicElementAnimation(node, config.clip, config);
+  }
+  return mixer;
+}
+function disposeLogicElementAnimations(object){
+  const entries = object && object.userData && object.userData.logicElementMixers;
+  if(Array.isArray(entries)) entries.forEach(entry => {
+    if(entry && entry.mixer) entry.mixer.stopAllAction();
+  });
+  if(object && object.userData) object.userData.logicElementMixers = [];
+}
+function loadLogicElementAsset(asset){
+  if(!asset) return Promise.reject(new Error('Logic Element asset missing'));
+  const key = logicElementAssetKey(asset);
+  let pending = logicElementAssetCache.get(key);
+  if(!pending){
+    const source = asset.src
+      ? Promise.resolve(asset.src)
+      : (asset.dbKey && window.LK_ASSET_BLOBS
+        ? window.LK_ASSET_BLOBS.getUrl(asset.dbKey)
+        : Promise.reject(new Error('Logic Element asset source missing')));
+    pending = source.then(src => loadGlb(src, Math.max(.05, Number(asset.fit) || 1)));
+    logicElementAssetCache.set(key, pending);
+    pending.catch(() => logicElementAssetCache.delete(key));
+  }
+  return pending.then(cloneLogicElementAsset);
+}
+function hydrateLogicElementPreviewAsset(node, element, owner){
+  if(!node || !element || !element.asset) return Promise.resolve(node);
+  const key = logicElementAssetKey(element.asset);
+  node.userData.logicElementAssetKey = key;
+  return loadLogicElementAsset(element.asset).then(model => {
+    if(node.userData.logicElementAssetKey !== key || !node.parent){
+      disposeObject3D(model);
+      return node;
+    }
+    Array.from(node.children).filter(child => child.userData && (child.userData.logicElementAssetPlaceholder || child.userData.logicElementAssetVisual)).forEach(child => {
+      node.remove(child);
+      disposeObject3D(child);
+    });
+    model.traverse(child => {
+      child.userData.logicElementAssetVisual = true;
+      child.userData.logicElementInternal = true;
+      child.userData.logicElementSceneId = element.id;
+      child.userData.logicElementOwnerId = owner && owner.userData && owner.userData.editorId || null;
+      child.userData.editorLocked = true;
+      child.userData.nonExportable = true;
+    });
+    node.add(model);
+    configureLogicElementAnimation(node, model, element, owner);
+    return node;
+  });
+}
+function removeLogicElementColliders(object, GAME){
+  const refs = object && object.userData && object.userData.logicElementColliderRefs;
+  if(!Array.isArray(refs) || !GAME || !GAME.world || !GAME.world.colliders) return;
+  refs.forEach(ref => {
+    const list = ref && ref.kind === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
+    const index = list && list.indexOf(ref);
+    if(index >= 0) list.splice(index, 1);
+    if(ref && ref.owner && ref.owner.userData) delete ref.owner.userData.collider;
+  });
+  object.userData.logicElementColliderRefs = [];
+}
+function updateLogicElementColliderRef(ref){
+  if(!ref || !ref.owner || !window.THREE) return;
+  const node = ref.owner;
+  const collider = ref.config || {};
+  node.updateMatrixWorld(true);
+  const offset = Array.isArray(collider.offset) ? collider.offset : [0,0,0];
+  const center = node.localToWorld(new THREE.Vector3(Number(offset[0]) || 0, Number(offset[1]) || 0, Number(offset[2]) || 0));
+  const scale = node.getWorldScale(new THREE.Vector3());
+  const rotation = new THREE.Euler().setFromQuaternion(node.getWorldQuaternion(new THREE.Quaternion()), 'XYZ');
+  ref.x = center.x;
+  ref.y = center.y;
+  ref.z = center.z;
+  ref.rotX = rotation.x;
+  ref.rotY = rotation.y;
+  ref.rotZ = rotation.z;
+  ref.rot = rotation.y;
+  if(ref.kind === 'circle'){
+    ref.r = Math.max(.01, Number(collider.radius) || .5) * Math.max(Math.abs(scale.x || 1), Math.abs(scale.y || 1), Math.abs(scale.z || 1));
+    ref.hy = ref.r;
+  } else {
+    const size = Array.isArray(collider.size) ? collider.size : [1,1,1];
+    ref.hx = Math.max(.005, Math.abs((Number(size[0]) || 1) * (scale.x || 1)) * .5);
+    ref.hy = Math.max(.005, Math.abs((Number(size[1]) || 1) * (scale.y || 1)) * .5);
+    ref.hz = Math.max(.005, Math.abs((Number(size[2]) || 1) * (scale.z || 1)) * .5);
+  }
+  const body = ref.cannonBody;
+  if(body){
+    if(body.position) body.position.set(ref.x, ref.y, ref.z);
+    if(body.quaternion) body.quaternion.setFromEuler(ref.rotX || 0, ref.rotY || 0, ref.rotZ || 0, 'XYZ');
+    body.aabbNeedsUpdate = true;
+    if(body.updateBoundingRadius) body.updateBoundingRadius();
+    if(body.wakeUp) body.wakeUp();
+  }
+}
+function updateLogicElementColliderRefs(object){
+  const refs = object && object.userData && object.userData.logicElementColliderRefs;
+  if(!Array.isArray(refs)) return;
+  refs.forEach(updateLogicElementColliderRef);
+}
+function syncLogicElementColliders(object, elements, nodes){
+  const GAME = window.LOT_KING;
+  if(!object || !GAME || !GAME.world || !GAME.world.colliders) return;
+  removeLogicElementColliders(object, GAME);
+  if(!object.parent) return;
+  const refs = [];
+  (elements || []).forEach(element => {
+    const collider = element && element.collider;
+    const node = element && nodes && nodes.get(element.id);
+    if(!node || !collider || collider.enabled !== true) return;
+    const kind = collider.shape === 'sphere' ? 'circle' : 'box';
+    const ref = {
+      kind,
+      owner:node,
+      config:cloneData(collider),
+      enabled:true,
+      physics:false,
+      logicElementCollider:true,
+      logicElementOwner:object,
+      logicElementId:element.id,
+    };
+    updateLogicElementColliderRef(ref);
+    const list = kind === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
+    list.push(ref);
+    node.userData.collider = {kind, ref};
+    refs.push(ref);
+  });
+  object.userData.logicElementColliderRefs = refs;
+  const rawPhysics = GAME.systems && GAME.systems.physics && GAME.systems.physics.raw;
+  if(rawPhysics) rawPhysics.staticsSignature = '';
+}
+function applyLogicElementPreviewTransform(THREERef, node, element){
+  const pos = logicElementElementPosition(element);
+  const rot = logicElementElementRotation(element);
+  const scale = logicElementElementScale(element);
+  node.position.set(pos[0], pos[1], pos[2]);
+  node.rotation.set(THREERef.MathUtils.degToRad(rot[0]), THREERef.MathUtils.degToRad(rot[1]), THREERef.MathUtils.degToRad(rot[2]));
+  node.scale.set(scale[0], scale[1], scale[2]);
+}
+function syncLogicElementSceneObject(object, graph, opts){
+  if(!object || !window.THREE) return object;
+  opts = opts || {};
+  const THREERef = window.THREE;
+  const normalized = ensureLogicElementScene(graph || object.userData.logicGraph || object.userData.addedEntry && object.userData.addedEntry.graph);
+  object.userData.logicGraph = normalized;
+  disposeLogicElementAnimations(object);
+  object.userData.logicAnimationUpdate = dt => {
+    const mixers = object.userData.logicElementMixers || [];
+    mixers.forEach(entry => entry && entry.mixer && entry.mixer.update(Math.max(0, Number(dt) || 0)));
+  };
+  const old = (object.children || []).filter(child => {
+    if(child.userData && (child.userData.logicElementInternal || child.userData.logicElementShell)) return true;
+    return object.userData && (object.userData.editorType === 'logicElement' || object.userData.addedEntry && object.userData.addedEntry.kind === 'logicElement');
+  });
+  old.forEach(child => {
+    object.remove(child);
+    disposeObject3D(child);
+  });
+  const elements = logicElementSceneElements(normalized);
+  const rootElement = elements.find(element => element && element.id === 'root');
+  if(rootElement){
+    object.userData.logicElementRootName = rootElement.name || 'Root';
+    object.userData.logicElementRootPosition = Array.isArray(rootElement.position) ? rootElement.position.slice() : [0,0,0];
+    object.userData.logicElementRootType = rootElement.type || 'mesh';
+  }
+  const nodes = new Map();
+  const assetLoads = [];
+  elements.forEach(element => {
+    if(!element || element.linked === false) return;
+    const node = createLogicElementPreviewNode(THREERef, element);
+    applyLogicElementPreviewTransform(THREERef, node, element);
+    node.name = element.name || element.id;
+    node.userData.logicElementInternal = true;
+    node.userData.logicElementSceneId = element.id;
+    node.userData.logicElementSceneType = element.type || 'mesh';
+    node.userData.editorName = element.name || element.id;
+    node.userData.logicElementOwnerId = object.userData.editorId || null;
+    node.userData.editorLocked = true;
+    node.userData.nonExportable = true;
+    node.traverse(child => {
+      child.userData.logicElementInternal = true;
+      child.userData.logicElementSceneId = element.id;
+      child.userData.logicElementOwnerId = object.userData.editorId || null;
+      child.userData.editorLocked = true;
+      child.userData.nonExportable = true;
+    });
+    nodes.set(element.id, node);
+    if(element.asset) assetLoads.push(hydrateLogicElementPreviewAsset(node, element, object));
+  });
+  elements.forEach(element => {
+    const node = element && nodes.get(element.id);
+    if(!node) return;
+    const parentId = element.id === 'root' ? null : (element.parentId || 'root');
+    const parent = parentId && nodes.get(parentId) ? nodes.get(parentId) : object;
+    parent.add(node);
+  });
+  syncLogicElementColliders(object, elements, nodes);
+  object.userData.logicElementAssetReady = Promise.allSettled(assetLoads);
+  return object;
+}
 function blank(){
-  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, ui:{}};
+  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
 }
 function sceneFromProject(data){
   if(!data) return null;
@@ -133,6 +567,20 @@ function importProject(project){
   const parsed = parseProject(project);
   save(parsed.scene, parsed.meta);
   return parsed;
+}
+function getLevelLogicGraph(){
+  const scene = load() || blank();
+  scene.logic = scene.logic || {};
+  scene.logic.levelGraph = normalizeLogicGraph(scene.logic.levelGraph, 'Level Logic', 'level');
+  return cloneData(scene.logic.levelGraph);
+}
+function setLevelLogicGraph(graph){
+  const project = loadProject();
+  const scene = project.scene || blank();
+  scene.logic = scene.logic || {};
+  scene.logic.levelGraph = normalizeLogicGraph(graph, 'Level Logic', 'level');
+  save(scene, project.meta);
+  return cloneData(scene.logic.levelGraph);
 }
 function cloneData(value){
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -182,6 +630,27 @@ async function localizePortableProjectAssets(project){
       if(!entry) continue;
       if(entry.kind === 'glb') await moveDataUrlToAssetDb(entry, 'src', entry.name || entry.id || 'glb', 'dbKey');
       if(entry.kind === 'texture' && entry.props) await moveDataUrlToAssetDb(entry.props, 'src', entry.name || entry.id || 'texture', 'dbKey');
+      if(entry.kind === 'logicElement'){
+        const logicScene = entry.graph && entry.graph.logicScene;
+        const elements = logicScene ? [logicScene.root].concat(logicScene.elements || []) : [];
+        for(const element of elements){
+          if(element && element.asset) await moveDataUrlToAssetDb(element.asset, 'src', element.name || element.id || 'logic-mesh', 'dbKey');
+        }
+        const assetScene = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.logicScene;
+        const assetElements = assetScene ? [assetScene.root].concat(assetScene.elements || []) : [];
+        for(const element of assetElements){
+          if(element && element.asset) await moveDataUrlToAssetDb(element.asset, 'src', element.name || element.id || 'logic-asset-mesh', 'dbKey');
+        }
+      }
+    }
+  }
+  const musicLibraries = scene.ui && scene.ui.musicLibraries;
+  if(musicLibraries){
+    for(const groupName of ['radio', 'menu']){
+      const tracks = Array.isArray(musicLibraries[groupName]) ? musicLibraries[groupName] : [];
+      for(const track of tracks){
+        await moveDataUrlToAssetDb(track, 'url', track.fileName || track.title || track.id || 'music-track', 'dbKey');
+      }
     }
   }
   return project;
@@ -563,6 +1032,123 @@ function writePlayerBlueprintAssets(items){
     console.warn('LotKing store: player blueprint assets non salvati', err);
     return false;
   }
+}
+function readLogicElementAssets(){
+  try {
+    const raw = localStorage.getItem(LOGIC_ELEMENT_ASSETS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const items = parsed && Array.isArray(parsed.items) ? parsed.items : [];
+    return items.filter(item => item && typeof item === 'object').map(item => normalizeLogicElementAssetRecord(item));
+  } catch(err){ return []; }
+}
+function writeLogicElementAssets(items){
+  try {
+    const normalized = (Array.isArray(items) ? items : []).filter(item => item && typeof item === 'object').map(item => normalizeLogicElementAssetRecord(item));
+    localStorage.setItem(LOGIC_ELEMENT_ASSETS_KEY, JSON.stringify({version:1, items:normalized}));
+    return true;
+  } catch(err){
+    console.warn('LotKing store: Logic Element assets non salvati', err);
+    return false;
+  }
+}
+function normalizeLogicElementAssetRecord(asset, fallbackName){
+  const source = asset && typeof asset === 'object' ? cloneData(asset) : {};
+  const name = String(source.name || fallbackName || 'Logic Element').trim() || 'Logic Element';
+  const graph = ensureLogicElementScene(normalizeLogicGraph(source.graph || source.logic, name, 'element'));
+  const normalizeAsset = window.LK_LOGIC_GRAPH && window.LK_LOGIC_GRAPH.normalizeDefinitionAsset;
+  const normalized = normalizeAsset
+    ? normalizeAsset(Object.assign({}, source, {name, graph}), name, 'element')
+    : Object.assign({}, source, {
+      name,
+      kind:'logic-element-definition',
+      definitionVersion:1,
+      graph,
+      dependencies:[],
+    });
+  normalized.name = String(normalized.name || name).trim() || 'Logic Element';
+  normalized.kind = 'logic-element-definition';
+  normalized.graph = ensureLogicElementScene(normalizeLogicGraph(normalized.graph, normalized.name, 'element'));
+  normalized.definitionVersion = Number(normalized.definitionVersion) || (window.LK_LOGIC_GRAPH && window.LK_LOGIC_GRAPH.DEFINITION_VERSION || 1);
+  normalized.dependencies = window.LK_LOGIC_GRAPH && window.LK_LOGIC_GRAPH.collectGraphDependencies
+    ? window.LK_LOGIC_GRAPH.collectGraphDependencies(normalized.graph)
+    : (Array.isArray(normalized.dependencies) ? normalized.dependencies : []);
+  if(source.id) normalized.id = String(source.id);
+  if(source.createdAt) normalized.createdAt = source.createdAt;
+  if(source.updatedAt) normalized.updatedAt = source.updatedAt;
+  return normalized;
+}
+function logicElementAssetById(id){
+  const asset = readLogicElementAssets().find(item => item && item.id === id);
+  return asset ? cloneData(asset) : null;
+}
+function saveLogicElementAsset(name, graph, opts){
+  const options = opts || {};
+  const items = readLogicElementAssets();
+  const id = options.id || ('lea_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7));
+  const previous = items.find(item => item && item.id === id);
+  const normalizedGraph = ensureLogicElementScene(normalizeLogicGraph(graph, name || 'Logic Element', 'element'));
+  const asset = normalizeLogicElementAssetRecord({
+    id,
+    name:String(name || previous && previous.name || 'Logic Element').trim() || 'Logic Element',
+    kind:'logic-element-definition',
+    definitionVersion:window.LK_LOGIC_GRAPH && window.LK_LOGIC_GRAPH.DEFINITION_VERSION || 1,
+    migration:options.migration || previous && previous.migration || undefined,
+    graph:normalizedGraph,
+    createdAt:options.createdAt || previous && previous.createdAt || new Date().toISOString(),
+    updatedAt:options.updatedAt || new Date().toISOString(),
+  });
+  const index = items.findIndex(item => item && item.id === id);
+  if(index >= 0) items[index] = asset;
+  else items.push(asset);
+  return writeLogicElementAssets(items) ? cloneData(asset) : null;
+}
+function importLogicElementAsset(asset){
+  if(!asset || !asset.id || !asset.graph) return null;
+  const incoming = normalizeLogicElementAssetRecord(asset);
+  const current = logicElementAssetById(incoming.id);
+  const currentTime = current && Date.parse(current.updatedAt || '') || 0;
+  const incomingTime = Date.parse(incoming.updatedAt || '') || 0;
+  if(current && currentTime > incomingTime) return current;
+  return saveLogicElementAsset(incoming.name, incoming.graph, {
+    id:incoming.id,
+    createdAt:incoming.createdAt,
+    updatedAt:incoming.updatedAt || new Date().toISOString(),
+    migration:incoming.migration,
+  });
+}
+function deleteLogicElementAsset(id){
+  return writeLogicElementAssets(readLogicElementAssets().filter(item => item && item.id !== id));
+}
+function applyLogicVariableOverrides(graph, overrides){
+  const normalized = ensureLogicElementScene(normalizeLogicGraph(graph, graph && graph.name || 'Logic Element', 'element'));
+  const values = overrides && typeof overrides === 'object' ? overrides : {};
+  normalized.variables.forEach(variable => {
+    if(variable.exposed === true && Object.prototype.hasOwnProperty.call(values, variable.name)){
+      variable.value = cloneData(values[variable.name]);
+    }
+  });
+  return normalized;
+}
+function resolveLogicElementGraph(source, fallbackName){
+  source = source || {};
+  const assetId = source.logicAssetId || null;
+  const linked = source.logicLinked !== false && !!assetId;
+  const embedded = source.logicAsset && source.logicAsset.id === assetId ? source.logicAsset : null;
+  const asset = linked ? (logicElementAssetById(assetId) || embedded) : null;
+  const base = asset && asset.graph || source.graph || source.logic || defaultLevelLogicGraph();
+  const overrides = source.variableOverrides || source.logicVariableOverrides || {};
+  return applyLogicVariableOverrides(normalizeLogicGraph(base, fallbackName || asset && asset.name || 'Logic Element', 'element'), linked ? overrides : {});
+}
+function logicElementAssetsApi(){
+  return {
+    list:() => readLogicElementAssets().map(cloneData),
+    get:logicElementAssetById,
+    saveAsset:saveLogicElementAsset,
+    importAsset:importLogicElementAsset,
+    deleteAsset:deleteLogicElementAsset,
+    resolveGraph:resolveLogicElementGraph,
+    applyOverrides:applyLogicVariableOverrides,
+  };
 }
 // ------------------------------------------------ engine sound sets (asset audio veicolo)
 // Set piccoli (solo JSON: path dei sample + parametri) salvati inline nell'indice.
@@ -1107,8 +1693,13 @@ function applyParentLink(obj, GAME){
 
 // keep the arcade collider (axis-aligned box / circle) in sync with the object
 function syncCollider(obj){
+  updateLogicElementColliderRefs(obj);
   const col = obj.userData.collider;
   if(!col || !col.ref) return;
+  if(col.ref.logicElementCollider){
+    updateLogicElementColliderRef(col.ref);
+    return;
+  }
   col.ref.owner = obj;
   obj.updateMatrixWorld(true);
   if(col.ref.enabled === false){
@@ -2320,6 +2911,25 @@ function createCinemaStudio(props){
   return gp;
 }
 
+function createLogicElement(props){
+  props = props || {};
+  const gp = new THREE.Group();
+  gp.userData.logicAssetId = props.logicAssetId || null;
+  gp.userData.logicLinked = !!(props.logicLinked !== false && gp.userData.logicAssetId);
+  gp.userData.logicVariableOverrides = cloneData(props.variableOverrides || {});
+  gp.userData.logicGraph = resolveLogicElementGraph({
+    graph:props.graph,
+    logicAssetId:gp.userData.logicAssetId,
+    logicLinked:gp.userData.logicLinked,
+    logicAsset:props.logicAsset,
+    variableOverrides:gp.userData.logicVariableOverrides,
+  }, props.name || 'Logic Element');
+  gp.userData.logicEnabled = props.enabled !== false;
+  gp.userData.logicRunInEditorPreview = props.runInEditorPreview !== false;
+  syncLogicElementSceneObject(gp, gp.userData.logicGraph);
+  return gp;
+}
+
 // ------------------------------------------------ factories: lights
 function createLight(kind, props){
   props = props || {};
@@ -2497,6 +3107,7 @@ function loadGlb(src, fit, opts){
       wrap.position.set(-c.x, -box2.min.y, -c.z);
       const gp = new THREE.Group();
       gp.add(wrap);
+      gp.animations = (g.animations || []).map(clip => clip && clip.clone ? clip.clone() : clip);
       resolve(gp);
     }, undefined, err => reject(err));
   });
@@ -2513,6 +3124,20 @@ function loadGlbEntry(entry){
 function createFromEntry(entry, GAME){
   if(entry.kind === 'camera') return Promise.resolve(createSceneCamera(entry.props));
   if(entry.kind === 'cinemaStudio') return Promise.resolve(createCinemaStudio(entry.props));
+  if(entry.kind === 'logicElement'){
+    if(entry.logicAsset) importLogicElementAsset(entry.logicAsset);
+    const object = createLogicElement({
+      graph:entry.graph || entry.logic,
+      logicAssetId:entry.logicAssetId,
+      logicLinked:entry.logicLinked,
+      logicAsset:entry.logicAsset,
+      variableOverrides:entry.variableOverrides,
+      enabled:entry.enabled,
+      runInEditorPreview:entry.runInEditorPreview,
+      name:entry.name,
+    });
+    return Promise.resolve(object.userData.logicElementAssetReady).then(() => object);
+  }
   if(entry.kind === 'light') return Promise.resolve(createLight(entry.light, entry.props));
   if(entry.kind === 'effect') return Promise.resolve(createEmitter(entry.effect, entry.params));
   if(entry.kind === 'text') return Promise.resolve(createText(entry.textKind || '2d', entry.props));
@@ -2535,6 +3160,7 @@ function entryType(entry, obj){
   if(entry.kind === 'texture') return 'texture';
   if(entry.kind === 'camera') return 'camera';
   if(entry.kind === 'cinemaStudio') return 'cinemaStudio';
+  if(entry.kind === 'logicElement') return 'logicElement';
   return entry.kind === 'light' ? 'light' : entry.kind === 'effect' ? 'effect' : 'mesh';
 }
 
@@ -2542,6 +3168,11 @@ function entryType(entry, obj){
 function registerAdded(GAME, obj, entry){
   ensureEffectHook(GAME);
   obj.userData.addedEntry = entry;
+  if(entry.kind === 'logicElement'){
+    obj.userData.logicAssetId = entry.logicAssetId || obj.userData.logicAssetId || null;
+    obj.userData.logicLinked = !!(entry.logicLinked !== false && obj.userData.logicAssetId);
+    obj.userData.logicVariableOverrides = cloneData(entry.variableOverrides || obj.userData.logicVariableOverrides || {});
+  }
   if(entry.asset){
     obj.userData.assetKey = entry.asset.key;
     obj.userData.assetName = entry.asset.name;
@@ -2585,6 +3216,7 @@ function registerAdded(GAME, obj, entry){
   GAME.world.register(obj, entry.name || entry.kind, entryType(entry, obj), {id: entry.id, builtin: false, collider: colliderOpt});
   GAME.core.scene.add(obj);
   applyT(obj, entry.t);
+  if(entry.kind === 'logicElement') syncLogicElementSceneObject(obj, obj.userData.logicGraph || entry.graph || entry.logic);
   if(hasCollider) syncCollider(obj);
   return obj;
 }
@@ -2597,6 +3229,7 @@ function ensureEffectHook(GAME){
   GAME.hooks.frame.push(dt => {
     for(const o of GAME.world.registry){
       if(o.userData.effectUpdate) o.userData.effectUpdate(dt);
+      if(o.userData.logicAnimationUpdate) o.userData.logicAnimationUpdate(dt);
     }
   });
 }
@@ -2736,6 +3369,15 @@ function apply(GAME){
   }
   applyEnvironment(GAME, data.env);
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
+  const musicLibraries = data.ui && data.ui.musicLibraries;
+  if(musicLibraries && GAME.systems){
+    if(GAME.systems.radio && GAME.systems.radio.restoreTracks && Array.isArray(musicLibraries.radio)){
+      pending.push(GAME.systems.radio.restoreTracks(musicLibraries.radio));
+    }
+    if(GAME.systems.menuMusic && GAME.systems.menuMusic.restoreTracks && Array.isArray(musicLibraries.menu)){
+      pending.push(GAME.systems.menuMusic.restoreTracks(musicLibraries.menu));
+    }
+  }
   // player blueprint
   if(data.player){
     const playerTransform = data.player.transform || (data.transforms && data.transforms.player);
@@ -2908,6 +3550,23 @@ function collect(GAME){
 	      else if(e.kind === 'texture') e.props = Object.assign({}, o.userData.textureProps || e.props || {});
 	      else if(e.kind === 'camera') e.props = Object.assign({}, o.userData.cameraProps || e.props || {});
 	      else if(e.kind === 'cinemaStudio') e.props = normalizeCinemaStudioProps(cloneData(o.userData.cinemaProps || e.props || {}));
+	      else if(e.kind === 'logicElement'){
+	        e.graph = normalizeLogicGraph(o.userData.logicGraph || e.graph, o.userData.editorName || e.name || 'Logic Element', 'element');
+	        e.enabled = o.userData.logicEnabled !== false;
+	        e.runInEditorPreview = o.userData.logicRunInEditorPreview !== false;
+	        e.logicAssetId = o.userData.logicAssetId || null;
+	        e.logicLinked = !!(o.userData.logicLinked && e.logicAssetId);
+	        e.variableOverrides = cloneData(o.userData.logicVariableOverrides || {});
+	        if(e.logicLinked){
+	          const definition = logicElementAssetById(e.logicAssetId) || e.logicAsset;
+	          if(definition) e.logicAsset = cloneData(definition);
+	        } else {
+	          delete e.logicAssetId;
+	          delete e.logicLinked;
+	          delete e.variableOverrides;
+	          delete e.logicAsset;
+	        }
+	      }
 	      else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
       if(o.userData.assetKey) e.asset = Object.assign({}, e.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
       d.added.push(e);
@@ -2916,7 +3575,14 @@ function collect(GAME){
   d.deleted = builtinIds.filter(id => !liveBuiltin.has(id));
   d.env = freezeRuntimeTransforms && old && old.env ? cloneData(old.env) : collectEnvironment(GAME);
   if(GAME.ui && GAME.ui.radioHud) d.ui.radioHud = JSON.parse(JSON.stringify(GAME.ui.radioHud));
+  if(GAME.systems){
+    const radioTracks = GAME.systems.radio && GAME.systems.radio.getStoredTracks ? GAME.systems.radio.getStoredTracks() : [];
+    const menuTracks = GAME.systems.menuMusic && GAME.systems.menuMusic.getStoredTracks ? GAME.systems.menuMusic.getStoredTracks() : [];
+    d.ui.musicLibraries = {radio:cloneData(radioTracks), menu:cloneData(menuTracks)};
+  }
   d.player = collectPlayerBlueprint(GAME) || {};
+  d.logic = old && old.logic ? cloneData(old.logic) : {};
+  d.logic.levelGraph = normalizeLogicGraph(d.logic.levelGraph, 'Level Logic', 'level');
   return d;
 }
 
@@ -2937,14 +3603,15 @@ function ensureApplied(GAME){
 }
 window.LK_STORE = {
   KEY, PROJECT_FORMAT, PROJECT_NAME, PROJECT_VERSION,
-  levels: LEVELS,
-  playerBlueprints: playerBlueprintApi(),
+	  levels: LEVELS,
+	  playerBlueprints: playerBlueprintApi(),
+	  logicElementAssets: logicElementAssetsApi(),
   soundSets: SOUND_SETS,
   isApplied: () => applied,
-  load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject,
+  load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject, getLevelLogicGraph, setLevelLogicGraph,
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
   lightProps, applyLightProps, applyMatProps,
-	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
+	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, collect, nextId,
   ensureBundledDemoProject,

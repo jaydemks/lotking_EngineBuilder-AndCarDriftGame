@@ -200,6 +200,42 @@ function create(deps){
     return obj;
   }
 
+  function addLogicElement(at, reusableAsset){
+    const id = STORE.nextId();
+    const template = reusableAsset && reusableAsset.template === true && reusableAsset.graph ? reusableAsset : null;
+    const asset = !template && reusableAsset && reusableAsset.graph ? reusableAsset : null;
+    const graph = asset ? window.LK_LOGIC_GRAPH.clone(asset.graph) : template ? window.LK_LOGIC_GRAPH.clone(template.graph) : window.LK_LOGIC_GRAPH
+      ? window.LK_LOGIC_GRAPH.createStarterGraph('Logic Element ' + id, 'element')
+      : {version:1, name:'Logic Element ' + id, scope:'element', enabled:true, variables:[], nodes:[], edges:[]};
+    const name = asset && asset.name || template && template.name || 'Logic Element';
+    const obj = STORE.createLogicElement({
+      graph,
+      name,
+      logicAssetId:asset && asset.id,
+      logicLinked:!!asset,
+      logicAsset:asset,
+      variableOverrides:{},
+    });
+    const entry = {id, kind:'logicElement', name, collide:false,
+      graph,
+      enabled:true,
+      runInEditorPreview:true,
+      asset:{key:asset ? ('logic:asset:' + asset.id) : template ? ('logic:template:' + template.id) : ('logic:element:' + id), name, source:asset ? 'Reusable Logic Element' : template ? 'Logic Element template' : 'Editor logic'},
+      t:{p:[at.x, .15, at.z], r:[0,0,0], s:[1,1,1], v:true}};
+    if(asset){
+      entry.logicAssetId = asset.id;
+      entry.logicLinked = true;
+      entry.variableOverrides = {};
+      entry.logicAsset = window.LK_LOGIC_GRAPH.clone(asset);
+    }
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = entry.asset.key;
+    obj.userData.assetName = entry.asset.name;
+    obj.userData.assetSource = entry.asset.source;
+    finishAdd(obj);
+    return obj;
+  }
+
   function finishAdd(obj){
     pushHistory({
       label: 'Add ' + (obj.userData.editorName || 'Entity'),
@@ -262,7 +298,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

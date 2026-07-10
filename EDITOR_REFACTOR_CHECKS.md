@@ -119,3 +119,30 @@ Get-ChildItem .\js\editor\*.js | ForEach-Object {
 3. Se tutti i file stampano `OK`, ricarica completamente l'editor nel browser.
 4. Prova rapidamente le parti toccate dal refactor.
 
+## Prima del commit v0.6.5
+
+Questa milestone Logic Element e' chiusa lato implementazione. Prima del commit conviene fare questi controlli da PowerShell Windows, non da WSL:
+
+```powershell
+node .\tests\logic-core.test.js
+```
+
+Poi un controllo sintattico rapido sui moduli principali aggiunti/toccati:
+
+```powershell
+node --check .\js\logic\logic-graph.js
+node --check .\js\logic\logic-exporter.js
+node --check .\js\logic\logic-runtime.js
+node --check .\js\runtime\logic-elements-runner.js
+node --check .\js\editor\logic-elements-inspector.js
+node --check .\js\editor\editor-menu-bar.js
+node --check .\js\engine\scene-store.js
+```
+
+Smoke test manuale consigliato:
+
+1. Apri `engine_editor.html`.
+2. Crea un Logic Element e apri il Logic Element Editor.
+3. Verifica Graph/Viewport, Print, On Start/On Update, variabili esposte e salvataggio progetto.
+4. Avvia Play Preview e controlla il Logic Profiler: timeline, Clear Timeline, breakpoint/step e detail JSON.
+5. Salva, ricarica e verifica che Logic Element, musica e HUD Radio restino persistenti.

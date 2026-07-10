@@ -101,6 +101,12 @@ Then open the printed LAN address on the other device.
 - Use `gameplay.html` to run the playable game without the editor UI.
 - Use `/` or `index.html` for the menu shell.
 
+Typical workflows:
+
+- Build locally in `engine_editor.html`, then export a playable ZIP when you want to publish only the game/runtime.
+- Publish the whole project as a read-only online demo when you want visitors to inspect the editor without mutating your hosted files.
+- Use Logic Element from inside the editor when you want Blueprint-style experimental visual scripting for level logic or scene objects.
+
 For day-to-day work, start with:
 
 ```text

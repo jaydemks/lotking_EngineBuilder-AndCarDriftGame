@@ -524,8 +524,75 @@ function refreshSetSelect(){
   sel.innerHTML = '';
   for(const s of STORE.soundSets.list()) sel.appendChild(new Option(s.name, s.id, false, work && s.id === work.id));
 }
+function designerChoice(opts){
+  opts = opts || {};
+  return new Promise(resolve => {
+    const old = root.querySelector('.lksd-confirm');
+    if(old) old.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'lksd-confirm';
+    const box = document.createElement('div');
+    box.className = 'lksd-confirm-box';
+    const title = document.createElement('div');
+    title.className = 'lksd-confirm-title';
+    title.textContent = opts.title || 'Sound Designer';
+    const message = document.createElement('div');
+    message.className = 'lksd-confirm-message';
+    message.textContent = opts.message || '';
+    const actions = document.createElement('div');
+    actions.className = 'lksd-confirm-actions';
+    const finish = value => {
+      overlay.remove();
+      removeEventListener('keydown', onKey, true);
+      resolve(value);
+    };
+    const onKey = e => {
+      if(e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(opts.cancelValue || 'cancel');
+    };
+    (opts.actions || []).forEach(action => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = action.label;
+      if(action.className) btn.className = action.className;
+      btn.addEventListener('click', () => finish(action.value));
+      actions.appendChild(btn);
+    });
+    overlay.addEventListener('pointerdown', e => {
+      if(e.target === overlay) finish(opts.cancelValue || 'cancel');
+    });
+    box.append(title, message, actions);
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+    addEventListener('keydown', onKey, true);
+    const first = actions.querySelector('button');
+    if(first) first.focus();
+  });
+}
 function confirmDesignerAction(opts){
-  return window.LK_EDITOR_CONFIRM ? window.LK_EDITOR_CONFIRM(opts) : Promise.resolve(false);
+  return designerChoice({
+    title: opts && opts.title || 'Sound Designer',
+    message: opts && opts.message || '',
+    cancelValue: false,
+    actions: [
+      {label: opts && opts.okText || 'OK', value: true, className: opts && opts.danger ? 'danger' : 'save'},
+      {label: tr('Cancel', 'Annulla'), value: false},
+    ],
+  });
+}
+function closeDirtyChoice(){
+  return designerChoice({
+    title: tr('Unsaved Sound Designer changes', 'Modifiche Sound Designer non salvate'),
+    message: tr('You changed this sound set. Save before closing, close without saving, or keep editing?', 'Hai modificato questo sound set. Vuoi salvare prima di chiudere, uscire senza salvare, oppure continuare a modificare?'),
+    cancelValue: 'cancel',
+    actions: [
+      {label: tr('Save and close', 'Salva e chiudi'), value: 'save', className: 'save'},
+      {label: tr('Close without saving', 'Esci senza salvare'), value: 'discard', className: 'danger'},
+      {label: tr('Keep editing', 'Continua a modificare'), value: 'cancel'},
+    ],
+  });
 }
 function loadSet(id){
   const set = STORE.soundSets.get(id) || EA().defaultSet();
@@ -561,14 +628,15 @@ $('#lksdName').addEventListener('change', e => {
 });
 $('#lksdSave').addEventListener('click', saveSet);
 function saveSet(){
-  if(!work) return;
+  if(!work) return false;
   work.name = $('#lksdName').value.trim() || work.name;
-  if(!STORE.soundSets.save(work)) return;
+  if(!STORE.soundSets.save(work)) return false;
   clearDirty();
   refreshSetSelect();
   // se e' il set del veicolo, riapplica la versione salvata
   if(GAME.player.engineAudio && GAME.player.engineAudio.setId === work.id) GAME.player.setEngineSound(work.id);
   EA().setConfig(work);
+  return true;
 }
 $('#lksdDup').addEventListener('click', () => {
   if(!work) return;
@@ -624,13 +692,9 @@ function open(setId){
 }
 async function close(){
   if(dirty){
-    const ok = await confirmDesignerAction({
-      title:'Close Sound Designer?',
-      message:'Chiudere senza salvare le modifiche al sound set?',
-      okText:'Close',
-      danger:false,
-    });
-    if(!ok) return;
+    const action = await closeDirtyChoice();
+    if(action === 'cancel') return;
+    if(action === 'save' && !saveSet()) return;
   }
   root.classList.remove('open');
   if(rafId){ cancelAnimationFrame(rafId); rafId = null; }

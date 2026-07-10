@@ -126,8 +126,8 @@ function create(options){
     if(wasPlaying) play().catch(() => {});
   }
 
-  function addTracks(files){
-    const added = library.addFiles(files, 'Menu music upload');
+  async function addTracks(files){
+    const added = await library.addFiles(files, 'Menu project audio');
     if(added.length && opts.popup) opts.popup('MENU TRACKS ADDED: ' + added.length, '#4be3a0');
     return added;
   }
@@ -144,6 +144,8 @@ function create(options){
     toggle,
     loadTrack,
     addTracks,
+    restoreTracks: tracks => library.restoreTracks(tracks),
+    getStoredTracks: () => library.storedTracks(),
     getTracks: options => library.list(options),
   };
 }

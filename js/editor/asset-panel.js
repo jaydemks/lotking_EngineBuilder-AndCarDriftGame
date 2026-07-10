@@ -182,11 +182,12 @@ function create(deps){
 
   function finishPanel(box, counts){
     counts = counts || {};
-    if(!counts.blueprints && !counts.levels && !counts.imported && !counts.projectAssets && !counts.scene){
+    if(!counts.blueprints && !counts.logicBlueprints && !counts.levels && !counts.imported && !counts.projectAssets && !counts.scene){
       box.appendChild(deps.el('<div class="lk-empty">No assets visible.<br>Change filters or import GLB/GLTF files.</div>'));
     }
     deps.setStatusRight(
       (counts.blueprints ? counts.blueprints + ' car logic · ' : '') +
+      (counts.logicBlueprints ? counts.logicBlueprints + ' logic elements · ' : '') +
       (counts.levels ? counts.levels + ' levels · ' : '') +
       (counts.imported ? counts.imported + ' imported · ' : '') +
       (counts.projectAssets ? counts.projectAssets + ' project assets · ' : '') +
@@ -307,6 +308,44 @@ function create(deps){
     return items.filter(item => visible(item, q));
   }
 
+  function logicBlueprintItems(q){
+    const STORE = deps.STORE;
+    const templates = window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.list ? window.LK_LOGIC_TEMPLATES.list().map(template => ({
+      kind:'logic-template',
+      ref:'logic-template:' + template.id,
+      id:template.id,
+      name:template.name || 'Logic Element Template',
+      sub:(template.category || 'Template') + ' template · local editable copy',
+      source:'Built-in Logic Element template',
+      icon:'◇',
+      badges:[{type:'info', label:'Template'}],
+      filterType:'blueprint',
+      draggable:true,
+      raw:template,
+      defaultAction:() => deps.placeAssetRef({kind:'logic-template', ref:'logic-template:' + template.id, id:template.id, name:template.name, raw:template}, deps.spawnPointAhead()),
+      actions:[
+        {label:'+', title:tr('Place editable local copy', 'Piazza copia locale editabile'), fn:() => deps.placeAssetRef({kind:'logic-template', ref:'logic-template:' + template.id, id:template.id, name:template.name, raw:template}, deps.spawnPointAhead())},
+      ],
+    })) : [];
+    const assets = STORE.logicElementAssets ? STORE.logicElementAssets.list().map(asset => ({
+      kind:'logic-blueprint',
+      ref:'logic-blueprint:' + asset.id,
+      id:asset.id,
+      name:asset.name || 'Logic Element',
+      sub:'reusable Logic Element · ' + (asset.graph && asset.graph.nodes ? asset.graph.nodes.length : 0) + ' nodes',
+      source:'Reusable Logic Element',
+      icon:'◇',
+      filterType:'blueprint',
+      draggable:true,
+      raw:asset,
+      defaultAction:() => deps.placeAssetRef({kind:'logic-blueprint', ref:'logic-blueprint:' + asset.id, id:asset.id, name:asset.name, raw:asset}, deps.spawnPointAhead()),
+      actions:[
+        {label:'+', title:tr('Place linked instance', 'Piazza istanza collegata'), fn:() => deps.placeAssetRef({kind:'logic-blueprint', ref:'logic-blueprint:' + asset.id, id:asset.id, name:asset.name, raw:asset}, deps.spawnPointAhead())},
+      ],
+    })) : [];
+    return templates.concat(assets).filter(item => visible(item, q));
+  }
+
   function sceneItems(q){
     function sampleEntryKind(item){
       return item && item.sample && item.sample.userData && item.sample.userData.addedEntry && item.sample.userData.addedEntry.kind || '';
@@ -357,6 +396,10 @@ function create(deps){
     addGroup(box, 'PLAYER CAR LOGIC', blueprints);
     allFolderedItems.push(...blueprints);
 
+    const logicBlueprints = logicBlueprintItems(q);
+    addGroup(box, 'LOGIC ELEMENTS', logicBlueprints);
+    allFolderedItems.push(...logicBlueprints);
+
     const sounds = soundSetItems(q);
     addGroup(box, 'ENGINE SOUND SETS', sounds);
     allFolderedItems.push(...sounds);
@@ -376,6 +419,7 @@ function create(deps){
     addGroup(box, 'FOLDERS / ALL ASSETS', allFolderedItems, true);
     finishPanel(box, {
       blueprints: blueprints.length,
+      logicBlueprints: logicBlueprints.length,
       levels: levels.length,
       imported: imported.length,
       projectAssets: projectAssets.length,
@@ -385,7 +429,7 @@ function create(deps){
 
   return Object.freeze({
     button, makeCard, visible, addGroup, preparePanel, finishPanel,
-    importedItems, levelItems, soundSetItems, blueprintItems, sceneItems, refresh,
+    importedItems, levelItems, soundSetItems, blueprintItems, logicBlueprintItems, sceneItems, refresh,
   });
 }
 

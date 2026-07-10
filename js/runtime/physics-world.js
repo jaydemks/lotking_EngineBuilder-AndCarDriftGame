@@ -284,11 +284,29 @@ function create(options){
     if(state.surfaceWorldCollision) ensureGroundBody();
     else removeGroundBody();
 
-    const addStaticBox = (x, y, z, hx, hy, hz, rotX, rotY, rotZ) => {
+    const bindLogicColliderBody = (body, colliderRef) => {
+      if(!body || !colliderRef || !colliderRef.logicElementCollider) return body;
+      body.logicObject = colliderRef.owner || null;
+      colliderRef.cannonBody = body;
+      body.userData = Object.assign({}, body.userData || {}, {logicElementCollider:true, logicElementId:colliderRef.logicElementId});
+      body.addEventListener('collide', event => {
+        if(!window.dispatchEvent || !window.CustomEvent) return;
+        window.dispatchEvent(new CustomEvent('lk-logic-collision-begin', {detail:{
+          body,
+          otherBody:event && event.body || null,
+          object:body.logicObject || null,
+          otherObject:event && event.body && event.body.logicObject || null,
+          contact:event && event.contact || null,
+        }}));
+      });
+      return body;
+    };
+    const addStaticBox = (x, y, z, hx, hy, hz, rotX, rotY, rotZ, colliderRef) => {
       const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
       body.addShape(new CANNONRef.Box(cannonVec(hx, hy, hz)));
       body.position.set(x, y, z);
       if(rotX || rotY || rotZ) body.quaternion.setFromEuler(rotX || 0, rotY || 0, rotZ || 0, 'XYZ');
+      bindLogicColliderBody(body, colliderRef);
       state.world.addBody(body);
       state.staticBodies.push(body);
     };
@@ -302,13 +320,14 @@ function create(options){
         specialStatics.add(key);
         if(kind === 'wedge' ? addWedge(box.owner) : addTrimesh(box.owner, box)) continue;
       }
-      addStaticBox(box.x, box.y != null ? box.y : Math.max(.1, box.hy || 1.1), box.z, box.hx || 1, box.hy || 1.1, box.hz || 1, box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0);
+      addStaticBox(box.x, box.y != null ? box.y : Math.max(.1, box.hy || 1.1), box.z, box.hx || 1, box.hy || 1.1, box.hz || 1, box.rotX || 0, box.rotY != null ? box.rotY : (box.rot || 0), box.rotZ || 0, box);
     }
     for(const circle of colliders.circle || []){
       if(!circle || circle.enabled === false || circle.physics || isDriveSurfaceCollider(circle)) continue;
       const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
       body.addShape(new CANNONRef.Sphere(circle.r));
-      body.position.set(circle.x, circle.r, circle.z);
+      body.position.set(circle.x, circle.y != null ? circle.y : circle.r, circle.z);
+      bindLogicColliderBody(body, circle);
       state.world.addBody(body);
       state.staticBodies.push(body);
     }

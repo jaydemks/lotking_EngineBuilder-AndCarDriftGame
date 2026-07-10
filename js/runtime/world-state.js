@@ -48,6 +48,15 @@ function create(options){
       const j = arr.indexOf(col.ref);
       if(j >= 0) arr.splice(j, 1);
     }
+    const logicRefs = obj.userData && obj.userData.logicElementColliderRefs;
+    if(Array.isArray(logicRefs)){
+      logicRefs.forEach(ref => {
+        const list = ref && ref.kind === 'circle' ? colliders.circle : colliders.box;
+        const index = list.indexOf(ref);
+        if(index >= 0) list.splice(index, 1);
+      });
+      obj.userData.logicElementColliderRefs = [];
+    }
   }
 
   function colliderSignature(){
@@ -63,7 +72,7 @@ function create(options){
     for(const c of colliders.circle){
       if(!c || c.enabled === false || c.physics || isDriveSurfaceCollider(c)) continue;
       activeCircles++;
-      parts.push([c.x, c.z, c.r, colliderMass(c)].map(v => Math.round(v * 100)).join(','));
+      parts.push([c.x, c.y || 0, c.z, c.r, colliderMass(c)].map(v => Math.round(v * 100)).join(','));
     }
     parts.unshift('b' + activeBoxes, 'c' + activeCircles);
     return parts.join('|');

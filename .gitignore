@@ -7,6 +7,8 @@ desktop.ini
 
 # Local dependency/cache folders
 node_modules/
+test-results/
+playwright-report/
 .npm/
 .yarn/
 .pnpm-store/
@@ -30,6 +32,7 @@ models_sources/
 *.bak
 *.swp
 *.swo
+ROADMAP_NODES_BLUEPRINT_JS_PART1.md
 
 # Local/private environment files
 .env

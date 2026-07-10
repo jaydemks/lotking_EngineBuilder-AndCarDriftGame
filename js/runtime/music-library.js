@@ -35,13 +35,24 @@ function normalizeTrack(track, source){
   return {
     id: track.id || ('trk_' + (uid++)),
     url: track.url,
+    dbKey: track.dbKey || null,
     title: track.title || meta.title,
     artist: track.artist || meta.artist,
     order: track.order == null ? meta.order : track.order,
     fileName: track.fileName || track.name || '',
     source: track.source || source || 'Default',
     uploaded: !!track.uploaded,
+    persisted: !!track.persisted || !!track.dbKey,
   };
+}
+
+function storedTrackId(){
+  return 'trk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function storedTrackKey(file){
+  const ext = /\.[a-z0-9]+$/i.exec(file && file.name || '');
+  return 'music:' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2, 10) + (ext ? ext[0].toLowerCase() : '.audio');
 }
 
 function create(defaultTracks){
@@ -52,24 +63,74 @@ function create(defaultTracks){
     return tracks[(index + tracks.length) % tracks.length];
   }
 
-  function addFiles(files, source){
+  async function addFiles(files, source){
     const added = [];
-    Array.from(files || []).forEach(file => {
-      if(!file || !/^audio\//i.test(file.type || '') && !/\.(mp3|ogg|wav|m4a|aac|flac)$/i.test(file.name || '')) return;
+    let lastError = null;
+    for(const file of Array.from(files || [])){
+      if(!file || (!/^audio\//i.test(file.type || '') && !/\.(mp3|ogg|wav|m4a|aac|flac)$/i.test(file.name || ''))) continue;
+      if(!window.LK_ASSET_BLOBS || !window.LK_ASSET_BLOBS.put) throw new Error('Persistent audio storage unavailable');
       const meta = metaFromName(file.name);
-      const track = normalizeTrack({
-        url: URL.createObjectURL(file),
-        title: meta.title,
-        artist: meta.artist,
-        order: meta.order,
-        fileName: file.name,
-        source: source || 'Session upload',
-        uploaded: true,
-      }, source || 'Session upload');
-      tracks.push(track);
-      added.push(track);
-    });
+      const dbKey = storedTrackKey(file);
+      try {
+        await window.LK_ASSET_BLOBS.put(dbKey, file);
+        const track = normalizeTrack({
+          id: storedTrackId(),
+          url: URL.createObjectURL(file),
+          dbKey,
+          title: meta.title,
+          artist: meta.artist,
+          order: meta.order,
+          fileName: file.name,
+          source: source || 'Project audio',
+          uploaded: true,
+          persisted: true,
+        }, source || 'Project audio');
+        tracks.push(track);
+        added.push(track);
+      } catch(err){
+        lastError = err;
+        console.warn('LotKing music: file audio non archiviato', file.name, err);
+      }
+    }
+    if(!added.length && lastError) throw lastError;
     return added;
+  }
+
+  async function restoreTracks(stored){
+    const restored = [];
+    for(const item of Array.from(stored || [])){
+      if(!item || tracks.some(track => (item.id && track.id === item.id) || (item.dbKey && track.dbKey === item.dbKey))) continue;
+      let url = item.url || '';
+      if(item.dbKey){
+        if(!window.LK_ASSET_BLOBS || !window.LK_ASSET_BLOBS.getUrl) continue;
+        try { url = await window.LK_ASSET_BLOBS.getUrl(item.dbKey); }
+        catch(err){ console.warn('LotKing music: traccia persistente non disponibile', item.fileName || item.title || item.dbKey, err); continue; }
+      }
+      if(!url) continue;
+      const track = normalizeTrack(Object.assign({}, item, {
+        url,
+        uploaded:true,
+        persisted:!!item.dbKey || /^data:/i.test(url),
+      }), item.source || 'Project audio');
+      tracks.push(track);
+      restored.push(track);
+    }
+    return restored;
+  }
+
+  function storedTracks(){
+    return tracks.filter(track => track.uploaded && (track.dbKey || /^data:/i.test(track.url || ''))).map(track => ({
+      id:track.id,
+      url:/^data:/i.test(track.url || '') ? track.url : null,
+      dbKey:track.dbKey || null,
+      title:track.title,
+      artist:track.artist,
+      order:track.order,
+      fileName:track.fileName,
+      source:track.source,
+      uploaded:true,
+      persisted:true,
+    }));
   }
 
   function list(options){
@@ -97,6 +158,8 @@ function create(defaultTracks){
   return {
     at,
     addFiles,
+    restoreTracks,
+    storedTracks,
     list,
     count: () => tracks.length,
     raw: () => tracks,

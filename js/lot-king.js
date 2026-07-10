@@ -6,7 +6,7 @@
 'use strict';
 
 const GAME = window.LOT_KING = {
-  version: '0.6.4',
+  version: '0.6.5',
   assets: null,
   core: {},
   world: {},
@@ -1681,8 +1681,8 @@ function handleCollisions(){
 let totalScore = 0, driftScore = 0, driftMult = 1, driftTime = 0, driftEndTimer = 0;
 const HUD = window.LK_RUNTIME_GAME_HUD.create();
 
-function popup(txt, color){
-  HUD.popup(txt, color);
+function popup(txt, color, duration){
+  HUD.popup(txt, color, duration);
 }
 function addPoints(p, msg){
   totalScore += p;
@@ -2808,7 +2808,9 @@ function createNoopMenuMusic(){
     syncButton: function(){},
     setVolume: function(){},
     getTracks: function(){ return []; },
-    addTracks: function(){ return []; },
+    addTracks: function(){ return Promise.resolve([]); },
+    restoreTracks: function(){ return Promise.resolve([]); },
+    getStoredTracks: function(){ return []; },
     loadTrack: function(){},
     play: function(){ return Promise.resolve(); },
     pause: function(){},
@@ -3167,6 +3169,8 @@ Object.assign(GAME.systems, {
     setVolume: MENU_MUSIC.setVolume,
     getTracks: MENU_MUSIC.getTracks,
     addTracks: MENU_MUSIC.addTracks,
+    restoreTracks: MENU_MUSIC.restoreTracks,
+    getStoredTracks: MENU_MUSIC.getStoredTracks,
     loadTrack: MENU_MUSIC.loadTrack,
     fadeOut: MENU_MUSIC.fadeOut,
   },

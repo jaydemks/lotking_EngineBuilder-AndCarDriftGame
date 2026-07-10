@@ -468,8 +468,8 @@ function createRadioHud(deps){
     canvas.classList.toggle('slowmo', open && !editorPreview);
   }
   function begin(){ if(started) return; started = true; load(0, true); }
-  function addTracks(files){
-    const added = library.addFiles(files, 'Game radio upload');
+  async function addTracks(files){
+    const added = await library.addFiles(files, 'Game radio project audio');
     if(added.length) popup('RADIO TRACKS ADDED: ' + added.length, '#4be3a0');
     return added;
   }
@@ -603,6 +603,8 @@ function createRadioHud(deps){
     setFrameRect,
     getTracks: options => library.list(options),
     addTracks,
+    restoreTracks: tracks => library.restoreTracks(tracks),
+    getStoredTracks: () => library.storedTracks(),
     loadTrack: i => load(i, true),
     getTrackIndex: () => idx};
 }

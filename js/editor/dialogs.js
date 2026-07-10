@@ -7,18 +7,20 @@
 
 function create(opts){
   opts = opts || {};
-  const root = opts.root;
-  const $ = sel => root.querySelector(sel);
 
   function parts(){
-    const overlay = $('#lkConfirmOverlay');
+    const overlay = document.getElementById('lkConfirmOverlay');
     return {
       overlay,
-      title: $('#lkConfirmTitle'),
-      message: $('#lkConfirmMessage'),
-      ok: $('#lkConfirmOk'),
-      cancel: $('#lkConfirmCancel'),
+      title: document.getElementById('lkConfirmTitle'),
+      message: document.getElementById('lkConfirmMessage'),
+      ok: document.getElementById('lkConfirmOk'),
+      cancel: document.getElementById('lkConfirmCancel'),
     };
+  }
+
+  function liftOverlay(overlay){
+    if(overlay && overlay.parentNode !== document.body) document.body.appendChild(overlay);
   }
 
   function clearInput(overlay){
@@ -30,6 +32,7 @@ function create(opts){
     const cfg = opts || {};
     const p = parts();
     if(!p.overlay || !p.title || !p.message || !p.ok || !p.cancel) return Promise.resolve(false);
+    liftOverlay(p.overlay);
     p.title.textContent = cfg.title || 'Confirm action';
     p.message.textContent = cfg.message || 'Are you sure?';
     p.ok.textContent = cfg.okText || 'Delete';
@@ -65,6 +68,7 @@ function create(opts){
     const cfg = opts || {};
     const p = parts();
     if(!p.overlay || !p.title || !p.message || !p.ok || !p.cancel) return Promise.resolve(null);
+    liftOverlay(p.overlay);
     p.title.textContent = cfg.title || 'Editor input';
     p.message.textContent = cfg.message || '';
     p.ok.textContent = cfg.okText || 'OK';

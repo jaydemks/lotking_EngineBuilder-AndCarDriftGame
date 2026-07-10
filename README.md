@@ -1,10 +1,23 @@
 # Lot King Engine Editor & Car Drift Game
 
-Lot King is a browser drift game with the editor I am building around it.
+Lot King is a browser drift game and a local-first 3D engine/editor being built around it.
 
-It began as a small parking-lot drift prototype. Over time it turned into a bigger idea: a lightweight browser-only engine where I can build tracks, tune the player car, set up sounds, add assets, author camera sequences, and then play the result without leaving the browser.
+The simplest way to describe it is this: you can download the project, run it locally, build a small but fairly complete browser car game, export a playable version, and publish that build on your own site without a traditional install/build pipeline. The same editor can also be published as a read-only online demo, or used more creatively as a browser 3D authoring tool for interactive scenes, cinematic pages, prototypes, and small game-like web experiences.
 
-There is no build step right now. It is plain JavaScript, Three.js, Cannon.js, static HTML pages, LocalStorage and IndexedDB.
+It began as a small parking-lot drift prototype. Over time it turned into a bigger idea: a lightweight browser-only engine where I can build tracks, tune the player car, set up sounds, add assets, author camera sequences, wire gameplay logic, and then play the result without leaving the browser.
+
+The direction is inspired by tools like Unreal Engine, Blender, Premiere Pro and After Effects: not as a clone, and not with the same production scale, but with the same kind of ambition around visual editing, timeline-driven authoring, scene composition and node-based logic. The project stays deliberately simple at the tech level: plain JavaScript, Three.js, Cannon.js, static HTML pages, LocalStorage and IndexedDB. There is no build step right now.
+
+## What You Can Do With It
+
+- Make and test a browser drift/car game level locally.
+- Tune the player car, camera, lights, collision, effects, sound and HUD.
+- Import and place GLB/GLTF assets.
+- Build levels in an editor with outliner, inspector, transform tools and Play Preview.
+- Export a playable ZIP that contains the runtime and selected levels, without the editor.
+- Publish a read-only online demo project on a normal static site.
+- Use the editor creatively for 3D web scenes, interactive pages, cinematic shots or experimental browser experiences.
+- Prototype gameplay logic with the experimental Logic Element visual scripting system.
 
 ## Main Pages
 
@@ -28,6 +41,33 @@ The editor runs in the browser. It has projects, levels, an outliner, inspector,
 Levels saved in the editor become playable cards in the game.
 
 Play Preview runs the authored level inside the editor viewport. Simulate uses the same runtime/event/physics path while keeping the editor viewport, gizmo, panels and save workflow active, so level logic can be tested without taking control away from the editor.
+
+### Logic Element Visual Scripting
+
+`v0.6.5` adds the first complete Logic Element foundation. Logic Element is an experimental visual scripting system inspired by Unreal Engine Blueprints, but built for this browser engine and its JavaScript runtime.
+
+There are two main ideas:
+
+- **Level Logic** - a graph that belongs to the whole level.
+- **Logic Elements** - independent scene objects with their own graph, internal 3D viewport, hierarchy, components, variables and exposed settings.
+
+The normal scene Inspector only shows the Logic Element position, key runtime settings and variables the author deliberately exposes. The graph internals stay inside the Logic Element editor, closer to how a Blueprint instance works in Unreal.
+
+Current Logic Element work includes:
+
+- a floating Graph/Viewport editor
+- node graph pan/zoom, selection, comments, copy/paste and undo/redo
+- events, flow, variables, math, scene, transform, physics, collision, material, camera, audio, animation and debug nodes
+- Function/Subgraph support with input/output pins
+- Macro foundation and exec-only Collapse to Macro
+- exposed variables and per-instance overrides
+- reusable Logic Element assets with linked instances
+- internal 3D elements, GLB assets, colliders and animation clips
+- Play Preview/runtime execution without `eval`
+- Logic Profiler with breakpoints, step, timeline filtering and event details
+- JS/TS graph export, runtime-wrapper export and an early imperative compiler foundation for a safe node subset
+
+It is still marked **Logic Element (Experimental)** because the system is large and needs more browser hardening, more node coverage and more real projects before it can be considered stable.
 
 ### Project Workspace And Online Demo
 
@@ -72,16 +112,22 @@ Every slot has a fallback synth sound, so the car still works even before real s
 
 The editor can export a playable ZIP with the gameplay runtime, selected levels and referenced assets. The exported build does not include the editor.
 
+This is the simplest publishing path: build locally in `engine_editor.html`, export the playable package, upload it to a static host or your own site, and share the result as a browser game. If you want people to inspect a project instead, you can publish the whole editor as a read-only online demo with a bundled `.lkep.json` project.
+
 ## Current Status
 
 This is still experimental. The editor is already useful for building and testing levels, but a lot is still moving quickly.
 
-The main focus right now is:
+The `v0.6.5` milestone is implementation-complete for the current Logic Element scope. The next practical focus is manual/browser verification, presentation testing and follow-up hardening.
+
+The main focus areas after this milestone are:
 
 - making Cinema Studio solid enough for real in-engine footage
 - keeping the editor browser-only
 - improving save/load reliability
 - tightening the player car setup workflow
+- hardening Logic Element with more browser tests and real use cases
+- expanding the visual scripting compiler and macro system beyond the current foundation
 - cleaning up release notes and docs as the project grows
 - doing a proper asset provenance pass before any polished public release
 
@@ -97,6 +143,8 @@ For detailed version notes, see:
 - `js/lot-king.js` - runtime bridge, main game setup and the `LOT_KING` API.
 - `js/runtime/` - gameplay systems: physics, cameras, audio, HUD, track flow, input and related modules.
 - `js/editor/` - editor UI and tools.
+- `js/logic/` - Logic Element graph model, node registry, validator, runtime, services, templates and exporter.
+- `js/plugins/` - plugin host foundation and built-in plugin descriptors.
 - `js/engine/scene-store.js` - project/level persistence, assets, player logic, sound sets and export data.
 - `demo/` - optional bundled online demo project loaded on hosted origins.
 - `css/` - runtime and editor styling.

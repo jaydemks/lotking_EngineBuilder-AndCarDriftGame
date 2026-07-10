@@ -334,6 +334,27 @@ function create(deps){
         if(!entry) continue;
         if(entry.kind === 'glb') await moveDataUrlToAssetDb(entry, 'src', entry.name || entry.id || 'glb', 'dbKey');
         if(entry.kind === 'texture' && entry.props) await moveDataUrlToAssetDb(entry.props, 'src', entry.name || entry.id || 'texture', 'dbKey');
+        if(entry.kind === 'logicElement'){
+          const logicScene = entry.graph && entry.graph.logicScene;
+          const elements = logicScene ? [logicScene.root].concat(logicScene.elements || []) : [];
+          for(const element of elements){
+            if(element && element.asset) await moveDataUrlToAssetDb(element.asset, 'src', element.name || element.id || 'logic-mesh', 'dbKey');
+          }
+          const assetScene = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.logicScene;
+          const assetElements = assetScene ? [assetScene.root].concat(assetScene.elements || []) : [];
+          for(const element of assetElements){
+            if(element && element.asset) await moveDataUrlToAssetDb(element.asset, 'src', element.name || element.id || 'logic-asset-mesh', 'dbKey');
+          }
+        }
+      }
+    }
+    const musicLibraries = scene.ui && scene.ui.musicLibraries;
+    if(musicLibraries){
+      for(const groupName of ['radio', 'menu']){
+        const tracks = Array.isArray(musicLibraries[groupName]) ? musicLibraries[groupName] : [];
+        for(const track of tracks){
+          await moveDataUrlToAssetDb(track, 'url', track.fileName || track.title || track.id || 'music-track', 'dbKey');
+        }
       }
     }
     return project;

@@ -5,9 +5,16 @@
 (function(){
 'use strict';
 
-function create(){
-  return `
-  <div id="lkTopbar">
+	function create(){
+	  return `
+	  <div id="lkAppMenuBar">
+	    <button data-app-menu="file" type="button">File</button>
+	    <button data-app-menu="edit" type="button">Edit</button>
+	    <button data-app-menu="view" type="button">View</button>
+	    <button data-app-menu="tools" type="button">Tools</button>
+	    <button data-app-menu="plugins" type="button">Plugins</button>
+	  </div>
+	  <div id="lkTopbar">
     <button id="lkLogoBtn" class="lk-logo" type="button" title="Editor settings">⚙ ENGINE EDITOR</button>
     <div class="lk-tools">
       <button data-tool="select" type="button" title="Select (Q)">☝</button>
@@ -86,7 +93,7 @@ function create(){
       <input id="lkSearch" type="search" placeholder="search...">
       <select id="lkFilter">
         <option value="all">All</option><option value="mesh">Meshes</option><option value="light">Lights</option>
-        <option value="effect">Effects</option><option value="camera">Cameras</option><option value="cinemaStudio">Cinema</option><option value="added">Added</option><option value="builtin">Built-in</option>
+        <option value="effect">Effects</option><option value="camera">Cameras</option><option value="cinemaStudio">Cinema</option><option value="logicElement">Logic</option><option value="added">Added</option><option value="builtin">Built-in</option>
       </select>
       <button id="lkViewGrid" type="button" title="Grid view">▦</button>
       <button id="lkViewList" class="on" type="button" title="List view">☰</button>
@@ -94,6 +101,7 @@ function create(){
     </div>
     <div id="lkPinned">
       <div class="lk-pin" data-special="env"><span class="lk-pin-ic">🌍</span><span class="lk-pin-label">Environment</span></div>
+      <div class="lk-pin" data-special="logic"><span class="lk-pin-ic">◇</span><span class="lk-pin-label">Level Logic</span></div>
       <div class="lk-pin" data-special="player"><span class="lk-pin-ic">🚗</span><span class="lk-pin-label">player_car (Logic)</span></div>
       <div class="lk-pin" data-special="hud"><span class="lk-pin-ic">▣</span><span class="lk-pin-label">HUD / Radio TAB</span></div>
     </div>
@@ -117,7 +125,7 @@ function create(){
       </span>
       <button id="lkAssetRefresh" type="button">Refresh</button>
       <span id="lkAssetsFilters">
-        <label><input data-asset-filter="blueprint" type="checkbox" checked> player car logic</label>
+        <label><input data-asset-filter="blueprint" type="checkbox" checked> blueprints / logic elements</label>
         <label><input data-asset-filter="sound" type="checkbox" checked> sound</label>
         <label><input data-asset-filter="levels" type="checkbox" checked> levels</label>
         <label><input data-asset-filter="glb" type="checkbox" checked> glb</label>
@@ -267,9 +275,24 @@ function create(){
       <div data-prefs-sec="controls" class="lk-prefs-sec"><div id="lkInputSettingsBody" class="lk-input-settings"></div></div>
       <div data-prefs-sec="viewport" class="lk-prefs-sec"><label class="lk-prefs-row lk-prefs-color"><input id="lkPrefLetterbox" type="color" value="#141518"><span><b data-pref-i18n="letterboxName">Frame background</b><i data-pref-i18n="letterboxDesc">Colour outside the player-camera frame (letterbox / crop). Saved with the level.</i></span></label></div>
     </div>
-  </div></div>
-  <div id="lkCtx"></div>
-  <input id="lkAssetInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
+	  </div></div>
+	  <div id="lkCtx"></div>
+	  <div id="lkPluginPanel" class="lk-plugin-panel" aria-hidden="true">
+	    <div class="lk-plugin-head">
+	      <div><b>Plugins</b><span>Built-in and extension modules</span></div>
+	      <button id="lkPluginClose" type="button" title="Close">×</button>
+	    </div>
+	    <div id="lkPluginList" class="lk-plugin-list"></div>
+	  </div>
+	  <div id="lkLogicProfilerPanel" class="lk-plugin-panel lk-logic-profiler-panel" aria-hidden="true">
+	    <div class="lk-plugin-head">
+	      <div><b>Logic Profiler</b><span>Runtime stats from active Logic Element graphs</span></div>
+	      <button id="lkLogicProfilerRefresh" type="button" title="Refresh">↻</button>
+	      <button id="lkLogicProfilerClose" type="button" title="Close">×</button>
+	    </div>
+	    <div id="lkLogicProfilerBody" class="lk-plugin-list"></div>
+	  </div>
+	  <input id="lkAssetInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
   <input id="lkGlbInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
   <input id="lkReplaceInput" type="file" accept=".glb,.gltf" hidden>
   <input id="lkPlayerModelInput" type="file" accept=".glb,.gltf" hidden>

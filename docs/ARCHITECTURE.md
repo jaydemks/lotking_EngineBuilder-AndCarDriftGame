@@ -1,8 +1,8 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture after the editor/runtime split, the v0.6.2 Cinema Studio pass, and the v0.6.3 online-demo/workspace stabilization pass.
+This document describes the current project architecture after the editor/runtime split, the Cinema Studio pass, the online-demo/workspace stabilization pass, and the v0.6.5 Logic Element foundation.
 
-The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
+The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
 ## High-Level Shape
 
@@ -18,7 +18,8 @@ The project is still intentionally simple at the platform level: plain JavaScrip
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
 - `demo/demo-project.lkep.json` is the optional bundled online demo project. On non-localhost origins, `scene-store.js` loads it automatically into the browser-local level library as a read-only demo.
 - `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface. Direct editor pages and the lazy loader must keep the same module order.
-- `js/editor/` contains the modular Engine Editor: core state, layout, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, viewport layout, Cinema Studio, playable export, Sound Designer, input settings, and preview/runtime handoff.
+- `js/plugins/` contains the plugin host API, plugin manager, and built-in plugin descriptors. Logic Element is registered there as a built-in plugin while its implementation modules remain in their existing editor/runtime/store locations during the first migration pass.
+- `js/editor/` contains the modular Engine Editor: core state, layout, application menu bar, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, viewport layout, Cinema Studio, playable export, Sound Designer, input settings, and preview/runtime handoff.
 - `css/lot-king.css` styles runtime UI, HUD, menus, touch controls, mapping windows, and shared overlays.
 - `css/editor.css` styles the Engine Editor, inspector panels, editor settings, asset dock, outliner, Sound Designer, and editor-specific overlays.
 - `docs/` contains architecture docs and release history.
@@ -55,6 +56,8 @@ Important `LOT_KING` areas include:
 - `LOT_KING.hooks.frameOverride` - lets the editor take over rendering while editing.
 - `LOT_KING.hooks.frame` - shared per-frame hooks that still run during editor and game loops.
 
+Editor mode also exposes a small `LOT_KING.editor` bridge for automation/debugging: enter/exit, editor state, warmup requests, dirty marking, viewport rect, left-panel switching, and asset-panel refresh. This bridge is intentionally small and should not become a backdoor for runtime modules to manipulate editor internals.
+
 ## Persistence and Project Data
 
 `js/engine/scene-store.js` exposes `window.LK_STORE` and `window.LK_ASSET_BLOBS`.
@@ -68,6 +71,7 @@ The store is responsible for:
 - imported GLB/GLTF metadata;
 - IndexedDB-backed asset blobs through `LK_ASSET_BLOBS`;
 - player blueprints;
+- reusable Logic Element definitions, linked scene instances, exposed-variable overrides, and embedded portable fallbacks;
 - engine sound sets;
 - bundled online-demo loading from `demo/demo-project.lkep.json`;
 - localizing embedded portable `data:` assets into IndexedDB-backed blob keys when applying an online demo project;
@@ -80,6 +84,64 @@ Editor projects are browser-based by default. `js/editor/project-io.js` owns the
 `js/runtime/project-workspace.js` adds an editor-only project workspace layer on top of that storage model. Locally, the editor can use normal browser storage or synchronize a project file through the File System Access API where supported. Online, the workspace becomes a read-only demo surface: uploads, saves, deletes, imports, asset edits, and server writes are blocked, while `.lkep.json` export remains allowed as a browser download.
 
 The bundled demo path is intentionally static-host friendly. The site owner exports a local project as a portable LKEP, uploads it as `demo/demo-project.lkep.json`, and the online editor/game loads that project for demonstration. No server database, PHP upload endpoint, or shared asset write path is required.
+
+## Logic Element Architecture
+
+Logic Element visual scripting is split into data, validation, controlled execution, scene integration, and authoring UI. Editor code never executes arbitrary graph text: saved graph JSON is normalized, validated against the node registry, and interpreted through engine services. In v0.6.5 it is also registered as the first built-in plugin through `js/plugins/logic-element-plugin.js` with the public title `Logic Element (Experimental)`; this exposes its capabilities to the plugin manager without yet moving the full implementation into a physical plugin folder.
+
+Core modules:
+
+- `js/logic/logic-graph.js` owns the versioned graph JSON shape, normalization, cloning, starter graphs, nodes, edges, variables, comments, reusable subgraphs, and the internal `logicScene` model.
+- `js/logic/logic-exporter.js` exports graph JSON as portable JavaScript or TypeScript data modules with metadata and dependency manifests. It can also emit a runtime-wrapper helper that instantiates the exported graph through `LK_LOGIC_RUNTIME`, plus a bounded imperative runner foundation for a safe subset of nodes. It does not use `eval`; full imperative coverage for the entire node catalog remains future work.
+- `js/logic/logic-registry.js` owns registered node definitions and their input/output metadata.
+- `js/logic/logic-validator.js` produces structured errors and non-blocking warnings. Errors cover invalid graph structure such as unknown nodes, missing pins, incompatible wires, duplicate ids, execution cycles, and broken subgraph internals. Warnings cover authoring problems such as unreachable execution nodes, disconnected events, missing references, unknown variables/elements/subgraphs, ambiguous data inputs, and unsafe defaults.
+- `js/logic/logic-runtime.js` interprets validated graphs without `eval` or `new Function`, owns runtime variable state and timers, enforces an execution-step cap, executes reusable subgraphs through the `Call Subgraph` node and `Entry` custom event convention, and exposes lightweight profiling stats plus a compact event/node/error timeline.
+- `js/logic/logic-services.js` is the controlled bridge from nodes to Three.js, Cannon, input, audio, camera, materials, and scene lookup.
+- `js/logic/logic-nodes-mvp.js` registers the Part 1 node catalog.
+- `js/logic/logic-templates.js` provides built-in starter Logic Element templates surfaced in the Assets panel as local editable copies.
+- `js/runtime/logic-elements-runner.js` creates Level Logic and scene Logic Element runtimes, routes frame/fixed-frame/input/collision events, aggregates runtime profiling stats, and disposes graph runtimes cleanly.
+- `js/editor/logic-elements-inspector.js` owns the dedicated Graph/Viewport authoring window, hierarchy/components/variables/functions UI, contextual diagnostics, graph interaction, and the normal Inspector surface for exposed values.
+- `tests/logic-core.test.js` is the browser-free regression suite for graph validation, contextual diagnostics, runtime event flow, variable state, interval ticks, reusable subgraph execution, built-in template validation, and template clone isolation.
+- `docs/logic-element-test-matrix.md` tracks implementation-side test coverage and the remaining technical sign-off matrix.
+
+There are two graph scopes. Level Logic is stored once in `scene.logic.levelGraph` and has no scene owner. A scene Logic Element is stored as `added.kind = "logicElement"`, owns a transform in the main scene, and resolves `Root` to that owner while additional internal elements remain locked children authored inside the Logic Element viewport.
+
+Reusable Logic Element data deliberately separates definition from instance state:
+
+- the shared definition contains graph nodes, wires, variables, comments, `logicScene`, components, colliders, and animation settings;
+- a linked scene instance stores `logicAssetId`, `logicLinked`, and `variableOverrides`;
+- only variables marked `exposed` can be overridden by an instance;
+- the resolved graph applies those overrides without mutating the shared definition;
+- saved reusable definitions include a `definitionVersion` and dependency manifest collected from internal mesh assets plus texture/audio node references;
+- reusable definitions are normalized through the shared graph helper during list/get/save/import, so legacy assets can be migrated to the current definition version without duplicating migration logic in editor UI code;
+- the Logic Element Graph Inspector surfaces the current dependency manifest for author review before save/export;
+- dependency entries can copy a review report, perform a base relink to compatible library assets for internal meshes and current texture/audio asset-ref nodes, or mark missing references as intentional manual/external fallbacks;
+- asset-aware graph pins can store either manual refs or small asset-library refs with `id/key/dbKey/src`, with runtime services resolving supported blob-backed refs through `LK_ASSET_BLOBS`;
+- each saved instance embeds the current definition and a resolved graph fallback so LKEP and playable exports remain portable if the original browser asset library is absent;
+- `Make local` copies the resolved graph and removes the link, while `Reset overrides` returns exposed values to shared defaults.
+
+Editing a linked definition propagates it to live instances. The normal scene Inspector only changes per-instance exposed values; graph internals stay in the Logic Element editor. Validation warnings are visible on node cards, in the selected-node Inspector, and in graph status, but only validation errors prevent runtime creation.
+
+Built-in templates are intentionally not linked definitions. They are listed in Assets under Logic Elements, but placing one creates a normal local Logic Element graph copy. This keeps demos fast and safe: users can edit the placed template freely, then promote it to a reusable asset only when they want shared linked instances.
+
+Functions/Subgraphs are stored inside the graph as reusable fragments. The authoring UI creates an `Entry` custom event automatically, manages function metadata from the sidebar/Inspector, inserts `Call Subgraph` nodes into the main graph, and can switch the canvas between `Main Graph` and a selected Function. The active canvas graph owns local undo/redo, copy/paste, delete and local run, while persistence and the internal `logicScene` stay rooted on the owning Logic Element graph. Function metadata can define named inputs/outputs; `Function Input` reads named payload fields, `Function Return` writes scalar or named multi-output return values, and the selected Function's metadata appears as dynamic input/output pins on the call node. The validator also checks duplicate Function ports, undeclared input/return names, and declared outputs that are never written.
+
+Macros currently reuse the Function/Subgraph runtime path with explicit `macro` metadata. The editor can create a non-destructive Macro from selected graph nodes and insert a `Call Subgraph` node for it, or collapse selected exec-only chains into a Macro while replacing the original nodes with a `Call Macro` node and preserving incoming/outgoing exec flow. Data-pin collapse, multiple external macro outputs and a richer macro library remain advanced macro work.
+
+Node breakpoints are runtime-aware debugger markers. The editor stores `node.data.breakpoint`, renders a badge on marked nodes, and the runtime records breakpoint hits in stats/timeline for the Logic Profiler. When `pauseOnBreakpoint` is enabled, execution pauses before the marked node and can be resumed through the runner/profiler or advanced one node at a time with `Step Breakpoint`. A richer debugger inspector stack remains future debugger work.
+
+The core suite runs directly with Node (`node tests/logic-core.test.js`) and does not require a bundler. Browser interaction, Three.js viewport rendering, imported GLB behavior, and Cannon integration still require browser-level coverage.
+
+## Plugin Host
+
+The editor now has a first plugin layer intended for future built-in and local extension modules:
+
+- `js/plugins/plugin-api.js` exposes the registration API passed to each plugin.
+- `js/plugins/plugin-manager.js` tracks registered plugins, enabled state, commands, menu entries, scene types, asset types, inspector providers, runtime hooks, and export hooks.
+- `js/editor/editor-menu-bar.js` provides a software-style top menu bar (`File`, `Edit`, `View`, `Tools`, `Plugins`), a non-modal Plugin Manager panel, and the Logic Profiler panel backed by runtime runner stats and timeline samples.
+- `js/plugins/logic-element-plugin.js` registers `Logic Element (Experimental)` as a built-in plugin and declares its scene type, asset type, inspector provider, runtime hook, export hook, and Level Logic command.
+
+This is intentionally a host-first migration. Existing Logic Element code still lives in `js/logic/`, `js/runtime/logic-elements-runner.js`, `js/editor/logic-elements-inspector.js`, and `js/engine/scene-store.js`, so the built-in Logic Element plugin is always enabled for now. Real enable/disable requires moving implementation files and hardcoded editor/runtime/store/export hooks behind plugin registration, then adding missing-plugin fallbacks for projects that reference disabled or unavailable plugins.
 
 ## Input Architecture
 
@@ -143,6 +205,7 @@ Major editor areas:
 - Project and levels: `project-io.js`, `level-manager.js`, `dialogs.js`, `status-ui.js`.
 - Player systems: `player-blueprints.js`, `player-camera-inspector.js`, `player-lights-inspector.js`, `player-attachments-inspector.js`, `player-setup-inspector.js`.
 - Inspectors: `inspector-controller.js`, `inspector-ui.js`, `object-inspector.js`, `material-editor.js`, `hud-inspector.js`, `environment-inspector.js`, `music-library-panel.js`.
+- Logic authoring: `logic-elements-inspector.js` plus the editor-independent modules under `js/logic/`.
 - Input authoring: `input-settings.js` plus shared runtime mapping modules.
 - Runtime handoff and preview: `editor-runtime.js`.
 - Sequencer/cameras: `cinema-studio.js`.

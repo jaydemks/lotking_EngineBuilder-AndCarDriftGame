@@ -21,8 +21,22 @@ function create(deps){
     return true;
   }
 
+  function logicElementOwnerOf(o){
+    let n = o;
+    while(n){
+      if(n.userData && (n.userData.editorType === 'logicElement' || n.userData.addedEntry && n.userData.addedEntry.kind === 'logicElement')) return n;
+      n = n.parent;
+    }
+    return null;
+  }
+
+  function selectableObject(o){
+    if(o && o.userData && o.userData.logicElementInternal) return logicElementOwnerOf(o) || o;
+    return o;
+  }
+
   function isBlueprintPart(o){
-    return !o || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
+    return !o || !o.userData || o.userData.logicElementInternal || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
       o.userData.editorType === 'playerEffect' || o.userData.editorType === 'playerSkid' ||
       o.userData.editorType === 'playerDataWidget';
   }
@@ -75,6 +89,7 @@ function create(deps){
   }
 
   function selectObject(o){
+    o = selectableObject(o);
     if(ED.selected === o && ED.special === null && !ED.colliderEdit && !ED.playerColliderEdit && !(ED.multiSelected && ED.multiSelected.length)) return;
     deps.clearHoverPickHelper();
     ED.multiSelected = null;
@@ -185,7 +200,7 @@ function create(deps){
   }
 
   function selectMultiObjects(objects){
-    const list = (objects || []).filter(o => o && !isBlueprintPart(o));
+    const list = (objects || []).map(selectableObject).filter(o => o && !isBlueprintPart(o));
     const unique = [];
     list.forEach(o => { if(!unique.includes(o)) unique.push(o); });
     if(!unique.length) return;

@@ -42,12 +42,24 @@ function create(deps){
     row.append(addBtn, refreshBtn, input);
     addBtn.addEventListener('click', () => input.click());
     refreshBtn.addEventListener('click', () => render());
-    input.addEventListener('change', e => {
-      if(api.addTracks) api.addTracks(e.target.files);
+    input.addEventListener('change', async e => {
+      const files = Array.from(e.target.files || []);
       e.target.value = '';
-      render();
-      markDirty();
-      status('Music library updated');
+      if(!files.length || !api.addTracks) return;
+      addBtn.disabled = true;
+      status('Importing audio...');
+      try {
+        const added = await api.addTracks(files);
+        render();
+        if(added && added.length){
+          markDirty();
+          status('Music library updated and ready to save');
+        } else status('No compatible audio files selected');
+      } catch(err){
+        status('Audio import failed: ' + (err && err.message ? err.message : err));
+      } finally {
+        addBtn.disabled = false;
+      }
     });
     filterInput.addEventListener('input', render);
 
@@ -71,7 +83,7 @@ function create(deps){
         const name = el('<div class="lk-asset-name"></div>');
         name.textContent = (t.artist || 'Unknown') + ' - ' + (t.title || 'Untitled');
         const sub = el('<div class="lk-asset-sub"></div>');
-        sub.textContent = (t.fileName || t.source || 'Default') + (t.uploaded ? ' · session upload' : '');
+        sub.textContent = (t.fileName || t.source || 'Default') + (t.persisted ? ' · project asset' : (t.uploaded ? ' · unsaved upload' : ''));
         meta.append(name, sub);
         const actions = el('<div class="lk-asset-actions"></div>');
         const play = el('<button type="button">Load</button>');

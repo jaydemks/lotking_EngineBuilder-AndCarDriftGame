@@ -88,6 +88,18 @@ const CSS = `
 .lksd-test button.hold:active, .lksd-test button.hold.on { filter:brightness(1.35); transform:scale(.97); }
 .lksd-boost { width:70px; height:8px; border-radius:4px; background:#1a2030; overflow:hidden; }
 .lksd-boost i { display:block; height:100%; width:0%; background:linear-gradient(90deg,#5fd7ff,#ff7d54); transition:width .08s; }
+.lksd-confirm { position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center;
+  background:rgba(4,7,12,.62); backdrop-filter:blur(3px); }
+.lksd-confirm-box { width:min(440px, calc(100vw - 50px)); border-radius:12px; border:1px solid #33405a;
+  background:linear-gradient(180deg,#171e2d,#0d121c); box-shadow:0 22px 60px rgba(0,0,0,.62); padding:18px; }
+.lksd-confirm-title { color:#ffd166; font-weight:900; letter-spacing:1px; font-size:13px; margin-bottom:8px; }
+.lksd-confirm-message { color:#dfe5f1; line-height:1.5; font-size:12px; margin-bottom:14px; }
+.lksd-confirm-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.lksd-confirm-actions button { height:31px; border-radius:7px; border:1px solid #2b3446; background:#1b2130;
+  color:#cfd6e4; cursor:pointer; font-size:12px; font-weight:800; padding:0 12px; }
+.lksd-confirm-actions button:hover { border-color:#ffd166; color:#ffd166; }
+.lksd-confirm-actions button.save { border-color:#2f9e5f; color:#4be3a0; }
+.lksd-confirm-actions button.danger { border-color:#704052; color:#ff9db1; }
 `;
 
 function installStyles(){

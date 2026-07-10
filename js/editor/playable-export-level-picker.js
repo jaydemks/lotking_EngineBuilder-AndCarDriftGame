@@ -14,12 +14,13 @@ function create(deps){
   const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   async function pick(levels, activeId){
-    const overlay = $('#lkConfirmOverlay');
-    const title = $('#lkConfirmTitle');
-    const message = $('#lkConfirmMessage');
-    const ok = $('#lkConfirmOk');
-    const cancel = $('#lkConfirmCancel');
+    const overlay = document.getElementById('lkConfirmOverlay') || $('#lkConfirmOverlay');
+    const title = document.getElementById('lkConfirmTitle') || $('#lkConfirmTitle');
+    const message = document.getElementById('lkConfirmMessage') || $('#lkConfirmMessage');
+    const ok = document.getElementById('lkConfirmOk') || $('#lkConfirmOk');
+    const cancel = document.getElementById('lkConfirmCancel') || $('#lkConfirmCancel');
     if(!overlay || !title || !message || !ok || !cancel) return null;
+    if(overlay.parentNode !== document.body) document.body.appendChild(overlay);
 
     const list = Array.isArray(levels) ? levels.slice() : [];
     if(!list.length) return null;

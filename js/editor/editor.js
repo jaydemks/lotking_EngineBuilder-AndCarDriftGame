@@ -83,11 +83,14 @@ let playerAttachmentsInspector = null;
 let playerSetupInspector = null;
 let hudInspector = null;
 let environmentInspector = null;
+let logicInspector = null;
 let projectIo = null;
 let inputSettings = null;
 let addActions = null;
 let historyManager = null;
 let sceneMenuActions = null;
+let pluginManager = null;
+let appMenuBar = null;
 
 function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight').textContent = msg || ''; }
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
@@ -227,7 +230,16 @@ quickAudio = window.LK_EDITOR_QUICK_AUDIO && window.LK_EDITOR_QUICK_AUDIO.create
 
 statusUi = window.LK_EDITOR_STATUS_UI && window.LK_EDITOR_STATUS_UI.create({root});
 dialogUi = window.LK_EDITOR_DIALOGS && window.LK_EDITOR_DIALOGS.create({root});
+window.LK_EDITOR_CONFIRM = opts => confirmEditorAction(opts);
 contextMenu = window.LK_EDITOR_CONTEXT_MENU && window.LK_EDITOR_CONTEXT_MENU.create({ctxEl: $('#lkCtx')});
+pluginManager = window.LK_PLUGIN_MANAGER && window.LK_PLUGIN_MANAGER.create({
+  GAME,
+  STORE,
+  ED,
+  status,
+  buildInspector,
+});
+if(pluginManager && window.LK_LOGIC_ELEMENT_PLUGIN) pluginManager.register(window.LK_LOGIC_ELEMENT_PLUGIN);
 lockEditorTrackSelector();
 assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status});
 thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({THREE, active: () => ED.active && !ED.playPreview});
@@ -756,6 +768,39 @@ function importProjectFile(file){ return projectIo.importProjectFile(file); }
 function setProjectImportTarget(target){ return projectIo.setProjectImportTarget(target); }
 function setProjectsOverlayOpen(open){ return projectIo.setProjectsOverlayOpen(open); }
 function createBrowserProject(){ return projectIo.createBrowserProject(); }
+appMenuBar = window.LK_EDITOR_MENU_BAR && window.LK_EDITOR_MENU_BAR.create({
+  root,
+  GAME,
+  ED,
+  $,
+  pluginManager,
+  openMenu,
+  status,
+  newTrack,
+  saveScene,
+  saveAsTrack,
+  setProjectsOverlayOpen,
+  setLevelsOverlayOpen,
+  importProject:() => { setProjectImportTarget('project'); $('#lkProjectInput').click(); },
+  exportProject,
+  exportPlayable:() => {
+    if(playableExport) playableExport.exportCurrentPlayableProjectZip();
+  },
+  exitEditor,
+  undo,
+  redo,
+  requestDeleteSelection,
+  deselect,
+  focusSelected,
+  setGrid,
+  setLeftMode,
+  restoreFloatingPanels,
+  spawnPointAhead,
+  addMenuItems,
+  openCinemaTimeline,
+  openSettings:() => setPrefsOpen(true),
+});
+if(pluginManager && pluginManager.env) pluginManager.env.appMenuBar = appMenuBar;
 // ------------------------------------------------ outliner
 let viewportReplaceTarget = null;
 assetDnd = window.LK_EDITOR_ASSET_DND && window.LK_EDITOR_ASSET_DND.create({
@@ -818,6 +863,7 @@ root.querySelectorAll('.lk-pin').forEach(p => {
   p.addEventListener('click', () => {
     if(p.dataset.special === 'env') selectSpecial('env');
     else if(p.dataset.special === 'hud') selectSpecial('hud');
+    else if(p.dataset.special === 'logic') selectSpecial('logic');
     else selectObject(GAME.player.car);
   });
 });
@@ -837,6 +883,7 @@ assetCatalog = window.LK_EDITOR_ASSET_CATALOG && window.LK_EDITOR_ASSET_CATALOG.
   setAssetLoading,
   placeProjectAsset,
   placeImportedAsset,
+  addLogicElement:(at, asset) => addLogicElement(at, asset),
   spawnPointAhead,
   status,
   duplicateEntity,
@@ -1255,6 +1302,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   addTexture,
   addCamera,
   addCinemaStudio,
+  addLogicElement,
   openGlbImportAt,
   setTool,
   selectObject,
@@ -1324,6 +1372,7 @@ function addText(kind, at){ return addActions.addText(kind, at); }
 function addTexture(kind, at, asset){ return addActions.addTexture(kind, at, asset); }
 function addCamera(at){ return addActions.addCamera(at); }
 function addCinemaStudio(at){ return addActions.addCinemaStudio(at); }
+function addLogicElement(at, asset){ return addActions.addLogicElement(at, asset); }
 function finishAdd(obj){ return addActions.finishAdd(obj); }
 function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
 function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }
@@ -1502,6 +1551,25 @@ environmentInspector = window.LK_EDITOR_ENVIRONMENT_INSPECTOR && window.LK_EDITO
   btnRow,
   el,
 });
+logicInspector = window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR && window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR.create({
+  GAME,
+  STORE,
+  ED,
+  el,
+  section,
+  btnRow,
+  checkRow,
+  markDirty,
+  buildInspector,
+  refreshOutliner,
+  status,
+  confirmEditorAction,
+  promptEditorAction,
+  refreshAssetsPanel,
+  assetLibraryLoad,
+  beginTransformHistory,
+  commitTransformHistory,
+});
 inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_INSPECTOR_CONTROLLER.create({
   THREE,
   GAME,
@@ -1522,6 +1590,7 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
   objectInspector,
   hudInspector,
   environmentInspector,
+  logicInspector,
   playerCameraInspector,
   playerLightsInspector,
   playerAttachmentsInspector,
@@ -1646,6 +1715,15 @@ addEventListener('lotking:radiohudchange', e => {
   if(d.before && d.after) queueHudHistory(d.before, d.after, hudPatchLabel(d.patch));
 });
 
-GAME.editor = {enter: enterEditor, exit: exitEditor, state: ED, requestWarmup: requestEditorWarmup, markDirty, viewportRect: editorViewportRect};
+GAME.editor = {
+  enter: enterEditor,
+  exit: exitEditor,
+  state: ED,
+  requestWarmup: requestEditorWarmup,
+  markDirty,
+  viewportRect: editorViewportRect,
+  setLeftMode,
+  refreshAssetsPanel,
+};
 console.info('LotKing: engine editor ready');
 })();
