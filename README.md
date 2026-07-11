@@ -1,5 +1,7 @@
 # Lot King Engine Editor & Car Drift Game
 
+[▶ Watch the Lot King Engine demo video](docs/media/lot-king-engine-demo.mp4)
+
 Lot King is a browser drift game and a local-first 3D engine/editor being built around it.
 
 The simplest way to describe it is this: you can download the project, run it locally, build a small but fairly complete browser car game, export a playable version, and publish that build on your own site without a traditional install/build pipeline. The same editor can also be published as a read-only online demo, or used more creatively as a browser 3D authoring tool for interactive scenes, cinematic pages, prototypes, and small game-like web experiences.
