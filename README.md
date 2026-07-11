@@ -1,6 +1,6 @@
 # Lot King Engine Editor & Car Drift Game
 
-[▶ Watch the Lot King Engine demo video](docs/media/lot-king-engine-demo.mp4)
+https://github.com/user-attachments/assets/6ccccc17-4816-4251-8ef9-867ab7ec009e
 
 ## Project Status And Demo Availability
 
