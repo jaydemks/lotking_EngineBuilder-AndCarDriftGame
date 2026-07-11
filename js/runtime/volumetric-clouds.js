@@ -172,7 +172,23 @@ function create(deps){
   dome.visible = P.enabled;
   scene.add(dome);
 
+  function normalizeParams(){
+    P.enabled = P.enabled === true;
+    P.coverage = clamp(Number(P.coverage) || 0, 0, 1);
+    P.density = clamp(Number(P.density) || 0, 0, 3);
+    P.scale = clamp(Number(P.scale) || DEFAULTS.scale, .2, 6);
+    P.detail = clamp(Number(P.detail) || 0, 0, 1);
+    P.speed = clamp(Number(P.speed) || 0, 0, 6);
+    P.windAngle = ((Number(P.windAngle) || 0) % 360 + 360) % 360;
+    P.altitude = clamp(Number(P.altitude) || DEFAULTS.altitude, 40, 400);
+    P.thickness = clamp(Number(P.thickness) || DEFAULTS.thickness, 10, 260);
+    P.quality = clamp(Math.round(Number(P.quality) || DEFAULTS.quality), 6, 40);
+    P.absorption = clamp(Number(P.absorption) || DEFAULTS.absorption, .2, 3);
+    P.opacity = clamp(Number(P.opacity) || 0, 0, 1);
+  }
+
   function applyParams(){
+    normalizeParams();
     uniforms.uCoverage.value = clamp(P.coverage, 0, 1);
     uniforms.uDensity.value = clamp(P.density, 0, 3);
     uniforms.uScale.value = clamp(P.scale, .2, 6);

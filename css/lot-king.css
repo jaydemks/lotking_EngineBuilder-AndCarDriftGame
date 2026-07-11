@@ -117,10 +117,9 @@ html,body {
       linear-gradient(rgba(6,8,13,.54), rgba(6,8,13,.82)),
       radial-gradient(circle at 50% 22%, rgba(255,209,102,.24), transparent 30%),
       radial-gradient(circle at 62% 44%, rgba(239,71,111,.26), transparent 36%),
-      image-set(url("../media/images/menu_bg.png") type("image/png")),
       linear-gradient(145deg, #171119 0%, #101522 42%, #07080c 100%);
-    background-size:cover, auto, auto, cover, auto;
-    background-position:center, center, center, center, center;
+    background-size:cover, auto, auto, auto;
+    background-position:center, center, center, center;
     transition:opacity .6s ease; color:#e8ecf5;
   }
   #overlay.hidden { opacity:0; pointer-events:none; }
@@ -169,6 +168,11 @@ html,body {
   }
   #controls-list { display:grid; grid-template-columns:auto auto; gap:6px 18px; font-size:14px; color:#c6cddd; margin-top:6px; }
   #controls-list b { color:#ffd166; font-weight:600; }
+  #controls-list.editor-loading-controls { grid-template-columns:minmax(280px,1fr) minmax(280px,1fr); gap:18px; align-items:start; }
+  .loading-controls-column { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; padding:12px 15px; border:1px solid rgba(157,180,255,.25); border-radius:7px; background:rgba(8,11,18,.42); }
+  .loading-controls-column > strong { grid-column:1 / -1; padding-bottom:6px; color:#9db4ff; letter-spacing:2px; font-size:11px; }
+  .loading-controls-column.gameplay-controls > strong { color:#ef9caf; }
+  @media (max-width:760px){ #controls-list.editor-loading-controls { grid-template-columns:1fr; max-height:48vh; overflow:auto; } }
   #startBtn {
     margin-top:14px; padding:14px 46px; font-size:18px; letter-spacing:3px; font-weight:700;
     color:#0b0d12; background:linear-gradient(90deg,#ffd166,#ef476f); border:none; border-radius:6px;
@@ -325,10 +329,9 @@ html,body {
       linear-gradient(rgba(6,8,13,.54), rgba(6,8,13,.86)),
       radial-gradient(circle at 50% 22%, rgba(255,209,102,.24), transparent 30%),
       radial-gradient(circle at 62% 44%, rgba(239,71,111,.26), transparent 36%),
-      image-set(url("../media/images/menu_bg.png") type("image/png")),
       linear-gradient(145deg, #171119 0%, #101522 42%, #07080c 100%);
-    background-size:cover, auto, auto, cover, auto;
-    background-position:center, center, center, center, center;
+    background-size:cover, auto, auto, auto;
+    background-position:center, center, center, center;
     backdrop-filter:blur(5px);
   }
   .lk-workspace-overlay.open { display:flex; }
@@ -885,6 +888,26 @@ html,body {
   .settingsSection.on { display:block; }
   .settingsRow { padding:12px 0; border-top:1px solid rgba(255,255,255,.08); }
   .settingsRow.hidden { display:none; }
+  #lkVideoApplyOverlay {
+    position:fixed; inset:0; z-index:10000; display:flex; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none; background:rgba(4,7,12,.58); backdrop-filter:blur(5px);
+    transition:opacity .16s ease;
+  }
+  #lkVideoApplyOverlay.on { opacity:1; pointer-events:auto; }
+  .lk-video-apply-card {
+    min-width:min(330px,calc(100vw - 36px)); padding:22px 26px; border-radius:10px;
+    display:grid; grid-template-columns:34px 1fr; column-gap:14px; align-items:center;
+    color:#eef3ff; background:rgba(12,17,27,.94); border:1px solid rgba(157,180,255,.3);
+    box-shadow:0 24px 80px rgba(0,0,0,.55);
+  }
+  .lk-video-apply-card b { font-size:14px; letter-spacing:.5px; }
+  .lk-video-apply-card small { grid-column:2; color:#9aa7bf; margin-top:3px; }
+  .lk-video-apply-spinner {
+    grid-row:1 / span 2; width:28px; height:28px; border-radius:50%;
+    border:3px solid rgba(157,180,255,.2); border-top-color:#ffd166;
+    animation:lk-video-spin .72s linear infinite;
+  }
+  @keyframes lk-video-spin { to { transform:rotate(360deg); } }
   .settingsMeta { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:start; margin-bottom:8px; }
   .settingsName { font-size:12px; font-weight:800; color:#fff; letter-spacing:1px; }
   .settingsDesc { grid-column:1 / -1; font-size:11px; line-height:1.35; color:#9aa3b8; }

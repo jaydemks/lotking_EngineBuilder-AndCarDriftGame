@@ -148,6 +148,45 @@ test('Logic Graph Delete key does not delete the selected scene Logic Element', 
   });
 });
 
+test('Logic Element scene sidebar, primitive root and text elements are authorable', async ({page}) => {
+  await addLogicElement(page);
+  await page.getByRole('button', {name:/Open Logic Editor/i}).click();
+  await expect(page.locator('.lk-logic-modal-panel')).toBeVisible();
+  await expect(page.locator('.lk-le-sidebar-splitter')).toHaveCount(3);
+
+  await page.locator('.lk-le-tabs [data-tab="viewport"]').click();
+  await page.locator('.lk-le-component.is-root').click();
+  const inspector = page.locator('.lk-le-inspector');
+  await inspector.locator('.lk-le-inspector-row', {hasText:'Type'}).locator('select').selectOption('mesh');
+  await inspector.locator('.lk-le-inspector-row', {hasText:'Mesh Type'}).locator('select').selectOption('primitive:sphere');
+
+  await inspector.locator('.lk-le-inspector-btn', {hasText:'Add text'}).click();
+  await expect(page.locator('.lk-le-component', {hasText:'Text 1'})).toBeVisible();
+  await inspector.locator('.lk-le-inspector-row', {hasText:'Text'}).locator('input').fill('Checkpoint');
+  await inspector.locator('.lk-le-inspector-row', {hasText:'Text'}).locator('input').blur();
+  await inspector.locator('.lk-le-inspector-row', {hasText:'Text Mode'}).locator('select').selectOption('billboard');
+
+  const state = await page.evaluate(() => {
+    const entry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const scene = entry && entry.graph && entry.graph.logicScene;
+    const text = scene && scene.elements && scene.elements.find(item => item && item.type === 'text');
+    return scene ? {
+      rootType:scene.root.type,
+      rootPrimitive:scene.root.primitive,
+      textType:text && text.type,
+      textValue:text && text.text,
+      textMode:text && text.textMode,
+    } : null;
+  });
+  expect(state).toEqual({
+    rootType:'mesh',
+    rootPrimitive:'sphere',
+    textType:'text',
+    textValue:'Checkpoint',
+    textMode:'billboard',
+  });
+});
+
 test('Logic Element Functions expose I/O metadata and create Call Subgraph nodes', async ({page}) => {
   await addLogicElement(page);
   await page.getByRole('button', {name:/Open Logic Editor/i}).click();

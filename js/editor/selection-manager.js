@@ -250,7 +250,7 @@ function create(deps){
     const car = GAME.player && GAME.player.car;
     let o = ED.selected;
     while(o){
-      if(o === car) return true;
+      if(o === car || (o.userData && o.userData.editorType === 'camera' && o.userData.sceneCamera)) return true;
       o = o.parent;
     }
     return false;

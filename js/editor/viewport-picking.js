@@ -13,6 +13,7 @@ function create(opts){
   const ptr = new THREE.Vector2();
   let hoverHelper = null;
   let materialPickHelper = null;
+  let materialPickHelpers = [];
 
   function pickView(clientX, clientY){
     return opts.pickView ? opts.pickView(clientX, clientY) : null;
@@ -135,7 +136,7 @@ function create(opts){
       if(found || !n.isMesh || !n.material) return;
       const mats = Array.isArray(n.material) ? n.material : [n.material];
       mats.forEach((mat, materialIndex) => {
-        const key = meshIndex + ':' + materialIndex;
+        const key = n.userData && n.userData.lkMeshEditId ? ('id|' + n.userData.lkMeshEditId + '|' + materialIndex) : (meshIndex + ':' + materialIndex);
         if(key === slotKey){
           found = {
             key,
@@ -163,7 +164,7 @@ function create(opts){
       if(n === mesh){
         const index = Math.max(0, Math.min(mats.length - 1, materialIndex || 0));
         found = {
-          key:meshIndex + ':' + index,
+          key:n.userData && n.userData.lkMeshEditId ? ('id|' + n.userData.lkMeshEditId + '|' + index) : (meshIndex + ':' + index),
           root,
           mesh:n,
           meshIndex,
@@ -238,6 +239,40 @@ function create(opts){
       if(materialPickHelper.material) materialPickHelper.material.dispose();
     }
     materialPickHelper = null;
+    materialPickHelpers.forEach(helper => {
+      if(helper.parent) helper.parent.remove(helper);
+      if(helper.geometry) helper.geometry.dispose();
+      if(helper.material) helper.material.dispose();
+    });
+    materialPickHelpers = [];
+  }
+
+  function createMaterialPickHelper(slot, color){
+    if(!slot || !slot.mesh) return null;
+    const subset = subsetGeometryForMaterial(slot.mesh, slot.materialIndex);
+    if(!subset) return null;
+    const edges = new THREE.EdgesGeometry(subset, 1);
+    subset.dispose();
+    const helper = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({color:color || 0xffd166, transparent:true, opacity:.95, depthTest:false}));
+    helper.renderOrder = 1002;
+    helper.frustumCulled = false;
+    helper.matrixAutoUpdate = false;
+    helper.userData.slotKey = slot.key;
+    helper.userData.mesh = slot.mesh;
+    slot.mesh.updateMatrixWorld(true);
+    helper.matrix.copy(slot.mesh.matrixWorld);
+    return helper;
+  }
+
+  function setMaterialPickHelpers(entries){
+    clearMaterialPickHelper();
+    const group = helperGroup();
+    if(!group) return;
+    (entries || []).forEach(entry => {
+      const slot = entry && entry.slot ? entry.slot : entry;
+      const helper = createMaterialPickHelper(slot, entry && entry.color);
+      if(helper){ materialPickHelpers.push(helper); group.add(helper); }
+    });
   }
 
   function setMaterialPickHelper(slot, color){
@@ -249,19 +284,8 @@ function create(opts){
       return;
     }
     clearMaterialPickHelper();
-    const subset = subsetGeometryForMaterial(slot.mesh, slot.materialIndex);
-    if(!subset) return;
-    const edges = new THREE.EdgesGeometry(subset, 1);
-    subset.dispose();
-    const mat = new THREE.LineBasicMaterial({color:color || 0xffd166, transparent:true, opacity:.95, depthTest:false});
-    materialPickHelper = new THREE.LineSegments(edges, mat);
-    materialPickHelper.renderOrder = 1002;
-    materialPickHelper.frustumCulled = false;
-    materialPickHelper.matrixAutoUpdate = false;
-    materialPickHelper.userData.slotKey = slot.key;
-    materialPickHelper.userData.mesh = slot.mesh;
-    slot.mesh.updateMatrixWorld(true);
-    materialPickHelper.matrix.copy(slot.mesh.matrixWorld);
+    materialPickHelper = createMaterialPickHelper(slot, color);
+    if(!materialPickHelper) return;
     group.add(materialPickHelper);
   }
 
@@ -297,6 +321,7 @@ function create(opts){
     pickMaterialAt,
     materialSlotInfo,
     setMaterialPickHelper,
+    setMaterialPickHelpers,
     clearMaterialPickHelper,
     groundPointAt,
     spawnPointAhead,

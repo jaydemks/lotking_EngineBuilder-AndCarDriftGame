@@ -48,6 +48,20 @@ function registerAll(registry){
   });
 
   registry.register({
+    type:'input.playerDrive', title:'Get Player Drive Input', category:'Input', description:'Reads the resolved local Player 1–4 profile. Player ID -1/None returns neutral input.',
+    inputs:[dataIn('playerId', 'number', 1)],
+    outputs:[dataOut('throttle', 'number'), dataOut('brake', 'number'), dataOut('steer', 'number'), dataOut('handbrake', 'boolean'), dataOut('device', 'string')],
+    evaluate(api, pin){
+      const drive = api.services.input ? api.services.input.playerDrive(api.getInput('playerId')) : {};
+      if(pin === 'brake') return Number(drive.brake) || 0;
+      if(pin === 'steer') return Number(drive.steer) || 0;
+      if(pin === 'handbrake') return drive.handbrake === true;
+      if(pin === 'device') return drive.device || '';
+      return Number(drive.throttle) || 0;
+    },
+  });
+
+  registry.register({
     type:'debug.print', title:'Print Debug', category:'Debug', description:'Writes a message to the runtime debug log.',
     inputs:[execIn, dataIn('message', 'string', 'Hello Logic'), dataIn('duration', 'number', 3)], outputs:[completedOut],
     run(api){ api.debug.log(api.getInput('message'), {duration:Math.max(.25, Number(api.getInput('duration')) || 3) * 1000}); return {exec:'completed'}; },
@@ -486,6 +500,18 @@ function registerAll(registry){
   });
 
   registry.register({
+    type:'scene.getElementByType', title:'Get Element By Type', category:'Scene', description:'Returns the first scene element matching a simple type such as Camera, Cinema Studio, Light, Mesh or Player Car.',
+    inputs:[dataIn('type', 'string', 'Camera')], outputs:[dataOut('object', 'object3d'), dataOut('found', 'boolean')],
+    evaluate(api, pin){ const obj = api.services.objects.byType(api.getInput('type')); return pin === 'found' ? !!obj : obj; },
+  });
+
+  registry.register({
+    type:'scene.getAllElementsByType', title:'Get All Elements By Type', category:'Scene', description:'Returns every scene element matching the requested type.',
+    inputs:[dataIn('type', 'string', 'Camera')], outputs:[dataOut('objects', 'any'), dataOut('count', 'number')],
+    evaluate(api, pin){ const objects = api.services.objects.allByType(api.getInput('type')); return pin === 'count' ? objects.length : objects; },
+  });
+
+  registry.register({
     type:'scene.getObjectById', title:'Get Object By ID', category:'Scene', description:'Finds an Object3D by editor or logic id.',
     inputs:[dataIn('id', 'string', '')], outputs:[dataOut('object', 'object3d'), dataOut('found', 'boolean')],
     evaluate(api, pin){ const obj = api.services.objects.byId(api.getInput('id')); return pin === 'found' ? !!obj : obj; },
@@ -759,7 +785,7 @@ function registerAll(registry){
   });
 
   registry.register({
-    type:'camera.setActive', title:'Set Active Camera', category:'Camera', description:'Copies a scene camera transform onto the gameplay camera.',
+    type:'camera.setActive', title:'Set Active Camera', category:'Camera', description:'Assigns a scene camera to the active Player 1 frame until another camera or timeline takes ownership.',
     inputs:[execIn, dataIn('camera', 'camera', null)], outputs:[completedOut],
     run(api){ if(api.services.cameras) api.services.cameras.setActiveCamera(api.getInput('camera')); return {exec:'completed'}; },
   });
@@ -774,6 +800,18 @@ function registerAll(registry){
     type:'camera.lookAt', title:'Look At', category:'Camera', description:'Rotates the gameplay camera toward a world position.',
     inputs:[execIn, dataIn('target', 'vector3', [0,0,0])], outputs:[completedOut],
     run(api){ if(api.services.cameras) api.services.cameras.lookAt(api.getInput('target')); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'cinema.playTimeline', title:'Play Cinema Timeline', category:'Cinema', description:'Starts a Cinema Studio timeline immediately in the active Player 1/preview frame.',
+    inputs:[execIn, dataIn('studio', 'string', ''), dataIn('startTime', 'number', 0)], outputs:[completedOut],
+    run(api){ if(api.services.cinema) api.services.cinema.playTimeline(api.getInput('studio'), api.getInput('startTime')); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'cinema.stopTimeline', title:'Stop Cinema Timeline', category:'Cinema', description:'Stops the active runtime Cinema Studio timeline.',
+    inputs:[execIn], outputs:[completedOut],
+    run(api){ if(api.services.cinema) api.services.cinema.stopTimeline(); return {exec:'completed'}; },
   });
 
   registry.register({

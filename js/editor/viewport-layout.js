@@ -25,6 +25,7 @@ function create(deps){
   let lastFrameSpikeAt = 0;
   let longTaskCount = 0;
   let longTaskMaxMs = 0;
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   if(typeof PerformanceObserver !== 'undefined'){
     try {
@@ -46,6 +47,16 @@ function create(deps){
       if(deps.setActiveViewportSlot) deps.setActiveViewportSlot(slot);
       else ED.activeViewportSlot = slot;
     });
+  });
+  root.querySelectorAll('.lk-view-corner .lk-view-helpers input').forEach(input => {
+    input.addEventListener('change', () => {
+      const slot = Number(input.closest('.lk-view-corner').dataset.viewSlot || 0);
+      ED.viewportShowHelpers[slot] = !!input.checked;
+    });
+  });
+  const videoSettingsButton = root.querySelector('#lkViewportVideoSettings');
+  if(videoSettingsButton) videoSettingsButton.addEventListener('click', () => {
+    if(GAME.actions && GAME.actions.openSettingsTab) GAME.actions.openSettingsTab('video', 'editor');
   });
   root.querySelectorAll('.lk-view-split,[data-split]').forEach(handle => {
     if(!handle.dataset || !handle.dataset.split) return;
@@ -95,13 +106,13 @@ function create(deps){
   }
   function viewOptions(){
     const base = [
-      {value:'perspective', label:'Perspective'},
-      {value:'top', label:'Top'},
-      {value:'bottom', label:'Bottom'},
-      {value:'front', label:'Front'},
-      {value:'back', label:'Back'},
-      {value:'right', label:'Right'},
-      {value:'left', label:'Left'},
+      {value:'perspective', label:tr('Perspective', 'Prospettiva')},
+      {value:'top', label:tr('Top', 'Alto')},
+      {value:'bottom', label:tr('Bottom', 'Basso')},
+      {value:'front', label:tr('Front', 'Fronte')},
+      {value:'back', label:tr('Back', 'Retro')},
+      {value:'right', label:tr('Right', 'Destra')},
+      {value:'left', label:tr('Left', 'Sinistra')},
     ];
     sceneCameras().forEach(cam => base.push({
       value:'cam:' + cam.userData.editorId,
@@ -111,7 +122,7 @@ function create(deps){
       .filter(o => o && o.userData && o.userData.editorType === 'cinemaStudio')
       .forEach(studio => base.push({
         value:'timeline:' + studio.userData.editorId,
-        label:'Timeline: ' + (studio.userData.editorName || studio.userData.editorId),
+        label:tr('Timeline: ', 'Timeline: ') + (studio.userData.editorName || studio.userData.editorId),
       }));
     return base;
   }
@@ -141,13 +152,29 @@ function create(deps){
     wrap.classList.toggle('on', !!rects);
     if(!rects) return;
     syncViewSelectOptions();
+    root.querySelectorAll('.lk-view-corner').forEach((node, index) => {
+      node.style.display = rects[index] ? '' : 'none';
+    });
+    wrap.querySelectorAll('[data-split]').forEach(handle => { handle.style.display = rects.length === 4 ? '' : 'none'; });
     rects.forEach((rect, index) => {
       const node = wrap.querySelector('[data-view-slot="' + index + '"]');
       if(!node) return;
       node.style.left = (rect.x + 8) + 'px';
       node.style.top = (rect.y + 8) + 'px';
       node.classList.toggle('active', index === (ED.activeViewportSlot || 0));
+      const helperInput = node.querySelector('.lk-view-helpers input');
+      const spec = ED.viewportSlots[index] || 'perspective';
+      const cleanPreview = spec.indexOf('cam:') === 0 || spec.indexOf('timeline:') === 0;
+      if(helperInput){
+        helperInput.disabled = cleanPreview;
+        helperInput.checked = !cleanPreview && ED.viewportShowHelpers[index] !== false;
+      }
+      const helperLabel = node.querySelector('.lk-view-helpers');
+      if(helperLabel) helperLabel.title = cleanPreview
+        ? tr('Camera and Timeline views always show the clean final result', 'Le viste Camera e Timeline mostrano sempre il risultato finale pulito')
+        : tr('Show editor helpers in this view', 'Mostra helper editor in questa vista');
     });
+    if(rects.length < 4) return;
     const left = rects[0].x;
     const top = rects[0].y;
     const right = rects[1].x + rects[1].w;
@@ -234,11 +261,6 @@ function create(deps){
     return cam;
   }
   function cameraForView(slot, rect){
-    if(slot === 0){
-      camE.aspect = rect.w / Math.max(1, rect.h);
-      camE.updateProjectionMatrix();
-      return camE;
-    }
     const spec = ED.viewportSlots[slot] || ['perspective', 'top', 'right', 'front'][slot] || 'top';
     if(spec === 'perspective' && deps.cameraForView) return deps.cameraForView(slot, rect);
     if(spec.indexOf('timeline:') === 0){
@@ -286,9 +308,26 @@ function create(deps){
     const mode = ED.viewportRenderModes[slot] || 'normal';
     const hidden = [];
     const previousOverride = scene.overrideMaterial;
+    const previousFog = scene.fog;
+    const helperGroup = deps.getHelperGroup && deps.getHelperGroup();
+    const previousHelperVisible = helperGroup ? helperGroup.visible : null;
     const gizmo = deps.getGizmo && deps.getGizmo();
     const previousGizmoVisible = gizmo ? gizmo.visible : null;
-    if(gizmo && ED.viewportMode === 'quad') gizmo.visible = slot === (ED.activeViewportSlot || 0);
+    const spec = ED.viewportSlots[slot] || 'perspective';
+    const cleanCameraView = spec.indexOf('cam:') === 0 || spec.indexOf('timeline:') === 0;
+    const showHelpers = !cleanCameraView && ED.viewportShowHelpers[slot] !== false;
+    if(helperGroup) helperGroup.visible = showHelpers && previousHelperVisible !== false;
+    if(gizmo) gizmo.visible = showHelpers && (ED.viewportMode !== 'quad' || slot === (ED.activeViewportSlot || 0)) && previousGizmoVisible !== false;
+    if(!showHelpers){
+      scene.traverse(n => {
+        if(!n.visible || n === helperGroup || n === gizmo) return;
+        const ud = n.userData || {};
+        if(ud.helperOnly || ud.colliderPreview || ud.editorOnly || ud.nonExportable || ud.editorCameraHelper || ud.editorCameraHelperPick || ud.editorLightHandle){
+          hidden.push(n);
+          n.visible = false;
+        }
+      });
+    }
     if(camera && camera.userData && camera.userData.lkSceneCameraPreview){
       GAME.world.registry.forEach(o => {
         if(!(o && o.userData && o.userData.editorType === 'camera' && o.traverse)) return;
@@ -317,10 +356,20 @@ function create(deps){
         });
       });
     }
-    renderer.render(scene, camera);
-    scene.overrideMaterial = previousOverride;
-    if(gizmo) gizmo.visible = previousGizmoVisible;
-    hidden.forEach(n => { n.visible = true; });
+    // Orthographic editor cameras sit far from their target only to establish
+    // projection direction. World fog must not treat that technical offset as
+    // the actual viewing distance, otherwise Top/Front/Side become a blue veil.
+    if(camera && camera.isOrthographicCamera) scene.fog = null;
+    try {
+      const postRendered = mode === 'normal' && deps.renderPost && deps.renderPost(rect, camera);
+      if(!postRendered) renderer.render(scene, camera);
+    } finally {
+      scene.fog = previousFog;
+      scene.overrideMaterial = previousOverride;
+      if(helperGroup) helperGroup.visible = previousHelperVisible;
+      if(gizmo) gizmo.visible = previousGizmoVisible;
+      hidden.forEach(n => { n.visible = true; });
+    }
   }
   function renderModeMaterial(mode){
     if(renderMats[mode]) return renderMats[mode];
@@ -336,9 +385,9 @@ function create(deps){
       renderQuadViewport(viewRect);
       return;
     }
-    updateOverlays(null);
+    updateOverlays([Object.assign({slot:0}, viewRect)]);
     renderer.setScissorTest(true);
-    renderRect(Object.assign({slot:0}, viewRect), camE);
+    renderRect(Object.assign({slot:0}, viewRect), cameraForView(0, viewRect));
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, innerWidth, innerHeight);
   }
@@ -357,9 +406,24 @@ function create(deps){
     ];
     updateOverlays(rects);
     renderer.setScissorTest(true);
-    rects.forEach((rect, index) => renderRect(rect, cameraForView(index, rect)));
+    const warming = Number.isInteger(ED.viewportQuadWarmupStep);
+    const lastSlot = warming ? Math.max(0, Math.min(3, ED.viewportQuadWarmupStep)) : 3;
+    rects.forEach((rect, index) => {
+      if(index > lastSlot) return;
+      renderRect(rect, cameraForView(index, rect));
+    });
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, innerWidth, innerHeight);
+    if(warming){
+      const rendered = lastSlot + 1;
+      root.dispatchEvent(new CustomEvent('lotking:quad-warmup-progress', {detail:{step:rendered}}));
+      if(lastSlot >= 3){
+        delete ED.viewportQuadWarmupStep;
+        root.dispatchEvent(new CustomEvent('lotking:quad-warmup-ready'));
+      } else {
+        ED.viewportQuadWarmupStep = lastSlot + 1;
+      }
+    }
   }
   function updateStats(dt, viewRect){
     if(!statsBox) return;

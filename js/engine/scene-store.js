@@ -112,6 +112,27 @@ function normalizeLogicGraph(graph, name, scope){
     ? window.LK_LOGIC_GRAPH.normalizeGraph(graph || defaultLevelLogicGraph(), name, scope)
     : (graph || {version:1, name:name || 'Logic Graph', scope:scope || 'element', enabled:true, variables:[], nodes:[], edges:[]});
 }
+function normalizeLogicElementHierarchy(scene){
+  if(!scene || !Array.isArray(scene.elements)) return;
+  const ids = new Set(['root'].concat(scene.elements.map(element => element && element.id).filter(Boolean)));
+  scene.elements.forEach(element => {
+    if(!element || !element.id) return;
+    if(!element.parentId || !ids.has(element.parentId) || element.parentId === element.id) element.parentId = 'root';
+  });
+  scene.elements.forEach(element => {
+    if(!element || !element.id) return;
+    const visited = new Set([element.id]);
+    let current = element;
+    while(current && current.parentId && current.parentId !== 'root'){
+      if(visited.has(current.parentId)){
+        element.parentId = 'root';
+        return;
+      }
+      visited.add(current.parentId);
+      current = scene.elements.find(item => item && item.id === current.parentId) || null;
+    }
+  });
+}
 function ensureLogicElementScene(graph){
   graph = normalizeLogicGraph(graph, 'Logic Element', 'element');
   if(!graph.logicScene || typeof graph.logicScene !== 'object') graph.logicScene = {};
@@ -119,6 +140,11 @@ function ensureLogicElementScene(graph){
   if(!scene.root) scene.root = {};
   scene.root = Object.assign({id:'root', name:'Root', type:'mesh', linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#7dd3fc'}, scene.root || {});
   scene.root.id = 'root';
+  if(scene.root.type === 'mesh' && !scene.root.asset && !scene.root.primitive) scene.root.primitive = 'cube';
+  if(scene.root.type === 'text'){
+    if(!scene.root.text) scene.root.text = 'Text';
+    if(!scene.root.textMode) scene.root.textMode = 'plane';
+  }
   if(!Array.isArray(scene.elements)) scene.elements = [];
   scene.elements.forEach(element => {
     if(!element || typeof element !== 'object') return;
@@ -127,8 +153,14 @@ function ensureLogicElementScene(graph){
     if(!Array.isArray(element.scale)) element.scale = [1,1,1];
     if(!element.color) element.color = '#7dd3fc';
     if(!element.type) element.type = 'mesh';
+    if(element.type === 'mesh' && !element.asset && !element.primitive) element.primitive = 'cube';
+    if(element.type === 'text'){
+      if(!element.text) element.text = 'Text';
+      if(!element.textMode) element.textMode = 'plane';
+    }
     if(!element.parentId) element.parentId = 'root';
   });
+  normalizeLogicElementHierarchy(scene);
   if(!Array.isArray(scene.components)) scene.components = [];
   const oldDefault = scene.elements.find(item => item && item.id === 'default_mesh');
   if(oldDefault){
@@ -154,7 +186,10 @@ function disposeObject3D(node){
     if(child.geometry && child.geometry.dispose) child.geometry.dispose();
     if(child.material){
       const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.forEach(mat => mat && mat.dispose && mat.dispose());
+      mats.forEach(mat => {
+        if(mat && mat.map && mat.map.dispose) mat.map.dispose();
+        if(mat && mat.dispose) mat.dispose();
+      });
     }
   });
 }
@@ -181,6 +216,49 @@ function logicElementMaterial(THREERef, element, opts){
   if(opts.basic) return new THREERef.MeshBasicMaterial({color, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity, depthTest:opts.depthTest !== false});
   if(THREERef.MeshStandardMaterial) return new THREERef.MeshStandardMaterial({color, roughness:.55, metalness:.08, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity});
   return new THREERef.MeshBasicMaterial({color, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity});
+}
+function logicElementPrimitiveGeometry(THREERef, element){
+  const primitive = String(element && element.primitive || 'cube').toLowerCase();
+  if(primitive === 'sphere') return new THREERef.SphereGeometry(.48, 32, 16);
+  if(primitive === 'cylinder') return new THREERef.CylinderGeometry(.42, .42, .9, 32);
+  if(primitive === 'cone') return new THREERef.ConeGeometry(.46, .95, 32);
+  if(primitive === 'plane') return new THREERef.PlaneGeometry(1, 1);
+  if(primitive === 'torus') return new THREERef.TorusGeometry(.36, .13, 16, 40);
+  return new THREERef.BoxGeometry(.8, .8, .8);
+}
+function createLogicElementTextTexture(THREERef, element){
+  if(typeof document === 'undefined' || !THREERef.CanvasTexture) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 192;
+  const ctx = canvas.getContext('2d');
+  const text = String(element && element.text || 'Text');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = '700 72px Inter, Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = 'rgba(0,0,0,.52)';
+  ctx.fillStyle = element && element.color || '#ffffff';
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const texture = new THREERef.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+function createLogicElementTextNode(THREERef, element){
+  const width = Math.max(.05, Number(element && element.textWidth) || 2.2);
+  const height = Math.max(.05, Number(element && element.textHeight) || .75);
+  const texture = createLogicElementTextTexture(THREERef, element);
+  if(texture && String(element && element.textMode || 'plane') === 'billboard' && THREERef.Sprite){
+    const sprite = new THREERef.Sprite(new THREERef.SpriteMaterial({map:texture, transparent:true, depthWrite:false}));
+    sprite.scale.set(width, height, 1);
+    return sprite;
+  }
+  const material = texture
+    ? new THREERef.MeshBasicMaterial({map:texture, transparent:true, depthWrite:false, side:THREERef.DoubleSide})
+    : logicElementMaterial(THREERef, element, {basic:true, transparent:true, opacity:.85});
+  return new THREERef.Mesh(new THREERef.PlaneGeometry(width, height), material);
 }
 function createLogicElementPreviewNode(THREERef, element){
   const type = String(element && element.type || 'mesh');
@@ -209,6 +287,8 @@ function createLogicElementPreviewNode(THREERef, element){
     ];
     group.add(new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat));
     node = group;
+  } else if(type === 'text'){
+    node = createLogicElementTextNode(THREERef, element);
   } else if(element && element.asset) {
     node = new THREERef.Group();
     const placeholder = new THREERef.Mesh(
@@ -218,7 +298,7 @@ function createLogicElementPreviewNode(THREERef, element){
     placeholder.userData.logicElementAssetPlaceholder = true;
     node.add(placeholder);
   } else {
-    const geo = new THREERef.BoxGeometry(.8, .8, .8);
+    const geo = logicElementPrimitiveGeometry(THREERef, element);
     node = new THREERef.Mesh(geo, logicElementMaterial(THREERef, element));
   }
   return node;
@@ -379,6 +459,11 @@ function hydrateLogicElementPreviewAsset(node, element, owner){
       child.userData.editorLocked = true;
       child.userData.nonExportable = true;
     });
+    const pawn = owner && owner.userData && owner.userData.logicGraph && owner.userData.logicGraph.playerPawnBlueprint;
+    if(pawn){
+      if(pawn.meshEdits) applyMeshEdits(model, pawn.meshEdits);
+      if(pawn.materials) applyMatProps(model, pawn.materials);
+    }
     node.add(model);
     configureLogicElementAnimation(node, model, element, owner);
     return node;
@@ -660,7 +745,13 @@ function isLocalOrigin(){
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
 }
 function shouldUseBundledDemoProject(){
-  return !isLocalOrigin();
+  try {
+    const workspace = JSON.parse(localStorage.getItem('lk.projectWorkspace.v1') || 'null');
+    if(window.__LK_STANDALONE_EDITOR && (!workspace || workspace.workspaceReady !== true)) return false;
+    if(workspace && workspace.startupTemplate === 'demo') return true;
+    if(isLocalOrigin()) return false;
+    return !workspace || workspace.onlineEditor !== true || workspace.startupTemplate === 'demo';
+  } catch(err){ return true; }
 }
 function normalizeName(s){
   return String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -677,6 +768,10 @@ function objectLocalVisualBox(obj){
   if(obj.traverse){
     obj.traverse(node => {
       if(!node || !node.isMesh || !node.geometry) return;
+      for(let current = node; current; current = current.parent){
+        if(current.visible === false) return;
+        if(current === obj) break;
+      }
       if(node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle)) return;
       if(!node.geometry.boundingBox) node.geometry.computeBoundingBox();
       const bb = node.geometry.boundingBox;
@@ -709,6 +804,10 @@ function objectLocalMeshBoxes(obj){
   if(!obj.traverse) return boxes;
   obj.traverse(node => {
     if(!node || !node.isMesh || !node.geometry) return;
+    for(let current = node; current; current = current.parent){
+      if(current.visible === false) return;
+      if(current === obj) break;
+    }
     if(node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle)) return;
     if(!node.geometry.boundingBox) node.geometry.computeBoundingBox();
     const bb = node.geometry.boundingBox;
@@ -1259,6 +1358,9 @@ function collectPlayerBlueprint(GAME){
   }
   const player = {
     headingMode: 'runtime-v2',
+    enabled: GAME.player.enabled !== false,
+    hidden: GAME.player.hidden === true,
+    controllerIndex: GAME.player.controllerIndex == null ? null : Math.max(0, Math.min(3, Number(GAME.player.controllerIndex) | 0)),
     tuning: cloneData(GAME.player.tuning && GAME.player.tuning.values || {}),
     cam: cloneData(GAME.player.cameraCfg || {}),
     lights: cloneData(GAME.player.lights || {}),
@@ -1290,6 +1392,11 @@ function collectPlayerBlueprint(GAME){
   if(GAME.player.car && GAME.player.car.userData.modelDbKey) player.modelDbKey = GAME.player.car.userData.modelDbKey;
   if(GAME.player.car && GAME.player.car.userData.modelName) player.modelName = GAME.player.car.userData.modelName;
   if(GAME.player.car && GAME.player.car.userData.matProps) player.materials = cloneData(GAME.player.car.userData.matProps);
+  if(GAME.player.car){
+    const model = GAME.player.getModel ? GAME.player.getModel() : null;
+    const meshEdits = GAME.player.car.userData.playerMeshEdits || model && model.userData && model.userData.meshEdits;
+    if(meshEdits) player.meshEdits = normalizeMeshEdits(meshEdits);
+  }
   player.rigTransforms = collectPlayerRigTransforms(GAME);
   // engine sound set: id + copia completa (cosi' l'export LKEP e' autosufficiente)
   if(GAME.player.engineAudio && GAME.player.engineAudio.setId){
@@ -1473,16 +1580,20 @@ const LEVELS = {
   list(){
     const idx = ensureLibrary();
     const activeId = normalizeLevelId(idx.activeId);
-    return idx.levels.map(l => Object.assign({}, l, {active: normalizeLevelId(l.id) === activeId}));
+    return idx.levels.map(l => {
+      const project = readLevelProject(l.id);
+      const levelRole = project && project.meta && project.meta.levelRole || l.levelRole || 'gameplay';
+      return Object.assign({}, l, {levelRole, active: normalizeLevelId(l.id) === activeId});
+    });
   },
   activeId(){ return normalizeLevelId(ensureLibrary().activeId); },
   get: readLevelProject,
-  create(name, scene){
+  create(name, scene, meta){
     const idx = ensureLibrary();
     const id = uniqueLevelId(idx, name);
-    const project = projectFromScene(scene || blank(), {trackId: id, trackName: name});
+    const project = projectFromScene(scene || blank(), Object.assign({trackId: id, trackName: name, levelRole:'gameplay'}, meta || {}));
     if(!writeLevelProject(id, project)) return null;
-    const entry = {id, name, savedAt: project.savedAt};
+    const entry = {id, name, levelRole:project.meta.levelRole || 'gameplay', savedAt: project.savedAt};
     idx.levels.push(entry);
     maybeStorePlayerBlueprintDefault(project, entry);
     maybeStoreRadioHudDefault(project, entry);
@@ -1499,6 +1610,23 @@ const LEVELS = {
     try { localStorage.setItem(KEY, JSON.stringify(project)); }
     catch(err){ console.warn('LotKing store: attivazione livello fallita', err); return false; }
     idx.activeId = id;
+    writeIndex(idx);
+    syncCatalog();
+    return true;
+  },
+  setRole(id, levelRole){
+    id = normalizeLevelId(id);
+    levelRole = ['editor-menu','game-menu'].includes(levelRole) ? levelRole : 'gameplay';
+    const idx = ensureLibrary();
+    const entry = levelEntry(idx, id);
+    const project = readLevelProject(id);
+    if(!entry || !project) return false;
+    project.meta = Object.assign({}, project.meta, {levelRole});
+    if(!writeLevelProject(id, project)) return false;
+    entry.levelRole = levelRole;
+    if(normalizeLevelId(idx.activeId) === id){
+      try { localStorage.setItem(KEY, JSON.stringify(project)); } catch(err){}
+    }
     writeIndex(idx);
     syncCatalog();
     return true;
@@ -1542,7 +1670,7 @@ const LEVELS = {
     copy.meta = Object.assign({}, copy.meta, {trackId: newId, trackName: newName});
     copy.savedAt = new Date().toISOString();
     if(!writeLevelProject(newId, copy)) return null;
-    idx.levels.push({id: newId, name: newName, savedAt: copy.savedAt});
+    idx.levels.push({id: newId, name: newName, levelRole:copy.meta && copy.meta.levelRole || 'gameplay', savedAt: copy.savedAt});
     writeIndex(idx);
     syncCatalog();
     return newId;
@@ -1576,7 +1704,7 @@ const LEVELS = {
     const id = uniqueLevelId(idx, meta.trackId || name);
     project.meta = Object.assign({}, meta, {trackId: id, trackName: name});
     if(!writeLevelProject(id, project)) return null;
-    const entry = {id, name, savedAt: project.savedAt || new Date().toISOString()};
+    const entry = {id, name, levelRole:project.meta.levelRole || 'gameplay', savedAt: project.savedAt || new Date().toISOString()};
     idx.levels.push(entry);
     maybeStorePlayerBlueprintDefault(project, entry);
     maybeStoreRadioHudDefault(project, entry);
@@ -1965,8 +2093,9 @@ function sanitizePlayerMatProps(props){
   };
 }
 
-function materialSlotMatches(meshIndex, materialIndex, targetSlot){
-  return !targetSlot || targetSlot === 'all' || targetSlot === (meshIndex + ':' + materialIndex);
+function materialSlotMatches(mesh, meshIndex, materialIndex, targetSlot){
+  const stableId = mesh && mesh.userData && mesh.userData.lkMeshEditId;
+  return !targetSlot || targetSlot === 'all' || targetSlot === (meshIndex + ':' + materialIndex) || (stableId && targetSlot === ('id|' + stableId + '|' + materialIndex));
 }
 
 function applyMatProps(obj, p){
@@ -2069,16 +2198,16 @@ function applyMatProps(obj, p){
     obj.traverse(o => {
       if(!o.isMesh || !o.material) return;
       if(patch.materialKind === 'standard'){
-        const convert = (m, i) => materialSlotMatches(meshIndex, i, targetSlot) ? convertToStandard(m) : m;
+        const convert = (m, i) => materialSlotMatches(o, meshIndex, i, targetSlot) ? convertToStandard(m) : m;
         o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material, 0);
       }
       if(patch.materialKind === 'physical'){
-        const convert = (m, i) => materialSlotMatches(meshIndex, i, targetSlot) ? convertToPhysical(m) : m;
+        const convert = (m, i) => materialSlotMatches(o, meshIndex, i, targetSlot) ? convertToPhysical(m) : m;
         o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material, 0);
       }
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       mats.forEach((m, materialIndex) => {
-        if(!materialSlotMatches(meshIndex, materialIndex, targetSlot)) return;
+        if(!materialSlotMatches(o, meshIndex, materialIndex, targetSlot)) return;
         if(patch.color != null && m.color) m.color.setHex(patch.color);
         if(patch.emissive != null && m.emissive) m.emissive.setHex(patch.emissive);
         if(patch.roughness != null && m.roughness != null) m.roughness = patch.roughness;
@@ -2777,6 +2906,8 @@ function normalizeCameraProps(props){
     far:800,
     helperSize:1.2,
     preview:true,
+    activeLevelCamera:false,
+    outputPlayerIndex:null,
   }, props || {});
 }
 
@@ -2865,6 +2996,7 @@ function normalizeCinemaStudioProps(props){
     playback:'one-shot',
     trigger:'manual',
     eventName:'',
+    outputPlayerIndex:null,
     previewCamera:'',
     cameraCuts:[],
     movieTrack:[],
@@ -2888,26 +3020,42 @@ function normalizeCinemaStudioProps(props){
 function createCinemaStudio(props){
   const gp = new THREE.Group();
   gp.userData.cinemaProps = normalizeCinemaStudioProps(props);
-  const mat = new THREE.LineBasicMaterial({color:0xffd166, transparent:true, opacity:.9, depthTest:false});
-  const s = 1.1;
-  const pts = [
-    new THREE.Vector3(-s,0,-s), new THREE.Vector3(s,0,-s),
-    new THREE.Vector3(s,0,-s), new THREE.Vector3(s,0,s),
-    new THREE.Vector3(s,0,s), new THREE.Vector3(-s,0,s),
-    new THREE.Vector3(-s,0,s), new THREE.Vector3(-s,0,-s),
-    new THREE.Vector3(-s,.55,-s), new THREE.Vector3(s,.55,-s),
-    new THREE.Vector3(s,.55,-s), new THREE.Vector3(s,.55,s),
-    new THREE.Vector3(s,.55,s), new THREE.Vector3(-s,.55,s),
-    new THREE.Vector3(-s,.55,s), new THREE.Vector3(-s,.55,-s),
-    new THREE.Vector3(-s,0,-s), new THREE.Vector3(-s,.55,-s),
-    new THREE.Vector3(s,0,-s), new THREE.Vector3(s,.55,-s),
-    new THREE.Vector3(s,0,s), new THREE.Vector3(s,.55,s),
-    new THREE.Vector3(-s,0,s), new THREE.Vector3(-s,.55,s),
-  ];
-  const line = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat);
-  line.userData.nonExportable = true;
-  line.renderOrder = 998;
-  gp.add(line);
+  const helper = new THREE.Group();
+  helper.name = 'Cinema Studio Clapperboard Helper';
+  helper.position.y = 1.05;
+  const dark = new THREE.MeshBasicMaterial({color:0x151a22, depthTest:false});
+  const gold = new THREE.MeshBasicMaterial({color:0xffd166, depthTest:false});
+  const pale = new THREE.MeshBasicMaterial({color:0xf8fafc, depthTest:false});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.05, .16), dark);
+  body.position.y = .1;
+  const bodyBand = new THREE.Mesh(new THREE.BoxGeometry(1.55, .08, .18), gold);
+  bodyBand.position.set(0, .14, 0);
+  const top = new THREE.Group();
+  top.position.set(-.88, .72, 0);
+  top.rotation.z = .16;
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(1.9, .28, .18), pale);
+  bar.position.x = .95;
+  top.add(bar);
+  for(let i = 0; i < 5; i++){
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(.22, .3, .19), dark);
+    stripe.position.x = .22 + i * .39;
+    stripe.rotation.z = -.48;
+    top.add(stripe);
+  }
+  const hinge = new THREE.Mesh(new THREE.CylinderGeometry(.11, .11, .22, 16), gold);
+  hinge.rotation.x = Math.PI / 2;
+  hinge.position.set(-.88, .72, 0);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, .75, 8), gold);
+  stem.position.y = -.8;
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(.48, .58, .08, 24), dark);
+  base.position.y = -1.18;
+  helper.add(body, bodyBand, top, hinge, stem, base);
+  helper.traverse(child => {
+    child.userData.nonExportable = true;
+    child.userData.editorHelper = true;
+    child.renderOrder = 998;
+  });
+  gp.add(helper);
   return gp;
 }
 
@@ -3057,6 +3205,307 @@ function createEmitter(kind, params){
 }
 
 // ------------------------------------------------ factory: GLB import
+function normalizeMeshEdits(value){
+  const edits = value && typeof value === 'object' ? cloneData(value) : {};
+  edits.version = 1;
+  edits.deleted = Array.isArray(edits.deleted) ? Array.from(new Set(edits.deleted.map(String))) : [];
+  edits.detached = Array.isArray(edits.detached) ? Array.from(new Set(edits.detached.map(String))) : [];
+  edits.transforms = edits.transforms && typeof edits.transforms === 'object' ? edits.transforms : {};
+  edits.properties = edits.properties && typeof edits.properties === 'object' ? edits.properties : {};
+  edits.splits = edits.splits && typeof edits.splits === 'object' ? edits.splits : {};
+  edits.joins = Array.isArray(edits.joins) ? edits.joins.filter(join => join && join.id && Array.isArray(join.parts) && join.parts.length > 1).map(join => ({
+    id:String(join.id),
+    name:String(join.name || 'Joined Mesh'),
+    parts:Array.from(new Set(join.parts.map(String))),
+  })) : [];
+  return edits;
+}
+function assignMeshEditIds(root){
+  let index = 0;
+  root.traverse(node => {
+    if(!node.isMesh || node.userData && node.userData.lkMeshEditGenerated) return;
+    if(!node.userData.lkMeshEditId) node.userData.lkMeshEditId = 'mesh:' + index;
+    if(!node.userData.lkMeshEditBaseProps) node.userData.lkMeshEditBaseProps = {
+      name:node.name || '', visible:node.visible !== false,
+      castShadow:!!node.castShadow, receiveShadow:!!node.receiveShadow,
+      frustumCulled:node.frustumCulled !== false, renderOrder:node.renderOrder || 0,
+    };
+    index++;
+  });
+}
+function triangleMaterialIndex(geometry, triangle){
+  const offset = triangle * 3;
+  const group = (geometry.groups || []).find(item => offset >= item.start && offset < item.start + item.count);
+  return group ? (group.materialIndex || 0) : 0;
+}
+function meshTriangleComponents(geometry, mode){
+  const source = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+  const position = source.attributes && source.attributes.position;
+  if(!position) return {source, components:[]};
+  const triangleCount = Math.floor(position.count / 3);
+  if(triangleCount > 120000) return {source, components:[], tooLarge:true};
+  if(mode === 'material'){
+    const groups = new Map();
+    for(let triangle = 0; triangle < triangleCount; triangle++){
+      const materialIndex = triangleMaterialIndex(source, triangle);
+      if(!groups.has(materialIndex)) groups.set(materialIndex, []);
+      groups.get(materialIndex).push(triangle);
+    }
+    return {source, components:Array.from(groups.values())};
+  }
+  const parent = Array.from({length:triangleCount}, (_, i) => i);
+  const find = value => {
+    let current = value;
+    while(parent[current] !== current){ parent[current] = parent[parent[current]]; current = parent[current]; }
+    return current;
+  };
+  const union = (a, b) => {
+    const aa = find(a), bb = find(b);
+    if(aa !== bb) parent[bb] = aa;
+  };
+  const ownerByVertex = new Map();
+  const precision = 100000;
+  for(let triangle = 0; triangle < triangleCount; triangle++){
+    for(let corner = 0; corner < 3; corner++){
+      const vertex = triangle * 3 + corner;
+      const key = Math.round(position.getX(vertex) * precision) + ':' + Math.round(position.getY(vertex) * precision) + ':' + Math.round(position.getZ(vertex) * precision);
+      if(ownerByVertex.has(key)) union(triangle, ownerByVertex.get(key));
+      else ownerByVertex.set(key, triangle);
+    }
+  }
+  const groups = new Map();
+  for(let triangle = 0; triangle < triangleCount; triangle++){
+    const id = find(triangle);
+    if(!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(triangle);
+  }
+  return {source, components:Array.from(groups.values())};
+}
+function geometryFromTriangles(source, triangles){
+  const geometry = new THREE.BufferGeometry();
+  Object.keys(source.attributes || {}).forEach(name => {
+    const attr = source.attributes[name];
+    const values = [];
+    const read = (vertex, component) => {
+      if(component === 0 && attr.getX) return attr.getX(vertex);
+      if(component === 1 && attr.getY) return attr.getY(vertex);
+      if(component === 2 && attr.getZ) return attr.getZ(vertex);
+      if(component === 3 && attr.getW) return attr.getW(vertex);
+      return attr.array ? attr.array[vertex * attr.itemSize + component] : 0;
+    };
+    triangles.forEach(triangle => {
+      for(let corner = 0; corner < 3; corner++){
+        const vertex = triangle * 3 + corner;
+        for(let component = 0; component < attr.itemSize; component++) values.push(read(vertex, component));
+      }
+    });
+    geometry.setAttribute(name, new THREE.Float32BufferAttribute(values, attr.itemSize));
+  });
+  triangles.forEach((triangle, index) => geometry.addGroup(index * 3, 3, triangleMaterialIndex(source, triangle)));
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+function cloneMeshEditMaterial(material, suffix){
+  const clone = material && material.clone ? material.clone() : material;
+  if(clone && clone !== material){
+    ['map','normalMap','roughnessMap','metalnessMap','alphaMap','emissiveMap','aoMap','lightMap','bumpMap','displacementMap'].forEach(key => {
+      if(material[key] && material[key].clone){ clone[key] = material[key].clone(); clone[key].needsUpdate = true; }
+    });
+  }
+  if(clone && suffix) clone.name = (material && material.name || 'Material') + ' · ' + suffix;
+  return clone;
+}
+function splitMeshForEditing(mesh, mode){
+  if(!mesh || !mesh.isMesh || mesh.isSkinnedMesh || !mesh.geometry || mesh.morphTargetInfluences || Object.keys(mesh.geometry.morphAttributes || {}).length) return [];
+  const id = mesh.userData.lkMeshEditId;
+  const result = meshTriangleComponents(mesh.geometry, mode);
+  if(result.tooLarge || result.components.length < 2){
+    if(result.source && result.source.dispose) result.source.dispose();
+    return [];
+  }
+  const group = new THREE.Group();
+  group.name = (mesh.name || id) + ' · separated';
+  group.userData.lkMeshEditGenerated = true;
+  group.userData.lkMeshEditSplitSource = id;
+  group.position.copy(mesh.position);
+  group.quaternion.copy(mesh.quaternion);
+  group.scale.copy(mesh.scale);
+  result.components.forEach((triangles, index) => {
+    const geometry = geometryFromTriangles(result.source, triangles);
+    const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const usedMaterialIds = Array.from(new Set((geometry.groups || []).map(item => item.materialIndex || 0)));
+    const materialMap = new Map(usedMaterialIds.map((id, materialIndex) => [id, materialIndex]));
+    geometry.groups.forEach(item => { item.materialIndex = materialMap.get(item.materialIndex || 0) || 0; });
+    const materials = usedMaterialIds.map(id => cloneMeshEditMaterial(sourceMaterials[id] || sourceMaterials[0], 'Part ' + (index + 1)));
+    const child = new THREE.Mesh(geometry, materials.length === 1 ? materials[0] : materials);
+    child.name = (mesh.name || id) + ' · Part ' + (index + 1);
+    child.castShadow = mesh.castShadow;
+    child.receiveShadow = mesh.receiveShadow;
+    child.renderOrder = mesh.renderOrder;
+    child.userData.lkMeshEditGenerated = true;
+    child.userData.lkMeshEditId = id + '#part:' + index;
+    group.add(child);
+  });
+  if(result.source && result.source.dispose) result.source.dispose();
+  mesh.visible = false;
+  mesh.userData.lkMeshEditSplitHidden = true;
+  mesh.parent.add(group);
+  return group.children.slice();
+}
+function joinedGeometry(root, parts){
+  root.updateMatrixWorld(true);
+  const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const prepared = parts.map(mesh => {
+    mesh.updateMatrixWorld(true);
+    const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(rootInverse, mesh.matrixWorld));
+    const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const count = geometry.attributes.position.count;
+    const groups = geometry.groups && geometry.groups.length ? geometry.groups : [{start:0, count, materialIndex:0}];
+    const usedMaterialIds = Array.from(new Set(groups.map(group => group.materialIndex || 0)));
+    const materialMap = new Map(usedMaterialIds.map((id, index) => [id, index]));
+    return {mesh, geometry, groups, materialMap, materials:usedMaterialIds.map(id => cloneMeshEditMaterial(sourceMaterials[id] || sourceMaterials[0], 'Joined ' + (mesh.name || mesh.userData.lkMeshEditId || 'Part')))};
+  });
+  const names = Array.from(new Set(prepared.flatMap(item => Object.keys(item.geometry.attributes || {}))));
+  const output = new THREE.BufferGeometry();
+  names.forEach(name => {
+    const itemSize = Math.max.apply(null, prepared.map(item => item.geometry.attributes[name] && item.geometry.attributes[name].itemSize || 0));
+    if(!itemSize) return;
+    const values = [];
+    prepared.forEach(item => {
+      const attr = item.geometry.attributes[name];
+      const count = item.geometry.attributes.position.count;
+      for(let vertex = 0; vertex < count; vertex++){
+        for(let component = 0; component < itemSize; component++){
+          let value = 0;
+          if(attr && component < attr.itemSize){
+            if(component === 0 && attr.getX) value = attr.getX(vertex);
+            else if(component === 1 && attr.getY) value = attr.getY(vertex);
+            else if(component === 2 && attr.getZ) value = attr.getZ(vertex);
+            else if(component === 3 && attr.getW) value = attr.getW(vertex);
+          } else if(name === 'color' && component < 3) value = 1;
+          values.push(value);
+        }
+      }
+    });
+    output.setAttribute(name, new THREE.Float32BufferAttribute(values, itemSize));
+  });
+  let vertexOffset = 0;
+  let materialOffset = 0;
+  const materials = [];
+  prepared.forEach(item => {
+    const count = item.geometry.attributes.position.count;
+    item.groups.forEach(group => output.addGroup(vertexOffset + group.start, group.count, materialOffset + (item.materialMap.get(group.materialIndex || 0) || 0)));
+    vertexOffset += count;
+    materials.push.apply(materials, item.materials);
+    materialOffset += item.materials.length;
+    item.geometry.dispose();
+  });
+  output.computeBoundingBox();
+  output.computeBoundingSphere();
+  return {geometry:output, materials};
+}
+function joinMeshesForEditing(root, definition, meshes){
+  const parts = definition.parts.map(id => meshes.get(id)).filter(mesh => mesh && mesh.isMesh && !mesh.isSkinnedMesh && !mesh.morphTargetInfluences);
+  if(parts.length < 2) return null;
+  const merged = joinedGeometry(root, parts);
+  const mesh = new THREE.Mesh(merged.geometry, merged.materials.length === 1 ? merged.materials[0] : merged.materials);
+  mesh.name = definition.name || 'Joined Mesh';
+  mesh.castShadow = parts.some(part => part.castShadow);
+  mesh.receiveShadow = parts.some(part => part.receiveShadow);
+  mesh.renderOrder = Math.max.apply(null, parts.map(part => part.renderOrder || 0));
+  mesh.userData.lkMeshEditGenerated = true;
+  mesh.userData.lkMeshEditJoin = true;
+  mesh.userData.lkMeshEditId = definition.id;
+  mesh.userData.lkMeshEditJoinParts = definition.parts.slice();
+  parts.forEach(part => { part.visible = false; part.userData.lkMeshEditJoinHidden = true; });
+  root.add(mesh);
+  return mesh;
+}
+function applyMeshEdits(root, value){
+  if(!root) return root;
+  const edits = normalizeMeshEdits(value);
+  const generated = [];
+  root.traverse(node => { if(node.userData && node.userData.lkMeshEditGenerated && node.parent) generated.push(node); });
+  generated.filter(node => !(node.parent && node.parent.userData && node.parent.userData.lkMeshEditGenerated)).forEach(node => {
+    node.traverse(child => {
+      if(child.isMesh && child.userData && child.userData.lkMeshEditGenerated){
+        if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+        const materials = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+        materials.forEach(material => {
+          if(!material) return;
+          ['map','normalMap','roughnessMap','metalnessMap','alphaMap','emissiveMap','aoMap','lightMap','bumpMap','displacementMap'].forEach(key => {
+            if(material[key] && material[key].dispose) material[key].dispose();
+          });
+          if(material.dispose) material.dispose();
+        });
+      }
+    });
+    node.parent.remove(node);
+  });
+  root.traverse(node => {
+    if(node.userData && node.userData.lkMeshEditSplitHidden){ node.visible = true; delete node.userData.lkMeshEditSplitHidden; }
+    if(node.userData && node.userData.lkMeshEditJoinHidden){ node.visible = true; delete node.userData.lkMeshEditJoinHidden; }
+    if(node.userData && node.userData.lkMeshEditDeleted){ node.visible = true; delete node.userData.lkMeshEditDeleted; }
+    if(node.isMesh && node.userData && node.userData.lkMeshEditBaseProps){
+      const p = node.userData.lkMeshEditBaseProps;
+      node.name = p.name; node.visible = p.visible; node.castShadow = p.castShadow;
+      node.receiveShadow = p.receiveShadow; node.frustumCulled = p.frustumCulled;
+      node.renderOrder = p.renderOrder;
+    }
+  });
+  assignMeshEditIds(root);
+  const originals = new Map();
+  root.traverse(node => { if(node.isMesh && node.userData && node.userData.lkMeshEditId) originals.set(node.userData.lkMeshEditId, node); });
+  Object.keys(edits.splits).sort().forEach(id => {
+    const mesh = originals.get(id);
+    if(mesh) splitMeshForEditing(mesh, edits.splits[id] === 'material' ? 'material' : 'connected');
+  });
+  const meshes = new Map();
+  root.traverse(node => { if(node.isMesh && node.userData && node.userData.lkMeshEditId) meshes.set(node.userData.lkMeshEditId, node); });
+  edits.detached.forEach(id => {
+    const mesh = meshes.get(id);
+    if(mesh && mesh.parent && mesh.parent !== root) root.attach(mesh);
+  });
+  Object.keys(edits.transforms).forEach(id => {
+    const mesh = meshes.get(id), t = edits.transforms[id];
+    if(!mesh || !t) return;
+    if(Array.isArray(t.p)) mesh.position.fromArray(t.p);
+    if(Array.isArray(t.r)) mesh.rotation.set(t.r[0] || 0, t.r[1] || 0, t.r[2] || 0);
+    if(Array.isArray(t.s)) mesh.scale.fromArray(t.s);
+  });
+  edits.joins.forEach(join => {
+    const joined = joinMeshesForEditing(root, join, meshes);
+    if(joined) meshes.set(join.id, joined);
+  });
+  const joinedMeshes = new Map();
+  root.traverse(node => { if(node.isMesh && node.userData && node.userData.lkMeshEditId) joinedMeshes.set(node.userData.lkMeshEditId, node); });
+  Object.keys(edits.transforms).forEach(id => {
+    const mesh = joinedMeshes.get(id), t = edits.transforms[id];
+    if(!mesh || !t) return;
+    if(Array.isArray(t.p)) mesh.position.fromArray(t.p);
+    if(Array.isArray(t.r)) mesh.rotation.set(t.r[0] || 0, t.r[1] || 0, t.r[2] || 0);
+    if(Array.isArray(t.s)) mesh.scale.fromArray(t.s);
+  });
+  Object.keys(edits.properties).forEach(id => {
+    const mesh = joinedMeshes.get(id), p = edits.properties[id];
+    if(!mesh || !p) return;
+    if(typeof p.name === 'string') mesh.name = p.name;
+    if(typeof p.visible === 'boolean') mesh.visible = p.visible;
+    if(typeof p.castShadow === 'boolean') mesh.castShadow = p.castShadow;
+    if(typeof p.receiveShadow === 'boolean') mesh.receiveShadow = p.receiveShadow;
+    if(typeof p.frustumCulled === 'boolean') mesh.frustumCulled = p.frustumCulled;
+    if(Number.isFinite(Number(p.renderOrder))) mesh.renderOrder = Number(p.renderOrder);
+  });
+  edits.deleted.forEach(id => {
+    const mesh = joinedMeshes.get(id);
+    if(mesh){ mesh.visible = false; mesh.userData.lkMeshEditDeleted = true; }
+  });
+  root.userData.meshEdits = edits;
+  if(root.userData.addedEntry) root.userData.addedEntry.meshEdits = cloneData(edits);
+  return root;
+}
 function loadGlbRaw(src){
   return new Promise((resolve, reject) => {
     if(typeof THREE.GLTFLoader === 'undefined'){ reject(new Error('GLTFLoader non disponibile')); return; }
@@ -3091,6 +3540,11 @@ function loadGlb(src, fit, opts){
     loader.load(src, g => {
       const root = g.scene;
       root.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
+      if(opts.suppressEmbeddedLights){
+        const embedded = [];
+        root.traverse(o => { if(o && o.isLight) embedded.push(o); });
+        embedded.forEach(light => { if(light.parent) light.parent.remove(light); });
+      }
       if(opts.vehicleLike && normalizeVehicleGlbRoot(root)){
         root.userData.lkVehicleAxisNormalized = true;
       }
@@ -3113,11 +3567,53 @@ function loadGlb(src, fit, opts){
   });
 }
 function loadGlbEntry(entry){
-  const opts = {vehicleLike: vehicleLikeGlbEntry(entry)};
-  if(entry.src) return loadGlb(entry.src, entry.fit, opts);
+  const opts = {vehicleLike: vehicleLikeGlbEntry(entry), suppressEmbeddedLights:!!entry.embeddedLightsExtracted};
+  if(entry.src) return loadGlb(entry.src, entry.fit, opts).then(root => applyMeshEdits(root, entry.meshEdits));
   const dbKey = entry.dbKey || (entry.asset && entry.asset.dbKey);
-  if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey).then(url => loadGlb(url, entry.fit, opts));
+  if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey).then(url => loadGlb(url, entry.fit, opts)).then(root => applyMeshEdits(root, entry.meshEdits));
   return Promise.reject(new Error('sorgente GLB non disponibile'));
+}
+
+function extractEmbeddedLights(GAME, root, sourceEntry){
+  if(!GAME || !root || !sourceEntry || sourceEntry.embeddedLightsExtracted) return [];
+  root.updateMatrixWorld(true);
+  const found = [];
+  root.traverse(node => { if(node && node.isLight && !node.userData.editorLightHandle) found.push(node); });
+  if(!found.length) return [];
+  const created = [];
+  found.forEach((source, index) => {
+    const kind = source.isSpotLight ? 'spot' : (source.isDirectionalLight ? 'directional' : 'point');
+    const fallbackIntensity = kind === 'spot' ? 1.8 : (kind === 'point' ? 1.4 : 1.1);
+    const rawIntensity = Number(source.intensity);
+    const props = {
+      color:source.color ? source.color.getHex() : 0xfff1d0,
+      intensity:Number.isFinite(rawIntensity) && rawIntensity > 0 ? Math.max(.1, Math.min(8, rawIntensity)) : fallbackIntensity,
+      distance:source.distance > 0 ? Math.max(2, Math.min(100, source.distance)) : (kind === 'spot' ? 45 : 35),
+      angle:source.isSpotLight && source.angle > 0 ? Math.max(.1, Math.min(1.2, source.angle)) : .55,
+      penumbra:source.isSpotLight && Number.isFinite(source.penumbra) ? Math.max(0, Math.min(1, source.penumbra)) : .35,
+      decay:Number.isFinite(source.decay) && source.decay > 0 ? Math.max(.5, Math.min(3, source.decay)) : 2,
+      castShadow:false,
+    };
+    const lightRoot = createLight(kind, props);
+    const worldPos = source.getWorldPosition(new THREE.Vector3());
+    const sourceQuat = source.getWorldQuaternion(new THREE.Quaternion());
+    let direction = new THREE.Vector3(0, 0, -1).applyQuaternion(sourceQuat).normalize();
+    if(source.target && source.target.getWorldPosition){
+      const targetPos = source.target.getWorldPosition(new THREE.Vector3());
+      if(targetPos.distanceToSquared(worldPos) > 1e-6) direction.copy(targetPos).sub(worldPos).normalize();
+    }
+    lightRoot.position.copy(worldPos);
+    if(kind !== 'point') lightRoot.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), direction);
+    const id = nextId();
+    const baseName = source.name || ((sourceEntry.name || 'GLB') + ' ' + (kind === 'spot' ? 'Spot' : kind === 'point' ? 'Point' : 'Directional') + ' Light ' + (index + 1));
+    const entry = {id, kind:'light', light:kind, name:baseName, props, t:tOf(lightRoot), embeddedFrom:sourceEntry.id || null};
+    registerAdded(GAME, lightRoot, entry);
+    created.push(lightRoot);
+  });
+  found.forEach(light => { if(light.parent) light.parent.remove(light); });
+  sourceEntry.embeddedLightsExtracted = true;
+  root.userData.embeddedLightsExtracted = true;
+  return created;
 }
 
 // ------------------------------------------------ create from a saved "added" entry
@@ -3168,6 +3664,7 @@ function entryType(entry, obj){
 function registerAdded(GAME, obj, entry){
   ensureEffectHook(GAME);
   obj.userData.addedEntry = entry;
+  if(entry.meshEdits) applyMeshEdits(obj, entry.meshEdits);
   if(entry.kind === 'logicElement'){
     obj.userData.logicAssetId = entry.logicAssetId || obj.userData.logicAssetId || null;
     obj.userData.logicLinked = !!(entry.logicLinked !== false && obj.userData.logicAssetId);
@@ -3305,6 +3802,9 @@ function apply(GAME){
 
   // Vehicle light config can create extra built-in light anchors; do it before
   // transform replay so custom Aux 3/4/... offsets have real targets.
+  if(data.player && GAME.player.setEnabled) GAME.player.setEnabled(data.player.enabled !== false);
+  if(data.player && GAME.player.setHidden) GAME.player.setHidden(data.player.hidden === true);
+  if(data.player && GAME.player.setControllerIndex) GAME.player.setControllerIndex(Object.prototype.hasOwnProperty.call(data.player, 'controllerIndex') ? data.player.controllerIndex : 0);
   if(data.player && data.player.lights && GAME.player.setLights) GAME.player.setLights(data.player.lights);
   if(data.player && data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
   if(data.player && data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
@@ -3368,6 +3868,9 @@ function apply(GAME){
     pending.push(p);
   }
   applyEnvironment(GAME, data.env);
+  if(data.ui && data.ui.video && GAME.settings && GAME.settings.setVideoProject){
+    GAME.settings.setVideoProject(data.ui.video);
+  }
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
   const musicLibraries = data.ui && data.ui.musicLibraries;
   if(musicLibraries && GAME.systems){
@@ -3431,6 +3934,10 @@ function apply(GAME){
           GAME.player.car.userData.modelSrc = data.player.modelSrc || null;
           GAME.player.car.userData.modelDbKey = data.player.modelDbKey || null;
           GAME.player.car.userData.modelName = data.player.modelName || null;
+          if(data.player.meshEdits){
+            applyMeshEdits(s, data.player.meshEdits);
+            GAME.player.car.userData.playerMeshEdits = normalizeMeshEdits(data.player.meshEdits);
+          }
           if(playerTransform){
             applyT(GAME.player.car, playerTransform);
           }
@@ -3439,6 +3946,12 @@ function apply(GAME){
         }))
         .catch(err => console.warn('LotKing store: modello player non ricaricato', err));
       pending.push(p);
+    } else if(data.player.meshEdits && GAME.player.getModel){
+      const model = GAME.player.getModel();
+      if(model){
+        applyMeshEdits(model, data.player.meshEdits);
+        GAME.player.car.userData.playerMeshEdits = normalizeMeshEdits(data.player.meshEdits);
+      }
     }
     if(data.player.cam){
       Object.assign(GAME.player.cameraCfg, data.player.cam, {
@@ -3474,7 +3987,6 @@ function apply(GAME){
     for(const o of GAME.world.registry) syncCollider(o);
     if(GAME.systems.physics) GAME.systems.physics.rebuild();
     GAME.state.sceneReady = true;
-    console.info('LotKing store: scena editor applicata (' + (data.added||[]).length + ' aggiunti, ' + (data.deleted||[]).length + ' eliminati)');
     return data;
   });
 }
@@ -3482,6 +3994,17 @@ function apply(GAME){
 // ------------------------------------------------ collect current scene → data (editor save)
 let _sessionCounter = 1;
 function collect(GAME){
+  // Older/import-library placement paths could leave KHR_lights_punctual nodes
+  // inside a GLB without creating persisted editor light entries. Normalize the
+  // live scene before collecting so Save, LKEP and Playable Export all serialize
+  // the same Point/Spot/Directional lights visible in the editor.
+  if(GAME && GAME.world && Array.isArray(GAME.world.registry)){
+    GAME.world.registry.slice().forEach(object => {
+      const entry = object && object.userData && object.userData.addedEntry;
+      if(!entry || entry.kind !== 'glb' || entry.embeddedLightsExtracted) return;
+      extractEmbeddedLights(GAME, object, entry);
+    });
+  }
   const d = blank();
   const old = load();
   const freezeRuntimeTransforms = !!(GAME && GAME.state && GAME.state.editorPreview);
@@ -3537,6 +4060,8 @@ function collect(GAME){
       if(o.userData.colliderShape) e.colliderShape = cloneData(o.userData.colliderShape);
       if(o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide') e.colliderDummyVisibility = o.userData.colliderDummyVisibility;
       else delete e.colliderDummyVisibility;
+      if(o.userData.meshEdits) e.meshEdits = normalizeMeshEdits(o.userData.meshEdits);
+      else delete e.meshEdits;
       if(colliderRef && colliderRef.mass != null){
         e.physicsMass = physicsMassFrom(o.userData.collider.ref.mass);
       } else {
@@ -3573,8 +4098,11 @@ function collect(GAME){
     }
   }
   d.deleted = builtinIds.filter(id => !liveBuiltin.has(id));
-  d.env = freezeRuntimeTransforms && old && old.env ? cloneData(old.env) : collectEnvironment(GAME);
+  d.env = freezeRuntimeTransforms
+    ? cloneData(GAME.state.editorPreviewManualEnvironment || old && old.env || collectEnvironment(GAME))
+    : collectEnvironment(GAME);
   if(GAME.ui && GAME.ui.radioHud) d.ui.radioHud = JSON.parse(JSON.stringify(GAME.ui.radioHud));
+  if(GAME.settings && GAME.settings.getVideoProject) d.ui.video = cloneData(GAME.settings.getVideoProject());
   if(GAME.systems){
     const radioTracks = GAME.systems.radio && GAME.systems.radio.getStoredTracks ? GAME.systems.radio.getStoredTracks() : [];
     const menuTracks = GAME.systems.menuMusic && GAME.systems.menuMusic.getStoredTracks ? GAME.systems.menuMusic.getStoredTracks() : [];
@@ -3611,7 +4139,7 @@ window.LK_STORE = {
   load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject, getLevelLogicGraph, setLevelLogicGraph,
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
   lightProps, applyLightProps, applyMatProps,
-	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, createFromEntry, registerAdded,
+	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, collect, nextId,
   ensureBundledDemoProject,
@@ -3643,12 +4171,6 @@ window.LK_STORE = {
     syncCatalog();
   }
   applyPlayableLevelHint();
-  try {
-    const _idx = ensureLibrary();
-    const _act = levelEntry(_idx, _idx.activeId);
-    console.log('[LotKing runtime] livello attivo risolto: ' + normalizeLevelId(_idx.activeId) +
-      ' → "' + (_act ? _act.name : '?') + '"; catalogo: ' + _idx.levels.map(l => l.name + '[' + normalizeLevelId(l.id) + ']').join(', '));
-  } catch(e){}
   function syncCatalogNow(attempt){
     attempt = attempt || 0;
     const tracks = catalogTracks();

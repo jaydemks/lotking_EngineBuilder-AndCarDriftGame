@@ -74,6 +74,25 @@ function createObjectService(GAME, owner){
   function labelOf(o){
     return String(o && o.userData && (o.userData.editorName || o.userData.logicElementSceneId) || o && o.name || '').toLowerCase();
   }
+  function normalizedType(value){ return String(value || '').toLowerCase().replace(/[\s_.-]+/g, ''); }
+  function matchesType(o, requested){
+    if(!o) return false;
+    const wanted = normalizedType(requested);
+    if(!wanted || wanted === 'all' || wanted === 'element' || wanted === 'object') return true;
+    const data = o.userData || {};
+    const editorType = normalizedType(data.editorType || data.kind);
+    if(wanted === editorType) return true;
+    if((wanted === 'camera' || wanted === 'scenecamera') && (editorType === 'camera' || o.isCamera || data.sceneCamera)) return true;
+    if((wanted === 'timeline' || wanted === 'cinema' || wanted === 'cinemastudio') && editorType === 'cinemastudio') return true;
+    if((wanted === 'logic' || wanted === 'logicelement') && editorType === 'logicelement') return true;
+    if((wanted === 'player' || wanted === 'pawn' || wanted === 'playercar') && (editorType === 'playercar' || data.playerCarLogicElement)) return true;
+    if(wanted === 'mesh' && (o.isMesh || editorType === 'mesh' || editorType === 'glb')) return true;
+    if(wanted === 'light' && (o.isLight || editorType === 'light')) return true;
+    if(wanted === 'spotlight' && (o.isSpotLight || normalizedType(data.lightKind) === 'spot')) return true;
+    if(wanted === 'pointlight' && (o.isPointLight || normalizedType(data.lightKind) === 'point')) return true;
+    if(wanted === 'directionallight' && (o.isDirectionalLight || normalizedType(data.lightKind) === 'directional')) return true;
+    return false;
+  }
   function colorOf(value){
     const THREERef = window.THREE;
     if(!THREERef || !THREERef.Color) return null;
@@ -96,6 +115,8 @@ function createObjectService(GAME, owner){
       const needle = String(name || '').toLowerCase();
       return allObjects().find(o => labelOf(o) === needle) || null;
     },
+    byType: type => allObjects().find(o => matchesType(o, type)) || null,
+    allByType: type => allObjects().filter(o => matchesType(o, type)),
     createPrimitive: (opts) => {
       const THREERef = window.THREE;
       if(!THREERef) return null;
@@ -212,7 +233,7 @@ function createTransformService(THREE, STORE){
   });
 }
 
-function createInputService(){
+function createInputService(GAME){
   const root = window;
   const state = root.LK_LOGIC_INPUT_STATE || {
     installed:false,
@@ -244,6 +265,18 @@ function createInputService(){
   }
   return Object.freeze({
     isKeyPressed: key => state.keys.has(String(key || '').toLowerCase()),
+    playerDrive: playerId => {
+      const id = Number(playerId);
+      if(!Number.isFinite(id) || id < 1 || id > 4 || !GAME || !GAME.input || !GAME.input.player) return {steer:0, throttle:0, brake:0, handbrake:false, device:null};
+      if(GAME.input.ensurePlayerSlot) GAME.input.ensurePlayerSlot(id - 1);
+      const view = GAME.input.player(id - 1);
+      const drive = view && view.drive ? view.drive() : {};
+      return {
+        steer:Number(drive.steer) || 0, throttle:Number(drive.throttle) || 0,
+        brake:Number(drive.brake) || 0, handbrake:drive.handbrake === true,
+        device:view && view.device ? view.device() : null,
+      };
+    },
     pointer: () => Object.assign({}, state.pointer),
   });
 }
@@ -571,11 +604,20 @@ function createCameraService(GAME, THREE){
     if(target.userData && target.userData.sceneCamera) return target.userData.sceneCamera;
     return null;
   }
+  function cameraHolder(target){
+    if(!target) return null;
+    if(target.userData && target.userData.editorType === 'camera') return target;
+    return GAME && GAME.world && Array.isArray(GAME.world.registry)
+      ? GAME.world.registry.find(item => item && item.userData && item.userData.sceneCamera === target) || null
+      : null;
+  }
   return Object.freeze({
     setActiveCamera: target => {
       const src = cameraFrom(target);
       const dst = gameCamera();
       if(!src || !dst) return false;
+      const holder = cameraHolder(target);
+      if(GAME && GAME.state) GAME.state.runtimeActiveSceneCameraId = holder && holder.userData.editorId || null;
       dst.position.copy(src.getWorldPosition ? src.getWorldPosition(new THREE.Vector3()) : src.position);
       if(src.getWorldQuaternion) dst.quaternion.copy(src.getWorldQuaternion(new THREE.Quaternion()));
       else if(src.quaternion) dst.quaternion.copy(src.quaternion);
@@ -594,6 +636,17 @@ function createCameraService(GAME, THREE){
       cam.lookAt(vec(target));
       return true;
     },
+  });
+}
+
+function createCinemaService(){
+  return Object.freeze({
+    playTimeline:(studio, startTime) => {
+      const detail = {studio:studio || '', time:Math.max(0, Number(startTime) || 0), fullscreen:true, playerIndex:0};
+      window.dispatchEvent(new CustomEvent('lotking:cinemastart', {detail}));
+      return true;
+    },
+    stopTimeline:() => { window.dispatchEvent(new CustomEvent('lotking:cinemastop')); return true; },
   });
 }
 
@@ -683,16 +736,17 @@ function createContext(opts){
     services: {
       objects: createObjectService(GAME, opts.owner || null),
       transforms: THREERef ? createTransformService(THREERef, STORE) : null,
-      input: createInputService(),
+      input: createInputService(GAME),
       physics: createPhysicsService(GAME, THREERef),
       materials: THREERef ? createMaterialService(THREERef) : null,
       raycasts: THREERef ? createRaycastService(GAME, THREERef) : null,
       cameras: THREERef ? createCameraService(GAME, THREERef) : null,
+      cinema: createCinemaService(),
       audio: createAudioService(),
       animations: createAnimationService(STORE),
     },
   };
 }
 
-window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createAudioService, createAnimationService});
+window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService});
 })();

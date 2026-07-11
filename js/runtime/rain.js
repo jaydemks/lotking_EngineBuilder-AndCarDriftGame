@@ -32,14 +32,14 @@ uniform vec2 uWind;
 uniform vec3 uCenter;
 varying float vFade;
 float wrap(float s, float c){
-  return c + mod(s * 2.0 * uArea - c, 2.0 * uArea) - uArea;
+  return c + (s * 2.0 - 1.0) * uArea;
 }
 void main(){
   float y = mod(aSeed.y * uHeight * 7.0 - uFall, uHeight);
   vec3 dir = normalize(vec3(uWind.x, -1.0, uWind.y));
   vec3 p = vec3(
     wrap(aSeed.x, uCenter.x) + dir.x * y,
-    y,
+    uCenter.y + y,
     wrap(aSeed.z, uCenter.z) + dir.z * y
   );
   p += dir * (uLen * aTip);
@@ -98,10 +98,32 @@ function create(deps){
   });
   const lines = new THREE.LineSegments(geo, mat);
   lines.frustumCulled = false;
+  lines.renderOrder = 54;
   lines.visible = P.enabled;
+  lines.onBeforeRender = (rnd, scn, camera) => {
+    if(!camera || !camera.getWorldPosition) return;
+    camera.getWorldPosition(_cameraPosition);
+    uniforms.uCenter.value.x = _cameraPosition.x;
+    uniforms.uCenter.value.z = _cameraPosition.z;
+  };
   scene.add(lines);
+  const _cameraPosition = new THREE.Vector3();
+
+  function normalizeParams(){
+    P.enabled = P.enabled === true;
+    P.intensity = clamp(Number(P.intensity) || 0, 0, 1);
+    P.speed = clamp(Number(P.speed) || DEFAULTS.speed, 5, 200);
+    P.length = clamp(Number(P.length) || DEFAULTS.length, .05, 3);
+    P.wind = clamp(Number(P.wind) || 0, 0, 1.5);
+    P.windAngle = ((Number(P.windAngle) || 0) % 360 + 360) % 360;
+    P.area = clamp(Number(P.area) || DEFAULTS.area, 20, 200);
+    P.height = clamp(Number(P.height) || DEFAULTS.height, 10, 120);
+    P.opacity = clamp(Number(P.opacity) || 0, 0, 1);
+    P.sound = clamp(Number(P.sound) || 0, 0, 1);
+  }
 
   function applyParams(){
+    normalizeParams();
     uniforms.uArea.value = clamp(P.area, 20, 200);
     uniforms.uHeight.value = clamp(P.height, 10, 120);
     uniforms.uLen.value = clamp(P.length, .05, 3);

@@ -56,6 +56,7 @@ function createState(){
     viewportSlots: ['perspective', 'top', 'right', 'front'],
     activeViewportSlot: 0,
     viewportRenderModes: ['normal', 'normal', 'normal', 'normal'],
+    viewportShowHelpers: [true, true, true, true],
     viewportSplitX: .5,
     viewportSplitY: .5,
     viewportViewStates: {},

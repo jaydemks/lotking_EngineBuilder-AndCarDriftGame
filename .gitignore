@@ -33,6 +33,7 @@ models_sources/
 *.swp
 *.swo
 ROADMAP_NODES_BLUEPRINT_JS_PART1.md
+ROADMAP_NODES_BLUEPRINT_JS_PART2.md
 
 # Local/private environment files
 .env

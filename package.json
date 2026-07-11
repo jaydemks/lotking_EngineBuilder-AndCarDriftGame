@@ -3,8 +3,11 @@
   "private": true,
   "scripts": {
     "test:logic": "node tests/logic-core.test.js",
+    "test:video": "node tests/video-settings.test.js",
+    "test:music": "node tests/music-library.test.js",
+    "test:post": "node tests/post-processing.test.js",
     "test:browser": "playwright test",
-    "test": "npm run test:logic && npm run test:browser"
+    "test": "npm run test:logic && npm run test:video && npm run test:music && npm run test:post && npm run test:browser"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"

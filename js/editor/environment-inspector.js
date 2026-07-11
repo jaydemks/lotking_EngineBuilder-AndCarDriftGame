@@ -8,7 +8,13 @@
 function create(deps){
   deps = deps || {};
   const GAME = deps.GAME;
-  const markDirty = deps.markDirty;
+  const STORE = deps.STORE;
+  const markDirty = function(){
+    if(GAME && GAME.state && GAME.state.editorPreview && STORE && STORE.collectEnvironment){
+      GAME.state.editorPreviewManualEnvironment = STORE.collectEnvironment(GAME);
+    }
+    if(deps.markDirty) deps.markDirty();
+  };
   const buildInspector = deps.buildInspector;
   const selectObject = deps.selectObject;
   const section = deps.section;
@@ -124,7 +130,7 @@ function create(deps){
       srn.body.appendChild(sliderRow(tr('Opacity', 'Opacita'), rp.opacity, 0, 1, .01, v => rset({opacity:v}), v => Math.round(v*100) + '%').root);
       srn.body.appendChild(sliderRow(tr('Sound volume', 'Volume suono'), rp.sound == null ? .6 : rp.sound, 0, 1, .01, v => rset({sound:v}), v => Math.round(v*100) + '%').root);
       srn.body.appendChild(btnRow([{label:'↺ Default', action:() => { rain.set(rain.defaults()); markDirty(); buildInspector(); }}]));
-      srn.body.appendChild(el('<div class="lk-hint">' + tr('GPU rain follows the vehicle: cost is almost negligible even at full intensity. Procedural sound follows intensity and uses the SFX bus. Wind and direction conceptually match clouds: align them for coherence.', 'Pioggia GPU che segue il veicolo: il costo e quasi nullo anche a intensita piena. Il suono procedurale segue l\'intensita e usa il bus SFX. Vento e direzione sono condivisi concettualmente con le nuvole: allineali per coerenza.') + '</div>'));
+      srn.body.appendChild(el('<div class="lk-hint">' + tr('GPU rain follows the camera in every viewport while retaining the level/player ground height. Procedural sound follows intensity and uses the SFX bus. Align wind and direction with clouds for coherent weather.', 'La pioggia GPU segue la camera in ogni viewport mantenendo la quota del terreno/livello del player. Il suono procedurale segue l\'intensita e usa il bus SFX. Allinea vento e direzione con le nuvole per un meteo coerente.') + '</div>'));
     } else {
       srn.body.appendChild(el('<div class="lk-empty">' + tr('Rain module not loaded.', 'Modulo pioggia non caricato.') + '</div>'));
     }

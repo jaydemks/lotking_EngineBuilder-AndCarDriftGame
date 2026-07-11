@@ -54,6 +54,9 @@ function create(deps){
     meta = meta || {};
     ED.trackName = meta.trackName || meta.levelName || ED.trackName || 'Parking Lot';
     ED.trackId = meta.trackId || meta.levelId || slugifyTrackName(ED.trackName);
+    ED.levelRole = ['editor-menu','game-menu'].includes(meta.levelRole)
+      ? meta.levelRole
+      : (meta.levelRole === 'gameplay' ? 'gameplay' : (ED.levelRole || 'gameplay'));
     const input = $('#lkTrackName');
     if(input) input.value = ED.trackName;
     if(GAME.levels && GAME.levels.setEditorTrack) GAME.levels.setEditorTrack({id:ED.trackId, name:ED.trackName});
@@ -63,7 +66,7 @@ function create(deps){
   }
 
   function currentTrackMeta(){
-    const meta = {trackId: ED.trackId || slugifyTrackName(ED.trackName), trackName: ED.trackName || 'Parking Lot'};
+    const meta = {trackId: ED.trackId || slugifyTrackName(ED.trackName), trackName: ED.trackName || 'Parking Lot', levelRole:ED.levelRole || 'gameplay'};
     if(ED.inputConfig) meta.input = ACT ? ACT.normalizeConfig(ED.inputConfig) : ED.inputConfig;
     return meta;
   }
@@ -615,7 +618,8 @@ function create(deps){
     });
   }
 
-  async function createBrowserProject(){
+  async function createBrowserProject(options){
+    options = options || {};
     if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const next = await promptEditorAction({title:tr('New project', 'Nuovo progetto'), message:tr('New project name:', 'Nome del nuovo progetto:'), value:'New Project', okText:tr('Create', 'Crea')});
     if(!next || !next.trim()) return;
@@ -629,7 +633,7 @@ function create(deps){
       if(!ok) return;
     }
     const LV = levelsApi();
-    const sceneData = LV && LV.templateScene ? LV.templateScene(GAME) : STORE.blank();
+    const sceneData = options.empty ? STORE.blank() : (LV && LV.templateScene ? LV.templateScene(GAME) : STORE.blank());
     const meta = {trackId: slugifyTrackName(next.trim()), trackName: next.trim()};
     const project = createProjectSnapshot(sceneData);
     project.meta = Object.assign({}, project.meta || {}, meta);
@@ -755,6 +759,10 @@ function create(deps){
   };
 
   bindWorkspaceProjectImport();
+  const workspace = window.LK_PROJECT_WORKSPACE;
+  if(workspace && workspace.consumeStartupTemplate && workspace.consumeStartupTemplate() === 'empty'){
+    setTimeout(() => createBrowserProject({empty:true}), 650);
+  }
 
   return Object.freeze({
     slugifyTrackName, setTrackMeta, currentTrackMeta, loadTrackMeta, saveScene, projectFilename, exportProject, importProjectFile,

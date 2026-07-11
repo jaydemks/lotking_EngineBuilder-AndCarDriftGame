@@ -35,6 +35,7 @@ function create(deps){
   const setColliderEnabled = deps.setColliderEnabled;
   const setPhysicsEnabled = deps.setPhysicsEnabled;
   const buildMaterialEditor = deps.buildMaterialEditor;
+  const buildMeshEditor = deps.buildMeshEditor || function(){};
   const duplicateEntity = deps.duplicateEntity;
   const requestDeleteEntity = deps.requestDeleteEntity;
   const replaceSelectedGlb = deps.replaceSelectedGlb;
@@ -44,6 +45,27 @@ function create(deps){
   const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return asset && asset.src ? Promise.resolve(asset.src) : Promise.reject(new Error('asset source missing')); };
   const beginColliderHistory = deps.beginColliderHistory || function(){};
   const commitColliderHistory = deps.commitColliderHistory || function(){};
+  const beginInspectorHistory = deps.beginInspectorHistory || function(){};
+  const commitInspectorHistory = deps.commitInspectorHistory || function(){};
+
+  function bindInspectorHistory(box, object){
+    const isControl = target => !!(target && target.matches && target.matches('input, select, textarea'));
+    const isManaged = target => !!(target && target.closest && target.closest('[data-history-managed]'));
+    const isTransform = target => !!(tf.inputs || []).find(item => item && item.input === target);
+    const shouldTrack = target => isControl(target) && !isManaged(target) && !isTransform(target);
+    box.addEventListener('focusin', event => {
+      if(shouldTrack(event.target)) beginInspectorHistory(object);
+    }, true);
+    box.addEventListener('pointerdown', event => {
+      if(shouldTrack(event.target)) beginInspectorHistory(object);
+    }, true);
+    box.addEventListener('change', event => {
+      if(shouldTrack(event.target)) commitInspectorHistory('Inspector parameter');
+    });
+    box.addEventListener('pointerup', event => {
+      if(shouldTrack(event.target) && event.target.matches('input[type="range"], input[type="color"]')) commitInspectorHistory('Inspector parameter');
+    });
+  }
 
   function transformContextInfo(o){
     const parent = o && o.parent && o.parent !== scene ? o.parent : null;
@@ -116,6 +138,7 @@ function create(deps){
   function build(box, o){
     const lang = GAME && GAME.i18n && GAME.i18n.lang === 'it' ? 'it' : 'en';
     const tr = (en, it) => lang === 'it' ? (it || en) : en;
+    bindInspectorHistory(box, o);
     const head = el('<div class="lk-head"><span class="lk-head-ic">' + entityIcon(o) + '</span><input class="lk-head-name"><span class="lk-head-id">' + o.userData.editorId + (o.userData.builtin ? ' · ' + tr('original', 'originale') : ' · ' + tr('added', 'aggiunto')) + '</span></div>');
     const nameI = head.querySelector('input');
     nameI.value = o.userData.editorName || '';
@@ -240,6 +263,20 @@ function create(deps){
       camSec.body.appendChild(sliderRow('Far clip', props.far || 800, 10, 3000, 10, v => updateCamera({far:Math.max(10, v)}), v => Math.round(v) + 'm').root);
       camSec.body.appendChild(sliderRow('Helper size', props.helperSize || 1.2, .25, 8, .05, v => updateCamera({helperSize:v}), v => (+v).toFixed(2) + 'm').root);
       camSec.body.appendChild(checkRow('Show helper', props.preview !== false, v => updateCamera({preview:v})).root);
+      camSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), (props.activeLevelCamera === true || props.outputPlayerIndex === 0) ? '0' : 'none', [
+        {value:'none', label:tr('None', 'Nessuna')},
+        {value:'0', label:'Player 1'},
+      ], v => {
+        const active = v === '0';
+        if(active){
+          GAME.world.registry.forEach(item => {
+            if(item === o || !item.userData || item.userData.editorType !== 'camera') return;
+            item.userData.cameraProps = Object.assign({}, item.userData.cameraProps || {}, {activeLevelCamera:false, outputPlayerIndex:null});
+            if(item.userData.addedEntry) item.userData.addedEntry.props = Object.assign({}, item.userData.addedEntry.props || {}, {activeLevelCamera:false, outputPlayerIndex:null});
+          });
+        }
+        updateCamera({activeLevelCamera:active, outputPlayerIndex:active ? 0 : null});
+      }).root);
       camSec.body.appendChild(btnRow([
         {label:'Align to view', action:alignCameraToView},
         {label:'Look through', action:() => setCameraViewSlot(o.userData.editorId)},
@@ -249,7 +286,7 @@ function create(deps){
 
     if(o.userData.editorType === 'cinemaStudio'){
       const cinemaSec = section('CINEMA STUDIO', true);
-      const props = Object.assign({version:2, duration:6, fps:24, playback:'one-shot', trigger:'manual', eventName:'', previewCamera:'', cameraCuts:[], movieTrack:[], cameras:[], keyframes:[], objectTracks:[], lensTracks:[], eventTracks:[], markers:[]}, o.userData.cinemaProps || {});
+      const props = Object.assign({version:2, duration:6, fps:24, playback:'one-shot', trigger:'manual', eventName:'', outputPlayerIndex:null, previewCamera:'', cameraCuts:[], movieTrack:[], cameras:[], keyframes:[], objectTracks:[], lensTracks:[], eventTracks:[], markers:[]}, o.userData.cinemaProps || {});
       props.version = Math.max(2, Number(props.version) || 1);
       if(!Array.isArray(props.cameraCuts)) props.cameraCuts = Array.isArray(props.movieTrack) ? props.movieTrack : [];
       props.movieTrack = props.cameraCuts;
@@ -281,6 +318,10 @@ function create(deps){
         {value:'on-play', label:'On Preview/Simulate'},
         {value:'runtime-event', label:'Runtime event'},
       ], v => saveCinema({trigger:v})).root);
+      cinemaSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), props.outputPlayerIndex === 0 ? '0' : 'none', [
+        {value:'none', label:tr('None', 'Nessuna')},
+        {value:'0', label:'Player 1'},
+      ], v => saveCinema({outputPlayerIndex:v === '0' ? 0 : null})).root);
       const eventRow = el('<div class="lk-row"><label>Event name</label><input type="text"></div>');
       const eventInput = eventRow.querySelector('input');
       eventInput.value = props.eventName || '';
@@ -545,6 +586,7 @@ function create(deps){
 
     if(o.userData.editorType === 'mesh'){
       const sc = section('PHYSICS');
+      sc.root.dataset.historyManaged = 'collider';
       const c = o.userData && o.userData.collider;
       if(c && c.ref) STORE.syncCollider(o);
       const hasCollider = !!(c && c.ref && c.ref.enabled !== false);
@@ -583,17 +625,32 @@ function create(deps){
       if(physicsMassRow.valueInput) physicsMassRow.valueInput.disabled = !hasPhysics;
       if(impactRow.input) impactRow.input.disabled = !hasPhysics;
       if(impactRow.valueInput) impactRow.valueInput.disabled = !hasPhysics;
-      const collisionRow = checkRow('Collision', hasCollider, v => setColliderEnabled(o, v));
+      const collisionRow = checkRow('Collision', hasCollider, v => {
+        beginColliderHistory(o);
+        setColliderEnabled(o, v);
+        commitColliderHistory('Collision enabled');
+      });
       sc.body.appendChild(collisionRow.root);
-      sc.body.appendChild(checkRow('Physics', hasPhysics, v => setPhysicsEnabled(o, v)).root);
+      sc.body.appendChild(checkRow('Physics', hasPhysics, v => {
+        beginColliderHistory(o);
+        setPhysicsEnabled(o, v);
+        commitColliderHistory('Physics enabled');
+      }).root);
       sc.body.appendChild(checkRow('Drive surface', !!o.userData.driveSurface, v => {
+        beginColliderHistory(o);
         o.userData.driveSurface = v;
         if(o.userData.addedEntry) o.userData.addedEntry.driveSurface = v;
         if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
         markDirty();
+        commitColliderHistory('Drive surface');
       }).root);
-      sc.body.appendChild(physicsMassRow.root);
-      sc.body.appendChild(impactRow.root);
+      const colliderSlider = row => {
+        row.root.addEventListener('lk-slider-edit-start', () => beginColliderHistory(o));
+        row.root.addEventListener('lk-slider-edit-end', () => commitColliderHistory('Collider edit'));
+        return row.root;
+      };
+      sc.body.appendChild(colliderSlider(physicsMassRow));
+      sc.body.appendChild(colliderSlider(impactRow));
       const hint = hasCollider
         ? ((o.userData.colliderShape && o.userData.colliderShape.mode === 'complex')
           ? 'Complex static collision follows the visible mesh. Select a child dummy in Scene to tune, force solid, or disable that single collider.'
@@ -652,7 +709,11 @@ function create(deps){
         const dummyVisibilityRow = el('<div class="lk-row"><label>Dummy visibility</label><select><option value="auto">Auto</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>');
         const dummyVisibilitySelect = dummyVisibilityRow.querySelector('select');
         dummyVisibilitySelect.value = o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide' ? o.userData.colliderDummyVisibility : 'auto';
-        dummyVisibilitySelect.addEventListener('change', () => applyDummyVisibility(dummyVisibilitySelect.value));
+        dummyVisibilitySelect.addEventListener('change', () => {
+          beginColliderHistory(o);
+          applyDummyVisibility(dummyVisibilitySelect.value);
+          commitColliderHistory('Collider visibility');
+        });
         sc.body.appendChild(dummyVisibilityRow);
         const modeRow = el('<div class="lk-row"><label>Collider mode</label><select><option value="simple">Simple</option><option value="complex">Complex</option></select></div>');
         const modeSelect = modeRow.querySelector('select');
@@ -665,11 +726,6 @@ function create(deps){
           refreshOutliner();
         });
         sc.body.appendChild(modeRow);
-        const colliderSlider = row => {
-          row.root.addEventListener('lk-slider-edit-start', () => beginColliderHistory(o));
-          row.root.addEventListener('lk-slider-edit-end', () => commitColliderHistory('Collider edit'));
-          return row.root;
-        };
         const selectedPartIndex = Number.isInteger(ED.colliderPartIndex) ? ED.colliderPartIndex : null;
         if(shape.mode === 'complex' && selectedPartIndex != null && c.ref.parts && c.ref.parts[selectedPartIndex]){
           const part = c.ref.parts[selectedPartIndex];
@@ -755,6 +811,7 @@ function create(deps){
     }
 
     buildMaterialEditor(box, o);
+    buildMeshEditor(box, o);
 
     if(o.userData.effectParams){
       const p = o.userData.effectParams;

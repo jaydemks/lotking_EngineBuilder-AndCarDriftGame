@@ -16,6 +16,7 @@ function create(deps){
   const getCamHelper = deps.getCamHelper || (() => null);
   const getCamRigHelper = deps.getCamRigHelper || (() => null);
   const getCamRigLine = deps.getCamRigLine || (() => null);
+  const tr = (en, it) => deps.lang && deps.lang() === 'it' ? (it || en) : en;
   if(!root || !ED || !$) return null;
 
   $('#lkSpace').addEventListener('click', () => {
@@ -88,6 +89,11 @@ function create(deps){
   const vpFold = $('#lkViewportToolbarFold');
   const vpSingle = $('#lkViewportSingle');
   const vpQuad = $('#lkViewportQuad');
+  let quadLoadingTimer = 0;
+  const setQuadLoading = (open, pct, step) => {
+    if(deps.setEditorLoading) deps.setEditorLoading(open, tr('PREPARING VIEWPORTS', 'PREPARAZIONE VIEWPORT'), tr('Quad View', 'Quattro viste'), pct, step);
+    else if(deps.setLevelLoading) deps.setLevelLoading(open, 'Quad View', pct, step);
+  };
   if(vpFold) vpFold.addEventListener('click', () => {
     ED.viewportToolbarCollapsed = !ED.viewportToolbarCollapsed;
     root.classList.toggle('viewport-toolbar-collapsed', ED.viewportToolbarCollapsed);
@@ -95,20 +101,65 @@ function create(deps){
     vpFold.title = ED.viewportToolbarCollapsed ? 'Expand viewport tools' : 'Collapse viewport tools';
   });
   if(vpSingle) vpSingle.addEventListener('click', () => {
+    ED.viewportTransitionSeq = (ED.viewportTransitionSeq || 0) + 1;
+    clearTimeout(quadLoadingTimer);
+    delete ED.viewportQuadWarmupStep;
+    ED.viewportTransitioning = false;
+    if(vpQuad) vpQuad.disabled = false;
+    setQuadLoading(false, 100, tr('Ready', 'Pronto'));
     ED.viewportMode = 'single';
     ED.activeViewportSlot = 0;
     vpSingle.classList.add('on');
     if(vpQuad) vpQuad.classList.remove('on');
   });
   if(vpQuad) vpQuad.addEventListener('click', () => {
-    ED.viewportMode = 'quad';
-    vpQuad.classList.add('on');
-    if(vpSingle) vpSingle.classList.remove('on');
-    ED.pipMinimized = true;
+    if(ED.viewportMode === 'quad' || ED.viewportTransitioning) return;
+    const transitionSeq = ED.viewportTransitionSeq = (ED.viewportTransitionSeq || 0) + 1;
+    ED.viewportTransitioning = true;
+    vpQuad.disabled = true;
+    setQuadLoading(true, 8, tr('Preparing four independent viewports', 'Preparazione di quattro viewport indipendenti'));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if(transitionSeq !== ED.viewportTransitionSeq || !ED.viewportTransitioning) return;
+      ED.viewportQuadWarmupStep = 0;
+      ED.viewportMode = 'quad';
+      vpQuad.classList.add('on');
+      if(vpSingle) vpSingle.classList.remove('on');
+      ED.pipMinimized = true;
+      if(deps.requestWarmup) deps.requestWarmup(tr('Preparing Quad View...', 'Preparazione quattro viste...'));
+      clearTimeout(quadLoadingTimer);
+      quadLoadingTimer = setTimeout(() => {
+        if(transitionSeq !== ED.viewportTransitionSeq || !ED.viewportTransitioning) return;
+        delete ED.viewportQuadWarmupStep;
+        ED.viewportTransitioning = false;
+        vpQuad.disabled = false;
+        setQuadLoading(false, 100, tr('Viewport warm-up completed with fallback', 'Preparazione viewport completata con fallback'));
+      }, 6000);
+    }));
+  });
+  root.addEventListener('lotking:quad-warmup-progress', event => {
+    const step = Math.max(0, Math.min(4, Number(event.detail && event.detail.step) || 0));
+    setQuadLoading(true, Math.max(12, step * 25), tr('Preparing viewport ', 'Preparazione viewport ') + step + tr(' of 4', ' di 4'));
+  });
+  root.addEventListener('lotking:quad-warmup-ready', () => {
+    clearTimeout(quadLoadingTimer);
+    ED.viewportTransitioning = false;
+    vpQuad.disabled = false;
+    setQuadLoading(false, 100, tr('Four viewports ready', 'Quattro viewport pronte'));
   });
   const vpRender = $('#lkViewportRenderMode');
+  const captureRenderTarget = () => {
+    if(!vpRender) return;
+    vpRender.dataset.viewportSlot = String(ED.viewportMode === 'quad' ? Math.max(0, Math.min(3, ED.activeViewportSlot || 0)) : 0);
+  };
+  if(vpRender){
+    vpRender.addEventListener('pointerdown', captureRenderTarget);
+    vpRender.addEventListener('focus', captureRenderTarget);
+  }
   if(vpRender) vpRender.addEventListener('change', () => {
-    const slot = ED.viewportMode === 'quad' ? Math.max(0, Math.min(3, ED.activeViewportSlot || 0)) : 0;
+    const captured = Number(vpRender.dataset.viewportSlot);
+    const slot = ED.viewportMode === 'quad' && Number.isFinite(captured)
+      ? Math.max(0, Math.min(3, captured))
+      : 0;
     ED.viewportRenderModes[slot] = vpRender.value || 'normal';
   });
   const vpOptions = $('#lkViewportOptions');
@@ -148,7 +199,7 @@ function create(deps){
     e.stopPropagation();
     ED.pipMinimized = !ED.pipMinimized;
     pipMin.textContent = ED.pipMinimized ? '+' : '−';
-    pipMin.title = ED.pipMinimized ? 'Expand player camera' : 'Minimize player camera';
+    pipMin.title = ED.pipMinimized ? 'Expand camera preview' : 'Minimize camera preview';
   });
   const cinemaPreviewMin = $('#lkCinemaPreviewMinimize');
   if(cinemaPreviewMin) cinemaPreviewMin.addEventListener('click', e => {

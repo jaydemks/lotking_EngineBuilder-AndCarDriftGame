@@ -132,6 +132,21 @@ function create(options){
     return added;
   }
 
+  function removeTrack(index){
+    const wasPlaying = !audio.paused;
+    const removed = library.removeAt(index);
+    const first = library.at(0);
+    if(first){
+      loadTrack(Math.min(Number(index) || 0, library.count() - 1), wasPlaying);
+    } else {
+      pause();
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    if(removed && opts.popup) opts.popup('MENU TRACK REMOVED', '#ff7d54');
+    return removed;
+  }
+
   return {
     audio,
     bindButton,
@@ -144,6 +159,7 @@ function create(options){
     toggle,
     loadTrack,
     addTracks,
+    removeTrack,
     restoreTracks: tracks => library.restoreTracks(tracks),
     getStoredTracks: () => library.storedTracks(),
     getTracks: options => library.list(options),

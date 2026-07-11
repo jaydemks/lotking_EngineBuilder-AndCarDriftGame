@@ -74,11 +74,21 @@ function create(opts){
     p.ok.textContent = cfg.okText || 'OK';
     p.ok.classList.toggle('danger', false);
     clearInput(p.overlay);
-    const input = document.createElement('input');
+    const input = document.createElement(Array.isArray(cfg.options) ? 'select' : 'input');
     input.className = 'lk-confirm-input';
-    input.type = cfg.type || 'text';
-    input.value = cfg.value || '';
-    input.placeholder = cfg.placeholder || '';
+    if(Array.isArray(cfg.options)){
+      cfg.options.forEach(option => {
+        const item = document.createElement('option');
+        item.value = option.value;
+        item.textContent = option.label;
+        input.appendChild(item);
+      });
+      input.value = cfg.value || (cfg.options[0] && cfg.options[0].value) || '';
+    } else {
+      input.type = cfg.type || 'text';
+      input.value = cfg.value || '';
+      input.placeholder = cfg.placeholder || '';
+    }
     p.message.insertAdjacentElement('afterend', input);
     p.overlay.classList.add('open');
     p.overlay.setAttribute('aria-hidden', 'false');
@@ -104,7 +114,7 @@ function create(opts){
       p.cancel.addEventListener('click', no);
       p.overlay.addEventListener('pointerdown', outside);
       addEventListener('keydown', key, true);
-      setTimeout(() => { input.focus(); input.select(); }, 0);
+      setTimeout(() => { input.focus(); if(input.select) input.select(); }, 0);
     });
   }
 

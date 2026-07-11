@@ -14,30 +14,32 @@ function create(deps){
   const section = deps.section;
   const selectRow = deps.selectRow;
   const el = deps.el;
+  const confirmEditorAction = deps.confirmEditorAction || (opts => Promise.resolve(confirm((opts && opts.message) || 'Confirm?')));
+  const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function build(title, api){
     const s = section(title, false);
     if(!api || !api.getTracks){
-      s.body.appendChild(el('<div class="lk-empty">Music library unavailable.</div>'));
+      s.body.appendChild(el('<div class="lk-empty">' + tr('Music library unavailable.', 'Libreria musicale non disponibile.') + '</div>'));
       return s.root;
     }
-    const tools = el('<div class="lk-row"><label>Filter</label><input type="text" placeholder="Track, artist, source"></div>');
+    const tools = el('<div class="lk-row"><label>' + tr('Filter', 'Filtro') + '</label><input type="text" placeholder="' + tr('Track, artist, source', 'Brano, artista, sorgente') + '"></div>');
     const filterInput = tools.querySelector('input');
-    const sort = selectRow('Sort by', 'order', [
-      {value:'order', label:'Number'},
-      {value:'title', label:'Title'},
-      {value:'artist', label:'Artist'},
-      {value:'source', label:'Source'},
-      {value:'fileName', label:'File name'},
+    const sort = selectRow(tr('Sort by', 'Ordina per'), 'order', [
+      {value:'order', label:tr('Number', 'Numero')},
+      {value:'title', label:tr('Title', 'Titolo')},
+      {value:'artist', label:tr('Artist', 'Artista')},
+      {value:'source', label:tr('Source', 'Sorgente')},
+      {value:'fileName', label:tr('File name', 'Nome file')},
     ], () => render());
-    const dir = selectRow('Direction', 'asc', [
-      {value:'asc', label:'A to Z'},
-      {value:'desc', label:'Z to A'},
+    const dir = selectRow(tr('Direction', 'Direzione'), 'asc', [
+      {value:'asc', label:tr('A to Z', 'Dalla A alla Z')},
+      {value:'desc', label:tr('Z to A', 'Dalla Z alla A')},
     ], () => render());
     const list = el('<div class="lk-music-list"></div>');
     const input = el('<input type="file" accept="audio/*,.mp3,.ogg,.wav,.m4a,.aac,.flac" multiple style="display:none">');
-    const addBtn = el('<button type="button">Import audio...</button>');
-    const refreshBtn = el('<button type="button">Refresh list</button>');
+    const addBtn = el('<button type="button">' + tr('Import audio...', 'Importa audio...') + '</button>');
+    const refreshBtn = el('<button type="button">' + tr('Refresh list', 'Aggiorna elenco') + '</button>');
     const row = el('<div class="lk-btnrow"></div>');
     row.append(addBtn, refreshBtn, input);
     addBtn.addEventListener('click', () => input.click());
@@ -47,16 +49,16 @@ function create(deps){
       e.target.value = '';
       if(!files.length || !api.addTracks) return;
       addBtn.disabled = true;
-      status('Importing audio...');
+      status(tr('Importing audio...', 'Importazione audio...'));
       try {
         const added = await api.addTracks(files);
         render();
         if(added && added.length){
           markDirty();
-          status('Music library updated and ready to save');
-        } else status('No compatible audio files selected');
+          status(tr('Music library updated and ready to save', 'Libreria musicale aggiornata e pronta da salvare'));
+        } else status(tr('No compatible audio files selected', 'Nessun file audio compatibile selezionato'));
       } catch(err){
-        status('Audio import failed: ' + (err && err.message ? err.message : err));
+        status(tr('Audio import failed: ', 'Importazione audio fallita: ') + (err && err.message ? err.message : err));
       } finally {
         addBtn.disabled = false;
       }
@@ -71,8 +73,28 @@ function create(deps){
         dir: dir.input.value,
       });
       if(!rows.length){
-        list.appendChild(el('<div class="lk-empty">No tracks found.</div>'));
+        list.appendChild(el('<div class="lk-empty">' + tr('No tracks found.', 'Nessun brano trovato.') + '</div>'));
         return;
+      }
+      async function removeTrack(t){
+        if(!api.removeTrack) return;
+        const label = (t.artist || 'Unknown') + ' - ' + (t.title || 'Untitled');
+        const ok = await confirmEditorAction({
+          title:tr('Remove music track?', 'Rimuovere il brano?'),
+          message:tr('Remove "', 'Rimuovere "') + label + tr('" from this project library?', '" dalla libreria del progetto?'),
+          okText:tr('Remove track', 'Rimuovi brano'),
+          danger:true,
+        });
+        if(!ok) return;
+        const removed = api.removeTrack(t.index);
+        if(removed){
+          if(api === (GAME.systems && GAME.systems.menuMusic) && ED.quickMusicIndex != null) ED.quickMusicIndex = Math.max(0, ED.quickMusicIndex - (t.index <= ED.quickMusicIndex ? 1 : 0));
+          markDirty();
+          status(tr('Removed: ', 'Rimosso: ') + (removed.title || tr('track', 'brano')));
+          render();
+        } else {
+          status(tr('Track remove failed', 'Rimozione brano fallita'));
+        }
       }
       rows.forEach(t => {
         const item = el('<div class="lk-asset-item"></div>');
@@ -86,13 +108,23 @@ function create(deps){
         sub.textContent = (t.fileName || t.source || 'Default') + (t.persisted ? ' · project asset' : (t.uploaded ? ' · unsaved upload' : ''));
         meta.append(name, sub);
         const actions = el('<div class="lk-asset-actions"></div>');
-        const play = el('<button type="button">Load</button>');
+        const play = el('<button type="button">' + tr('Load', 'Carica') + '</button>');
         play.addEventListener('click', () => {
           if(api.loadTrack) api.loadTrack(t.index, true);
           if(api === (GAME.systems && GAME.systems.menuMusic)) ED.quickMusicIndex = t.index;
-          status('Loaded: ' + (t.title || 'track'));
+          status(tr('Loaded: ', 'Caricato: ') + (t.title || tr('track', 'brano')));
         });
         actions.appendChild(play);
+        if(api.removeTrack){
+          const remove = el('<button type="button" class="lk-danger">' + tr('Remove', 'Rimuovi') + '</button>');
+          remove.title = tr('Remove track from this project library', 'Rimuovi il brano dalla libreria del progetto');
+          remove.addEventListener('click', () => removeTrack(t));
+          actions.appendChild(remove);
+          item.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            removeTrack(t);
+          });
+        }
         item.append(badge, meta, actions);
         list.appendChild(item);
       });

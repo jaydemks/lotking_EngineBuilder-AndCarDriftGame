@@ -9,6 +9,7 @@ function create(deps){
   deps = deps || {};
   const THREE = deps.THREE;
   const active = deps.active || function(){ return true; };
+  const canProcessHeavy = deps.canProcessHeavy || function(){ return true; };
   const cache = new Map();
   let renderer = null, scene = null, camera = null;
   const queue = [];
@@ -16,6 +17,7 @@ function create(deps){
   const assetQueue = [];
   const assetWaiters = new Map();
   let assetBusy = false;
+  let scheduled = false;
 
   function has(id){ return cache.has(id); }
   function get(id){ return cache.get(id); }
@@ -50,6 +52,13 @@ function create(deps){
     const id = asset && (asset.id || asset.key || asset.dbKey || asset.src || asset.source);
     if(!id) return;
     const key = 'asset:' + id;
+    // A 96px thumbnail must not load a second full copy of a large map GLB.
+    // Keep the normal asset icon instead; the placed scene object is still
+    // rendered normally and can receive a lightweight shared-geometry thumb.
+    if(asset.kind === 'glb' && Number(asset.size) > 12 * 1024 * 1024){
+      cache.set(key, null);
+      return;
+    }
     if(cache.has(key)){
       applyImage(el, cache.get(key));
       return;
@@ -61,8 +70,12 @@ function create(deps){
     assetWaiters.set(key, [el]);
     assetQueue.push({key, asset, resolveUrl});
   }
-  function processQueue(){
+  function runQueue(){
     if(!active()) return;
+    if(!canProcessHeavy()){
+      setTimeout(processQueue, 120);
+      return;
+    }
     if(!queue.length){
       processAssetQueue();
       return;
@@ -78,6 +91,16 @@ function create(deps){
     applyImage(job.el, url);
     processAssetQueue();
   }
+  function processQueue(){
+    if(scheduled || !active()) return;
+    scheduled = true;
+    const run = () => {
+      scheduled = false;
+      runQueue();
+    };
+    if(window.requestIdleCallback) window.requestIdleCallback(run, {timeout:1200});
+    else setTimeout(run, 32);
+  }
   function processAssetQueue(){
     if(!active() || assetBusy || !assetQueue.length) return;
     const job = assetQueue.shift();
@@ -91,7 +114,7 @@ function create(deps){
     }).finally(() => {
       assetWaiters.delete(job.key);
       assetBusy = false;
-      if(assetQueue.length) setTimeout(processAssetQueue, 0);
+      if(assetQueue.length) setTimeout(processQueue, 80);
     });
   }
   function render(o){

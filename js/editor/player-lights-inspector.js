@@ -27,7 +27,11 @@ function create(deps){
     if(!GAME.player.lights || !GAME.player.setLights) return;
     const sh = section(tr('VEHICLE LIGHTS', 'LUCI VEICOLO'), false);
     const lights = GAME.player.lights;
-    const upd = patch => { GAME.player.setLights(patch); requestWarmup('Warm-up lights...'); markDirty(); };
+    const upd = patch => { GAME.player.setLights(patch); requestWarmup(tr('Warm-up lights...', 'Preparazione luci...')); markDirty(); };
+    const hourLabel = value => {
+      const total = Math.round(Math.max(0, Math.min(24, Number(value) || 0)) * 60) % (24 * 60);
+      return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+    };
     sh.body.appendChild(el('<div class="lk-hint">' + tr('Spot headlights and reactive rear lights for position, brake and reverse.', 'Fari anteriori spot e luci posteriori reattive per posizione, freno e retromarcia.') + '</div>'));
     sh.body.appendChild(checkRow(tr('Show light dummies', 'Mostra dummy luci'), lights.dummies && lights.dummies.visible, v => { upd({dummies:{visible:v}}); refreshOutliner(); }).root);
     const addVehicleLight = preset => {
@@ -73,6 +77,9 @@ function create(deps){
     ]));
     sh.body.appendChild(checkRow(tr('Headlights', 'Fari anteriori'), lights.front.enabled, v => upd({front:{enabled:v}})).root);
     sh.body.appendChild(checkRow(tr('Auto day/night', 'Auto giorno/notte'), lights.front.auto, v => upd({front:{auto:v}})).root);
+    sh.body.appendChild(sliderRow(tr('Automatic switch-on time', 'Ora accensione automatica'), lights.front.autoOnHour == null ? 18 : lights.front.autoOnHour, 0, 24, .25, v => upd({front:{autoOnHour:v}}), hourLabel).root);
+    sh.body.appendChild(sliderRow(tr('Automatic switch-off time', 'Ora spegnimento automatico'), lights.front.autoOffHour == null ? 7 : lights.front.autoOffHour, 0, 24, .25, v => upd({front:{autoOffHour:v}}), hourLabel).root);
+    sh.body.appendChild(el('<div class="lk-hint">' + tr('The schedule follows the authored day/night clock and also drives auxiliary lights set to Night. Equal times keep the automatic window active all day.', 'La programmazione segue l’orologio del ciclo giorno/notte e controlla anche le luci ausiliarie impostate su Notte. Orari uguali mantengono la finestra automatica attiva tutto il giorno.') + '</div>'));
     sh.body.appendChild(sliderRow(tr('Headlight count', 'Numero fari anteriori'), lights.front.count, 1, 2, 1, v => upd({front:{count:Math.round(v)}})).root);
     sh.body.appendChild(colorRow(tr('Headlight color', 'Colore fari'), lights.front.color, v => upd({front:{color:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight intensity', 'Intensita fari'), lights.front.intensity, 0, 6, .05, v => upd({front:{intensity:v}})).root);

@@ -32,8 +32,20 @@ function create(deps){
     if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
     if(deps.setActiveViewportAt) deps.setActiveViewportAt(e.clientX, e.clientY);
     downX = e.clientX; downY = e.clientY; downBtn = e.button;
+    if(deps.setNavigationActive) deps.setNavigationActive(true);
     deps.clearHoverPickHelper();
-    if(e.button === 2) deps.flyStart(e);
+    const navigationLocked = deps.isActiveViewportNavigationLocked && deps.isActiveViewportNavigationLocked();
+    if(e.button === 1){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if(!navigationLocked) deps.flyStart(e, {button:1, panOnly:true});
+    }
+    else if(e.button === 2 && !navigationLocked) deps.flyStart(e);
+    else if(e.button === 0 && deps.isActiveViewportPerspectiveSecondary && deps.isActiveViewportPerspectiveSecondary()){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      deps.flyStart(e, {button:0, orbitOnly:true});
+    }
     else if(e.button === 0 && deps.isActiveViewportCameraDriven && deps.isActiveViewportCameraDriven()){
       deps.flyStart(e, {button:0, rotateOnly:true});
     }
@@ -47,6 +59,7 @@ function create(deps){
   });
 
   addEventListener('pointerup', e => {
+    if(deps.setNavigationActive) deps.setNavigationActive(false);
     if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
     const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
     const wasFlying = deps.isFlyActive() && deps.flyMoved() > 6;
@@ -90,6 +103,8 @@ function create(deps){
       }
     }
   });
+  addEventListener('pointercancel', () => { if(deps.setNavigationActive) deps.setNavigationActive(false); });
+  addEventListener('blur', () => { if(deps.setNavigationActive) deps.setNavigationActive(false); });
 
   canvas.addEventListener('contextmenu', e => { if(ED.active && !ED.levelsOpen && !ED.projectsOpen) e.preventDefault(); });
   addEventListener('contextmenu', e => {
@@ -101,10 +116,11 @@ function create(deps){
     if(ED.levelsOpen || ED.projectsOpen) return;
     if(ED.active && !ED.playPreview){
       e.preventDefault();
+      if(deps.markWheelNavigation) deps.markWheelNavigation();
       if(deps.isFlyActive()) deps.adjustFlySpeed(e.deltaY);
-      else if(deps.zoomActiveViewport) deps.zoomActiveViewport(e.deltaY, e.clientX, e.clientY);
+      else if(deps.zoomActiveViewport && deps.zoomActiveViewport(e.deltaY, e.clientX, e.clientY)) e.stopImmediatePropagation();
     }
-  }, {passive:false});
+  }, {passive:false, capture:true});
 
   return Object.freeze({updateViewportHover});
 }

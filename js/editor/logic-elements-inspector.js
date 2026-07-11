@@ -268,6 +268,7 @@ function create(deps){
     let spaceDown = false;
     const graphView = {x:80, y:60, zoom:1};
     canvasWrap.tabIndex = 0;
+    setupLogicElementSidebarResizers(root);
     if(!Array.isArray(graph.comments)) graph.comments = [];
     lastGraphSnapshot = graphSnapshot();
 
@@ -279,8 +280,26 @@ function create(deps){
         : ('Errors: ' + checked.errors.length + (warningCount ? ' · warnings: ' + warningCount : ''));
       statusEl.classList.toggle('bad', !checked.ok);
       statusEl.classList.toggle('warn', checked.ok && warningCount > 0);
+      statusEl.title = (checked.diagnostics || []).length
+        ? 'Click to open graph diagnostics\n' + (checked.diagnostics || []).map(item => (item.severity === 'error' ? 'Error: ' : 'Warning: ') + item.message).join('\n')
+        : 'Graph validation passed';
       refreshNodeDiagnostics(checked);
     }
+
+    statusEl.setAttribute('role', 'button');
+    statusEl.tabIndex = 0;
+    const openGraphDiagnostics = () => {
+      selection = {kind:'graph'};
+      renderNodes();
+      renderInspector();
+      if(inspector && inspector.scrollIntoView) inspector.scrollIntoView({block:'nearest'});
+    };
+    statusEl.addEventListener('click', openGraphDiagnostics);
+    statusEl.addEventListener('keydown', event => {
+      if(event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openGraphDiagnostics();
+    });
 
     function graphSnapshot(){
       return window.LK_LOGIC_GRAPH.clone(graph);
@@ -1194,6 +1213,154 @@ function create(deps){
       return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5);
     }
 
+    function setupLogicElementSidebarResizers(editorRoot){
+      const left = editorRoot && editorRoot.querySelector('.lk-le-left');
+      if(!left || left.dataset.resizersReady === '1') return;
+      left.dataset.resizersReady = '1';
+      const storageKey = 'lk.logicElement.sidebarSizes.v1';
+      const blockDefs = [
+        {selector:'.lk-le-hierarchy-block', key:'hierarchy', fallback:190, min:86},
+        {selector:'.lk-le-subgraphs-block', key:'functions', fallback:140, min:78},
+        {selector:'.lk-le-palette-block', key:'nodes', fallback:260, min:112},
+        {selector:'.lk-le-vars-block', key:'variables', fallback:180, min:96},
+      ];
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}') || {}; }
+      catch(err){ saved = {}; }
+      blockDefs.forEach(def => {
+        const block = left.querySelector(def.selector);
+        if(!block) return;
+        const value = Number(saved[def.key]);
+        block.style.setProperty('--lk-le-block-basis', Math.max(def.min, Number.isFinite(value) ? value : def.fallback) + 'px');
+      });
+      const blocks = blockDefs.map(def => ({def, block:left.querySelector(def.selector)})).filter(item => item.block);
+      blocks.slice(0, -1).forEach((item, index) => {
+        const splitter = document.createElement('div');
+        splitter.className = 'lk-le-sidebar-splitter';
+        splitter.setAttribute('role', 'separator');
+        splitter.setAttribute('aria-orientation', 'horizontal');
+        splitter.title = 'Resize Logic Element sidebar section';
+        item.block.insertAdjacentElement('afterend', splitter);
+        splitter.addEventListener('pointerdown', event => {
+          event.preventDefault();
+          const next = blocks[index + 1];
+          if(!next) return;
+          const startY = event.clientY;
+          const prevStart = item.block.getBoundingClientRect().height;
+          const nextStart = next.block.getBoundingClientRect().height;
+          const total = prevStart + nextStart;
+          splitter.setPointerCapture(event.pointerId);
+          left.classList.add('is-resizing');
+          const move = moveEvent => {
+            const delta = moveEvent.clientY - startY;
+            const prev = Math.max(item.def.min, Math.min(total - next.def.min, prevStart + delta));
+            const nextSize = Math.max(next.def.min, total - prev);
+            item.block.style.setProperty('--lk-le-block-basis', prev + 'px');
+            next.block.style.setProperty('--lk-le-block-basis', nextSize + 'px');
+            saved[item.def.key] = Math.round(prev);
+            saved[next.def.key] = Math.round(nextSize);
+            try { localStorage.setItem(storageKey, JSON.stringify(saved)); }
+            catch(err){}
+            resizeViewport3D();
+          };
+          const up = upEvent => {
+            splitter.releasePointerCapture(upEvent.pointerId);
+            left.classList.remove('is-resizing');
+            window.removeEventListener('pointermove', move, true);
+            window.removeEventListener('pointerup', up, true);
+          };
+          window.addEventListener('pointermove', move, true);
+          window.addEventListener('pointerup', up, true);
+        });
+      });
+    }
+
+    function sceneElementTypeLabel(element, isRoot){
+      const type = String(element && element.type || 'mesh');
+      const label = type === 'mesh'
+        ? (element && element.asset ? 'Asset Mesh' : ((element && element.primitive) || 'Cube'))
+        : (type === 'text' ? ((element && element.textMode) === 'billboard' ? '2D Text' : '3D Text') : type.charAt(0).toUpperCase() + type.slice(1));
+      return (isRoot ? 'Root · ' : '') + label;
+    }
+
+    function sceneElementLabel(element, isRoot){
+      if(!element) return isRoot ? 'Root' : 'Element';
+      const name = String(element.name || '').trim();
+      if(name) return name;
+      return isRoot ? 'Root' : sceneElementTypeLabel(element, false);
+    }
+
+    function defaultSceneElement(id, index, type, parentId){
+      type = type || 'mesh';
+      const element = {
+        id,
+        name:(type === 'text' ? 'Text ' : type === 'empty' ? 'Empty ' : 'Element ') + index,
+        type,
+        parentId:parentId || 'root',
+        linked:true,
+        position:[0,0,0],
+        rotation:[0,0,0],
+        scale:[1,1,1],
+        color:type === 'text' ? '#ffffff' : '#7dd3fc',
+      };
+      if(type === 'mesh') element.primitive = 'cube';
+      if(type === 'text'){
+        element.text = 'Text';
+        element.textMode = 'plane';
+        element.textWidth = 2.2;
+        element.textHeight = .75;
+      }
+      return element;
+    }
+
+    function sceneElementIds(scene){
+      return new Set(['root'].concat((scene && scene.elements || []).map(element => element && element.id).filter(Boolean)));
+    }
+
+    function isSceneElementDescendant(scene, candidateId, ancestorId){
+      if(!scene || !candidateId || !ancestorId || candidateId === 'root' || ancestorId === 'root') return false;
+      let current = scene.elements.find(item => item && item.id === candidateId) || null;
+      const visited = new Set();
+      while(current && current.parentId && current.parentId !== 'root'){
+        if(current.parentId === ancestorId) return true;
+        if(visited.has(current.id)) return false;
+        visited.add(current.id);
+        current = scene.elements.find(item => item && item.id === current.parentId) || null;
+      }
+      return false;
+    }
+
+    function normalizeSceneHierarchy(scene){
+      if(!scene || !Array.isArray(scene.elements)) return;
+      const ids = sceneElementIds(scene);
+      scene.elements.forEach(element => {
+        if(!element || !element.id) return;
+        if(!element.parentId || !ids.has(element.parentId) || element.parentId === element.id) element.parentId = 'root';
+      });
+      scene.elements.forEach(element => {
+        if(!element || !element.id) return;
+        const visited = new Set([element.id]);
+        let current = element;
+        while(current && current.parentId && current.parentId !== 'root'){
+          if(visited.has(current.parentId)){
+            element.parentId = 'root';
+            return;
+          }
+          visited.add(current.parentId);
+          current = scene.elements.find(item => item && item.id === current.parentId) || null;
+        }
+      });
+    }
+
+    function validParentOptions(element){
+      const scene = logicScene();
+      return [{id:'root', name:sceneElementLabel(scene.root, true)}].concat(
+        scene.elements
+          .filter(item => item && item.id !== element.id && !isSceneElementDescendant(scene, item.id, element.id))
+          .map(item => ({id:item.id, name:sceneElementLabel(item, false)}))
+      );
+    }
+
     function ensureLogicScene(){
       if(!rootGraph.logicScene || typeof rootGraph.logicScene !== 'object') rootGraph.logicScene = {};
       const scene = rootGraph.logicScene;
@@ -1209,6 +1376,11 @@ function create(deps){
         color:'#7dd3fc',
       }, scene.root || {});
       scene.root.id = 'root';
+      if(scene.root.type === 'mesh' && !scene.root.asset && !scene.root.primitive) scene.root.primitive = 'cube';
+      if(scene.root.type === 'text'){
+        if(!scene.root.text) scene.root.text = 'Text';
+        if(!scene.root.textMode) scene.root.textMode = 'plane';
+      }
       if(!Array.isArray(scene.elements)) scene.elements = [];
       scene.elements = scene.elements.filter(element => element && typeof element === 'object');
       scene.elements.forEach(element => {
@@ -1218,8 +1390,14 @@ function create(deps){
         if(!Array.isArray(element.scale)) element.scale = [1,1,1];
         if(!element.color) element.color = '#7dd3fc';
         if(!element.type) element.type = 'mesh';
+        if(element.type === 'mesh' && !element.asset && !element.primitive) element.primitive = 'cube';
+        if(element.type === 'text'){
+          if(!element.text) element.text = 'Text';
+          if(!element.textMode) element.textMode = 'plane';
+        }
         if(!element.parentId) element.parentId = 'root';
       });
+      normalizeSceneHierarchy(scene);
       if(!Array.isArray(scene.components)) scene.components = [];
       scene.components = scene.components.filter(component => component && typeof component === 'object');
       const oldDefault = scene.elements.find(item => item && item.id === 'default_mesh');
@@ -1276,11 +1454,11 @@ function create(deps){
       return logicScene().components.find(item => item.id === id) || null;
     }
 
-    function addSceneElement(){
+    function addSceneElement(type){
       const scene = logicScene();
       const id = sceneId('element');
       const parentId = selection.kind === 'element' || selection.kind === 'root' ? selection.id : 'root';
-      const element = {id, name:'Element ' + (scene.elements.length + 1), type:'mesh', parentId:parentId || 'root', linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#7dd3fc'};
+      const element = defaultSceneElement(id, scene.elements.length + 1, typeof type === 'string' ? type : 'mesh', parentId || 'root');
       scene.elements.push(element);
       ensureElementComponents(id);
       persist();
@@ -1327,13 +1505,13 @@ function create(deps){
 
     function componentItems(){
       const scene = logicScene();
-      const rootLabel = scene.root.name && scene.root.name !== 'Root' ? scene.root.name : 'Default Mesh';
-      const items = [{id:'root', kind:'root', label:rootLabel, type:'Root · ' + (scene.root.type || 'mesh'), depth:0, element:scene.root}];
+      const rootLabel = sceneElementLabel(scene.root, true);
+      const items = [{id:'root', kind:'root', label:rootLabel, type:sceneElementTypeLabel(scene.root, true), depth:0, element:scene.root}];
       const added = new Set(['root']);
       const appendElement = (element, depth) => {
         if(!element || added.has(element.id)) return;
         added.add(element.id);
-        items.push({id:element.id, kind:'element', label:element.name, type:element.type || 'Element', depth, element});
+        items.push({id:element.id, kind:'element', label:sceneElementLabel(element, false), type:sceneElementTypeLabel(element, false), depth, element});
         scene.elements.filter(child => child && child.parentId === element.id).forEach(child => appendElement(child, depth + 1));
       };
       scene.elements.filter(element => element && (!element.parentId || element.parentId === 'root' || !scene.elements.some(parent => parent && parent.id === element.parentId))).forEach(element => appendElement(element, 1));
@@ -1425,7 +1603,16 @@ function create(deps){
 
     function renderVariables(){
       varsList.innerHTML = '';
+      let lastCategory = null;
       (graph.variables || []).forEach(variable => {
+        const category = String(variable.category || 'General');
+        if(category !== lastCategory){
+          const heading = document.createElement('div');
+          heading.className = 'lk-lg-var-category';
+          heading.textContent = category;
+          varsList.appendChild(heading);
+          lastCategory = category;
+        }
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'lk-lg-var';
@@ -1486,13 +1673,13 @@ function create(deps){
       } catch(err){
         console.warn('Logic Element hierarchy render failed', err);
         const scene = logicScene();
-        const rootLabel = scene.root.name && scene.root.name !== 'Root' ? scene.root.name : 'Default Mesh';
-        items = [{id:'root', kind:'root', label:rootLabel, type:'Root · ' + (scene.root.type || 'mesh'), depth:0, element:scene.root}];
+        const rootLabel = sceneElementLabel(scene.root, true);
+        items = [{id:'root', kind:'root', label:rootLabel, type:sceneElementTypeLabel(scene.root, true), depth:0, element:scene.root}];
       }
       if(!items.length){
         const scene = logicScene();
-        const rootLabel = scene.root.name && scene.root.name !== 'Root' ? scene.root.name : 'Default Mesh';
-        items = [{id:'root', kind:'root', label:rootLabel, type:'Root · ' + (scene.root.type || 'mesh'), depth:0, element:scene.root}];
+        const rootLabel = sceneElementLabel(scene.root, true);
+        items = [{id:'root', kind:'root', label:rootLabel, type:sceneElementTypeLabel(scene.root, true), depth:0, element:scene.root}];
       }
       items.forEach(item => {
         const btn = document.createElement('button');
@@ -1615,7 +1802,7 @@ function create(deps){
       const warningCount = (checked.warnings || []).length;
       meta.textContent = (checked.ok ? 'Valid graph' : ('Errors: ' + checked.errors.length)) + (warningCount ? ' · ' + warningCount + ' warnings' : '') + ' · ' + graph.nodes.length + ' nodes · ' + graph.edges.length + ' wires';
       inspector.appendChild(meta);
-      (checked.diagnostics || []).slice(0, 8).forEach(item => inspector.appendChild(diagnosticNote(item)));
+      (checked.diagnostics || []).forEach(item => inspector.appendChild(diagnosticNote(item)));
       const dependencySection = renderDependencySection();
       if(dependencySection) inspector.appendChild(dependencySection);
       const actions = document.createElement('div');
@@ -2127,6 +2314,10 @@ function create(deps){
       });
       inspector.appendChild(makeInspectorRow('Parent', parent));
       inspector.appendChild(makeInspectorRow('Value', variableValueInput(variable)));
+      const category = document.createElement('input');
+      category.type = 'text'; category.value = variable.category || 'General';
+      category.addEventListener('change', () => { variable.category = category.value.trim() || 'General'; persist(); renderVariables(); });
+      inspector.appendChild(makeInspectorRow('Category', category));
       const linked = document.createElement('input');
       linked.type = 'checkbox';
       linked.checked = variable.linked !== false;
@@ -2326,10 +2517,16 @@ function create(deps){
       });
       inspector.appendChild(makeInspectorRow('Name', name));
       const type = document.createElement('select');
-      ['mesh', 'empty', 'light', 'camera'].forEach(kind => {
+      [
+        ['mesh', 'Mesh'],
+        ['empty', 'Empty'],
+        ['text', 'Text'],
+        ['light', 'Light'],
+        ['camera', 'Camera'],
+      ].forEach(def => {
         const opt = document.createElement('option');
-        opt.value = kind;
-        opt.textContent = kind;
+        opt.value = def[0];
+        opt.textContent = def[1];
         type.appendChild(opt);
       });
       type.value = element.type || 'mesh';
@@ -2339,31 +2536,44 @@ function create(deps){
           delete element.asset;
           delete element.animation;
           removeAnimationComponent(element);
+        } else if(!element.primitive && !element.asset){
+          element.primitive = 'cube';
+        }
+        if(element.type === 'text'){
+          if(!element.text) element.text = 'Text';
+          if(!element.textMode) element.textMode = 'plane';
+          if(!element.textWidth) element.textWidth = 2.2;
+          if(!element.textHeight) element.textHeight = .75;
         }
         persist();
         renderComponents();
+        renderViewport();
         syncViewport3D();
         renderInspector();
       });
       inspector.appendChild(makeInspectorRow('Type', type));
       if(element.type === 'mesh') renderElementAssetInspector(element);
+      if(element.type === 'text') renderElementTextInspector(element);
       if(!isRoot){
         const parent = document.createElement('select');
-        const rootOpt = document.createElement('option');
-        rootOpt.value = 'root';
-        rootOpt.textContent = logicScene().root.name || 'Root';
-        parent.appendChild(rootOpt);
-        logicScene().elements.filter(item => item.id !== element.id).forEach(item => {
+        const parentOptions = validParentOptions(element);
+        parentOptions.forEach(item => {
           const opt = document.createElement('option');
           opt.value = item.id;
           opt.textContent = item.name;
           parent.appendChild(opt);
         });
+        if(!parentOptions.some(item => item.id === element.parentId)) element.parentId = 'root';
         parent.value = element.parentId || 'root';
         parent.addEventListener('change', () => {
-          element.parentId = parent.value || 'root';
+          const nextParent = parent.value || 'root';
+          const scene = logicScene();
+          element.parentId = nextParent === element.id || isSceneElementDescendant(scene, nextParent, element.id) ? 'root' : nextParent;
+          normalizeSceneHierarchy(scene);
           persist();
           renderComponents();
+          syncViewport3D();
+          renderInspector();
         });
         inspector.appendChild(makeInspectorRow('Parent', parent));
       }
@@ -2425,7 +2635,9 @@ function create(deps){
       inspector.appendChild(componentSection);
       const actions = document.createElement('div');
       actions.className = 'lk-le-inspector-actions';
-      actions.appendChild(makeInspectorButton('Add element', addSceneElement));
+      actions.appendChild(makeInspectorButton('Add mesh', () => addSceneElement('mesh')));
+      actions.appendChild(makeInspectorButton('Add text', () => addSceneElement('text')));
+      actions.appendChild(makeInspectorButton('Add empty', () => addSceneElement('empty')));
       actions.appendChild(makeInspectorButton('Add component', () => addElementComponent(element)));
       actions.appendChild(makeInspectorButton('Get Element node', () => addNodeFromType('scene.getElement', {name:element.id === 'root' ? 'Root' : (element.name || element.id)})));
       if(isRoot) actions.appendChild(makeInspectorButton('Get Owner node', () => addNodeFromType('scene.getOwner', {})));
@@ -2541,29 +2753,46 @@ function create(deps){
       return asset && (asset.id || asset.key) || '';
     }
 
+    function primitiveOptions(){
+      return [
+        ['cube', 'Cube'],
+        ['sphere', 'Sphere'],
+        ['cylinder', 'Cylinder'],
+        ['cone', 'Cone'],
+        ['plane', 'Plane'],
+        ['torus', 'Torus'],
+      ];
+    }
+
     function renderElementAssetInspector(element){
+      if(!element.primitive && !element.asset) element.primitive = 'cube';
       const select = document.createElement('select');
-      const defaultOption = document.createElement('option');
-      defaultOption.value = '';
-      defaultOption.textContent = 'Default Cube';
-      select.appendChild(defaultOption);
+      primitiveOptions().forEach(def => {
+        const option = document.createElement('option');
+        option.value = 'primitive:' + def[0];
+        option.textContent = 'Primitive · ' + def[1];
+        select.appendChild(option);
+      });
       const assets = logicMeshAssets();
       const currentId = elementAssetId(element);
       assets.forEach(asset => {
         const option = document.createElement('option');
-        option.value = asset.id || asset.key;
-        option.textContent = asset.name || asset.source || asset.key;
+        option.value = 'asset:' + (asset.id || asset.key);
+        option.textContent = 'Asset · ' + (asset.name || asset.source || asset.key);
         select.appendChild(option);
       });
       if(currentId && !assets.some(asset => (asset.id || asset.key) === currentId)){
         const projectOption = document.createElement('option');
-        projectOption.value = currentId;
-        projectOption.textContent = (element.asset.name || element.asset.source || 'Project Mesh') + ' (Project)';
+        projectOption.value = 'asset:' + currentId;
+        projectOption.textContent = 'Asset · ' + (element.asset.name || element.asset.source || tr('Project Mesh', 'Mesh progetto')) + tr(' (Project)', ' (Progetto)');
         select.appendChild(projectOption);
       }
-      select.value = currentId;
+      select.value = currentId ? 'asset:' + currentId : 'primitive:' + (element.primitive || 'cube');
       select.addEventListener('change', () => {
-        const asset = assets.find(item => (item.id || item.key) === select.value);
+        const rawValue = String(select.value || '');
+        const isAsset = rawValue.indexOf('asset:') === 0;
+        const wanted = rawValue.replace(/^(asset|primitive):/, '');
+        const asset = isAsset ? assets.find(item => (item.id || item.key) === wanted) : null;
         if(asset){
           element.asset = {
             id:asset.id || null,
@@ -2574,16 +2803,20 @@ function create(deps){
             dbKey:asset.dbKey || null,
             fit:1,
           };
+          element.primitive = element.primitive || 'cube';
         } else {
+          element.primitive = primitiveOptions().some(def => def[0] === wanted) ? wanted : 'cube';
           delete element.asset;
           delete element.animation;
           removeAnimationComponent(element);
         }
         persist();
+        renderComponents();
+        renderViewport();
         syncViewport3D();
         renderInspector();
       });
-      inspector.appendChild(makeInspectorRow('Mesh Asset', select));
+      inspector.appendChild(makeInspectorRow('Mesh Type', select));
       if(!element.asset) return;
       const fit = document.createElement('input');
       fit.type = 'number';
@@ -2597,6 +2830,50 @@ function create(deps){
       });
       inspector.appendChild(makeInspectorRow('Asset Fit', fit));
       renderElementAnimationInspector(element);
+    }
+
+    function renderElementTextInspector(element){
+      if(!element.text) element.text = 'Text';
+      if(!element.textMode) element.textMode = 'plane';
+      if(!element.textWidth) element.textWidth = 2.2;
+      if(!element.textHeight) element.textHeight = .75;
+      const text = document.createElement('input');
+      text.type = 'text';
+      text.value = element.text || '';
+      text.addEventListener('change', () => {
+        element.text = text.value || 'Text';
+        persist();
+        syncViewport3D();
+      });
+      inspector.appendChild(makeInspectorRow('Text', text));
+      const mode = document.createElement('select');
+      [['plane', '3D plane'], ['billboard', '2D billboard']].forEach(def => {
+        const option = document.createElement('option');
+        option.value = def[0];
+        option.textContent = def[1];
+        mode.appendChild(option);
+      });
+      mode.value = element.textMode === 'billboard' ? 'billboard' : 'plane';
+      mode.addEventListener('change', () => {
+        element.textMode = mode.value;
+        persist();
+        renderComponents();
+        syncViewport3D();
+      });
+      inspector.appendChild(makeInspectorRow('Text Mode', mode));
+      [['Width', 'textWidth', 2.2], ['Height', 'textHeight', .75]].forEach(def => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '.05';
+        input.step = '.05';
+        input.value = Math.max(.05, Number(element[def[1]]) || def[2]);
+        input.addEventListener('change', () => {
+          element[def[1]] = Math.max(.05, Number(input.value) || def[2]);
+          persist();
+          syncViewport3D();
+        });
+        inspector.appendChild(makeInspectorRow(def[0], input));
+      });
     }
 
     function ensureElementAnimation(element){
@@ -2856,6 +3133,7 @@ function create(deps){
       const camera = new THREERef.PerspectiveCamera(55, 1, .1, 200);
       const renderer = new THREERef.WebGLRenderer({antialias:true, alpha:false});
       renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      renderer.domElement.tabIndex = 0;
       viewportMount.appendChild(renderer.domElement);
       const grid = new THREERef.GridHelper(12, 24, 0x46617d, 0x223044);
       scene3d.add(grid);
@@ -2876,7 +3154,14 @@ function create(deps){
         mixers:new Map(),
         animationRaf:0,
         animationLast:0,
+        resizeObserver:null,
+        resizeRaf:0,
+        fly:{active:false, keys:Object.create(null), speed:5, raf:0, last:0},
       };
+      if(typeof ResizeObserver !== 'undefined'){
+        viewport.resizeObserver = new ResizeObserver(() => requestViewportResize());
+        viewport.resizeObserver.observe(viewportMount);
+      }
       initViewportGizmo();
       bindViewportControls();
       syncViewport3D();
@@ -2975,7 +3260,17 @@ function create(deps){
       const dom = viewport.renderer.domElement;
       let drag = null;
       dom.addEventListener('pointerdown', e => {
+        dom.focus({preventScroll:true});
         if(viewport.gizmo && (viewport.gizmoDragging || viewport.gizmo.axis)) return;
+        if(e.button === 2){
+          viewport.fly.active = true;
+          viewport.fly.lastX = e.clientX;
+          viewport.fly.lastY = e.clientY;
+          viewport.fly.moved = 0;
+          startViewportFlyLoop();
+          dom.setPointerCapture(e.pointerId);
+          return;
+        }
         const pickedId = e.button === 0 ? viewportElementIdAt(e.clientX, e.clientY) : null;
         if(pickedId){
           if(pickedId === 'root') setSelection({kind:'root', id:'root'});
@@ -2999,6 +3294,24 @@ function create(deps){
         dom.setPointerCapture(e.pointerId);
       });
       dom.addEventListener('pointermove', e => {
+        if(viewport.fly.active){
+          const dx = e.clientX - viewport.fly.lastX;
+          const dy = e.clientY - viewport.fly.lastY;
+          viewport.fly.lastX = e.clientX;
+          viewport.fly.lastY = e.clientY;
+          viewport.fly.moved += Math.abs(dx) + Math.abs(dy);
+          const cameraPosition = viewport.camera.position.clone();
+          viewport.orbit.yaw -= dx * .004;
+          viewport.orbit.pitch = Math.max(-1.45, Math.min(1.45, viewport.orbit.pitch + dy * .004));
+          const cp = Math.cos(viewport.orbit.pitch);
+          viewport.orbit.target.set(
+            cameraPosition.x - Math.sin(viewport.orbit.yaw) * cp * viewport.orbit.distance,
+            cameraPosition.y - Math.sin(viewport.orbit.pitch) * viewport.orbit.distance,
+            cameraPosition.z - Math.cos(viewport.orbit.yaw) * cp * viewport.orbit.distance
+          );
+          syncViewport3D();
+          return;
+        }
         if(!drag) return;
         const dx = e.clientX - drag.x;
         const dy = e.clientY - drag.y;
@@ -3014,7 +3327,7 @@ function create(deps){
           scaleSceneElementByDrag(drag.id, drag.baseScale, e.clientX - drag.startX, e.clientY - drag.startY);
         } else if(drag.mode === 'select'){
           return;
-        } else if(drag.button === 2){
+        } else if(drag.button === 1){
           const right = new viewport.THREE.Vector3(1, 0, 0).applyQuaternion(viewport.camera.quaternion);
           const up = new viewport.THREE.Vector3(0, 1, 0);
           viewport.orbit.target.addScaledVector(right, -dx * .015 * viewport.orbit.distance / 7);
@@ -3026,6 +3339,12 @@ function create(deps){
         syncViewport3D();
       });
       dom.addEventListener('pointerup', e => {
+        if(viewport.fly.active && e.button === 2){
+          viewport.fly.active = false;
+          viewport.fly.keys = Object.create(null);
+          try { dom.releasePointerCapture(e.pointerId); } catch(err){}
+          return;
+        }
         if(!drag) return;
         dom.releasePointerCapture(e.pointerId);
         const wasClick = !drag.moved;
@@ -3037,12 +3356,53 @@ function create(deps){
           renderInspector();
         }
       });
+      dom.addEventListener('pointercancel', () => {
+        drag = null;
+        if(viewport && viewport.fly){
+          viewport.fly.active = false;
+          viewport.fly.keys = Object.create(null);
+        }
+      });
       dom.addEventListener('wheel', e => {
         e.preventDefault();
+        if(viewport.fly.active){
+          viewport.fly.speed = Math.max(.5, Math.min(80, viewport.fly.speed * (e.deltaY > 0 ? .85 : 1.18)));
+          return;
+        }
         viewport.orbit.distance *= e.deltaY > 0 ? 1.1 : .9;
         syncViewport3D();
       }, {passive:false});
       dom.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    function startViewportFlyLoop(){
+      if(!viewport || viewport.fly.raf) return;
+      viewport.fly.last = performance.now();
+      const tick = now => {
+        if(!viewport) return;
+        const fly = viewport.fly;
+        const dt = Math.min(.05, Math.max(.001, (now - fly.last) / 1000));
+        fly.last = now;
+        if(fly.active){
+          const direction = new viewport.THREE.Vector3(
+            (fly.keys.d ? 1 : 0) - (fly.keys.a ? 1 : 0),
+            (fly.keys.e ? 1 : 0) - (fly.keys.q ? 1 : 0),
+            (fly.keys.s ? 1 : 0) - (fly.keys.w ? 1 : 0)
+          );
+          if(direction.lengthSq()){
+            direction.normalize()
+              .multiplyScalar(fly.speed * (fly.keys.shift ? 2.4 : 1) * dt)
+              .applyQuaternion(viewport.camera.quaternion);
+            viewport.camera.position.add(direction);
+            viewport.orbit.target.add(direction);
+            syncViewport3D();
+          }
+          fly.raf = requestAnimationFrame(tick);
+        } else {
+          fly.raf = 0;
+        }
+      };
+      viewport.fly.raf = requestAnimationFrame(tick);
     }
 
     function pickViewportElement(clientX, clientY){
@@ -3117,15 +3477,42 @@ function create(deps){
       viewport.renderer.setSize(w, h, false);
     }
 
+    function requestViewportResize(){
+      if(!viewport || viewport.resizeRaf) return;
+      viewport.resizeRaf = requestAnimationFrame(() => {
+        if(!viewport) return;
+        viewport.resizeRaf = 0;
+        resizeViewport3D();
+        updateViewportCamera();
+        viewport.renderer.render(viewport.scene, viewport.camera);
+      });
+    }
+
     function disposeViewportNode(node){
       if(!node) return;
       node.traverse(child => {
         if(child.geometry && child.geometry.dispose) child.geometry.dispose();
         if(child.material){
           const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach(mat => mat && mat.dispose && mat.dispose());
+          mats.forEach(mat => {
+            if(mat && mat.map && mat.map.dispose) mat.map.dispose();
+            if(mat && mat.dispose) mat.dispose();
+          });
         }
       });
+    }
+
+    function removeViewportNode(node, preserveManagedChildren){
+      if(!node) return;
+      if(viewport && viewport.gizmo && viewport.gizmo.object === node) viewport.gizmo.detach();
+      if(preserveManagedChildren !== false && viewport && viewport.meshes){
+        const managed = new Set(viewport.meshes.values());
+        Array.from(node.children || []).forEach(child => {
+          if(child !== node && managed.has(child)) viewport.scene.add(child);
+        });
+      }
+      if(node.parent && node.parent.remove) node.parent.remove(node);
+      disposeViewportNode(node);
     }
 
     function viewportElementMaterial(element, opts){
@@ -3135,6 +3522,56 @@ function create(deps){
       if(opts.line) return new THREERef.LineBasicMaterial({color, transparent:true, opacity:opts.opacity == null ? .9 : opts.opacity, depthTest:false});
       if(opts.basic) return new THREERef.MeshBasicMaterial({color, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity, depthTest:opts.depthTest !== false});
       return new THREERef.MeshStandardMaterial({color, roughness:.55, metalness:.08, transparent:opts.transparent === true, opacity:opts.opacity == null ? 1 : opts.opacity});
+    }
+
+    function viewportPrimitiveGeometry(element){
+      const THREERef = viewport.THREE;
+      const primitive = String(element && element.primitive || 'cube').toLowerCase();
+      if(primitive === 'sphere') return new THREERef.SphereGeometry(.48, 32, 16);
+      if(primitive === 'cylinder') return new THREERef.CylinderGeometry(.42, .42, .9, 32);
+      if(primitive === 'cone') return new THREERef.ConeGeometry(.46, .95, 32);
+      if(primitive === 'plane') return new THREERef.PlaneGeometry(1, 1);
+      if(primitive === 'torus') return new THREERef.TorusGeometry(.36, .13, 16, 40);
+      return new THREERef.BoxGeometry(.8, .8, .8);
+    }
+
+    function createTextCanvasTexture(THREERef, element){
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+      const text = String(element && element.text || 'Text');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.font = '700 72px Inter, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = 'rgba(0,0,0,.52)';
+      ctx.fillStyle = element && element.color || '#ffffff';
+      ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+      const texture = new THREERef.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      return texture;
+    }
+
+    function createViewportTextNode(element){
+      const THREERef = viewport.THREE;
+      const texture = createTextCanvasTexture(THREERef, element);
+      const width = Math.max(.05, Number(element && element.textWidth) || 2.2);
+      const height = Math.max(.05, Number(element && element.textHeight) || .75);
+      if(String(element && element.textMode || 'plane') === 'billboard' && THREERef.Sprite){
+        const sprite = new THREERef.Sprite(new THREERef.SpriteMaterial({map:texture, transparent:true, depthWrite:false}));
+        sprite.scale.set(width, height, 1);
+        return sprite;
+      }
+      const material = new THREERef.MeshBasicMaterial({
+        map:texture,
+        transparent:true,
+        depthWrite:false,
+        side:THREERef.DoubleSide,
+      });
+      return new THREERef.Mesh(new THREERef.PlaneGeometry(width, height), material);
     }
 
     function createViewportElementNode(element){
@@ -3164,6 +3601,8 @@ function create(deps){
         ];
         group.add(new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat));
         node = group;
+      } else if(type === 'text'){
+        node = createViewportTextNode(element);
       } else if(element && element.asset) {
         node = new THREERef.Group();
         const placeholder = new THREERef.Mesh(
@@ -3174,7 +3613,7 @@ function create(deps){
         node.add(placeholder);
         hydrateViewportElementAsset(node, element);
       } else {
-        node = new THREERef.Mesh(new THREERef.BoxGeometry(.8, .8, .8), viewportElementMaterial(element));
+        node = new THREERef.Mesh(viewportPrimitiveGeometry(element), viewportElementMaterial(element));
       }
       node.userData.logicElementType = type;
       node.userData.logicElementAssetKey = logicElementAssetKey(element);
@@ -3188,8 +3627,9 @@ function create(deps){
 
     function logicElementAssetKey(element){
       const asset = element && element.asset;
-      if(!asset) return '';
-      return [asset.id || '', asset.key || '', asset.dbKey || '', asset.src || '', Number(asset.fit) || 1].join(':');
+      const visual = [element && element.type || 'mesh', element && element.primitive || '', element && element.text || '', element && element.textMode || '', element && element.textWidth || '', element && element.textHeight || '', element && element.color || ''].join(':');
+      if(!asset) return visual;
+      return visual + ':' + [asset.id || '', asset.key || '', asset.dbKey || '', asset.src || '', Number(asset.fit) || 1].join(':');
     }
 
     function hydrateViewportElementAsset(node, element){
@@ -3371,8 +3811,7 @@ function create(deps){
         let mesh = viewport.meshes.get(element.id);
         if(mesh && mesh.userData && (mesh.userData.logicElementType !== element.type || mesh.userData.logicElementAssetKey !== logicElementAssetKey(element))){
           disposeViewportElementAnimation(element.id);
-          viewport.scene.remove(mesh);
-          disposeViewportNode(mesh);
+          removeViewportNode(mesh);
           viewport.meshes.delete(element.id);
           mesh = null;
         }
@@ -3402,8 +3841,7 @@ function create(deps){
         if(live.has(id)) return;
         const mesh = viewport.meshes.get(id);
         disposeViewportElementAnimation(id);
-        viewport.scene.remove(mesh);
-        disposeViewportNode(mesh);
+        removeViewportNode(mesh);
         viewport.meshes.delete(id);
       });
       allSceneElements().forEach(element => {
@@ -3423,6 +3861,11 @@ function create(deps){
       if(!viewport) return;
       if(viewport.animationRaf) cancelAnimationFrame(viewport.animationRaf);
       viewport.animationRaf = 0;
+      if(viewport.resizeObserver) viewport.resizeObserver.disconnect();
+      if(viewport.resizeRaf) cancelAnimationFrame(viewport.resizeRaf);
+      viewport.resizeRaf = 0;
+      if(viewport.fly && viewport.fly.raf) cancelAnimationFrame(viewport.fly.raf);
+      if(viewport.fly) viewport.fly.raf = 0;
       viewport.mixers.forEach(entry => entry && entry.mixer && entry.mixer.stopAllAction());
       viewport.mixers.clear();
       if(viewport.gizmo){
@@ -3430,10 +3873,10 @@ function create(deps){
         viewport.scene.remove(viewport.gizmo);
         if(viewport.gizmo.dispose) viewport.gizmo.dispose();
       }
-      viewport.meshes.forEach(mesh => {
-        viewport.scene.remove(mesh);
-        disposeViewportNode(mesh);
-      });
+      const viewportNodes = new Set(viewport.meshes.values());
+      Array.from(viewportNodes)
+        .filter(mesh => !mesh.parent || !viewportNodes.has(mesh.parent))
+        .forEach(mesh => removeViewportNode(mesh, false));
       viewport.meshes.clear();
       if(viewport.renderer){
         viewport.renderer.dispose();
@@ -4027,7 +4470,8 @@ function create(deps){
       const target = e && e.target;
       if(target && root.contains(target)) return true;
       const active = document.activeElement;
-      return !!(active && root.contains(active));
+      if(active && root.contains(active)) return true;
+      return !!(root.isConnected && root.closest('.lk-logic-modal'));
     }
 
     function stopLogicEditorKey(e){
@@ -4040,7 +4484,17 @@ function create(deps){
       if(!isLogicEditorKeyEvent(e) || isFormTarget(e.target)) return;
       if(activeTab === 'viewport'){
         const key = String(e.key || '').toLowerCase();
-        if(key === 'w') setViewportTool('move');
+        const mod = e.ctrlKey || e.metaKey;
+        if(mod && key === 'z'){
+          if(e.shiftKey) redoGraph();
+          else undoGraph();
+        } else if(mod && key === 'y'){
+          redoGraph();
+        } else if(viewport && viewport.fly && viewport.fly.active && ['w','a','s','d','q','e','shift'].includes(key)){
+          viewport.fly.keys[key] = true;
+          viewport.fly.keys.shift = e.shiftKey;
+          startViewportFlyLoop();
+        } else if(key === 'w') setViewportTool('move');
         else if(key === 'e') setViewportTool('rotate');
         else if(key === 'r') setViewportTool('scale');
         else if(key === 'f') frameSelectedViewportElement();
@@ -4094,7 +4548,15 @@ function create(deps){
     }
 
     function handleKeyUp(e){
-      if(!isLogicEditorKeyEvent(e) || e.code !== 'Space') return;
+      if(!isLogicEditorKeyEvent(e)) return;
+      const key = String(e.key || '').toLowerCase();
+      if(activeTab === 'viewport' && viewport && viewport.fly && ['w','a','s','d','q','e','shift'].includes(key)){
+        viewport.fly.keys[key] = false;
+        viewport.fly.keys.shift = e.shiftKey;
+        stopLogicEditorKey(e);
+        return;
+      }
+      if(e.code !== 'Space') return;
       spaceDown = false;
       canvasWrap.classList.remove('panning-ready');
       stopLogicEditorKey(e);
@@ -4200,12 +4662,12 @@ function create(deps){
     });
     root.querySelector('.lk-lg-run').addEventListener('click', runRuntime);
     root.querySelector('.lk-lg-stop').addEventListener('click', stopRuntime);
-    window.addEventListener('resize', resizeViewport3D);
+    window.addEventListener('resize', requestViewportResize);
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp, true);
     box.addEventListener('logic-editor-close', () => {
       stopRuntime();
-      window.removeEventListener('resize', resizeViewport3D);
+      window.removeEventListener('resize', requestViewportResize);
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
       disposeViewport3D();
@@ -4562,6 +5024,18 @@ function create(deps){
     const label = document.createElement('label');
     label.textContent = variableLabel(variable);
     row.appendChild(label);
+    if(variable.ui === 'player-id' || variable.name === 'ControllerPlayerId'){
+      const input = document.createElement('select');
+      [
+        {value:'-1', label:tr('None (external possession)', 'None (possesso esterno)')},
+        {value:'1', label:'Player 1'}, {value:'2', label:'Player 2'},
+        {value:'3', label:'Player 3'}, {value:'4', label:'Player 4'},
+      ].forEach(item => input.appendChild(new Option(item.label, item.value)));
+      input.value = String(Number(variable.value) || -1);
+      input.addEventListener('change', () => updateVariable(object, variable, Number(input.value)));
+      row.appendChild(input);
+      return row;
+    }
     if(variable.type === 'boolean'){
       const input = el('<input type="checkbox">');
       input.checked = variable.value === true;
@@ -4664,6 +5138,30 @@ function create(deps){
       ]));
     }
     box.appendChild(mg.root);
+
+    if(graph.playerPawnBlueprint){
+      const pawn = section(tr('PLAYER PAWN MIGRATION', 'MIGRAZIONE PLAYER PAWN'), false);
+      pawn.body.appendChild(el('<div class="lk-hint">' + tr(
+        'Authoring preview: model, scale, rig snapshot, mesh/material edits and Pawn variables are preserved. Independent vehicle physics and the specialist Player Car tabs are not yet attached to this Logic Element runtime.',
+        'Anteprima di authoring: modello, scala, snapshot del rig, modifiche mesh/materiali e variabili Pawn sono conservati. La fisica veicolo indipendente e le tab specialistiche Player Car non sono ancora collegate al runtime di questo Logic Element.'
+      ) + '</div>'));
+      pawn.body.appendChild(el('<div class="lk-hint">' + tr(
+        'Hierarchy elements are unlimited. You may add multiple lights, including several intended as Reverse lights, but their reactive Reverse/Brake/Turn conditions require the future vehicle-Pawn adapter.',
+        'Gli elementi della gerarchia sono illimitati. Puoi aggiungere più luci, incluse diverse luci pensate come Retromarcia, ma le condizioni reattive Retromarcia/Freno/Freccia richiedono il futuro adattatore vehicle-Pawn.'
+      ) + '</div>'));
+      const present = [
+        tr('Model / rig snapshot', 'Snapshot modello / rig'),
+        tr('Scale + mesh/material edits', 'Scala + modifiche mesh/materiali'),
+        tr('Categorized exposed variables', 'Variabili esposte categorizzate'),
+      ];
+      const pending = [
+        tr('Independent vehicle physics', 'Fisica veicolo indipendente'),
+        tr('Camera, Lights/Neon and Attachments tabs', 'Tab Camera, Luci/Neon e Accessori'),
+        tr('Engine Sound, HUD/widgets and input possession', 'Engine Sound, HUD/widget e possesso input'),
+      ];
+      pawn.body.appendChild(el('<div class="lk-hint">✓ ' + present.join('<br>✓ ') + '<br>○ ' + pending.join('<br>○ ') + '</div>'));
+      box.appendChild(pawn.root);
+    }
 
     buildExposedVariables(box, object);
   }

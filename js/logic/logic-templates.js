@@ -48,8 +48,82 @@ function graph(name, variables, nodes, edges, comments, color){
   };
 }
 
+function playerCarTemplateGraph(){
+  const g = graph('Template - Player Car Logic Element', [
+    {name:'PawnEnabled', type:'boolean', value:true, exposed:true, label:'Pawn Enabled', category:'Pawn'},
+    {name:'Hidden', type:'boolean', value:false, exposed:true, label:'Hidden', category:'Pawn'},
+    {name:'ControllerPlayerId', type:'number', value:1, exposed:true, label:'Controller Player ID', category:'Input', ui:'player-id'},
+    {name:'Horsepower', type:'number', value:450, exposed:true, label:'Horsepower', category:'Driving'},
+    {name:'Torque', type:'number', value:5, exposed:true, label:'Torque', category:'Driving'},
+    {name:'MaxSpeed', type:'number', value:7, exposed:true, label:'Max Speed', category:'Driving'},
+    {name:'CameraMode', type:'string', value:'arcade', exposed:true, label:'Camera Mode', category:'Camera'},
+    {name:'HeadlightsEnabled', type:'boolean', value:true, exposed:true, label:'Headlights', category:'Lights'},
+    {name:'ExhaustEnabled', type:'boolean', value:true, exposed:true, label:'Exhaust', category:'Effects'},
+    {name:'SkidsEnabled', type:'boolean', value:true, exposed:true, label:'Skids', category:'Effects'},
+  ], [
+    node('on_start', 'event.onStart', 80, 100),
+    node('print_ready', 'debug.print', 360, 100, {message:'Player Car Logic Element ready — assign/import a vehicle model and connect Pawn runtime logic.', duration:3}),
+    node('on_update', 'event.onUpdate', 80, 330),
+    node('get_player_id', 'variable.get', 340, 250, {name:'ControllerPlayerId'}),
+    node('player_drive', 'input.playerDrive', 590, 270),
+    node('get_owner', 'scene.getOwner', 590, 480),
+    node('get_speed', 'variable.get', 840, 540, {name:'MaxSpeed'}),
+    node('speed_delta', 'math.multiply', 1070, 485),
+    node('throttle_delta', 'math.multiply', 1300, 425),
+    node('forward_vector', 'vector.make3', 1530, 400, {x:0, y:0}),
+    node('move_vehicle', 'scene.translateObject', 1790, 330),
+  ], [edge('e_start_ready', 'on_start', 'then', 'print_ready', 'exec')], [
+    {id:'comment_pawn', title:'Editable Player Car authoring template. Use “Duplicate as Logic Element” on the built-in Player Car for an exact project snapshot.', x:42, y:42, w:930, h:210, color:'#38bdf8'},
+  ], '#60a5fa');
+  g.edges.push(
+    edge('e_update_move', 'on_update', 'then', 'move_vehicle', 'exec'),
+    edge('e_player_id_drive', 'get_player_id', 'value', 'player_drive', 'playerId'),
+    edge('e_owner_move', 'get_owner', 'object', 'move_vehicle', 'object'),
+    edge('e_speed_mul_a', 'get_speed', 'value', 'speed_delta', 'a'),
+    edge('e_delta_mul_b', 'on_update', 'deltaTime', 'speed_delta', 'b'),
+    edge('e_speed_throttle_a', 'speed_delta', 'value', 'throttle_delta', 'a'),
+    edge('e_drive_throttle_b', 'player_drive', 'throttle', 'throttle_delta', 'b'),
+    edge('e_mul_vector_z', 'throttle_delta', 'value', 'forward_vector', 'z'),
+    edge('e_vector_move', 'forward_vector', 'vector', 'move_vehicle', 'delta')
+  );
+  const element = (id, name, primitive, parentId, position, rotation, scale, color) => ({
+    id, name, type:'mesh', primitive, parentId:parentId || 'root', linked:true,
+    position:position || [0,0,0], rotation:rotation || [0,0,0], scale:scale || [1,1,1], color:color || '#64748b',
+  });
+  g.logicScene = {
+    root:{id:'root', name:'Player Car Root', type:'empty', linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#60a5fa'},
+    elements:[
+      element('vehicle_model', 'Vehicle Model / GLB Placeholder', 'cube', 'root', [0,.75,0], [0,0,0], [1.9,.65,4.1], '#2563eb'),
+      element('wheel_front_left', 'Wheel Front Left', 'cylinder', 'root', [-1,.38,1.3], [0,0,Math.PI/2], [.42,.26,.42], '#111827'),
+      element('wheel_front_right', 'Wheel Front Right', 'cylinder', 'root', [1,.38,1.3], [0,0,Math.PI/2], [.42,.26,.42], '#111827'),
+      element('wheel_rear_left', 'Wheel Rear Left', 'cylinder', 'root', [-1,.38,-1.3], [0,0,Math.PI/2], [.42,.26,.42], '#111827'),
+      element('wheel_rear_right', 'Wheel Rear Right', 'cylinder', 'root', [1,.38,-1.3], [0,0,Math.PI/2], [.42,.26,.42], '#111827'),
+      {id:'camera_anchor', name:'Player Camera Anchor', type:'camera', parentId:'root', linked:true, position:[0,2.4,-5.5], rotation:[0,0,0], scale:[1,1,1], color:'#a78bfa'},
+      {id:'headlight_left', name:'Headlight Left', type:'light', parentId:'root', linked:true, position:[-.62,.72,2.05], rotation:[0,0,0], scale:[1,1,1], color:'#fff7cc'},
+      {id:'headlight_right', name:'Headlight Right', type:'light', parentId:'root', linked:true, position:[.62,.72,2.05], rotation:[0,0,0], scale:[1,1,1], color:'#fff7cc'},
+      {id:'exhaust_left', name:'Exhaust Left', type:'empty', parentId:'root', linked:true, position:[-.55,.35,-2.05], rotation:[0,0,0], scale:[1,1,1], color:'#94a3b8'},
+      {id:'exhaust_right', name:'Exhaust Right', type:'empty', parentId:'root', linked:true, position:[.55,.35,-2.05], rotation:[0,0,0], scale:[1,1,1], color:'#94a3b8'},
+    ],
+    components:[
+      {id:'root_transform', elementId:'root', name:'Transform', type:'transform', linked:true},
+      {id:'pawn_vehicle', elementId:'root', name:'Vehicle Pawn', type:'player-pawn', linked:true},
+      {id:'pawn_collision', elementId:'root', name:'Vehicle Collision', type:'collider', linked:true, collider:{enabled:true, shape:'box', size:[1.9,1.1,4.1]}},
+      {id:'model_render', elementId:'vehicle_model', name:'Imported Model / Placeholder', type:'render', linked:true},
+    ],
+  };
+  g.playerPawnBlueprint = {template:true, version:1, controllerIndex:0, enabled:true, hidden:false};
+  return g;
+}
+
 function makeTemplates(){
   return [
+    {
+      id:'logic-template-player-car',
+      name:'Template - Player Car Logic Element',
+      description:'Editable vehicle Pawn starter with organized model, wheel, camera, light, exhaust and collision hierarchy. Duplicate the built-in Player Car as Logic Element for an exact current-rig copy.',
+      category:'Pawn / Vehicle',
+      graph:playerCarTemplateGraph(),
+    },
     {
       id:'logic-template-rotating-cube',
       name:'Template - Rotating Cube',

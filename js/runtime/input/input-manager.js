@@ -298,6 +298,20 @@ function create(deps){
     resolveAssignments();
     emitChange();
   }
+  function ensurePlayerSlot(playerIndex){
+    playerIndex = Math.max(0, Math.min(3, playerIndex | 0));
+    while(config.players.length <= playerIndex){
+      const slot = config.players.length + 1;
+      let device = slot === 1 ? 'keyboard-1' : 'gamepad-' + slot;
+      if(!ACT.deviceInstance(config, device)){
+        const inst = ACT.addDeviceInstance(config, slot === 1 ? 'keyboard' : 'gamepad');
+        if(inst) device = inst.id;
+      }
+      config.players.push({id:'player-' + slot, device});
+    }
+    resolveAssignments(); emitChange();
+    return player(playerIndex);
+  }
   function setAutoAssign(v){
     config.autoAssign = !!v;
     if(overrideEnabled) snapshotOverride();
@@ -387,7 +401,7 @@ function create(deps){
     setConfig, getConfig: () => ACT.clone(config), setOverrideEnabled,
     setActiveContext,
     // devices / assignment
-    describe, onChange, assignPlayerDevice, setAutoAssign, addInstance, removeInstance,
+    describe, onChange, assignPlayerDevice, ensurePlayerSlot, setAutoAssign, addInstance, removeInstance,
     // touch
     setTouchEnabled, setTouchMode, isTouchEnabled, isTouchAllowed, isPhone, setPortrait, touchSource: touch,
     // mapping

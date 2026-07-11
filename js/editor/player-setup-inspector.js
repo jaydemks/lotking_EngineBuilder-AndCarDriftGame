@@ -18,9 +18,44 @@ function create(deps){
   const focusSelected = deps.focusSelected;
   const section = deps.section;
   const sliderRow = deps.sliderRow;
+  const selectRow = deps.selectRow;
+  const checkRow = deps.checkRow;
   const btnRow = deps.btnRow;
   const el = deps.el;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+
+  function buildPawnInput(box){
+    const input = section(tr('PAWN / LOCAL PLAYER', 'PAWN / GIOCATORE LOCALE'), false);
+    const index = GAME.player.controllerIndex == null ? null : Math.max(0, Math.min(3, Number(GAME.player.controllerIndex) | 0));
+    input.body.appendChild(checkRow(tr('Pawn enabled', 'Pawn attivo'), GAME.player.enabled !== false, value => {
+      if(GAME.player.setEnabled) GAME.player.setEnabled(value); else GAME.player.enabled = value;
+      markDirty();
+    }).root);
+    input.body.appendChild(checkRow(tr('Hidden in scene/runtime', 'Nascosto in scena/runtime'), GAME.player.hidden === true, value => {
+      if(GAME.player.setHidden) GAME.player.setHidden(value); else { GAME.player.hidden = value; GAME.player.car.visible = !value; }
+      markDirty();
+    }).root);
+    input.body.appendChild(selectRow(tr('Controlled by', 'Controllato da'), index == null ? 'none' : String(index), [
+      {value:'none', label:tr('None (external possession)', 'None (possesso esterno)')},
+      {value:'0', label:'Player 1'}, {value:'1', label:'Player 2'},
+      {value:'2', label:'Player 3'}, {value:'3', label:'Player 4'},
+    ], value => {
+      const next = value === 'none' ? null : Number(value);
+      if(GAME.player.setControllerIndex) GAME.player.setControllerIndex(next);
+      else GAME.player.controllerIndex = next;
+      markDirty(); buildInspector();
+    }).root);
+    const snapshot = GAME.input && GAME.input.describe ? GAME.input.describe() : null;
+    const assigned = index != null && snapshot && snapshot.players && snapshot.players[index];
+    input.body.appendChild(el('<div class="lk-hint">' + (assigned && assigned.deviceLabel
+      ? tr('Current automatic device: ', 'Dispositivo automatico attuale: ') + assigned.deviceLabel
+      : tr('Waiting for an available device. Configure bindings in Game Input.', 'In attesa di un dispositivo disponibile. Configura le associazioni in Game Input.')) + '</div>'));
+    input.body.appendChild(el('<div class="lk-hint">' + tr(
+      'Up to 4 local Player IDs are supported. This Pawn consumes the selected profile; simultaneous cars require one Pawn, camera and HUD instance per player.',
+      'Sono supportati fino a 4 Player ID locali. Questo Pawn usa il profilo selezionato; le auto simultanee richiedono un Pawn, una camera e un HUD per ogni giocatore.'
+    ) + '</div>'));
+    box.appendChild(input.root);
+  }
 
   function buildDrivingTuning(box){
     const sg = section(tr('DRIVING (SETUP)', 'GUIDA (SETUP)'), false);
@@ -174,6 +209,7 @@ function create(deps){
   }
 
   function build(box){
+    buildPawnInput(box);
     buildDrivingTuning(box);
     buildModel(box);
     buildEngineSound(box);

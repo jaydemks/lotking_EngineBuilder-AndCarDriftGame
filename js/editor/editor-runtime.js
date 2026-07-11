@@ -59,11 +59,27 @@ function create(deps){
     sceneCameras,
     normalizeSceneCameraLocal,
     getGizmo: deps.getGizmo,
+    getHelperGroup: () => helperGroup,
     getOrbit: deps.getOrbit,
     editorViewportRect: deps.editorViewportRect,
     setActiveViewportSlot: deps.setActiveViewportSlot,
     cameraForView: deps.cameraForView,
     cinemaStudio,
+    renderPost:(rect, camera) => {
+      const post = GAME.systems && GAME.systems.post;
+      const video = GAME.settings && GAME.settings.video;
+      const enabled = post && post.ok && video && (video.rendererMode === 'raytracing' || video.volumetricLighting || video.quality !== 'high' || video.antialiasing === 'fxaa');
+      if(!enabled) return false;
+      try {
+        post.composer.setSize(rect.w, rect.h);
+        post.render(camera, {videoOnly:true});
+        return true;
+      } catch(err){
+        return false;
+      } finally {
+        try { post.composer.setSize(innerWidth, innerHeight); } catch(err){}
+      }
+    },
   });
 
   function requestWarmup(label, opts){
@@ -196,6 +212,7 @@ function create(deps){
     ED.playPreview = !!on && mode === 'play';
     ED.simulatePreview = !!on && mode === 'simulate';
     ED.playPreviewMode = on ? mode : 'play';
+    if(!on) GAME.state.cinemaInputLocked = false;
     if(ED.playPreview) deps.clearHoverPickHelper();
     if(ED.playPreview && viewportLayout) viewportLayout.updateOverlays(null);
     if(ED.playPreview && cinemaStudio) cinemaStudio.hideTimeline();
@@ -243,6 +260,7 @@ function create(deps){
   function stopPlayPreview(){
     stopRuntimeCinematics();
     cinemaTriggerState.clear();
+    GAME.state.runtimeActiveSceneCameraId = null;
     if(GAME.actions.stopEditorPreview) GAME.actions.stopEditorPreview();
     const stoppedMode = ED.playPreviewMode;
     setPlayPreview(false);
@@ -355,6 +373,16 @@ function create(deps){
       const shot = cinemaStudio.updatePreview(dt);
       runtimeShot = runtimeState.playing ? shot : null;
     }
+    GAME.state.cinemaInputLocked = !!runtimeShot;
+    if(!runtimeShot){
+      const runtimeCameraId = GAME.state && GAME.state.runtimeActiveSceneCameraId;
+      const playerUnavailable = GAME.player && (GAME.player.enabled === false || GAME.player.hidden === true || GAME.player.controllerIndex == null);
+      const active = runtimeCameraId ? sceneCameraHolderById(runtimeCameraId) : (playerUnavailable
+        ? sceneCameras().find(holder => holder.userData.cameraProps && holder.userData.cameraProps.activeLevelCamera === true)
+          || sceneCameras().find(holder => holder.userData.cameraProps && holder.userData.cameraProps.outputPlayerIndex === 0)
+        : null);
+      if(active) runtimeShot = {cameraId:active.userData.editorId};
+    }
     if(viewportLayout) viewportLayout.updateOverlays(null);
     helperGroup.visible = false;
     const gizmo = deps.getGizmo();
@@ -426,41 +454,63 @@ function create(deps){
       $('#lkPipFrame').classList.remove('on');
       return;
     }
+    let selectedCameraHolder = ED.selected;
+    while(selectedCameraHolder && !(selectedCameraHolder.userData && selectedCameraHolder.userData.editorType === 'camera' && selectedCameraHolder.userData.sceneCamera)){
+      selectedCameraHolder = selectedCameraHolder.parent;
+    }
+    const sourceCamera = selectedCameraHolder ? normalizeSceneCameraLocal(selectedCameraHolder) : gameCam;
+    const isSceneCamera = !!selectedCameraHolder;
     const rightW = deps.panelWidth('right');
     const usableW = Math.max(320, innerWidth - deps.panelWidth('left') - rightW - 28);
-    const aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (gameCam.aspect || innerWidth / innerHeight);
+    const aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (sourceCamera.aspect || innerWidth / innerHeight);
     const w = Math.round(Math.min(ED.pipW, usableW * .9));
     const hgt = Math.round(w / aspect);
+    const displayW = ED.pipMinimized ? 170 : w;
+    const displayH = ED.pipMinimized ? 26 : hgt;
     const defaultPos = {
-      x: innerWidth - rightW - w - 14,
-      y: innerHeight - 40 - hgt - 14,
+      x: innerWidth - rightW - displayW - 14,
+      y: innerHeight - 40 - displayH - 14,
     };
-    const pos = deps.clampPanelPos(ED.pipPos || defaultPos, w, hgt);
+    const pos = deps.clampPanelPos(ED.pipPos || defaultPos, displayW, displayH);
     const x = pos.x;
     const y = pos.y;
     const pipFrame = $('#lkPipFrame');
     pipFrame.classList.add('on');
     pipFrame.classList.toggle('minimized', !!ED.pipMinimized);
+    const pipTitle = pipFrame.querySelector('.lk-pip-title span');
+    if(pipTitle) pipTitle.textContent = isSceneCamera
+      ? ((selectedCameraHolder.userData.editorName || selectedCameraHolder.name || 'SCENE CAMERA').toUpperCase() + ' · PREVIEW')
+      : 'PLAYER CAMERA';
     const pipMin = $('#lkPipMinimize');
     if(pipMin){
       pipMin.textContent = ED.pipMinimized ? '+' : '−';
-      pipMin.title = ED.pipMinimized ? 'Expand player camera' : 'Minimize player camera';
+      pipMin.title = ED.pipMinimized ? 'Expand camera preview' : 'Minimize camera preview';
     }
     pipFrame.style.left = x + 'px';
     pipFrame.style.top = y + 'px';
-    pipFrame.style.width = (ED.pipMinimized ? 170 : w) + 'px';
-    pipFrame.style.height = (ED.pipMinimized ? 26 : hgt) + 'px';
+    pipFrame.style.width = displayW + 'px';
+    pipFrame.style.height = displayH + 'px';
     if(ED.pipMinimized) return;
     helperGroup.visible = false;
     const gizmo = deps.getGizmo();
     if(gizmo) gizmo.visible = false;
+    const cameraHelperVisibility = sceneCameras().map(holder => {
+      const helper = holder.children.find(child => child.userData && child.userData.editorCameraHelper);
+      const visible = helper ? helper.visible : false;
+      if(helper) helper.visible = false;
+      return [helper, visible];
+    });
     const glY = innerHeight - y - hgt;
     try {
       renderer.setScissorTest(true);
       renderer.setViewport(x, glY, w, hgt);
       renderer.setScissor(x, glY, w, hgt);
       const cc = GAME.player.cameraCfg;
-      const postOn = ((cc.dof && cc.dof.enabled) || (cc.grade && cc.grade.enabled)) && GAME.systems.post && GAME.systems.post.ok;
+      const video = GAME.settings && GAME.settings.video;
+      const videoPost = video && (video.volumetricLighting || video.rendererMode === 'raytracing' || video.quality !== 'high' || video.antialiasing === 'fxaa');
+      sourceCamera.aspect = w / Math.max(1, hgt);
+      sourceCamera.updateProjectionMatrix();
+      const postOn = !isSceneCamera && ((cc.dof && cc.dof.enabled) || (cc.grade && cc.grade.enabled) || videoPost) && GAME.systems.post && GAME.systems.post.ok;
       if(postOn){
         try {
           GAME.systems.post.composer.setSize(w, hgt);
@@ -475,13 +525,14 @@ function create(deps){
           try { GAME.systems.post.composer.setSize(innerWidth, innerHeight); } catch(e){}
         }
       } else {
-        renderer.render(scene, gameCam);
+        renderer.render(scene, sourceCamera);
       }
     } finally {
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, innerWidth, innerHeight);
       helperGroup.visible = true;
       if(gizmo) gizmo.visible = true;
+      cameraHelperVisibility.forEach(pair => { if(pair[0]) pair[0].visible = pair[1]; });
     }
   }
   function cinemaFloatAspect(){
@@ -539,7 +590,7 @@ function create(deps){
     let started = false;
     cinemaStudios().forEach(studio => {
       const props = cinemaStudio.propsFor(studio);
-      if(props.trigger !== 'on-play') return;
+      if(props.trigger !== 'on-play' || props.outputPlayerIndex !== 0) return;
       cinemaStudio.playStudio(studio, {time:0, playing:true, runtime:true, source:'on-play'});
       started = true;
     });
@@ -556,6 +607,24 @@ function create(deps){
     if(!cinemaStudio) return [];
     return cinemaStudio.triggerRuntimeEvent(eventName, opts);
   }
+  window.addEventListener('lotking:cinemastart', event => {
+    if(!cinemaStudio || !GAME.state || !GAME.state.editorActive) return;
+    const detail = event && event.detail || {};
+    const directStudio = detail.studio && detail.studio.userData ? detail.studio : null;
+    const ref = directStudio ? '' : String(detail.studio || '');
+    const studio = directStudio || cinemaStudios().find(item => !ref || item.userData.editorId === ref || item.userData.editorName === ref ||
+      (item.userData.cinemaProps && item.userData.cinemaProps.eventName === ref));
+    if(studio){
+      GAME.state.cinemaInputLocked = true;
+      cinemaStudio.playStudio(studio, {time:detail.time || 0, playing:true, runtime:true, source:'logic-element'});
+    }
+  });
+  window.addEventListener('lotking:cinemastop', () => {
+    if(!cinemaStudio || !GAME.state || !GAME.state.editorActive) return;
+    const state = ED.cinemaPreview;
+    cinemaStudio.stopStudio(state && cinemaStudioById(state.id));
+    GAME.state.cinemaInputLocked = false;
+  });
   function cinemaTriggerId(o){
     return o && o.userData && (o.userData.editorId || (o.userData.addedEntry && o.userData.addedEntry.id)) || '';
   }
@@ -637,7 +706,10 @@ function create(deps){
     const rightW = deps.panelWidth('right');
     const usableW = Math.max(320, innerWidth - deps.panelWidth('left') - rightW - 28);
     const aspect = cinemaFloatAspect();
-    const w = Math.round(Math.min(ED.cinemaFloatPreviewW || 640, usableW * .9));
+    const availableW = Math.max(80, Math.min(usableW * .9, viewRect.w - 20));
+    const availableH = Math.max(80, viewRect.h - 20);
+    const fitW = Math.min(availableW, availableH * aspect);
+    const w = Math.round(Math.max(80, Math.min(ED.cinemaFloatPreviewW || 640, fitW)));
     const hgt = Math.round(w / aspect);
     const defaultPos = {x:viewRect.x + 18, y:viewRect.y + 18};
     const pos = deps.clampPanelPos(ED.cinemaFloatPreviewPos || defaultPos, w, hgt);

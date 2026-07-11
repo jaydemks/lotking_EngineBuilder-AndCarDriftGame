@@ -460,7 +460,20 @@ function createSky(deps){
     flare: {
       state: FLARE,
       get: () => Object.assign({}, FLARE),
-      set: patch => { Object.assign(FLARE, patch || {}); applyFlareColors(); update(0); },
+      set: patch => {
+        Object.assign(FLARE, patch || {});
+        FLARE.enabled = FLARE.enabled === true;
+        FLARE.intensity = clampf(Number(FLARE.intensity) || 0, 0, 2);
+        FLARE.size = clampf(Number(FLARE.size) || FLARE_DEFAULTS.size, .2, 3);
+        FLARE.ghosts = Math.round(clampf(Number(FLARE.ghosts) || 0, 0, FLARE_MAX_GHOSTS));
+        FLARE.spacing = clampf(Number(FLARE.spacing) || FLARE_DEFAULTS.spacing, .1, 2);
+        FLARE.chroma = clampf(Number(FLARE.chroma) || 0, 0, 1);
+        FLARE.halo = clampf(Number(FLARE.halo) || 0, 0, 1);
+        FLARE.haloSize = clampf(Number(FLARE.haloSize) || FLARE_DEFAULTS.haloSize, .2, 3);
+        FLARE.streak = clampf(Number(FLARE.streak) || 0, 0, 1);
+        applyFlareColors();
+        update(0);
+      },
       defaults: () => Object.assign({}, FLARE_DEFAULTS),
       // compat con le vecchie chiavi di persistenza (flareEnabled/Opacity/Size)
       setEnabled: v => { FLARE.enabled = !!v; update(0); },
@@ -472,7 +485,13 @@ function createSky(deps){
     },
     sunBloom: {
       get: () => Object.assign({}, SUN_BLOOM),
-      set: patch => { Object.assign(SUN_BLOOM, patch || {}); update(0); },
+      set: patch => {
+        Object.assign(SUN_BLOOM, patch || {});
+        SUN_BLOOM.enabled = SUN_BLOOM.enabled === true;
+        SUN_BLOOM.intensity = clampf(Number(SUN_BLOOM.intensity) || 0, 0, 2);
+        SUN_BLOOM.size = clampf(Number(SUN_BLOOM.size) || SUN_BLOOM_DEFAULTS.size, .2, 3);
+        update(0);
+      },
       defaults: () => Object.assign({}, SUN_BLOOM_DEFAULTS),
     },
     volClouds: {

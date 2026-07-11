@@ -45,13 +45,18 @@ function create(deps){
   function collectMaterialSlots(o){
     const slots = [];
     let meshIndex = 0;
+    const worldVisible = mesh => {
+      for(let node = mesh; node; node = node.parent) if(node.visible === false) return false;
+      return true;
+    };
     o.traverse(n => {
       if(!n.isMesh || !n.material) return;
+      if(!worldVisible(n)){ meshIndex++; return; }
       const mats = Array.isArray(n.material) ? n.material : [n.material];
       mats.forEach((mat, materialIndex) => {
         if(!mat) return;
         slots.push({
-          key:meshIndex + ':' + materialIndex,
+          key:n.userData && n.userData.lkMeshEditId ? ('id|' + n.userData.lkMeshEditId + '|' + materialIndex) : (meshIndex + ':' + materialIndex),
           mesh:n,
           meshIndex,
           materialIndex,
@@ -75,6 +80,13 @@ function create(deps){
     return slots.some(slot => slot.key === current) ? current : 'all';
   }
 
+  function getActiveTargets(o, slots){
+    const wanted = Array.isArray(o.userData.materialEditorSlots) ? o.userData.materialEditorSlots : [];
+    const valid = wanted.filter(key => key === 'all' || slots.some(slot => slot.key === key));
+    if(valid.length) return valid.includes('all') ? ['all'] : Array.from(new Set(valid));
+    return [getActiveSlot(o, slots)];
+  }
+
   function getMaterialForTarget(o, slots, target){
     if(target && target !== 'all'){
       const slot = slots.find(item => item.key === target);
@@ -83,19 +95,16 @@ function create(deps){
     return getFirstMaterial(o);
   }
 
-  function scopedPatch(o, patch){
-    const target = o.userData.materialEditorSlot || 'all';
-    if(target === 'all') return Object.assign({allowGlobal:true}, patch);
-    return Object.assign({materialSlot:target}, patch);
-  }
-
   function applyMaterialPatch(o, patch){
     const root = materialRoot(o);
-    STORE.applyMatProps(root, scopedPatch(o, patch));
+    const slots = collectMaterialSlots(root);
+    const targets = getActiveTargets(o, slots);
+    if(targets.includes('all')) STORE.applyMatProps(root, Object.assign({allowGlobal:true}, patch));
+    else targets.forEach(target => STORE.applyMatProps(root, Object.assign({materialSlot:target}, patch)));
     if(root !== o) o.userData.matProps = root.userData.matProps;
     thumbCache.delete(o.userData.editorId);
-    if(patch && Object.prototype.hasOwnProperty.call(patch, 'castShadow')) requestWarmup(patch.castShadow ? 'Warm-up shadows...' : 'Warm-up render...');
-    if(patch && (patch.transparent != null || patch.opacity != null || patch.depthWrite != null || patch.materialKind)) requestWarmup('Warm-up material...');
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'castShadow')) requestWarmup(patch.castShadow ? tr('Warm-up shadows...', 'Preparazione ombre...') : tr('Warm-up render...', 'Preparazione rendering...'));
+    if(patch && (patch.transparent != null || patch.opacity != null || patch.depthWrite != null || patch.materialKind)) requestWarmup(tr('Warm-up material...', 'Preparazione materiale...'));
     markDirty();
     refreshOutliner();
   }
@@ -159,14 +168,17 @@ function create(deps){
 
   function build(box, o){
     const root = materialRoot(o);
+    if(STORE.assignMeshEditIds && (o.userData.editorType === 'mesh' || o.userData.editorType === 'player')) STORE.assignMeshEditIds(root);
     const slots = collectMaterialSlots(root);
     if(!slots.length) return;
     if(o.userData.editorType !== 'mesh' && o.userData.editorType !== 'player') return;
-    const target = getActiveSlot(o, slots);
+    const targets = getActiveTargets(o, slots);
+    const target = targets.length > 1 ? '__multi__' : targets[0];
+    o.userData.materialEditorSlots = targets.slice();
     o.userData.materialEditorSlot = target;
-    const mat = getMaterialForTarget(o, slots, target);
+    const mat = getMaterialForTarget(o, slots, targets[0]);
     if(!mat) return;
-    const activeSlot = target === 'all' ? slots[0] : slots.find(slot => slot.key === target);
+    const activeSlot = targets[0] === 'all' ? slots[0] : slots.find(slot => slot.key === targets[0]);
 
     const sm = section(tr('EDIT MATERIAL', 'MODIFICA MATERIALE'));
     sm.body.appendChild(el('<div class="lk-hint">' + tr(
@@ -176,15 +188,19 @@ function create(deps){
 
     sm.body.appendChild(selectRow('Target', target, [
       {value:'all', label:tr('All materials', 'Tutti i materiali')},
+      ...(targets.length > 1 ? [{value:'__multi__', label:targets.length + tr(' selected materials', ' materiali selezionati')}] : []),
       ...slots.map(slot => ({value:slot.key, label:slot.label})),
     ], v => {
+      if(v === '__multi__') return;
       o.userData.materialEditorSlot = v;
+      o.userData.materialEditorSlots = [v];
+      if(liveMaterialSelection && liveMaterialSelection.setIds) liveMaterialSelection.setIds(o, [v]);
       if(liveMaterialSelection && liveMaterialSelection.sync) liveMaterialSelection.sync(o);
       buildInspector();
     }).root);
-    const activeLabel = target === 'all' ? tr('All materials', 'Tutti i materiali') : (slots.find(slot => slot.key === target) || {}).label || target;
+    const activeLabel = targets.length > 1 ? (targets.length + tr(' selected materials', ' materiali selezionati')) : (target === 'all' ? tr('All materials', 'Tutti i materiali') : (slots.find(slot => slot.key === target) || {}).label || target);
     const preview = materialPreview(mat, activeLabel);
-    const currentMaterial = () => getMaterialForTarget(o, collectMaterialSlots(materialRoot(o)), o.userData.materialEditorSlot);
+    const currentMaterial = () => getMaterialForTarget(o, collectMaterialSlots(materialRoot(o)), (o.userData.materialEditorSlots || [o.userData.materialEditorSlot])[0]);
     const patchMat = patch => {
       applyMaterialPatch(o, patch);
       if(preview.lkRefresh) preview.lkRefresh(currentMaterial());
@@ -201,8 +217,8 @@ function create(deps){
       ]));
       if(live){
         sm.body.appendChild(el('<div class="lk-hint">' + tr(
-          'Live selection is active: click a visible part of this model to set the material target. Only the material border is highlighted.',
-          'Selezione live attiva: clicca una parte visibile del modello per impostare il target materiale. Viene evidenziato solo il bordo del materiale.'
+          'Live selection is active: click for one material, Ctrl/Shift-click to add or remove material slots. All selected slots receive the same edits.',
+          'Selezione live attiva: clicca per un materiale, Ctrl/Shift-clic per aggiungere o rimuovere slot. Tutti gli slot selezionati ricevono le stesse modifiche.'
         ) + '</div>'));
       }
     }

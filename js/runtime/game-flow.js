@@ -72,6 +72,7 @@ function create(options){
     call('previewRadioHud', false);
     call('resetTimescale');
     call('resetCar');
+    call('resetGameplayCamera');
     call('disposePhysicsWorld');
     call('disposeRenderLists');
   }
@@ -101,6 +102,7 @@ function create(options){
   function beginGameplaySession(editorPreview, editorPreviewMode){
     gameState.paused = false;
     gameState.playPreviewCursorVisible = false;
+    if(editorPreview) delete gameState.editorPreviewManualEnvironment;
     if(editorPreview && !onlineDemoMode()) call('syncEditorSpawnFromPlayer');
     call('resetCar');
     call('resetGameplayCamera');
@@ -123,6 +125,7 @@ function create(options){
     call('pauseRadio');
     call('resetTimescale');
     call('resetCar');
+    call('resetGameplayCamera');
     call('disposePhysicsWorld');
     call('disposeRenderLists');
     if(gameState.editorActive){

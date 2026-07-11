@@ -27,6 +27,7 @@ function create(deps){
   const setGrid = deps.setGrid || function(){};
   const requestDeleteEntity = deps.requestDeleteEntity || function(){};
   const requestDeleteSelection = deps.requestDeleteSelection || function(){ requestDeleteEntity(ED.selected); };
+  const getEditorKeymap = deps.getEditorKeymap || (() => ({select:'q', move:'w', rotate:'e', scale:'r', focus:'f'}));
 
   function onKeyDown(e){
     if(!ED.active) return;
@@ -78,15 +79,14 @@ function create(deps){
     if(mod && key === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if(mod && key === 'y'){ e.preventDefault(); redo(); return; }
     if(mod && key === 'r'){ e.preventDefault(); applyLastTransform(); return; }
-    switch(key){
-      case 'q': setTool('select'); break;
-      case 'w': setTool('translate'); break;
-      case 'e': setTool('rotate'); break;
-      case 'r': setTool('scale'); break;
-      case 'f': focusSelected(); break;
-      case 'g': setGrid(!ED.gridOn); break;
-      case 'delete': case 'backspace': requestDeleteSelection(); break;
-    }
+    const keymap = getEditorKeymap() || {};
+    if(key === keymap.select) setTool('select');
+    else if(key === keymap.move) setTool('translate');
+    else if(key === keymap.rotate) setTool('rotate');
+    else if(key === keymap.scale) setTool('scale');
+    else if(key === keymap.focus) focusSelected();
+    else if(key === 'g') setGrid(!ED.gridOn);
+    else if(key === 'delete' || key === 'backspace') requestDeleteSelection();
   }
   function onKeyUp(e){
     fly.keys[e.key.toLowerCase()] = false;

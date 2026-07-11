@@ -52,14 +52,16 @@ To move a project between origins or devices, use the editor's project export/im
 The Project Workspace button is an optional bridge. It does not replace the current local browser database workflow, but it can use a `.lkep.json` file as the portable project document.
 
 - On `localhost`, the editor keeps working as before with localStorage and IndexedDB. The Workspace panel opens automatically in the editor so you can choose the local browser database or open/sync an LKEP project file.
-- On a published site, the project runs as an online demo with the bundled/default assets. Import, save, delete, duplicate and rename actions are disabled. LKEP export is allowed only as a browser download, so it does not write to the server.
+- The editor detects a hosted site versus localhost automatically. It then asks only which project to open: the author `DEMO` (authored for consumer high-end hardware) or a clean project. The hosted path asks the visitor to authorize a local project directory in Chrome/Edge; the workspace manifest and DEMO project are written there, while browser storage remains local to that visitor.
+- On first editor entry, this project choice is required and appears before world/assets/editor warm-up. It has no close button until a choice is completed. After the selection reload, the normal loading phase starts; later the workspace panel can be reopened and closed normally from the toolbar.
+- Hosted Editor never uploads project data or imported assets to the site's FTP/server. If writable folder access is unavailable, **Run locally / GitHub** shows the download, extraction and `avvio.bat` steps.
 - To publish your authored online demo level, export a portable LKEP locally and upload it as:
 
 ```text
 demo/demo-project.lkep.json
 ```
 
-The published site loads that file automatically as the read-only demo level.
+The published site offers that file as the Author DEMO. It remains read-only until the visitor explicitly authorizes a local project folder, then an editable copy is written into that workspace without modifying the hosted source.
 - In Chrome or Edge on `localhost`, `Project Workspace -> Open / sync LKEP file` can link a portable project file. The editor imports the file, and the normal Save button writes the portable `.lkep.json` file again.
 - Portable LKEP export/import is responsible for carrying imported asset blobs inside the project data when possible.
 
@@ -104,7 +106,7 @@ Then open the printed LAN address on the other device.
 Typical workflows:
 
 - Build locally in `engine_editor.html`, then export a playable ZIP when you want to publish only the game/runtime.
-- Publish the whole project as a read-only online demo when you want visitors to inspect the editor without mutating your hosted files.
+- Publish the whole project as a server-read-only hosted editor: visitors may edit only after authorizing their own local folder, while hosted files remain immutable.
 - Use Logic Element from inside the editor when you want Blueprint-style experimental visual scripting for level logic or scene objects.
 
 For day-to-day work, start with:

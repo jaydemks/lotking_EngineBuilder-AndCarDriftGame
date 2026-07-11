@@ -164,6 +164,7 @@ function create(deps){
     box.innerHTML = '';
     tf.inputs = null;
     if(ED.special === 'env') return deps.environmentInspector.build(box);
+    if(ED.special === 'rendering' && deps.renderingInspector) return deps.renderingInspector.build(box);
     if(ED.special === 'hud') return deps.hudInspector.build(box);
     if(ED.special === 'logic' && deps.logicInspector) return deps.logicInspector.buildLevel(box);
     const multi = selectedList();
@@ -192,6 +193,8 @@ function create(deps){
         }
       }},
     ]));
+    if(deps.buildMaterialEditor) deps.buildMaterialEditor(box, o);
+    if(deps.buildMeshEditor) deps.buildMeshEditor(box, o);
 
     const st = deps.section(tr('POSITION / SPAWN', 'POSIZIONE / SPAWN'));
     st.body.appendChild(deps.el('<div class="lk-hint">' + tr('Move the car with the gizmo: its position becomes the spawn.', 'Muovi l\'auto con il gizmo: la sua posizione diventa lo spawn.') + '</div>'));
@@ -264,31 +267,66 @@ function create(deps){
       if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
       if(deps.markDirty) deps.markDirty();
     };
+    let playerColliderBefore = null;
+    const playerColliderSnapshot = () => ({
+      collision:JSON.parse(JSON.stringify(GAME.player.collision || {})),
+      dummyVisibility:o.userData.colliderDummyVisibility,
+    });
+    const applyPlayerColliderSnapshot = snapshot => {
+      if(!snapshot) return;
+      if(GAME.player.setCollision) GAME.player.setCollision(JSON.parse(JSON.stringify(snapshot.collision || {})));
+      Object.keys(collision).forEach(key => { delete collision[key]; });
+      Object.assign(collision, JSON.parse(JSON.stringify(snapshot.collision || {})));
+      if(snapshot.dummyVisibility === 'show' || snapshot.dummyVisibility === 'hide') o.userData.colliderDummyVisibility = snapshot.dummyVisibility;
+      else delete o.userData.colliderDummyVisibility;
+      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      buildInspector();
+      if(deps.markDirty) deps.markDirty();
+    };
+    const beginPlayerColliderHistory = () => { playerColliderBefore = playerColliderSnapshot(); };
+    const commitPlayerColliderHistory = () => {
+      if(!playerColliderBefore || !deps.pushHistory) return;
+      const before = playerColliderBefore;
+      const after = playerColliderSnapshot();
+      playerColliderBefore = null;
+      if(JSON.stringify(before) === JSON.stringify(after)) return;
+      deps.pushHistory({
+        label:tr('Player collider', 'Collisione player'),
+        undo:() => applyPlayerColliderSnapshot(before),
+        redo:() => applyPlayerColliderSnapshot(after),
+      });
+    };
+    const playerColliderRow = row => {
+      row.root.addEventListener('lk-slider-edit-start', beginPlayerColliderHistory);
+      row.root.addEventListener('lk-slider-edit-end', commitPlayerColliderHistory);
+      return row.root;
+    };
     pc.body.appendChild(deps.el('<div class="lk-hint">' + (selectedCollider ? tr('Collider selection active. Edit this dummy here; it is separate from the player_car object transform.', 'Selezione collider attiva. Modifica qui questo dummy; e separato dalla trasformazione del player_car.') : tr('Dedicated player_car collision. This controls the car body used by physics and the lightweight arcade impact radius.', 'Collisione dedicata del player_car. Controlla la carrozzeria usata dalla fisica e il raggio impatto arcade.')) + '</div>'));
     const dummyVisibilityRow = deps.el('<div class="lk-row"><label>Dummy visibility</label><select><option value="auto">Auto</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>');
     const dummyVisibilitySelect = dummyVisibilityRow.querySelector('select');
     dummyVisibilitySelect.value = o.userData.colliderDummyVisibility === 'show' || o.userData.colliderDummyVisibility === 'hide' ? o.userData.colliderDummyVisibility : 'auto';
     dummyVisibilitySelect.addEventListener('change', () => {
+      beginPlayerColliderHistory();
       const mode = dummyVisibilitySelect.value === 'show' || dummyVisibilitySelect.value === 'hide' ? dummyVisibilitySelect.value : 'auto';
       if(mode === 'auto') delete o.userData.colliderDummyVisibility;
       else o.userData.colliderDummyVisibility = mode;
       if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
       if(deps.markDirty) deps.markDirty();
+      commitPlayerColliderHistory();
     });
     pc.body.appendChild(dummyVisibilityRow);
-    pc.body.appendChild(deps.sliderRow('Half X', collision.hx == null ? .92 : collision.hx, .1, 4, .01, v => setCollision({hx:v}), v => (+v).toFixed(2)).root);
-    pc.body.appendChild(deps.sliderRow('Half Y', collision.hy == null ? .42 : collision.hy, .05, 2, .01, v => setCollision({hy:v}), v => (+v).toFixed(2)).root);
-    pc.body.appendChild(deps.sliderRow('Half Z', collision.hz == null ? 1.85 : collision.hz, .1, 6, .01, v => setCollision({hz:v}), v => (+v).toFixed(2)).root);
-    pc.body.appendChild(deps.sliderRow('Shape offset Y', collision.offsetY == null ? .45 : collision.offsetY, -1, 3, .01, v => setCollision({offsetY:v}), v => (+v).toFixed(2)).root);
-    pc.body.appendChild(deps.sliderRow('Body height Y', collision.bodyY == null ? .55 : collision.bodyY, .05, 3, .01, v => setCollision({bodyY:v}), v => (+v).toFixed(2)).root);
-    pc.body.appendChild(deps.sliderRow('Arcade radius', collision.radius == null ? 1.4 : collision.radius, .2, 5, .01, v => setCollision({radius:v}), v => (+v).toFixed(2)).root);
+    pc.body.appendChild(playerColliderRow(deps.sliderRow('Half X', collision.hx == null ? .92 : collision.hx, .1, 4, .01, v => setCollision({hx:v}), v => (+v).toFixed(2))));
+    pc.body.appendChild(playerColliderRow(deps.sliderRow('Half Y', collision.hy == null ? .42 : collision.hy, .05, 2, .01, v => setCollision({hy:v}), v => (+v).toFixed(2))));
+    pc.body.appendChild(playerColliderRow(deps.sliderRow('Half Z', collision.hz == null ? 1.85 : collision.hz, .1, 6, .01, v => setCollision({hz:v}), v => (+v).toFixed(2))));
+    pc.body.appendChild(playerColliderRow(deps.sliderRow('Shape offset Y', collision.offsetY == null ? .45 : collision.offsetY, -1, 3, .01, v => setCollision({offsetY:v}), v => (+v).toFixed(2))));
+    pc.body.appendChild(playerColliderRow(deps.sliderRow('Body height Y', collision.bodyY == null ? .55 : collision.bodyY, .05, 3, .01, v => setCollision({bodyY:v}), v => (+v).toFixed(2))));
+    pc.body.appendChild(playerColliderRow(deps.sliderRow('Arcade radius', collision.radius == null ? 1.4 : collision.radius, .2, 5, .01, v => setCollision({radius:v}), v => (+v).toFixed(2))));
     box.appendChild(pc.root);
 
     deps.playerCameraInspector.build(box);
     deps.playerLightsInspector.build(box);
     deps.playerAttachmentsInspector.build(box);
     deps.playerSetupInspector.build(box);
-    if(deps.buildMaterialEditor) deps.buildMaterialEditor(box, o);
   }
 
   function openSoundDesigner(setId){

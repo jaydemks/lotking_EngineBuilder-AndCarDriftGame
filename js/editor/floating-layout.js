@@ -31,7 +31,9 @@ function create(deps){
   function editorViewportRect(){
     const x = Math.round(panelWidth('left') + 10);
     const toolbarH = ED.viewportToolbarCollapsed ? 28 : 36;
-    const y = 46 + toolbarH;
+    const toolbar = root && root.querySelector ? root.querySelector('#lkViewportToolbar') : null;
+    const toolbarRect = toolbar && toolbar.getBoundingClientRect ? toolbar.getBoundingClientRect() : null;
+    const y = Math.round(toolbarRect && toolbarRect.height ? toolbarRect.bottom + 2 : 74 + toolbarH + 2);
     const w = Math.max(220, Math.round(innerWidth - panelWidth('left') - panelWidth('right') - 20));
     const timelineH = ED.cinemaTimelineOpen && ED.cinemaTimelineDocked ? (ED.cinemaTimelineH || 136) : 0;
     const h = Math.max(160, Math.round(innerHeight - y - 40 - ED.assetsH - timelineH));
@@ -158,7 +160,10 @@ function create(deps){
       const startRect = frame.getBoundingClientRect();
       const move = ev => {
         const aspect = ED.cinemaFloatPreviewAspect === '21:9' ? 21 / 9 : (ED.cinemaFloatPreviewAspect === '4:3' ? 4 / 3 : (ED.cinemaFloatPreviewAspect === '1:1' ? 1 : (ED.cinemaFloatPreviewAspect === '9:16' ? 9 / 16 : 16 / 9)));
-        const nextW = Math.max(360, Math.min(1280, startW + startX - ev.clientX));
+        const view = editorViewportRect();
+        const maxW = Math.max(80, Math.min(1280, view.w - 20, (view.h - 20) * aspect));
+        const minW = Math.min(360, maxW);
+        const nextW = Math.max(minW, Math.min(maxW, startW + startX - ev.clientX));
         const nextH = nextW / aspect;
         ED.cinemaFloatPreviewW = nextW;
         ED.cinemaFloatPreviewPos = clampPanelPos({x:startRect.right - nextW, y:startRect.bottom - nextH}, nextW, nextH);
@@ -196,7 +201,7 @@ function create(deps){
   }
   function wireFloatingPanels(){
     wireFloatingDrag($('#lkQuickAudio'), $('#lkQuickAudio'), 'quickAudioPos', 'Toolbar audio');
-    wireFloatingDrag($('#lkPipFrame'), $('#lkPipFrame .lk-pip-title'), 'pipPos', 'Player camera');
+    wireFloatingDrag($('#lkPipFrame'), $('#lkPipFrame .lk-pip-title'), 'pipPos', 'Camera preview');
     const cinemaFrame = $('#lkCinemaPreviewFrame');
     if(cinemaFrame) wireFloatingDrag(cinemaFrame, $('#lkCinemaPreviewFrame .lk-pip-title'), 'cinemaFloatPreviewPos', 'Timeline preview');
   }

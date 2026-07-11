@@ -8,7 +8,7 @@
 'use strict';
 
 const DEFAULT_CONFIG = Object.freeze({
-  front: {enabled:true, auto:true, count:2, color:0xfff0c8, intensity:1.55, distance:42, angle:.50, penumbra:.55,
+  front: {enabled:true, auto:true, autoOnHour:18, autoOffHour:7, count:2, color:0xfff0c8, intensity:1.55, distance:42, angle:.50, penumbra:.55,
     glow:true, bloom:true, bloomIntensity:.55, flare:true, glowSize:.62, flareSize:.42},
   rear: {enabled:true, color:0xff1f18, baseIntensity:.45, brakeIntensity:2.8, reverseColor:0xf3f4ff, reverseIntensity:2.2,
     glow:true, bloom:true, bloomIntensity:.55, flare:true, glowSize:.55, flareSize:.34},
@@ -61,7 +61,15 @@ function create(opts){
   function isNightTime(){
     const sky = getSky();
     const t = sky && sky.getTime ? sky.getTime() : .5;
-    return t < .24 || t > .70;
+    const hour = (((Number(t) || 0) % 1) + 1) % 1 * 24;
+    const normalizeHour = (value, fallback) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? Math.max(0, Math.min(24, n)) : fallback;
+    };
+    const on = normalizeHour(config.front.autoOnHour, 18);
+    const off = normalizeHour(config.front.autoOffHour, 7);
+    if(Math.abs(on - off) < .001) return true;
+    return on > off ? (hour >= on || hour < off) : (hour >= on && hour < off);
   }
 
   function syncTimeOfDay(){
@@ -301,6 +309,10 @@ function create(opts){
   function setConfig(patch){
     if(!patch) return;
     if(patch.front) Object.assign(config.front, patch.front);
+    const onHour = Number(config.front.autoOnHour);
+    const offHour = Number(config.front.autoOffHour);
+    config.front.autoOnHour = Number.isFinite(onHour) ? Math.max(0, Math.min(24, onHour)) : 18;
+    config.front.autoOffHour = Number.isFinite(offHour) ? Math.max(0, Math.min(24, offHour)) : 7;
     if(patch.rear) Object.assign(config.rear, patch.rear);
     if(patch.neon) Object.assign(config.neon, patch.neon);
     if(patch.aux) patch.aux.forEach((v, i) => {

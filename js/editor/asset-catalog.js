@@ -409,6 +409,11 @@ function create(deps){
       return;
     }
     if(item.kind === 'logic-blueprint' || item.kind === 'logic-template'){
+      if(item.kind === 'logic-template' && item.id === 'logic-template-player-car' && deps.convertPlayerToLogicElement){
+        deps.convertPlayerToLogicElement(at || deps.spawnPointAhead());
+        deps.setLeftMode('scene');
+        return;
+      }
       addLogicElement(at || deps.spawnPointAhead(), item.raw);
       deps.setLeftMode('scene');
       return;

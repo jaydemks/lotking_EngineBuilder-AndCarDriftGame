@@ -14,6 +14,7 @@ function create(deps){
   const setAssetLoading = deps.setAssetLoading || function(){};
   const confirmEditorAction = deps.confirmEditorAction || function(){ return Promise.resolve(false); };
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
+  const refreshOutliner = deps.refreshOutliner || function(){};
   const finishAdd = deps.finishAdd || function(){};
   const spawnPointAhead = deps.spawnPointAhead || function(){ return null; };
   const performDeleteEntity = deps.performDeleteEntity || function(){};
@@ -57,7 +58,18 @@ function create(deps){
     obj.userData.assetName = asset.name;
     obj.userData.assetSource = asset.source || 'Imported asset';
     finishAdd(obj);
+    extractEmbeddedLights(obj, entry);
     return obj;
+  }
+  function extractEmbeddedLights(obj, entry){
+    if(!STORE.extractEmbeddedLights) return [];
+    const lights = STORE.extractEmbeddedLights(GAME, obj, entry);
+    if(lights.length){
+      refreshOutliner();
+      refreshAssetsPanel();
+      status(lights.length + tr(lights.length === 1 ? ' embedded GLB light converted' : ' embedded GLB lights converted', lights.length === 1 ? ' luce GLB incorporata convertita' : ' luci GLB incorporate convertite'));
+    }
+    return lights;
   }
   function registerImportedTexture(asset, at){
     const entry = createTextureEntryFromAsset(asset, at || spawnPointAhead());
@@ -162,8 +174,13 @@ function create(deps){
   }
   function saveImportedBlob(file, dbKey){
     return window.LK_ASSET_BLOBS
-      ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
-      : readFileAsDataURL(file).then(src => ({src}));
+      ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(err => {
+        if(file && file.size > 12 * 1024 * 1024) throw new Error(tr('IndexedDB could not store this large GLB; base64 fallback was stopped to protect page memory.', 'IndexedDB non ha potuto salvare questo GLB grande; il fallback base64 è stato fermato per proteggere la memoria della pagina.'));
+        return readFileAsDataURL(file).then(src => ({src}));
+      })
+      : (file && file.size > 12 * 1024 * 1024
+        ? Promise.reject(new Error(tr('IndexedDB asset storage is unavailable; large GLB base64 fallback was stopped to protect page memory.', 'Lo storage asset IndexedDB non è disponibile; il fallback base64 del GLB grande è stato fermato per proteggere la memoria della pagina.')))
+        : readFileAsDataURL(file).then(src => ({src})));
   }
   function importTextureFile(file, opts){
     const options = opts || {};
@@ -269,6 +286,7 @@ function create(deps){
       performDeleteEntity(target);
       STORE.registerAdded(GAME, obj, entry);
       finishAdd(obj);
+      extractEmbeddedLights(obj, entry);
       setAssetLoading(true, asset.name, 100, 'Replacement complete');
       setTimeout(() => setAssetLoading(false), 300);
     }).catch(err => {
@@ -283,11 +301,16 @@ function create(deps){
       return;
     }
     setAssetLoading(true, file.name, 12, 'Importing replacement');
-    readFileAsDataURL(file).then(src => STORE.loadGlb(src, 5).then(obj => {
-      const asset = upsertImportedAsset(file, {src});
+    const key = assetKeyFromFile(file);
+    const dbKey = assetDbKeyFromFile(file, key);
+    const objectUrl = URL.createObjectURL(file);
+    Promise.all([STORE.loadGlb(objectUrl, 5), saveImportedBlob(file, dbKey)]).then(results => {
+      const obj = results[0];
+      const sourceInfo = results[1] || {};
+      const asset = upsertImportedAsset(file, sourceInfo);
       const id = STORE.nextId();
       const entry = {
-        id, kind:'glb', src, fit:5,
+        id, kind:'glb', src:sourceInfo.src || null, dbKey:sourceInfo.dbKey || null, fit:5,
         name:file.name.replace(/\.(glb|gltf)$/i,''),
         collide:!!target.userData.collider,
         physics: !!(target.userData.physicsEnabled || (target.userData.collider && target.userData.collider.ref && target.userData.collider.ref.physics)),
@@ -301,13 +324,16 @@ function create(deps){
       performDeleteEntity(target);
       STORE.registerAdded(GAME, obj, entry);
       finishAdd(obj);
+      extractEmbeddedLights(obj, entry);
       if(asset) refreshAssetsPanel();
       setAssetLoading(true, file.name, 100, 'Replacement complete');
       setTimeout(() => setAssetLoading(false), 300);
       status(tr('Replaced with ', 'Sostituito con ') + file.name);
-    })).catch(err => {
+    }).catch(err => {
       setAssetLoading(false);
       status(tr('Replacement failed: ', 'Sostituzione fallita: ') + err.message);
+    }).finally(() => {
+      URL.revokeObjectURL(objectUrl);
     });
   }
 

@@ -6,7 +6,7 @@
 'use strict';
 
 const GAME = window.LOT_KING = {
-  version: '0.6.5',
+  version: '0.6.6',
   assets: null,
   core: {},
   world: {},
@@ -51,13 +51,34 @@ GAME.i18n = {
 };
 
 const RUNTIME_DOM_I18N = [
+  ['#controls-list .editor-controls > strong', 'text', 'EDITOR', 'EDITOR'],
+  ['#controls-list .gameplay-controls > strong', 'text', 'GAMEPLAY / PLAY PREVIEW', 'GIOCO / ANTEPRIMA GIOCO'],
+  ['#controls-list .editor-controls span:nth-of-type(2)', 'text', 'Free viewport camera', 'Camera libera viewport'],
+  ['#controls-list .editor-controls span:nth-of-type(4)', 'text', 'Pan / zoom viewport', 'Sposta / zoom viewport'],
+  ['#controls-list .editor-controls span:nth-of-type(6)', 'text', 'Select · Move · Rotate · Scale', 'Seleziona · Sposta · Ruota · Scala'],
+  ['#controls-list .editor-controls span:nth-of-type(8)', 'text', 'Focus selection', 'Centra selezione'],
+  ['#controls-list .editor-controls span:nth-of-type(10)', 'text', 'Undo / Redo', 'Annulla / Ripeti'],
+  ['#controls-list .editor-controls span:nth-of-type(12)', 'text', 'Stop Play Preview', 'Ferma anteprima gioco'],
+  ['#controls-list .editor-controls span:nth-of-type(14)', 'text', 'Release / capture cursor', 'Libera / cattura cursore'],
+  ['#controls-list .gameplay-controls span:nth-of-type(2)', 'text', 'Accelerate', 'Accelera'],
+  ['#controls-list .gameplay-controls span:nth-of-type(4)', 'text', 'Brake / Reverse', 'Frena / Retromarcia'],
+  ['#controls-list .gameplay-controls span:nth-of-type(6)', 'text', 'Steer', 'Sterza'],
+  ['#controls-list .gameplay-controls span:nth-of-type(8)', 'text', 'Handbrake (drift!)', 'Freno a mano (drift!)'],
   ['#controlsToggleBtn', 'text', 'SHOW CONTROLS', 'MOSTRA COMANDI'],
   ['#controlsToggleBtn', 'data-show', 'SHOW CONTROLS', 'MOSTRA COMANDI'],
   ['#controlsToggleBtn', 'data-hide', 'HIDE CONTROLS', 'NASCONDI COMANDI'],
-  ['#controls-list span:nth-child(24)', 'text', 'Driving setup', 'Setup guida'],
-  ['#controls-list span:nth-child(10)', 'text', 'Look around', 'Guarda intorno'],
-  ['#controls-list span:nth-child(26)', 'text', 'Pause menu', 'Menu pausa'],
-  ['#controls-list span:nth-child(34)', 'text', 'Flash high beams', 'Lampeggia fari'],
+  ['#controls-list .gameplay-controls span:nth-of-type(24)', 'text', 'Driving setup', 'Setup guida'],
+  ['#controls-list .gameplay-controls span:nth-of-type(10)', 'text', 'Look around', 'Guarda intorno'],
+  ['#controls-list .gameplay-controls span:nth-of-type(26)', 'text', 'Pause menu', 'Menu pausa'],
+  ['#controls-list .gameplay-controls span:nth-of-type(32)', 'text', 'Flash high beams', 'Lampeggia fari'],
+  ['#controls-list .gameplay-controls span:nth-of-type(12)', 'text', 'Zoom camera', 'Zoom camera'],
+  ['#controls-list .gameplay-controls span:nth-of-type(14)', 'text', 'Camera mode', 'Modalità camera'],
+  ['#controls-list .gameplay-controls span:nth-of-type(16)', 'text', 'Reset car', 'Ripristina veicolo'],
+  ['#controls-list .gameplay-controls span:nth-of-type(18)', 'text', 'Mute sound', 'Disattiva audio'],
+  ['#controls-list .gameplay-controls span:nth-of-type(20)', 'text', 'Radio (slow-motion)', 'Radio (rallentatore)'],
+  ['#controls-list .gameplay-controls span:nth-of-type(22)', 'text', 'Play · Next · Prev', 'Riproduci · Successivo · Precedente'],
+  ['#controls-list .gameplay-controls span:nth-of-type(28)', 'text', 'Toggle controls legend', 'Mostra/nascondi legenda comandi'],
+  ['#controls-list .gameplay-controls span:nth-of-type(30)', 'text', 'Use your own car model', 'Usa il tuo modello di veicolo'],
   ['#tuneBtn', 'title', 'Driving setup', 'Setup guida'],
   ['.tuneTitle', 'text', 'DRIVING SETUP', 'SETUP GUIDA'],
   ['.tuneHint', 'text', '0 = base style', '0 = stile base'],
@@ -91,14 +112,20 @@ const RUNTIME_DOM_I18N = [
   ['#videoQuality', 'row-label', 'Render quality', 'Qualita render'],
   ['#videoQuality', 'row-desc', 'Visual profile for the engine editor and viewport.', 'Profilo visivo dell\'engine editor e del viewport.'],
   ['#videoAA', 'row-label', 'Antialiasing', 'Antialiasing'],
-  ['#videoAA', 'row-desc', 'Sharpens edges and lines in the game and editor.', 'Aumenta la nitidezza di bordi e linee nel gioco e nell\'editor.'],
+  ['#videoAA', 'row-desc', 'FXAA is mobile-friendly; 2× and 4× supersampling increase internal edge resolution.', 'FXAA è adatto al mobile; il supersampling 2× e 4× aumenta la risoluzione interna dei bordi.'],
   ['#videoRenderer', 'row-label', 'Renderer', 'Renderer'],
-  ['#videoRenderer', 'row-desc', 'Standard WebGL or experimental raytracing preset with safe fallback.', 'WebGL normale oppure preset sperimentale raytracing con fallback sicuro.'],
+  ['#videoRenderer', 'row-desc', 'Standard rendering or enhanced ray lighting with automatic WebGL compatibility.', 'Rendering standard oppure ray lighting migliorato con compatibilita WebGL automatica.'],
+  ['#videoShadows', 'row-label', 'Dynamic shadows', 'Ombre dinamiche'],
+  ['#videoShadows', 'row-desc', 'Quality-scaled realtime scene shadows.', 'Ombre realtime scalate in base alla qualita.'],
+  ['#videoReflections', 'row-label', 'Material reflections', 'Riflessi materiali'],
+  ['#videoReflections', 'row-desc', 'Environment response for reflective materials.', 'Risposta ambientale dei materiali riflettenti.'],
   ['#videoVolumetricLighting', 'row-label', 'Volumetric lighting', 'Volumetric lighting'],
   ['#videoVolumetricLighting', 'row-desc', 'Enables screen-space light rays in the current renderer.', 'Abilita raggi luce screen-space nel renderer attuale.'],
   ['#videoEditorHud', 'row-label', 'Editor HUD', 'HUD editor'],
   ['#videoEditorHud', 'row-desc', 'Shows editor panels and helpers.', 'Mostra pannelli e helper dell\'editor.'],
   ['#videoVolumetricLighting', 'next-label', 'Enabled', 'Abilitato'],
+  ['#videoShadows', 'next-label', 'Enabled', 'Abilitate'],
+  ['#videoReflections', 'next-label', 'Enabled', 'Abilitati'],
   ['#videoEditorHud', 'next-label', 'Visible', 'Visibile'],
   ['#openGameplayTune', 'row-label', 'Driving setup', 'Setup guida'],
   ['#openGameplayTune', 'row-desc', 'Open the driving parameters already available in the game.', 'Apri i parametri di guida gia presenti nel gioco.'],
@@ -157,20 +184,20 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1420);
+scene.fog = new THREE.FogExp2(0x0e1420, 0.008);
 const VIDEO_SETTINGS = window.LK_RUNTIME_SETTINGS_MENU.createVideo({
   renderer,
+  scene,
   pixelRatio: () => devicePixelRatio,
   size: () => ({width: innerWidth, height: innerHeight}),
 });
 const VIDEO = VIDEO_SETTINGS.values;
-function applyVideoSettings(){
-  VIDEO_SETTINGS.apply();
+function applyVideoSettings(options){
+  return VIDEO_SETTINGS.apply(options);
 }
 applyVideoSettings();
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0e1420);
-scene.fog = new THREE.FogExp2(0x0e1420, 0.008);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.1, 500);
 
@@ -843,6 +870,7 @@ function initSettingsMenu(){
     gameState: GAME.state,
     audio: AUDIO,
     video: VIDEO,
+    commitVideo: VIDEO_SETTINGS.commitValues,
     applyAudio: applyAudioSettings,
     applyVideo: applyVideoSettings,
     shouldShowMenuCursor: shouldShowMenuCursorForSource,
@@ -856,6 +884,7 @@ function initSettingsMenu(){
   });
   setSettingsOpen = SETTINGS_MENU.setOpen;
   toggleSettingsMenu = SETTINGS_MENU.toggle;
+  GAME.actions.openSettingsTab = (tab, mode) => SETTINGS_MENU.openTab(tab, mode || (GAME.state.editorActive ? 'editor' : 'game'), {source:'mouse'});
 }
 let handbrake = false, driftAngle = 0, speedKmh = 0, isDrifting = false, lastLatG = 0;
 let axPrev = 0;                 // longitudinal accel of the previous step (weight transfer)
@@ -1430,6 +1459,10 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
 function updateCar(dt){
   const cannonState = updateCarCannon(dt);
   if(cannonState) return cannonState;
+  if(GAME.player && GAME.player.enabled === false){
+    P.vF = 0; P.vR = 0; P.yawRate = 0; P.steer = 0;
+    return {vF:0, vR:0, drifting:false};
+  }
 
   // input
   const drive = readDriveInput();
@@ -1971,12 +2004,98 @@ const playerVisualBaseEulerTmp = new THREE.Euler();
 const playerVisualBaseRotation = {x:0, z:0};
 let playerDriveHeadingOffset = 0;
 let camYaw = 0, camPitch = .32, camDist = 9, camMode = 0; // 0 chase, 1 free orbit
+let runtimeCameraMode = null;
 let dragging = false, lastMX = 0, lastMY = 0, userCamTimer = 0, camShake = 0;
 let camDriftSide = 0, camReverseBlend = 0, camCinematicRoll = 0, lastCamVF = 0, lastCamVR = 0, lastCamDrifting = false;
 let camSnapNext = false;
 let camReverseHold = 0;
 let camHeading = 0, camSpeedForFov = 0;
-function resetCameraState(){
+let runtimeCinemaState = null;
+let runtimeCinemaAutoLevelKey = '';
+let runtimeCinemaAutoStarted = new Set();
+function sceneCameraHolder(ref){
+  const value = ref && ref.userData ? ref.userData.editorId : String(ref || '');
+  return GAME.world.registry.find(item => item && item.userData && item.userData.editorType === 'camera' &&
+    (item.userData.editorId === value || item.userData.editorName === value));
+}
+function cinemaStudioHolder(ref){
+  const value = ref && ref.userData ? ref.userData.editorId : String(ref || '');
+  return GAME.world.registry.find(item => item && item.userData && item.userData.editorType === 'cinemaStudio' &&
+    (!value || item.userData.editorId === value || item.userData.editorName === value || (item.userData.cinemaProps && item.userData.cinemaProps.eventName === value)));
+}
+function copySceneCameraToGame(holder){
+  const src = holder && holder.userData && holder.userData.sceneCamera;
+  if(!src) return false;
+  holder.updateMatrixWorld(true); src.updateMatrixWorld(true);
+  src.getWorldPosition(camera.position); src.getWorldQuaternion(camera.quaternion);
+  camera.fov = src.fov || camera.fov; camera.near = src.near || camera.near; camera.far = src.far || camera.far;
+  camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
+  return true;
+}
+function updateSceneCameraOverride(dt){
+  const levelKey = String(GAME.state && GAME.state.activeLevel || 'default');
+  if(levelKey !== runtimeCinemaAutoLevelKey){
+    const changedLoadedLevel = runtimeCinemaAutoLevelKey !== '';
+    runtimeCinemaAutoLevelKey = levelKey;
+    runtimeCinemaAutoStarted.clear();
+    if(changedLoadedLevel){
+      runtimeCinemaState = null;
+      if(GAME.state) GAME.state.runtimeActiveSceneCameraId = null;
+    }
+  }
+  if(!runtimeCinemaState && !(GAME.state && GAME.state.editorActive)){
+    const autoStudio = GAME.world.registry.find(item => {
+      if(!item || !item.userData || item.userData.editorType !== 'cinemaStudio') return false;
+      const props = item.userData.cinemaProps || {};
+      const id = item.userData.editorId || item.uuid;
+      return props.trigger === 'on-play' && props.outputPlayerIndex === 0 && !runtimeCinemaAutoStarted.has(id);
+    });
+    if(autoStudio){
+      const id = autoStudio.userData.editorId || autoStudio.uuid;
+      runtimeCinemaAutoStarted.add(id);
+      runtimeCinemaState = {studioId:id, time:0};
+    }
+  }
+  if(runtimeCinemaState){
+    const studio = cinemaStudioHolder(runtimeCinemaState.studioId);
+    if(!studio){ runtimeCinemaState = null; return false; }
+    const props = studio.userData.cinemaProps || {};
+    const duration = Math.max(.1, Number(props.duration) || 6);
+    runtimeCinemaState.time += Math.max(0, Number(dt) || 0);
+    if(runtimeCinemaState.time > duration){
+      if(props.playback === 'loop') runtimeCinemaState.time %= duration;
+      else { runtimeCinemaState = null; return false; }
+    }
+    const cuts = (props.cameraCuts || props.movieTrack || []).slice().sort((a,b) => (Number(a.time)||0) - (Number(b.time)||0));
+    let cut = null;
+    cuts.forEach(item => { if((Number(item.time) || 0) <= runtimeCinemaState.time) cut = item; });
+    const cameraId = cut && cut.cameraId || props.previewCamera;
+    if(cameraId) return copySceneCameraToGame(sceneCameraHolder(cameraId));
+  }
+  const runtimeCameraId = GAME.state && GAME.state.runtimeActiveSceneCameraId;
+  if(runtimeCameraId){
+    const runtimeCamera = sceneCameraHolder(runtimeCameraId);
+    if(runtimeCamera) return copySceneCameraToGame(runtimeCamera);
+    GAME.state.runtimeActiveSceneCameraId = null;
+  }
+  if(GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true && GAME.player.controllerIndex != null) return false;
+  const cameras = GAME.world.registry.filter(item => item && item.userData && item.userData.editorType === 'camera' && item.userData.cameraProps);
+  const active = cameras.find(item => item.userData.cameraProps.activeLevelCamera === true)
+    || cameras.find(item => item.userData.cameraProps.outputPlayerIndex === 0);
+  return copySceneCameraToGame(active);
+}
+window.addEventListener('lotking:cinemastart', event => {
+  if(GAME.state && GAME.state.editorActive) return;
+  const detail = event && event.detail || {};
+  const studio = cinemaStudioHolder(detail.studio);
+  if(studio) runtimeCinemaState = {studioId:studio.userData.editorId, time:Math.max(0, Number(detail.time) || 0)};
+});
+window.addEventListener('lotking:cinemastop', () => { if(!(GAME.state && GAME.state.editorActive)) runtimeCinemaState = null; });
+function activeCameraMode(){
+  return runtimeCameraMode || CAM_CFG.mode || 'free';
+}
+function resetCameraState(preserveRuntimeMode){
+  if(!preserveRuntimeMode) runtimeCameraMode = null;
   dragging = false;
   camMode = 0;
   camPitch = .32;
@@ -1995,6 +2114,19 @@ function resetCameraState(){
   lastCamDrifting = false;
   userCamTimer = 0;
   camSnapNext = true;
+}
+function cycleGameplayCameraMode(){
+  const modes = ['free', 'arcade', 'cinematic'];
+  const current = activeCameraMode();
+  runtimeCameraMode = modes[(Math.max(0, modes.indexOf(current)) + 1) % modes.length];
+  resetCameraState(true);
+  if(runtimeCameraMode === 'free'){
+    camMode = 1;
+    userCamTimer = 1e9;
+  }
+  const labels = {free:'FREE CAMERA', arcade:'ARCADE CAMERA', cinematic:'CINEMATIC CAMERA'};
+  popup(labels[runtimeCameraMode], '#9db4ff');
+  return runtimeCameraMode;
 }
 function playerCameraForwardVector(target){
   const out = target || new THREE.Vector3();
@@ -2084,7 +2216,9 @@ function applyCameraCfg(){
   camera.far = CAM_CFG.far;
   camera.updateProjectionMatrix();
   scene.fog.density = CAM_CFG.fogDensity;
-  renderer.toneMappingExposure = CAM_CFG.grade && CAM_CFG.grade.enabled && CAM_CFG.grade.exposure != null ? CAM_CFG.grade.exposure : 1;
+  renderer.toneMappingExposure = CAM_CFG.grade && CAM_CFG.grade.enabled && CAM_CFG.grade.exposure != null
+    ? CAM_CFG.grade.exposure
+    : (renderer.userData && renderer.userData.videoToneMappingExposure || 1.05);
   camDist = clamp(camDist, CAM_CFG.minDist, CAM_CFG.maxDist);
 }
 function setCameraConfig(patch, reset){
@@ -2096,6 +2230,7 @@ function setCameraConfig(patch, reset){
   delete rest.dof;
   delete rest.grade;
   Object.assign(CAM_CFG, rest);
+  runtimeCameraMode = null;
   applyCameraCfg();
   if(reset || (patch.mode && patch.mode !== previousMode)) resetCameraState();
   camSnapNext = true;
@@ -2169,6 +2304,9 @@ function endFinalGameplayRender(hidden){
     if(pair && pair[0]) pair[0].visible = pair[1];
   });
 }
+function videoNeedsPost(){
+  return !!(VIDEO && (VIDEO.volumetricLighting || VIDEO.rendererMode === 'raytracing' || VIDEO.quality !== 'high' || VIDEO.antialiasing === 'fxaa'));
+}
 function renderPlayerCamera(targetRect){
   const area = targetRect || {x:0, y:0, w:innerWidth, h:innerHeight};
   const hidden = beginFinalGameplayRender();
@@ -2185,7 +2323,7 @@ function renderPlayerCamera(targetRect){
       clip: !!targetRect,
       clearColor: letterboxColor(),
       render: rect => {
-        if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || (VIDEO && VIDEO.volumetricLighting))){
+        if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || videoNeedsPost())){
           if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
           POST.render();
           if(rect.scoped || targetRect) POST.composer.setSize(innerWidth, innerHeight);
@@ -2229,7 +2367,7 @@ function runtimePointerLookUiTarget(target){
 function canStartRuntimeCameraLook(e){
   if(isEditorSimulationPreview()) return false;
   if(e.button > 0) return false;
-  if((CAM_CFG.mode || 'free') !== 'free') return false;
+  if(activeCameraMode() !== 'free') return false;
   if(!((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview)) return false;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return false;
   if(shouldShowRuntimeCursor()) return false;
@@ -2337,7 +2475,7 @@ function viewportOwnsPointerEvent(e){
 });
 addEventListener('pointermove', e => {
   if(isEditorSimulationPreview()) return;
-  const freeMouseLook = !dragging && (CAM_CFG.mode || 'free') === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
+  const freeMouseLook = !dragging && activeCameraMode() === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
     !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e.target);
   const locked = document.pointerLockElement === canvas;
   if((!dragging && !freeMouseLook && !locked) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
@@ -2359,12 +2497,12 @@ addEventListener('wheel', e => {
 function updateCamera(dt){
   const snap = camSnapNext;
   camSnapNext = false;
-  const mode = CAM_CFG.mode || 'free';
+  const mode = activeCameraMode();
   const cursorVisible = shouldShowRuntimeCursor();
-  const runtimeCameraActive = !isEditorSimulationPreview() && mode === 'free' && runtimeSessionActive() && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
+  const runtimeCameraActive = !isEditorSimulationPreview() && runtimeSessionActive() && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
   document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
   syncRuntimeCursorState();
-  if(!runtimeCameraActive && document.pointerLockElement === canvas && document.exitPointerLock){
+  if((!runtimeCameraActive || mode !== 'free') && document.pointerLockElement === canvas && document.exitPointerLock){
     try { document.exitPointerLock(); } catch(err){}
   }
   const focusAlpha = snap ? 1 : dampAlpha(mode === 'free' ? 13 : 16, dt);
@@ -2503,7 +2641,7 @@ addEventListener('keydown', e => {
       document.body.classList.remove('lk-game-ui-cursor');
       document.body.classList.add('lk-free-camera-cursor-hidden');
       userCamTimer = 1.6;
-      requestRuntimeCameraPointerLock();
+      if(activeCameraMode() === 'free') requestRuntimeCameraPointerLock();
     }
     popup(GAME.state.playPreviewCursorVisible ? 'PREVIEW CURSOR ON' : 'PREVIEW CURSOR OFF', '#9db4ff');
     return;
@@ -2519,6 +2657,7 @@ addEventListener('keydown', e => {
     toggleSettingsMenu('game', {source: 'keyboard'});
     return;
   }
+  if(runtimeCinemaState || GAME.state.cinemaInputLocked) return;
   if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
   if(key === 'u'){
     e.preventDefault();
@@ -2529,12 +2668,9 @@ addEventListener('keydown', e => {
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) e.preventDefault();
   if(key === 'r' && !isEditorSimulationPreview()) resetCar();
   if(key === 'c'){
-    if(CAM_CFG.mode === 'free'){
-      camMode = 1-camMode; userCamTimer = camMode ? 1e9 : 0;
-    } else {
-      CAM_CFG.mode = CAM_CFG.mode === 'arcade' ? 'cinematic' : 'arcade';
-      popup(CAM_CFG.mode === 'cinematic' ? 'CINEMATIC CAMERA' : 'ARCADE CAMERA', '#9db4ff');
-    }
+    e.preventDefault();
+    if(e.repeat) return;
+    if(!INPUT) cycleGameplayCameraMode();
   }
   if(key === 'm'){ const m = SFX.toggleMute(); popup(m?'MUTED':'SOUND ON','#9aa3b8'); }
   if(key === 'f' && !isEditorSimulationPreview()){
@@ -2565,6 +2701,7 @@ const INPUT = window.LK_RUNTIME_INPUT_MANAGER ? window.LK_RUNTIME_INPUT_MANAGER.
 GAME.input = INPUT;
 let lastResetHeld = false;
 let lastGamepadActions = {};
+let lastCameraModeHeld = false;
 
 function neutralPlayerDrive(){
   if(window.LK_RUNTIME_INPUT_ACTIONS && window.LK_RUNTIME_INPUT_ACTIONS.neutralDrive) return window.LK_RUNTIME_INPUT_ACTIONS.neutralDrive();
@@ -2592,12 +2729,19 @@ function neutralPlayerDrive(){
 function isEditorSimulationPreview(){
   return !!(GAME.state.editorPreview && GAME.state.editorPreviewMode === 'simulate');
 }
+function playerControllerIndex(){
+  if(!GAME.player || GAME.player.controllerIndex == null) return -1;
+  return Number.isFinite(Number(GAME.player.controllerIndex))
+    ? Math.max(0, Math.min(3, Number(GAME.player.controllerIndex) | 0)) : 0;
+}
 
 function readDriveInput(){
   if(GAME.state.paused) return neutralPlayerDrive();
+  if(runtimeCinemaState || GAME.state.cinemaInputLocked) return neutralPlayerDrive();
+  if(!GAME.player || GAME.player.enabled === false || playerControllerIndex() < 0) return neutralPlayerDrive();
   if(isEditorSimulationPreview()) return neutralPlayerDrive();
   if(INPUT){
-    const drive = INPUT.player(0).drive();
+    const drive = INPUT.player(playerControllerIndex()).drive();
     return drive;
   }
   // fallback if the input modules failed to load: legacy keyboard
@@ -2626,7 +2770,9 @@ function readDriveInput(){
 function gamepadActions(){
   if(isEditorSimulationPreview()) return null;
   if(!INPUT) return null;
-  const p = INPUT.player(0);
+  const index = playerControllerIndex();
+  if(index < 0) return null;
+  const p = INPUT.player(index);
   if(!p || p.deviceType() !== 'gamepad') return null;
   return p.drive();
 }
@@ -2636,8 +2782,15 @@ function gamepadEdge(state, key){
 function handleGamepadActions(){
   if(GAME.state.editorActive && !GAME.state.editorPreview){
     lastGamepadActions = {};
+    lastCameraModeHeld = false;
     return;
   }
+  const controllerIndex = playerControllerIndex();
+  const mappedPlayer = !runtimeCinemaState && !GAME.state.cinemaInputLocked && INPUT && INPUT.player && controllerIndex >= 0 ? INPUT.player(controllerIndex) : null;
+  const mappedState = mappedPlayer && mappedPlayer.drive ? mappedPlayer.drive() : null;
+  const cameraModeHeld = !!(mappedState && mappedState.cameraMode);
+  if(!GAME.state.paused && cameraModeHeld && !lastCameraModeHeld) cycleGameplayCameraMode();
+  lastCameraModeHeld = cameraModeHeld;
   const state = gamepadActions();
   if(state){
     if(!GAME.state.paused && gamepadEdge(state, 'pauseMenu')) toggleSettingsMenu('game', {source: 'gamepad'});
@@ -2646,15 +2799,6 @@ function handleGamepadActions(){
       if(gamepadEdge(state, 'radioPlay')) RADIO.togglePlay();
       if(gamepadEdge(state, 'radioNext')) RADIO.next();
       if(gamepadEdge(state, 'radioPrev')) RADIO.prev();
-      if(gamepadEdge(state, 'cameraMode')){
-        if(CAM_CFG.mode === 'free'){
-          camMode = 1 - camMode;
-          userCamTimer = camMode ? 1e9 : 0;
-        } else {
-          CAM_CFG.mode = CAM_CFG.mode === 'arcade' ? 'cinematic' : 'arcade';
-          popup(CAM_CFG.mode === 'cinematic' ? 'CINEMATIC CAMERA' : 'ARCADE CAMERA', '#9db4ff');
-        }
-      }
       if(gamepadEdge(state, 'tuningMenu')) toggleTunePanel();
       if(gamepadEdge(state, 'mute')){
         const muted = SFX.toggleMute();
@@ -2671,7 +2815,8 @@ function handleGamepadActions(){
 }
 function checkResetEdge(){
   if(!INPUT) return;
-  const held = !isEditorSimulationPreview() && !!INPUT.player(0).drive().reset;
+  const index = playerControllerIndex();
+  const held = index >= 0 && !isEditorSimulationPreview() && !!INPUT.player(index).drive().reset;
   if(held && !lastResetHeld) resetCar();
   lastResetHeld = held;
 }
@@ -2800,18 +2945,32 @@ const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
 const TS = {cur:1, get target(){ return RADIO.isOpen() ? 0.1 : 1; }};
 
 const IS_EMBEDDED_GAMEPLAY = !!window.__LK_EMBEDDED_GAMEPLAY;
+const DEFAULT_MENU_MUSIC_TRACKS = [
+  {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Menu default'},
+];
 function createNoopMenuMusic(){
+  const libApi = window.LK_RUNTIME_MUSIC_LIBRARY;
+  const library = libApi && libApi.create ? libApi.create(DEFAULT_MENU_MUSIC_TRACKS) : null;
+  let index = 0;
   return {
     audio: null,
     bindAutoStart: function(){},
     bindButton: function(){},
     syncButton: function(){},
     setVolume: function(){},
-    getTracks: function(){ return []; },
-    addTracks: function(){ return Promise.resolve([]); },
-    restoreTracks: function(){ return Promise.resolve([]); },
-    getStoredTracks: function(){ return []; },
-    loadTrack: function(){},
+    getTracks: function(options){ return library ? library.list(options) : []; },
+    addTracks: function(files){ return library ? library.addFiles(files, 'Menu project audio') : Promise.resolve([]); },
+    removeTrack: function(i){
+      if(!library) return null;
+      const removed = library.removeAt(i);
+      const count = library.count();
+      index = count ? Math.min(index, count - 1) : 0;
+      if(removed) popup('MENU TRACK REMOVED', '#ff7d54');
+      return removed;
+    },
+    restoreTracks: function(tracks){ return library ? library.restoreTracks(tracks) : Promise.resolve([]); },
+    getStoredTracks: function(){ return library ? library.storedTracks() : []; },
+    loadTrack: function(i){ index = Math.max(0, Number(i) || 0); },
     play: function(){ return Promise.resolve(); },
     pause: function(){},
     fadeOut: function(){ return Promise.resolve(); },
@@ -2821,9 +2980,7 @@ function createNoopMenuMusic(){
 
 // menu music (loops on the start screen; starts at first interaction - browser policy)
 const MENU_MUSIC = IS_EMBEDDED_GAMEPLAY ? createNoopMenuMusic() : window.LK_RUNTIME_MENU_MUSIC.create({
-  tracks: [
-    {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Menu default'},
-  ],
+  tracks: DEFAULT_MENU_MUSIC_TRACKS,
   popup,
   getVolume: () => .55 * AUDIO.master * AUDIO.music,
 });
@@ -2909,14 +3066,7 @@ function preloadMenuShell(){
     if(loadTxt) loadTxt.textContent = label + '... ' + Math.round(pct) + '%';
   };
   setMenuProgress(8, 'loading menu');
-  tasks.push(new Promise(resolve => {
-    const img = new Image();
-    const done = () => resolve();
-    img.onload = done;
-    img.onerror = done;
-    img.src = 'media/images/menu_bg.png';
-    setTimeout(done, 1200);
-  }).then(() => setMenuProgress(46, 'loading menu background')));
+  setMenuProgress(46, 'loading menu background');
   if(MENU_MUSIC && MENU_MUSIC.audio){
     tasks.push(new Promise(resolve => {
       const audio = MENU_MUSIC.audio;
@@ -2950,7 +3100,13 @@ function preloadMenuShell(){
     }, 280);
   });
 }
-preloadMenuShell();
+const editorWorkspacePending = !!(window.__LK_STANDALONE_EDITOR && window.LK_PROJECT_WORKSPACE
+  && LK_PROJECT_WORKSPACE.requiresInitialChoice && LK_PROJECT_WORKSPACE.requiresInitialChoice());
+if(!editorWorkspacePending) preloadMenuShell();
+else {
+  if(loadTxt) loadTxt.textContent = GAME.i18n.pick('Choose a project to begin', 'Scegli un progetto per iniziare');
+  if(loadBar) loadBar.style.width = '0%';
+}
 RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
   loading: LOADING,
   gameState: GAME.state,
@@ -3108,6 +3264,24 @@ Object.assign(GAME.world, {
 });
 Object.assign(GAME.player, {
   car,
+  enabled: true,
+  hidden: false,
+  controllerIndex: 0,
+  setControllerIndex(index){
+    this.controllerIndex = index == null || index === 'none' ? null : Math.max(0, Math.min(3, Number(index) | 0));
+    if(this.controllerIndex != null && INPUT && INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(this.controllerIndex);
+    lastGamepadActions = {}; lastResetHeld = false; lastCameraModeHeld = false;
+    return this.controllerIndex;
+  },
+  setEnabled(value){
+    this.enabled = value !== false;
+    if(!this.enabled && PHYS.carBody){
+      PHYS.carBody.velocity.set(0,0,0); PHYS.carBody.angularVelocity.set(0,0,0);
+      if(PHYS.carBody.sleep) PHYS.carBody.sleep();
+    } else if(this.enabled && PHYS.carBody && PHYS.carBody.wakeUp) PHYS.carBody.wakeUp();
+    return this.enabled;
+  },
+  setHidden(value){ this.hidden = value === true; car.visible = !this.hidden; return this.hidden; },
   visual: carVisual,
   wheels,
   physics: P,
@@ -3169,6 +3343,7 @@ Object.assign(GAME.systems, {
     setVolume: MENU_MUSIC.setVolume,
     getTracks: MENU_MUSIC.getTracks,
     addTracks: MENU_MUSIC.addTracks,
+    removeTrack: MENU_MUSIC.removeTrack,
     restoreTracks: MENU_MUSIC.restoreTracks,
     getStoredTracks: MENU_MUSIC.getStoredTracks,
     loadTrack: MENU_MUSIC.loadTrack,
@@ -3220,6 +3395,9 @@ Object.assign(GAME.settings, {
   setAudio: setAudioChannel,
   video: VIDEO,
   applyVideo: applyVideoSettings,
+  videoPresets: VIDEO_SETTINGS.presets,
+  getVideoProject: VIDEO_SETTINGS.getProjectConfig,
+  setVideoProject: VIDEO_SETTINGS.setProjectConfig,
   menuMusic: MENU_MUSIC.audio,
   setAudioOpen: setSettingsOpen,
   toggleAudio: toggleSettingsMenu,
@@ -3338,6 +3516,7 @@ function stepGameplayFrame(dt, shouldRender){
   updateWind(sdt, speedKmh);
   for(const h of GAME.hooks.frame) h(sdt);   // editor-added effects (emitters, ...)
   updateCamera(dt);                       // camera stays responsive in slow-mo
+  updateSceneCameraOverride(dt);          // level/cinema camera owns the final Player 1 frame
   SKY.update(sdt);                        // day/night cycle (slows down with slow-mo)
 
   // sound

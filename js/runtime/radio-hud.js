@@ -6,6 +6,7 @@
 'use strict';
 
 function createRadioHud(deps){
+  const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
   const paths = deps.paths;
   const canvas = deps.canvas;
   const clamp = deps.clamp;
@@ -473,6 +474,23 @@ function createRadioHud(deps){
     if(added.length) popup('RADIO TRACKS ADDED: ' + added.length, '#4be3a0');
     return added;
   }
+  function removeTrack(index){
+    const removed = library.removeAt(index);
+    const count = library.count();
+    if(!count){
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      idx = 0;
+      el.title.textContent = tr('NO TRACK', 'NESSUN BRANO');
+      el.artist.textContent = 'RADIO';
+    } else {
+      idx = Math.min(idx, count - 1);
+      load(idx, !audio.paused);
+    }
+    if(removed) popup('RADIO TRACK REMOVED', '#ff7d54');
+    return removed;
+  }
   function setVolume(v){ extVol = clamp(v, 0, 2); applyVolume(); }
   audio.addEventListener('ended', next);
 
@@ -603,6 +621,7 @@ function createRadioHud(deps){
     setFrameRect,
     getTracks: options => library.list(options),
     addTracks,
+    removeTrack,
     restoreTracks: tracks => library.restoreTracks(tracks),
     getStoredTracks: () => library.storedTracks(),
     loadTrack: i => load(i, true),

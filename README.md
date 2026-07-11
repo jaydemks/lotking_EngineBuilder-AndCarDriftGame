@@ -83,6 +83,12 @@ The asset browser can manage imported GLB/GLTF models, scene assets, player car 
 
 The `player_car` is treated as logic, not just a mesh. From the editor I can tune driving values, player collision, camera behavior, lights, underglow, exhaust sources, skid sources, 3D data widgets and reusable car logic presets.
 
+The built-in `player_car (Logic)` remains the reference implementation for now. A Player Car Logic Element template and an exact-current-car conversion path are being developed beside it, but they are not yet a complete replacement: the internal car still owns the mature vehicle physics and specialist Inspector tabs. In future versions the built-in player may be removed in favor of an expandable Logic Element Pawn once vehicle physics, cameras, HUD, lights, exhaust, skid sources, widgets and input possession can all be instantiated independently. Dynamic collections are part of that direction: the current Player Car already supports any number of auxiliary lights—including multiple reverse/brake/turn lights—and the Logic Element version is intended to expose the same freedom through hierarchy elements and nodes.
+
+The Logic Element candidate can already select `None` or Player 1–4 and read that slot through the shared input manager. Its starter graph uses the selected player's throttle for a simple transform-based movement demonstration, making controller/device routing testable while the full independent vehicle-physics adapter is still pending.
+
+The longer-term goal is to separate vehicle physics behind an individual component/plugin boundary. Besides making multiple Pawns and different vehicle systems easier to add, that boundary will make third-party component provenance, licenses and author credits clearer than keeping every dependency inside one built-in player implementation.
+
 ### Cinema Studio
 
 Cinema Studio is the in-editor timeline system. It is meant for making cinematic footage directly inside the engine.
@@ -118,6 +124,8 @@ This is the simplest publishing path: build locally in `engine_editor.html`, exp
 
 This is still experimental. The editor is already useful for building and testing levels, but a lot is still moving quickly.
 
+There are many systems left to fix and many more to add, and this is not a photoreal renderer today. Even so, the current browser-only editor can already build levels, interactive scenes, cinematics and playable experiments without requiring a large toolchain. I hope the current state is already fun to explore and that people use it to make many different projects; visual fidelity, extensibility and workflow depth can grow step by step from here.
+
 The `v0.6.5` milestone is implementation-complete for the current Logic Element scope. The next practical focus is manual/browser verification, presentation testing and follow-up hardening.
 
 The main focus areas after this milestone are:
@@ -126,6 +134,8 @@ The main focus areas after this milestone are:
 - keeping the editor browser-only
 - improving save/load reliability
 - tightening the player car setup workflow
+- completing Player Car Logic Element parity before considering removal of the built-in `player_car (Logic)`
+- extracting independently instantiable vehicle physics/components behind a plugin-ready, attribution-friendly boundary
 - hardening Logic Element with more browser tests and real use cases
 - expanding the visual scripting compiler and macro system beyond the current foundation
 - cleaning up release notes and docs as the project grows

@@ -83,6 +83,7 @@
       <button id="lkViewportFps" type="button" title="Toggle FPS status">FPS</button>
       <button id="lkViewportPerf" type="button" title="Toggle performance debug">▤</button>
       <span class="lk-viewport-caption">VIEWPORT</span>
+      <button id="lkViewportVideoSettings" type="button" title="Project Video settings shared by editor and game">⚙</button>
     </div>
   </div>
   <aside id="lkLeft">
@@ -101,6 +102,7 @@
     </div>
     <div id="lkPinned">
       <div class="lk-pin" data-special="env"><span class="lk-pin-ic">🌍</span><span class="lk-pin-label">Environment</span></div>
+      <div class="lk-pin" data-special="rendering"><span class="lk-pin-ic">◈</span><span class="lk-pin-label">Rendering / Video</span></div>
       <div class="lk-pin" data-special="logic"><span class="lk-pin-ic">◇</span><span class="lk-pin-label">Level Logic</span></div>
       <div class="lk-pin" data-special="player"><span class="lk-pin-ic">🚗</span><span class="lk-pin-label">player_car (Logic)</span></div>
       <div class="lk-pin" data-special="hud"><span class="lk-pin-ic">▣</span><span class="lk-pin-label">HUD / Radio TAB</span></div>
@@ -159,10 +161,10 @@
     <button id="lkQuickNext" type="button" title="Next menu music">Next</button>
   </div>
   <div id="lkViewportOverlays">
-    <div class="lk-view-corner" data-view-slot="0"><span>Perspective</span></div>
-    <div class="lk-view-corner" data-view-slot="1"><select></select></div>
-    <div class="lk-view-corner" data-view-slot="2"><select></select></div>
-    <div class="lk-view-corner" data-view-slot="3"><select></select></div>
+    <div class="lk-view-corner" data-view-slot="0"><select></select><label class="lk-view-helpers" title="Show editor helpers in this view"><input type="checkbox" checked><span>◇</span></label></div>
+    <div class="lk-view-corner" data-view-slot="1"><select></select><label class="lk-view-helpers" title="Show editor helpers in this view"><input type="checkbox" checked><span>◇</span></label></div>
+    <div class="lk-view-corner" data-view-slot="2"><select></select><label class="lk-view-helpers" title="Show editor helpers in this view"><input type="checkbox" checked><span>◇</span></label></div>
+    <div class="lk-view-corner" data-view-slot="3"><select></select><label class="lk-view-helpers" title="Show editor helpers in this view"><input type="checkbox" checked><span>◇</span></label></div>
     <div id="lkViewportSplitV" class="lk-view-split lk-view-split-v" data-split="x" title="Resize left/right views"></div>
     <div id="lkViewportSplitH" class="lk-view-split lk-view-split-h" data-split="y" title="Resize top/bottom views"></div>
     <div id="lkViewportSplitC" class="lk-view-split-center" data-split="xy" title="Resize all quad views"></div>
@@ -244,7 +246,7 @@
     </div>
     <div id="lkCinemaClipPanel"></div>
   </div>
-  <div id="lkPipFrame"><div class="lk-pip-title"><span>PLAYER CAMERA</span><button id="lkPipMinimize" type="button" title="Minimize player camera">−</button></div><div id="lkPipResize"></div></div>
+  <div id="lkPipFrame"><div class="lk-pip-title"><span>PLAYER CAMERA</span><button id="lkPipMinimize" type="button" title="Minimize camera preview">−</button></div><div id="lkPipResize"></div></div>
   <div id="lkCinemaPreviewFrame"><div class="lk-pip-title"><span>TIMELINE PREVIEW</span><button id="lkCinemaPreviewMinimize" type="button" title="Minimize timeline preview">−</button><button id="lkCinemaPreviewClose" type="button" title="Close timeline preview">×</button></div><div id="lkCinemaPreviewMeta"></div><div id="lkCinemaPreviewResize"></div></div>
   <div id="lkLevelsOverlay"><div class="lk-levels-panel">
     <div class="lk-levels-head"><div class="lk-levels-title">🗀 PROJECT LEVELS</div><div class="lk-levels-sub">stored locally</div><button id="lkLevelsClose" type="button">×</button></div>
@@ -266,13 +268,15 @@
   </div>
   <div id="lkConfirmOverlay"><div class="lk-confirm-box"><div id="lkConfirmTitle"></div><div id="lkConfirmMessage"></div><div class="lk-confirm-actions"><button id="lkConfirmCancel" type="button">Cancel</button><button id="lkConfirmOk" type="button">OK</button></div></div></div>
   <div id="lkPrefsOverlay"><div class="lk-prefs-panel">
-    <div class="lk-prefs-head"><div><div class="lk-prefs-title">⚙ SETTINGS</div><div class="lk-prefs-sub" data-pref-i18n="prefsSub">preferences saved locally</div></div><button id="lkPrefsClose" type="button">×</button></div>
-    <div class="lk-prefs-tabs"><button data-prefs-tab="interface" class="on" type="button" data-pref-i18n="tabInterface">Interface</button><button data-prefs-tab="theme" type="button" data-pref-i18n="tabTheme">Theme</button><button data-prefs-tab="language" type="button" data-pref-i18n="tabLanguage">Language</button><button data-prefs-tab="controls" type="button" data-pref-i18n="tabControls">Controls</button><button data-prefs-tab="viewport" type="button" data-pref-i18n="tabViewport">Viewport</button></div>
+    <div class="lk-prefs-head"><div><div class="lk-prefs-title">⚙ SETTINGS</div><div class="lk-prefs-sub" data-pref-i18n="prefsSub">editor preferences + project general settings</div></div><button id="lkPrefsClose" type="button">×</button></div>
+    <div class="lk-prefs-tabs"><button data-prefs-tab="interface" class="on" type="button" data-pref-i18n="tabInterface">Interface</button><button data-prefs-tab="general" type="button" data-pref-i18n="tabGeneral">Project General</button><button data-prefs-tab="theme" type="button" data-pref-i18n="tabTheme">Theme</button><button data-prefs-tab="language" type="button" data-pref-i18n="tabLanguage">Language</button><button data-prefs-tab="controls" type="button" data-pref-i18n="tabControls">Game Input</button><button data-prefs-tab="editorKeys" type="button" data-pref-i18n="tabEditorKeys">Editor Keys</button><button data-prefs-tab="viewport" type="button" data-pref-i18n="tabViewport">Viewport</button></div>
     <div class="lk-prefs-body">
       <div data-prefs-sec="interface" class="lk-prefs-sec on"><label class="lk-prefs-row"><input id="lkPrefMusicPanel" type="checkbox" checked><span><b data-pref-i18n="musicPanelName">Menu music player</b><i data-pref-i18n="musicPanelDesc">Show the floating quick music player in the editor.</i></span></label></div>
+      <div data-prefs-sec="general" class="lk-prefs-sec"><div class="lk-prefs-row"><span><b>Project General Settings</b><i>Shared Video, Audio, game input and gameplay settings. The same values drive the editor viewport, Play Preview, gameplay and playable exports.</i></span></div><button id="lkOpenProjectGeneral" class="lk-prefs-action" type="button">Open shared Video / Audio / Controls</button></div>
       <div data-prefs-sec="theme" class="lk-prefs-sec"><label class="lk-prefs-row"><input name="lkPrefTheme" type="radio" value="dark"><span><b data-pref-i18n="themeDark">Dark</b><i data-pref-i18n="themeDarkDesc">The current game-engine dark look.</i></span></label><label class="lk-prefs-row"><input name="lkPrefTheme" type="radio" value="light"><span><b data-pref-i18n="themeLight">Light</b><i data-pref-i18n="themeLightDesc">Bright panels, same layout.</i></span></label></div>
       <div data-prefs-sec="language" class="lk-prefs-sec"><label class="lk-prefs-row"><input name="lkPrefLang" type="radio" value="en"><span><b>English</b><i data-pref-i18n="langEnDesc">Default editor language.</i></span></label><label class="lk-prefs-row"><input name="lkPrefLang" type="radio" value="it"><span><b>Italiano</b><i data-pref-i18n="langItDesc">Main interface in Italian.</i></span></label></div>
       <div data-prefs-sec="controls" class="lk-prefs-sec"><div id="lkInputSettingsBody" class="lk-input-settings"></div></div>
+      <div data-prefs-sec="editorKeys" class="lk-prefs-sec"><div class="lk-prefs-row"><span><b>Editor-only controls</b><i>These authoring mappings stay local and are never exported as game controls.</i></span></div><div class="lk-editor-keymap-summary"><label>Select <input data-editor-key="select" maxlength="1" value="Q"></label><label>Move <input data-editor-key="move" maxlength="1" value="W"></label><label>Rotate <input data-editor-key="rotate" maxlength="1" value="E"></label><label>Scale <input data-editor-key="scale" maxlength="1" value="R"></label><label>Focus <input data-editor-key="focus" maxlength="1" value="F"></label><span><b>Ctrl+Z/Y</b> Undo / Redo</span></div></div>
       <div data-prefs-sec="viewport" class="lk-prefs-sec"><label class="lk-prefs-row lk-prefs-color"><input id="lkPrefLetterbox" type="color" value="#141518"><span><b data-pref-i18n="letterboxName">Frame background</b><i data-pref-i18n="letterboxDesc">Colour outside the player-camera frame (letterbox / crop). Saved with the level.</i></span></label></div>
     </div>
 	  </div></div>

@@ -62,6 +62,7 @@ function create(deps){
 
   function objectMenuItems(o, fromOutliner, gp){
     const isCinemaStudio = !!(o && o.userData && o.userData.editorType === 'cinemaStudio');
+    const isPlayer = !!(o && o.userData && o.userData.editorType === 'player');
     if(isOnlineDemo()){
       const demoItems = [
         {label:'Select', icon:'◎', action:() => deps.selectObject(o)},
@@ -109,6 +110,7 @@ function create(deps){
       {label:'Select similar', icon:'☑', action:() => deps.selectSimilarObjects ? deps.selectSimilarObjects(o) : deps.selectObject(o)},
       {label:tr('Duplicate', 'Duplica'), icon:'⧉', sub: [
         {label:tr('Duplicate  Ctrl+D', 'Duplica  Ctrl+D'), icon:'⧉', action:() => deps.duplicateEntity(o)},
+        ...(isPlayer && deps.convertPlayerToLogicElement ? [{label:tr('Duplicate as Logic Element', 'Duplica come Logic Element'), icon:'◇', action:deps.convertPlayerToLogicElement}] : []),
         {label:tr('Populate row x5', 'Popola in fila x5'), icon:'▦', action:() => duplicateLine(o, 5)},
       ]},
       {label:tr('Apply last transform  Ctrl+R', 'Applica ultima trasformazione  Ctrl+R'), icon:'↻', disabled:!deps.hasLastTransformRepeat(), action:deps.applyLastTransform},

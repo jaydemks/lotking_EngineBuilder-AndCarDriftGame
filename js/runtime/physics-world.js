@@ -325,8 +325,17 @@ function create(options){
     for(const circle of colliders.circle || []){
       if(!circle || circle.enabled === false || circle.physics || isDriveSurfaceCollider(circle)) continue;
       const body = new CANNONRef.Body({mass: 0, material: state.groundMaterial});
-      body.addShape(new CANNONRef.Sphere(circle.r));
-      body.position.set(circle.x, circle.y != null ? circle.y : circle.r, circle.z);
+      const radius = Math.max(.05, Number(circle.r) || .5);
+      const halfHeight = Math.max(radius, Number(circle.hy) || radius);
+      if(typeof CANNONRef.Cylinder === 'function'){
+        const cylinder = new CANNONRef.Cylinder(radius, radius, halfHeight * 2, 12);
+        const orientation = new CANNONRef.Quaternion();
+        orientation.setFromEuler(-Math.PI / 2, 0, 0, 'XYZ');
+        body.addShape(cylinder, cannonVec(0, 0, 0), orientation);
+      } else {
+        body.addShape(new CANNONRef.Box(cannonVec(radius, halfHeight, radius)));
+      }
+      body.position.set(circle.x, circle.y != null ? circle.y : halfHeight, circle.z);
       bindLogicColliderBody(body, circle);
       state.world.addBody(body);
       state.staticBodies.push(body);

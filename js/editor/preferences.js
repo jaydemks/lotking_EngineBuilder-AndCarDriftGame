@@ -9,25 +9,30 @@ function create(deps){
   deps = deps || {};
   const root = deps.root;
   const ED = deps.ED;
+  const GAME = deps.GAME || window.LOT_KING;
   const $ = deps.$;
   const status = deps.status || function(){};
   const refreshOutliner = deps.refreshOutliner || function(){};
+  const buildInspector = deps.buildInspector || function(){};
 
   const PREFS_KEY = 'lotking.editorPrefs.v1';
-  const prefs = Object.assign({musicPanel: true, theme: 'dark', lang: 'en'}, (() => {
+  const prefs = Object.assign({musicPanel: true, theme: 'dark', lang: 'en', editorKeys:{select:'q', move:'w', rotate:'e', scale:'r', focus:'f'}}, (() => {
     try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch(err){ return {}; }
   })());
+  prefs.editorKeys = Object.assign({select:'q', move:'w', rotate:'e', scale:'r', focus:'f'}, prefs.editorKeys || {});
 
   function save(){
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch(err){}
   }
 
   const I18N = {
-    prefsSub:       {en:'preferences saved locally', it:'preferenze salvate in locale'},
+    prefsSub:       {en:'editor preferences + project general settings', it:'preferenze editor + impostazioni generali progetto'},
     tabInterface:   {en:'Interface', it:'Interfaccia'},
+    tabGeneral:     {en:'Project General', it:'Generali progetto'},
     tabTheme:       {en:'Theme', it:'Tema'},
     tabLanguage:    {en:'Language', it:'Lingua'},
-    tabControls:    {en:'Controls', it:'Controlli'},
+    tabControls:    {en:'Game Input', it:'Input gioco'},
+    tabEditorKeys:  {en:'Editor Keys', it:'Tasti editor'},
     tabViewport:    {en:'Viewport', it:'Viewport'},
     letterboxName:  {en:'Frame background', it:'Sfondo fuori dal frame'},
     letterboxDesc:  {en:'Colour outside the player-camera frame (letterbox / crop). Saved with the level.', it:'Colore fuori dal frame della camera del player (letterbox / crop). Salvato col livello.'},
@@ -68,6 +73,7 @@ function create(deps){
     ['#lkProjectsNew', 'text', {en:'＋ New project', it:'＋ Nuovo progetto'}],
     ['#lkProjectsFromFile', 'text', {en:'⇧ Import project file…', it:'⇧ Importa file progetto…'}],
     ['#lkPinned .lk-pin[data-special="env"] .lk-pin-label', 'text', {en:'Environment', it:'Environment'}],
+    ['#lkPinned .lk-pin[data-special="rendering"] .lk-pin-label', 'text', {en:'Rendering / Video', it:'Rendering / Video'}],
     ['#lkPinned .lk-pin[data-special="player"] .lk-pin-label', 'text', {en:'player_car (Logic)', it:'player_car (Logic)'}],
     ['#lkPinned .lk-pin[data-special="hud"] .lk-pin-label', 'text', {en:'HUD / Radio TAB', it:'HUD / Radio TAB'}],
   ];
@@ -76,6 +82,7 @@ function create(deps){
 
   function emitLanguageChange(){
     refreshOutliner();
+    buildInspector();
     window.dispatchEvent(new CustomEvent('lotking:languagechange', {detail:{lang: lang()}}));
   }
 
@@ -122,6 +129,7 @@ function create(deps){
     $('#lkPrefMusicPanel').checked = !!prefs.musicPanel;
     root.querySelectorAll('[name="lkPrefTheme"]').forEach(r => { r.checked = r.value === prefs.theme; });
     root.querySelectorAll('[name="lkPrefLang"]').forEach(r => { r.checked = r.value === lang(); });
+    root.querySelectorAll('[data-editor-key]').forEach(input => { input.value = String(prefs.editorKeys[input.dataset.editorKey] || '').toUpperCase(); });
   }
 
   function setTab(tab){
@@ -130,6 +138,11 @@ function create(deps){
   }
 
   $('#lkLogoBtn').addEventListener('click', () => setOpen(!ED.prefsOpen));
+  const projectGeneral = $('#lkOpenProjectGeneral');
+  if(projectGeneral) projectGeneral.addEventListener('click', () => {
+    setOpen(false);
+    if(GAME && GAME.actions && GAME.actions.openSettingsTab) GAME.actions.openSettingsTab('video', 'editor');
+  });
   $('#lkPrefsClose').addEventListener('click', () => setOpen(false));
   $('#lkPrefsOverlay').addEventListener('pointerdown', e => { if(e.target === e.currentTarget) setOpen(false); });
   root.querySelectorAll('[data-prefs-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.prefsTab)));
@@ -143,6 +156,13 @@ function create(deps){
   }));
   root.querySelectorAll('[name="lkPrefLang"]').forEach(r => r.addEventListener('change', () => {
     if(r.checked) setLang(r.value);
+  }));
+  root.querySelectorAll('[data-editor-key]').forEach(input => input.addEventListener('change', () => {
+    const value = String(input.value || '').trim().slice(0, 1).toLowerCase();
+    if(!value){ input.value = String(prefs.editorKeys[input.dataset.editorKey] || '').toUpperCase(); return; }
+    prefs.editorKeys[input.dataset.editorKey] = value;
+    input.value = value.toUpperCase();
+    save();
   }));
   $('#lkQuickHide').addEventListener('click', () => {
     prefs.musicPanel = false;

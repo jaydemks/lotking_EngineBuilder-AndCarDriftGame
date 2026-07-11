@@ -16,6 +16,7 @@ function create(opts){
   let workActive = 0;
   let loadingToken = 0;
   let assetToken = 0;
+  const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   function status(msg){
     $('#lkStatusRight').textContent = msg;
@@ -96,10 +97,10 @@ function create(opts){
     const progressTitle = [title || 'LOADING', name].filter(Boolean).join(' · ');
     const progressPct = Math.max(0, Math.min(100, Number.isFinite(+pct) ? +pct : 0));
     if(open){
-      if(!loadingToken) loadingToken = beginWork(progressTitle, step || 'Avvio', 'loading');
-      updateWork(loadingToken, progressPct, step || 'Avvio', 'loading', progressTitle);
+      if(!loadingToken) loadingToken = beginWork(progressTitle, step || tr('Starting', 'Avvio'), 'loading');
+      updateWork(loadingToken, progressPct, step || tr('Starting', 'Avvio'), 'loading', progressTitle);
     } else if(loadingToken){
-      finishWork(loadingToken, progressTitle + ' · completato', step || 'Completato', 'success');
+      finishWork(loadingToken, progressTitle + ' · ' + tr('complete', 'completato'), step || tr('Complete', 'Completato'), 'success');
       loadingToken = 0;
     }
     overlay.classList.toggle('open', !!open);
@@ -111,19 +112,19 @@ function create(opts){
   }
 
   function setLevelLoading(open, name, pct, step){
-    setEditorLoading(open, 'LOADING LEVEL', name, pct, step);
+    setEditorLoading(open, tr('LOADING LEVEL', 'CARICAMENTO LIVELLO'), name, pct, step);
   }
 
   function setAssetLoading(open, name, pct, step){
     const tokenTitle = ['IMPORTING ASSETS', name].filter(Boolean).join(' · ');
     if(open){
-      if(!assetToken) assetToken = beginWork(tokenTitle, step || 'Avvio', 'loading');
-      else updateWork(assetToken, pct || 0, step || 'Avvio', 'loading', tokenTitle);
+      if(!assetToken) assetToken = beginWork(tokenTitle, step || tr('Starting', 'Avvio'), 'loading');
+      else updateWork(assetToken, pct || 0, step || tr('Starting', 'Avvio'), 'loading', tokenTitle);
     } else if(assetToken){
-      finishWork(assetToken, 'Importazione asset completata', step || 'Completato', 'success');
+      finishWork(assetToken, tr('Asset import complete', 'Importazione asset completata'), step || tr('Complete', 'Completato'), 'success');
       assetToken = 0;
     }
-    setEditorLoading(open, 'IMPORTING ASSETS', name, pct, step);
+    setEditorLoading(open, tr('IMPORTING ASSETS', 'IMPORTAZIONE ASSET'), name, pct, step);
   }
 
   return {

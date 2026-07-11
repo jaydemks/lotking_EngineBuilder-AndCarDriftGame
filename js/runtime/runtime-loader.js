@@ -54,9 +54,7 @@ function create(options){
       .then(scene => {
         const file = name + '.glb';
         loadReport.push(file + (scene ? ' ✓' : ' ✗'));
-        if(scene){
-          console.info('LotKing: ' + file + ' caricato da ' + (scene.userData.assetUrl || opts.paths.model(file)));
-        } else {
+        if(!scene){
           const why = opts.isFileMode && opts.isFileMode()
             ? 'apri il gioco da http://127.0.0.1:8000/gameplay.html, non da file://'
             : 'file mancante/bloccato — vedi errori rete sopra';

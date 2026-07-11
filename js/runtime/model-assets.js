@@ -117,12 +117,10 @@ function create(deps){
         found++;
       }
       if(found && exactPivotOk){
-        console.info('LotKing rig: struttura Car Wheel GLB Rigger riconosciuta (' + found + ' ruote)');
         return true;
       }
       if(found && !exactPivotOk){
         items = [];
-        console.info('LotKing rig: pivot GLB non centrati, ricreo i pivot ruota dai mesh');
       }
 
       let namedFound = 0;
@@ -156,7 +154,6 @@ function create(deps){
         namedFound++;
       }
       if(namedFound >= 2){
-        console.info('LotKing rig: ruote/dischi/pinze agganciati dai nomi mesh (' + namedFound + ' ruote)');
         return true;
       }
       items = [];

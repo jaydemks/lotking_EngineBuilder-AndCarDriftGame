@@ -29,6 +29,7 @@ function create(deps){
   let transformBefore = null;
   let lastTransformRepeat = null;
   let colliderBefore = null;
+  let inspectorBefore = null;
   let hudHistoryPending = null;
   let hudHistoryTimer = null;
   let hudHistorySuppress = false;
@@ -312,6 +313,9 @@ function create(deps){
       physicsMass: o.userData.physicsMass,
       physicsImpact: o.userData.physicsImpact,
       physicsEnabled: !!o.userData.physicsEnabled,
+      driveSurface: o.userData.driveSurface,
+      dummyVisibility: o.userData.colliderDummyVisibility,
+      cinemaTrigger: cloneValue(o.userData.cinemaTrigger),
       ref: ref ? {
         enabled: ref.enabled !== false,
         physics: !!ref.physics,
@@ -328,6 +332,7 @@ function create(deps){
         rotY: ref.rotY,
         rotZ: ref.rotZ,
         rot: ref.rot,
+        parts: ref.parts ? JSON.parse(JSON.stringify(ref.parts)) : null,
       } : null,
     };
   }
@@ -339,6 +344,11 @@ function create(deps){
     o.userData.physicsMass = snap.physicsMass;
     o.userData.physicsImpact = snap.physicsImpact;
     o.userData.physicsEnabled = !!snap.physicsEnabled;
+    o.userData.driveSurface = snap.driveSurface;
+    if(snap.dummyVisibility === 'show' || snap.dummyVisibility === 'hide') o.userData.colliderDummyVisibility = snap.dummyVisibility;
+    else delete o.userData.colliderDummyVisibility;
+    if(snap.cinemaTrigger) o.userData.cinemaTrigger = cloneValue(snap.cinemaTrigger);
+    else delete o.userData.cinemaTrigger;
     const ref = o.userData.collider && o.userData.collider.ref;
     if(ref && snap.ref){
       Object.assign(ref, snap.ref);
@@ -351,6 +361,11 @@ function create(deps){
       o.userData.addedEntry.physicsImpact = snap.physicsImpact;
       o.userData.addedEntry.physics = !!snap.physicsEnabled;
       o.userData.addedEntry.collide = !!(snap.ref && snap.ref.enabled);
+      o.userData.addedEntry.driveSurface = snap.driveSurface;
+      if(snap.dummyVisibility === 'show' || snap.dummyVisibility === 'hide') o.userData.addedEntry.colliderDummyVisibility = snap.dummyVisibility;
+      else delete o.userData.addedEntry.colliderDummyVisibility;
+      if(snap.cinemaTrigger) o.userData.addedEntry.cinemaTrigger = cloneValue(snap.cinemaTrigger);
+      else delete o.userData.addedEntry.cinemaTrigger;
     }
     STORE.syncCollider(o);
     if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
@@ -358,6 +373,79 @@ function create(deps){
     buildInspector();
     refreshOutliner();
     markDirty();
+  }
+
+  function cloneValue(value){
+    if(value == null) return value;
+    try { return JSON.parse(JSON.stringify(value)); }
+    catch(err){ return null; }
+  }
+
+  const INSPECTOR_CONFIG_KEYS = [
+    'matProps', 'effectParams', 'textProps', 'textureProps', 'cameraProps', 'cinemaProps',
+    'logicGraph', 'logicVariableOverrides', 'logicEnabled', 'logicRunInEditorPreview',
+    'driveSurface', 'physicsMass', 'physicsImpact', 'physicsEnabled', 'colliderDummyVisibility',
+    'cinemaTrigger', 'assetKey', 'assetName', 'assetSource',
+    'editorName',
+  ];
+
+  function inspectorSnapshot(o){
+    if(!o || !o.userData) return null;
+    const configs = {};
+    INSPECTOR_CONFIG_KEYS.forEach(key => {
+      if(o.userData[key] !== undefined) configs[key] = cloneValue(o.userData[key]);
+    });
+    const light = o.isLight ? o : o.userData.light;
+    return {
+      transform: STORE.tOf(o),
+      configs,
+      addedEntry: cloneValue(o.userData.addedEntry),
+      light: light && STORE.lightProps ? STORE.lightProps(light) : null,
+      collider: colliderSnapshot(o),
+    };
+  }
+
+  function applyInspectorSnapshot(o, snap){
+    if(!o || !snap) return;
+    if(snap.transform) STORE.applyT(o, snap.transform);
+    INSPECTOR_CONFIG_KEYS.forEach(key => { delete o.userData[key]; });
+    Object.keys(snap.configs || {}).forEach(key => { o.userData[key] = cloneValue(snap.configs[key]); });
+    if(snap.addedEntry) o.userData.addedEntry = cloneValue(snap.addedEntry);
+    const light = o.isLight ? o : o.userData.light;
+    if(light && snap.light && STORE.applyLightProps) STORE.applyLightProps(light, snap.light);
+    if(o.userData.matProps && STORE.applyMatProps) STORE.applyMatProps(o, o.userData.matProps);
+    if(o.userData.textProps && STORE.updateTextObject) STORE.updateTextObject(o, o.userData.textProps);
+    if(o.userData.textureProps && STORE.updateTextureObject) STORE.updateTextureObject(o, o.userData.textureProps);
+    if(o.userData.cameraProps && STORE.updateSceneCameraObject) STORE.updateSceneCameraObject(o, o.userData.cameraProps);
+    if(o.userData.logicGraph && STORE.syncLogicElementSceneObject) STORE.syncLogicElementSceneObject(o, o.userData.logicGraph);
+    if(snap.collider) applyColliderSnapshot(o, snap.collider);
+    else {
+      STORE.syncCollider(o);
+      buildInspector();
+      refreshOutliner();
+      markDirty();
+    }
+    refreshSelectionHelpers();
+    syncTransformFields();
+  }
+
+  function beginInspectorHistory(o){
+    const obj = o || ED.selected;
+    inspectorBefore = obj ? {obj, snap:inspectorSnapshot(obj)} : null;
+  }
+
+  function commitInspectorHistory(label){
+    if(!inspectorBefore || !inspectorBefore.obj) return;
+    const obj = inspectorBefore.obj;
+    const before = inspectorBefore.snap;
+    const after = inspectorSnapshot(obj);
+    inspectorBefore = null;
+    if(sameT(before, after)) return;
+    pushHistory({
+      label:label || 'Inspector edit',
+      undo:() => applyInspectorSnapshot(obj, before),
+      redo:() => applyInspectorSnapshot(obj, after),
+    });
   }
 
   function beginColliderHistory(o){
@@ -426,6 +514,8 @@ function create(deps){
     withTransformHistory,
     beginColliderHistory,
     commitColliderHistory,
+    beginInspectorHistory,
+    commitInspectorHistory,
     applyLastTransform,
     hasLastTransformRepeat,
     isHudHistorySuppress,

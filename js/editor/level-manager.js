@@ -92,6 +92,18 @@ function create(deps){
     if(!LV){ status(tr('⚠ Level library unavailable', '⚠ Libreria livelli non disponibile')); return; }
     const next = await promptEditorAction({title:tr('New level', 'Nuovo livello'), message:tr('New level name:', 'Nome del nuovo livello:'), value:'New Level', okText:tr('Create', 'Crea')});
     if(!next || !next.trim()) return;
+    const levelRole = await promptEditorAction({
+      title:tr('Level purpose', 'Scopo del livello'),
+      message:tr('How will this authored scene be used?', 'Come verrà usata questa scena?'),
+      value:'gameplay',
+      options:[
+        {value:'gameplay', label:tr('Gameplay level', 'Livello di gioco')},
+        {value:'editor-menu', label:tr('EDITOR MENU', 'MENU EDITOR')},
+        {value:'game-menu', label:tr('GAME MENU (future runtime menu)', 'MENU GIOCO (menu runtime futuro)')},
+      ],
+      okText:tr('Continue', 'Continua'),
+    });
+    if(!levelRole) return;
     if(ED.dirty){
       const ok = await confirmEditorAction({
         title:'Create new level?',
@@ -101,7 +113,7 @@ function create(deps){
       });
       if(!ok) return;
     }
-    const id = LV.create(next.trim(), LV.templateScene(GAME));
+    const id = LV.create(next.trim(), LV.templateScene(GAME), {levelRole});
     if(!id){ status(tr('⚠ Level creation failed', '⚠ Creazione livello fallita')); return; }
     LV.setActive(id);
     reopenEditorAndReload(tr('New level created', 'Nuovo livello creato'), next.trim());
@@ -149,6 +161,26 @@ function create(deps){
     refreshLevelsOverlay();
     refreshAssetsPanel();
     status('"' + (currentName || id) + tr('" duplicated ✓', '" duplicato ✓'));
+  }
+  async function changeLevelRole(id, currentRole){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
+    const LV = levelsApi();
+    if(!LV || !LV.setRole) return;
+    const levelRole = await promptEditorAction({
+      title:tr('Level purpose', 'Scopo del livello'),
+      message:tr('Choose how this authored scene is used:', 'Scegli come utilizzare questa scena:'),
+      value:currentRole || 'gameplay',
+      options:[
+        {value:'gameplay', label:tr('Gameplay level', 'Livello di gioco')},
+        {value:'editor-menu', label:'EDITOR MENU'},
+        {value:'game-menu', label:'GAME MENU'},
+      ],
+      okText:tr('Apply', 'Applica'),
+    });
+    if(!levelRole || !LV.setRole(id, levelRole)) return;
+    if(id === LV.activeId()) setTrackMeta({levelRole});
+    refreshLevelsOverlay();
+    status(tr('Level purpose updated', 'Scopo del livello aggiornato'));
   }
   function deleteLevel(id, currentName){
     if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
@@ -207,7 +239,8 @@ function create(deps){
       nm.textContent = l.name;
       if(l.active) nm.appendChild(el('<span class="lk-level-badge">' + tr('ACTIVE', 'ATTIVO') + '</span>'));
       const sub = el('<div class="lk-level-sub"></div>');
-      sub.textContent = l.id + (l.savedAt ? tr(' · saved ', ' · salvato ') + new Date(l.savedAt).toLocaleString() : '');
+      const role = l.levelRole === 'editor-menu' ? 'EDITOR MENU' : (l.levelRole === 'game-menu' ? 'GAME MENU' : tr('GAMEPLAY', 'GIOCO'));
+      sub.textContent = role + ' · ' + l.id + (l.savedAt ? tr(' · saved ', ' · salvato ') + new Date(l.savedAt).toLocaleString() : '');
       meta.append(nm, sub);
       const actions = el('<div class="lk-level-actions"></div>');
       const mkBtn = (label, title, fn, cls) => {
@@ -219,6 +252,7 @@ function create(deps){
       };
       if(!l.active) actions.appendChild(mkBtn(tr('▶ Load', '▶ Carica'), tr('Open this level in the editor', "Apri questo livello nell'editor"), () => loadLevel(l.id, l.name), 'lk-level-load'));
       actions.appendChild(mkBtn('✎', tr('Rename', 'Rinomina'), () => renameLevel(l.id, l.name)));
+      actions.appendChild(mkBtn('ROLE', tr('Change level purpose', 'Cambia scopo del livello'), () => changeLevelRole(l.id, l.levelRole)));
       actions.appendChild(mkBtn('⧉', tr('Duplicate', 'Duplica'), () => duplicateLevel(l.id, l.name)));
       actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportLevel(l.id), 'lk-level-export'));
       actions.appendChild(mkBtn('🗑', tr('Delete', 'Elimina'), () => deleteLevel(l.id, l.name), 'lk-level-del'));
@@ -235,6 +269,7 @@ function create(deps){
     loadLevel,
     renameLevel,
     duplicateLevel,
+    changeLevelRole,
     deleteLevel,
     exportLevel,
     setLevelsOverlayOpen,

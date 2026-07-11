@@ -133,6 +133,22 @@ function create(defaultTracks){
     }));
   }
 
+  function removeAt(index){
+    if(!tracks.length) return null;
+    const i = Math.max(0, Math.min(tracks.length - 1, Number(index) || 0));
+    const removed = tracks.splice(i, 1)[0] || null;
+    if(!removed) return null;
+    if(/^blob:/i.test(removed.url || '') && typeof URL !== 'undefined' && URL.revokeObjectURL){
+      try { URL.revokeObjectURL(removed.url); } catch(err){}
+    }
+    if(removed.dbKey && window.LK_ASSET_BLOBS && window.LK_ASSET_BLOBS.remove){
+      window.LK_ASSET_BLOBS.remove(removed.dbKey).catch(err => {
+        console.warn('LotKing music: traccia rimossa dalla lista ma non dal blob store', removed.fileName || removed.title || removed.dbKey, err);
+      });
+    }
+    return Object.assign({index:i}, removed);
+  }
+
   function list(options){
     const opts = options || {};
     const q = String(opts.filter || '').trim().toLowerCase();
@@ -159,6 +175,7 @@ function create(defaultTracks){
     at,
     addFiles,
     restoreTracks,
+    removeAt,
     storedTracks,
     list,
     count: () => tracks.length,

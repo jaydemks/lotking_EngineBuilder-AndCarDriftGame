@@ -15,6 +15,7 @@ const PROJECT_DIR = 'lotking-workspace';
 const PROJECT_FILE = 'active-project.lkep.json';
 const MANIFEST_FILE = 'workspace-manifest.json';
 const GUIDE_URL = 'HOW_TO_START.md';
+const GITHUB_URL = 'https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame';
 const DEMO_BLOCKED_SELECTOR = [
   '#lkSave',
   '#lkSaveAsTrack',
@@ -40,6 +41,12 @@ let badge = null;
 let topbarRetry = null;
 let autoOpenChecked = false;
 let demoGuardsInstalled = false;
+function workspaceLang(){
+  if(window.LOT_KING && LOT_KING.i18n) return LOT_KING.i18n.lang === 'it' ? 'it' : 'en';
+  try { return JSON.parse(localStorage.getItem('lotking.editorPrefs.v1') || '{}').lang === 'it' ? 'it' : 'en'; }
+  catch(err){ return 'en'; }
+}
+function tr(en, it){ return workspaceLang() === 'it' ? (it || en) : en; }
 
 function isLocalOrigin(){
   const host = location.hostname;
@@ -47,7 +54,7 @@ function isLocalOrigin(){
 }
 
 function canUseDirectoryPicker(){
-  return !!(!isOnlineDemoMode() && window.isSecureContext && typeof window.showDirectoryPicker === 'function');
+  return !!(window.isSecureContext && typeof window.showDirectoryPicker === 'function');
 }
 
 function canUseFilePicker(){
@@ -55,11 +62,16 @@ function canUseFilePicker(){
 }
 
 function isOnlineDemoMode(){
-  return !isLocalOrigin();
+  const state = loadState();
+  return !isLocalOrigin() && (state.onlineEditor !== true || state.workspaceReady !== true);
 }
 
 function isEditorPage(){
   return !!window.__LK_STANDALONE_EDITOR || /(^|\/)engine_editor\.html$/i.test(location.pathname || '');
+}
+
+function requiresInitialChoice(){
+  return isEditorPage() && loadState().workspaceReady !== true;
 }
 
 function loadState(){
@@ -199,11 +211,10 @@ async function readFileHandleText(handle){
 }
 
 async function connectFolder(){
-  if(isOnlineDemoMode()) throw new Error('The published site is demo-only. Run the project locally to connect a folder.');
-  if(!canUseDirectoryPicker()) throw new Error('Folder access is available on HTTPS or localhost in Chromium browsers');
+  if(!canUseDirectoryPicker()) throw new Error(tr('Folder access is available on HTTPS or localhost in Chromium browsers', 'L’accesso alle cartelle è disponibile su HTTPS o localhost nei browser Chromium'));
   const handle = await window.showDirectoryPicker({mode:'readwrite'});
   await putHandle(handle);
-  saveState({mode:'folder', folderName:handle.name || 'Project folder', projectFile:PROJECT_DIR + '/' + PROJECT_FILE});
+  saveState({mode:'folder', onlineEditor:true, workspaceReady:true, folderName:handle.name || 'Project folder', projectFile:PROJECT_DIR + '/' + PROJECT_FILE});
   return handle;
 }
 
@@ -221,7 +232,7 @@ async function connectProjectFile(){
   if(!handle) throw new Error('No project file selected');
   const text = await readFileHandleText(handle);
   await putProjectFileHandle(handle);
-  saveState({mode:'file', fileName:handle.name || PROJECT_FILE, projectFile:handle.name || PROJECT_FILE, folderName:null});
+  saveState({mode:'file', onlineEditor:true, workspaceReady:true, fileName:handle.name || PROJECT_FILE, projectFile:handle.name || PROJECT_FILE, folderName:null});
   dispatchLoadedProject(text, handle.name || PROJECT_FILE);
   showToast('Linked LKEP project file: ' + (handle.name || PROJECT_FILE));
   return handle;
@@ -277,15 +288,47 @@ async function loadProjectText(){
 }
 
 function setBrowserMode(){
-  saveState({mode:'browser'});
-  showToast(isOnlineDemoMode() ? 'Online demo mode' : 'Using local browser database');
+  saveState({mode:'browser', onlineEditor:true, workspaceReady:true});
+  showToast(tr('Using this browser local database. Nothing is uploaded.', 'Uso del database locale del browser. Nessun dato viene caricato.'));
+}
+
+async function chooseEditorProject(template){
+  const selectedTemplate = template === 'empty' ? 'empty' : 'demo';
+  if(!isLocalOrigin()){
+    if(!canUseDirectoryPicker()) throw new Error(tr('Online folder projects require Chrome or Edge on HTTPS. You can still use Run locally.', 'I progetti online su cartella richiedono Chrome o Edge su HTTPS. Puoi comunque usare Avvia in locale.'));
+    const handle = await window.showDirectoryPicker({mode:'readwrite', id:'lot-king-project'});
+    await putHandle(handle);
+    const dir = await workspaceDir(handle);
+    if(selectedTemplate === 'demo'){
+      const response = await fetch('demo/demo-project.lkep.json', {cache:'reload'});
+      if(!response.ok) throw new Error(tr('DEMO project could not be downloaded', 'Impossibile scaricare il progetto DEMO'));
+      await writeJsonFile(dir, PROJECT_FILE, JSON.parse(await response.text()));
+    }
+    await writeJsonFile(dir, MANIFEST_FILE, {
+      app:'LOT KING ENGINE EDITOR', format:'LK_WORKSPACE', version:1,
+      projectFile:PROJECT_FILE, template:selectedTemplate,
+      storage:'Files stay in this user-selected folder and browser storage. No server upload is used.',
+    });
+    saveState({mode:'folder', onlineEditor:true, workspaceReady:true, startupTemplate:selectedTemplate, folderName:handle.name || 'Project folder', projectFile:PROJECT_DIR + '/' + PROJECT_FILE});
+  } else {
+    saveState({mode:'browser', onlineEditor:true, workspaceReady:true, startupTemplate:selectedTemplate});
+  }
+  location.reload();
+}
+
+function consumeStartupTemplate(){
+  const state = loadState();
+  const template = state.startupTemplate || null;
+  if(template) saveState({startupTemplate:null});
+  return template;
 }
 
 function resetChoice(){
   cachedHandle = null;
   cachedFileHandle = null;
-  saveState({mode:'browser', folderName:null, fileName:null, projectFile:null, lastProjectName:null, lastSavedAt:null});
+  saveState({mode:'browser', onlineEditor:isLocalOrigin() ? true : false, workspaceReady:false, startupTemplate:null, folderName:null, fileName:null, projectFile:null, lastProjectName:null, lastSavedAt:null});
   showToast('Workspace choice reset');
+  if(!isLocalOrigin()) location.reload();
 }
 
 function isFolderMode(){
@@ -317,11 +360,17 @@ function el(tag, className, text){
 }
 
 function closeOverlay(){
-  if(overlay) overlay.classList.remove('open');
+  if(!overlay || requiresInitialChoice()) return;
+  overlay.classList.remove('open');
 }
 
 function openGuide(){
-  window.open(GUIDE_URL, '_blank', 'noopener,noreferrer');
+  if(!overlay) return;
+  const status = overlay.querySelector('#lkWorkspaceStatus');
+  if(status) status.innerHTML = tr(
+    '<b>Run locally</b><br>1. Open GitHub and download the repository ZIP.<br>2. Extract it to a normal local folder.<br>3. Run <code>avvio.bat</code> and open the localhost address.<br>4. Create, import and export projects with your own local files.<br>',
+    '<b>Avvia in locale</b><br>1. Apri GitHub e scarica lo ZIP del repository.<br>2. Estrailo in una normale cartella locale.<br>3. Avvia <code>avvio.bat</code> e apri l’indirizzo localhost.<br>4. Crea, importa ed esporta progetti usando i tuoi file locali.<br>'
+  ) + '<a href="' + GITHUB_URL + '" target="_blank" rel="noopener noreferrer">' + tr('Open GitHub repository', 'Apri repository GitHub') + '</a> · <a href="' + GUIDE_URL + '" target="_blank" rel="noopener noreferrer">' + tr('Detailed setup guide', 'Guida dettagliata') + '</a><br><b>' + tr('Enjoy.', 'Buon divertimento.') + '</b>';
 }
 
 function dispatchLoadedProject(text, name){
@@ -338,36 +387,43 @@ function renderOverlay(){
     '<div class="lk-workspace-panel" role="dialog" aria-modal="true" aria-labelledby="lkWorkspaceTitle">',
       '<div class="lk-workspace-head">',
         '<div>',
-          '<div class="lk-workspace-kicker">PROJECT STORAGE</div>',
-          '<h2 id="lkWorkspaceTitle">Choose how this project should work</h2>',
+          '<div class="lk-workspace-kicker">' + tr('PROJECT START', 'AVVIO PROGETTO') + '</div>',
+          '<h2 id="lkWorkspaceTitle">' + tr('Choose a project', 'Scegli un progetto') + '</h2>',
         '</div>',
         '<button id="lkWorkspaceClose" type="button" title="Close">x</button>',
       '</div>',
       '<div class="lk-workspace-grid">',
-        '<button id="lkWorkspaceBrowser" class="lk-workspace-card" type="button">',
-          '<b>Local browser database</b>',
-          '<span>Local editor mode: projects stay in this browser on this computer. Nothing is uploaded to a server.</span>',
-        '</button>',
+        '<div id="lkWorkspaceBrowser" class="lk-workspace-card primary">',
+          '<b>' + tr('Environment detected automatically', 'Ambiente rilevato automaticamente') + '</b>',
+          '<span id="lkWorkspaceEnvironment"></span>',
+        '</div>',
         '<button id="lkWorkspaceFile" class="lk-workspace-card" type="button">',
-          '<b>Open / sync LKEP file</b>',
-          '<span>Choose a .lkep.json project file. The editor imports it, then Save writes back to the same portable file.</span>',
+          '<b>' + tr('Open an existing LKEP', 'Apri un LKEP esistente') + '</b>',
+          '<span>' + tr('Choose a .lkep.json project file. The editor imports it, then Save writes back to the same portable file.', 'Scegli un progetto .lkep.json. L’editor lo importa e Salva riscrive lo stesso file portabile.') + '</span>',
         '</button>',
         '<button id="lkWorkspaceGuide" class="lk-workspace-card" type="button">',
-          '<b>Run locally</b>',
-          '<span>Open the local setup guide for avvio.bat, localhost and LAN testing.</span>',
+          '<b>' + tr('Run locally / GitHub', 'Avvia in locale / GitHub') + '</b>',
+          '<span>' + tr('Download, extract and start the complete local installation.', 'Scarica, estrai e avvia l’installazione locale completa.') + '</span>',
         '</button>',
       '</div>',
       '<div class="lk-workspace-status" id="lkWorkspaceStatus"></div>',
       '<div class="lk-workspace-actions">',
-        '<button id="lkWorkspaceLoad" type="button">Reload linked LKEP</button>',
-        '<button id="lkWorkspaceReset" type="button">Reset choice</button>',
+        '<button id="lkWorkspaceDemo" type="button">' + tr('Open author DEMO project', 'Apri progetto DEMO dell’autore') + '</button>',
+        '<button id="lkWorkspaceEmpty" type="button">' + tr('Create clean project', 'Crea progetto pulito') + '</button>',
+        '<button id="lkWorkspaceLoad" type="button">' + tr('Reload linked LKEP', 'Ricarica LKEP collegato') + '</button>',
+        '<button id="lkWorkspaceReset" type="button">' + tr('Reset choice', 'Reimposta scelta') + '</button>',
       '</div>',
     '</div>',
   ].join('');
   document.body.appendChild(overlay);
   const browserCard = overlay.querySelector('#lkWorkspaceBrowser');
   const fileCard = overlay.querySelector('#lkWorkspaceFile');
-  if(isOnlineDemoMode()){
+  const hosted = !isLocalOrigin();
+  const environment = overlay.querySelector('#lkWorkspaceEnvironment');
+  if(environment) environment.textContent = hosted
+    ? tr('Choose DEMO or a clean project, then grant a local folder. Nothing is uploaded to this server.', 'Scegli DEMO o un progetto pulito, poi autorizza una cartella locale. Nulla viene caricato su questo server.')
+    : tr('LOCAL INSTALLATION · Browser project storage and local LKEP files are available.', 'INSTALLAZIONE LOCALE · Sono disponibili archivio progetti del browser e file LKEP locali.');
+  if(hosted){
     const kicker = overlay.querySelector('.lk-workspace-kicker');
     const title = overlay.querySelector('#lkWorkspaceTitle');
     const browserTitle = overlay.querySelector('#lkWorkspaceBrowser b');
@@ -375,22 +431,20 @@ function renderOverlay(){
     const fileTitle = overlay.querySelector('#lkWorkspaceFile b');
     const fileDesc = overlay.querySelector('#lkWorkspaceFile span');
     if(kicker) kicker.textContent = 'ONLINE DEMO';
-    if(title) title.textContent = 'Bundled project, read-only';
-    if(browserTitle) browserTitle.textContent = 'Online demo only';
-    if(browserDesc) browserDesc.textContent = 'Bundled/default assets only. Upload, save and delete are disabled because the hosting space is not a shared project database. LKEP export is download-only.';
-    if(fileTitle) fileTitle.textContent = 'LKEP sync disabled online';
-    if(fileDesc) fileDesc.textContent = 'Run the project locally, then open your .lkep.json file from your own computer.';
+    if(title) title.textContent = tr('Choose your local project', 'Scegli il progetto locale');
+    if(browserTitle) browserTitle.textContent = tr('Online editor, local files', 'Editor online, file locali');
+    if(browserDesc) browserDesc.textContent = tr('You will choose a folder on this PC. The hosted editor may read/write only that authorized folder; it never saves projects or assets to the website server.', 'Sceglierai una cartella su questo PC. L’editor hosted può leggere e scrivere solo nella cartella autorizzata; non salva mai progetti o asset sul server del sito.');
+    if(fileCard) fileCard.style.display = 'none';
+    if(fileTitle) fileTitle.textContent = tr('Local browser project', 'Progetto locale del browser');
+    if(fileDesc) fileDesc.textContent = tr('Local-only storage.', 'Archiviazione esclusivamente locale.');
   }
-  if(browserCard) browserCard.classList.toggle('primary', isOnlineDemoMode());
-  if(fileCard) fileCard.classList.toggle('primary', !isOnlineDemoMode());
+  const guideCard = overlay.querySelector('#lkWorkspaceGuide');
+  if(guideCard) guideCard.style.display = hosted ? '' : 'none';
+  if(browserCard) browserCard.classList.add('primary');
+  if(fileCard) fileCard.classList.toggle('primary', false);
 
   overlay.querySelector('#lkWorkspaceClose').addEventListener('click', closeOverlay);
   overlay.addEventListener('click', event => { if(event.target === overlay) closeOverlay(); });
-  overlay.querySelector('#lkWorkspaceBrowser').addEventListener('click', () => {
-    setBrowserMode();
-    syncOverlayStatus();
-    closeOverlay();
-  });
   overlay.querySelector('#lkWorkspaceFile').addEventListener('click', () => {
     connectProjectFile().then(() => {
       syncOverlayStatus();
@@ -400,6 +454,8 @@ function renderOverlay(){
     });
   });
   overlay.querySelector('#lkWorkspaceGuide').addEventListener('click', openGuide);
+  overlay.querySelector('#lkWorkspaceDemo').addEventListener('click', () => chooseEditorProject('demo').catch(err => syncOverlayStatus(err.message || String(err))));
+  overlay.querySelector('#lkWorkspaceEmpty').addEventListener('click', () => chooseEditorProject('empty').catch(err => syncOverlayStatus(err.message || String(err))));
   overlay.querySelector('#lkWorkspaceReset').addEventListener('click', () => {
     resetChoice();
     syncOverlayStatus();
@@ -416,6 +472,8 @@ function renderOverlay(){
   });
 
   syncOverlayStatus();
+  const close = overlay.querySelector('#lkWorkspaceClose');
+  if(close) close.hidden = requiresInitialChoice();
   return overlay;
 }
 
@@ -425,24 +483,28 @@ function syncOverlayStatus(error){
   const status = overlay.querySelector('#lkWorkspaceStatus');
   const fileBtn = overlay.querySelector('#lkWorkspaceFile');
   const loadBtn = overlay.querySelector('#lkWorkspaceLoad');
+  const demoBtn = overlay.querySelector('#lkWorkspaceDemo');
+  const emptyBtn = overlay.querySelector('#lkWorkspaceEmpty');
+  if(demoBtn) demoBtn.hidden = false;
+  if(emptyBtn) emptyBtn.hidden = false;
   if(fileBtn){
     fileBtn.disabled = !canUseFilePicker();
     fileBtn.classList.toggle('disabled', !canUseFilePicker());
   }
   if(loadBtn) loadBtn.disabled = state.mode !== 'file' && state.mode !== 'folder';
   if(status){
-    const support = isOnlineDemoMode()
-      ? 'Published site mode: demo only. Import, delete and save are disabled. LKEP export downloads a local copy only.'
+    const support = !isLocalOrigin()
+      ? tr('Online mode: select DEMO or Clean Project and authorize a folder. No FTP/server project writes are performed.', 'Modalità online: scegli DEMO o Progetto pulito e autorizza una cartella. Nessuna scrittura viene effettuata su FTP/server.')
       : (canUseFilePicker()
-        ? 'LKEP file sync available.'
-        : 'LKEP file sync is available in Chrome/Edge on localhost or HTTPS.');
-    const current = isOnlineDemoMode()
-      ? 'Current mode: online demo.'
+        ? tr('LKEP file sync available.', 'Sincronizzazione file LKEP disponibile.')
+        : tr('LKEP file sync is available in Chrome/Edge on localhost or HTTPS.', 'La sincronizzazione LKEP è disponibile in Chrome/Edge su localhost o HTTPS.'));
+    const current = !isLocalOrigin() && !state.workspaceReady
+      ? tr('Current mode: waiting for a local project folder.', 'Modalità attuale: in attesa di una cartella progetto locale.')
       : (state.mode === 'file'
-      ? 'Current mode: linked LKEP file' + (state.fileName ? ' (' + state.fileName + ')' : '') + '.'
+      ? tr('Current mode: linked LKEP file', 'Modalità attuale: file LKEP collegato') + (state.fileName ? ' (' + state.fileName + ')' : '') + '.'
       : state.mode === 'folder'
-      ? 'Current mode: local folder' + (state.folderName ? ' (' + state.folderName + ')' : '') + '.'
-      : 'Current mode: local browser database.');
+      ? tr('Current mode: local folder', 'Modalità attuale: cartella locale') + (state.folderName ? ' (' + state.folderName + ')' : '') + '.'
+      : tr('Current mode: local browser database.', 'Modalità attuale: database locale del browser.'));
     status.textContent = (error ? error + ' ' : '') + current + ' ' + support;
   }
 }
@@ -454,7 +516,7 @@ function updateBadge(state){
     badge.textContent = 'Workspace: demo';
     badge.classList.remove('folder');
     badge.classList.add('demo');
-    badge.title = 'Online demo: editing, imports and destructive actions are disabled';
+    badge.title = tr('Online demo: editing, imports and destructive actions are disabled', 'Demo online: modifica, importazione e azioni distruttive sono disabilitate');
     return;
   }
   const file = state.mode === 'file';
@@ -462,7 +524,7 @@ function updateBadge(state){
   badge.textContent = file ? 'Workspace: ' + (state.fileName || 'LKEP') : (folder ? 'Workspace: ' + (state.folderName || 'folder') : 'Workspace: local DB');
   badge.classList.toggle('folder', folder || file);
   badge.classList.remove('demo');
-  badge.title = file ? 'Syncing saves to linked LKEP file' : (folder && state.projectFile ? 'Mirroring saves to ' + state.projectFile : 'Using this browser localStorage and IndexedDB');
+  badge.title = file ? tr('Syncing saves to linked LKEP file', 'Salvataggi sincronizzati nel file LKEP collegato') : (folder && state.projectFile ? tr('Mirroring saves to ', 'Copia dei salvataggi in ') + state.projectFile : tr('Using this browser localStorage and IndexedDB', 'Uso di localStorage e IndexedDB del browser'));
 }
 
 function openOverlay(){
@@ -474,7 +536,7 @@ function workspaceButtonMarkup(compact){
   if(isOnlineDemoMode()){
     return compact
       ? '<span>ONLINE DEMO</span>'
-      : '<b>ONLINE DEMO</b><small>read only</small>';
+      : '<b>ONLINE DEMO</b><small>' + tr('read only', 'sola lettura') + '</small>';
   }
   const state = loadState();
   const file = state.mode === 'file';
@@ -499,7 +561,7 @@ function syncWorkspaceButtons(){
 }
 
 function blockedDemoMessage(){
-  showToast('Online demo only. Run the project locally to import, save or edit assets.');
+  showToast(tr('Online demo only. Run the project locally to import, save or edit assets.', 'Solo demo online. Avvia il progetto in locale per importare, salvare o modificare asset.'));
 }
 
 function isTextEditingTarget(target){
@@ -534,18 +596,21 @@ function installOnlineDemoGuards(){
   demoGuardsInstalled = true;
   document.body.classList.add('lk-online-demo');
   document.addEventListener('click', event => {
+    if(!isOnlineDemoMode()) return;
     if(!isDemoBlockedEvent(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     blockedDemoMessage();
   }, true);
   document.addEventListener('submit', event => {
+    if(!isOnlineDemoMode()) return;
     if(!isDemoBlockedEvent(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     blockedDemoMessage();
   }, true);
   document.addEventListener('keydown', event => {
+    if(!isOnlineDemoMode()) return;
     const key = String(event.key || '').toLowerCase();
     const mod = event.ctrlKey || event.metaKey;
     if(((key === 'delete' || key === 'backspace') && !isTextEditingTarget(event.target))
@@ -557,11 +622,13 @@ function installOnlineDemoGuards(){
     }
   }, true);
   document.addEventListener('dragover', event => {
+    if(!isOnlineDemoMode()) return;
     if(!event.dataTransfer || !Array.prototype.some.call(event.dataTransfer.types || [], type => type === 'Files')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
   document.addEventListener('drop', event => {
+    if(!isOnlineDemoMode()) return;
     if(!event.dataTransfer || !event.dataTransfer.files || !event.dataTransfer.files.length) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -623,18 +690,24 @@ function installEntryPoints(){
     }, 250);
   }
 
-  const shouldAutoOpen = !autoOpenChecked && isEditorPage();
+  const shouldAutoOpen = !autoOpenChecked && requiresInitialChoice();
   if(shouldAutoOpen || (!autoOpenChecked && /[?&]workspace=1\b/.test(location.search))){
     autoOpenChecked = true;
-    setTimeout(openOverlay, 450);
+    if(shouldAutoOpen) openOverlay();
+    else setTimeout(openOverlay, 0);
   }
 }
 
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', installEntryPoints);
-} else {
-  installEntryPoints();
-}
+installEntryPoints();
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installEntryPoints, {once:true});
+window.addEventListener('lotking:languagechange', () => {
+  if(!overlay) return;
+  const wasOpen = overlay.classList.contains('open');
+  overlay.remove();
+  overlay = null;
+  if(wasOpen) openOverlay();
+  else syncWorkspaceButtons();
+});
 
 window.LK_PROJECT_WORKSPACE = Object.freeze({
   open: openOverlay,
@@ -643,12 +716,14 @@ window.LK_PROJECT_WORKSPACE = Object.freeze({
   isFileMode,
   isOnlineDemoMode,
   isEditorPage,
+  requiresInitialChoice,
   connectProjectFile,
   connectFolder,
   saveProject,
   loadProjectText,
   canUseFilePicker,
   canUseDirectoryPicker,
+  consumeStartupTemplate,
 });
 
 })();

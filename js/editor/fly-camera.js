@@ -48,13 +48,15 @@ function create(deps){
     fly.rmb = true;
     fly.button = opts.button == null ? e.button : opts.button;
     fly.rotateOnly = !!opts.rotateOnly;
+    fly.panOnly = !!opts.panOnly;
+    fly.orbitOnly = !!opts.orbitOnly;
     fly.moved = 0;
     fly.lastX = e.clientX;
     fly.lastY = e.clientY;
     fly.orthoPan = !!(activeCamera() && activeCamera().isOrthographicCamera);
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = false;
-    if(canvas && canvas.requestPointerLock && e.pointerType !== 'touch'){
+    if(!fly.panOnly && !fly.orbitOnly && canvas && canvas.requestPointerLock && e.pointerType !== 'touch'){
       try {
         const result = canvas.requestPointerLock();
         if(result && result.catch) result.catch(() => {});
@@ -69,11 +71,22 @@ function create(deps){
     const dx = locked ? (e.movementX || 0) : (e.clientX - fly.lastX);
     const dy = locked ? (e.movementY || 0) : (e.clientY - fly.lastY);
     fly.lastX = e.clientX; fly.lastY = e.clientY; fly.moved += Math.abs(dx) + Math.abs(dy);
-    if(fly.orthoPan && deps.panActiveViewport){
+    if((fly.orthoPan || fly.panOnly) && deps.panActiveViewport){
       deps.panActiveViewport(dx, dy);
       return;
     }
     const cam = activeCamera();
+    if(fly.orbitOnly){
+      const target = deps.getActiveViewportTarget ? deps.getActiveViewportTarget() : null;
+      if(target){
+        const spherical = new THREE.Spherical().setFromVector3(cam.position.clone().sub(target));
+        spherical.theta -= dx * .004;
+        spherical.phi = Math.max(.035, Math.min(Math.PI - .035, spherical.phi - dy * .004));
+        cam.position.copy(target).add(new THREE.Vector3().setFromSpherical(spherical));
+        cam.lookAt(target);
+      }
+      return;
+    }
     const rig = activeRig();
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuaternion(cam)).normalize();
     const yaw = -dx * .004;
@@ -113,22 +126,25 @@ function create(deps){
   }
 
   function flyEnd(e){
+    const wasPan = !!(fly.orthoPan || fly.panOnly || fly.orbitOnly);
     fly.rmb = false;
     fly.orthoPan = false;
     fly.rotateOnly = false;
+    fly.panOnly = false;
+    fly.orbitOnly = false;
     fly.button = null;
     if(document.pointerLockElement === canvas && document.exitPointerLock){
       try { document.exitPointerLock(); } catch(err){}
     }
     if(e && e.pointerId != null){ try { canvas.releasePointerCapture(e.pointerId); } catch(err){} }
-    syncOrbitAfterFly();
+    if(!wasPan) syncOrbitAfterFly();
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : (ED.active && !ED.playPreview);
   }
 
   function flyUpdate(dt){
     if(!fly.rmb) return;
-    if(fly.orthoPan) return;
+    if(fly.orthoPan || fly.panOnly || fly.orbitOnly) return;
     if(fly.rotateOnly) return;
     const speed = (fly.keys.shift ? fly.speed * 2.4 : fly.speed) * Math.max(.001, dt || .016);
     const dir = new THREE.Vector3();

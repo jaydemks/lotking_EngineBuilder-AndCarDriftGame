@@ -38,7 +38,13 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Gameplay/editor session state for launched tracks, editor preview, pending loads, selected project, and loaded-level flags.
 
 - `js/runtime/game-flow.js`
-  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, and play-state orchestration. In online-demo mode, editor preview skips the local save/sync mutation path and uses the loaded demo project as the authoritative state.
+  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, play-state orchestration, and cleanup of session-only camera overrides. Browser gameplay, Play Preview and playable exports use the same flow.
+
+- Runtime scene/cinema camera override
+  `lot-king.js` applies the exclusive active Scene Camera for non-Pawn levels and evaluates Cinema Studio Movie Track camera cuts after the normal Player Camera update, ensuring the selected scene/timeline camera owns the final Player 1 render. Logic services dispatch the same start/stop contract to editor preview and standalone gameplay.
+
+- `js/engine/scene-store.js`
+  In addition to scene persistence and factories, owns versioned GLB `meshEdits`: stable mesh ids, deleted/detached parts, local transforms, persistent non-material node properties and deterministic material/connected-island decomposition reconstructed from source geometry at load time.
 
 - `js/runtime/track-catalog.js`
   Available track list, current track state, level-select card rendering, and runtime track catalog updates from saved levels.
@@ -46,13 +52,13 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## World and Physics
 
 - `js/runtime/world-state.js`
-  Editor entity registry, deterministic world seed, static collider data, cone state, world entity bookkeeping, and lightweight car collision helpers.
+  Editor entity registry, deterministic world seed, static collider data/signatures including circular-volume height, cone state, world entity bookkeeping, and lightweight car collision helpers.
 
 - `js/runtime/world-generation.js`
   Default parking-lot track factory: ground, walls, props, parked cars, cones, light poles, and track-owned lights.
 
 - `js/runtime/physics-world.js`
-  Cannon world adapter: player body creation, static collider rebuild, body sync, physics stepping, and teardown.
+  Cannon world adapter: player body creation, static collider rebuild, height-aware vertical cylinders for circular props such as light poles, body sync, physics stepping, and teardown.
 
 ## Logic Element Runtime
 
@@ -84,6 +90,20 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Runtime lifecycle bridge for Level Logic and scene Logic Elements. Builds validated runtimes, routes start/update/fixed-update/input/gamepad/resize/collision/custom/destroy events, starts internal animations, aggregates profiling stats across active graph runtimes, toggles pause-on-breakpoint for all active runtimes, resumes or steps paused breakpoints, and disposes timers and runtime state.
 
 `js/engine/scene-store.js` resolves reusable Logic Element definitions before runtime creation. Linked instances share their definition and apply only exposed-variable overrides; saved entries embed the definition and resolved fallback so runtime/playable imports do not depend on another browser's local asset library.
+
+## Editor Mesh Authoring
+
+- `js/editor/material-editor.js`
+  Edits material slots and provides Live Material Selection, including Ctrl/Shift multi-selection and one patch across all selected stable slots.
+
+- `js/editor/mesh-editor.js`
+  Edits scene GLBs and the active player model through Start/Stop Live Mesh Editing, Ctrl/Shift multi-selection, hierarchy controls, local transforms, node visibility/name/shadow/culling/render-order properties, deletion/restoration, internal detachment, safe non-skinned decomposition and reversible joins. For scene GLBs it can also extract selected parts as independent persisted entities that reuse the source asset and receive normal per-object collision editing. Commands use shared editor history and compact `meshEdits` overrides.
+
+- `js/editor/player-blueprints.js`
+  Collects/applies the built-in Player Car blueprint, including enabled/hidden/nullable controller possession state, and can generate a reusable Player Car Logic Element snapshot with model, rig hierarchy, collision metadata, exposed categorized variables and the complete future-runtime Pawn payload.
+
+- `js/editor/viewport-picking.js`
+  Supplies the mesh/material intersection used by both live authoring modes; the editor composition layer routes a click to the currently active mode so structural selection cannot accidentally change a material target.
 
 - `tests/logic-core.test.js`
   Standalone Node regression suite for clean graph validation, contextual warning/error codes, runtime start/update execution, variable persistence, `Tick Every` timing, reusable subgraph execution, and built-in template integrity. Browser/Three.js/Cannon integration remains a separate test layer.
@@ -151,7 +171,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## Runtime UI Helpers
 
 - `js/runtime/project-workspace.js`
-  Editor-only workspace overlay and online-demo guard. Detects local/private-network origins vs hosted origins, presents local/browser/project-file workspace choices, labels the online demo state, and blocks unsafe online authoring actions such as imports, uploads, saves, deletes, renames, duplicates, and asset mutation. LKEP export remains a download-only operation.
+  Editor-only workspace overlay and hosted-origin gate. It detects hosted versus local execution automatically, then offers Author DEMO or Clean Project. Hosted editing requires a user-authorized writable folder through the File System Access API; the portable DEMO/manifest and later saves remain in that folder plus origin-scoped browser storage. Unsupported browsers use the GitHub/local guide. No hosted project/FTP write endpoint is used.
 
 - `js/runtime/ui/window-manager.js`
   Shared floating-window manager for runtime/editor overlays. Supports centered windows, drag, resize, persisted geometry, viewport clamping, magnetic snapping, z-ordering, and attaching to existing panels.
@@ -185,18 +205,18 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Day/night cycle, stars, moon, clouds, procedural environment lighting, global light modulation, sun bloom, lens flare, and volumetric-clouds integration.
 
 - `js/runtime/volumetric-clouds.js`
-  Raymarched volumetric clouds on a sky dome. Editor-tunable coverage, density, noise scale, edge detail, wind, altitude, thickness, quality, absorption, and opacity.
+  Day/night-synchronized raymarched cloud layer with normalized editor-tunable coverage, density, noise scale, edge detail, wind, altitude, thickness, quality, absorption and opacity.
 
 - `js/runtime/rain.js`
-  GPU rain using line segments and shader-driven fall, plus procedural rain audio. Editor-tunable intensity, speed, length, wind, area, opacity, and sound level.
+  Camera-aware GPU line rain with stable camera-relative distribution, level-relative vertical volume, normalized intensity/speed/length/wind/area/opacity controls and procedural SFX routing.
 
 - `js/runtime/post.js`
-  Gameplay-camera post-processing: depth of field, golden-angle bokeh, highlight weighting, focus mask around the player, and visual grading.
+  Shared camera-bindable post-processing: gameplay DOF/bokeh/grade plus a `videoOnly` editor path for color-neutral quality sharpening, selective Three.js SSR, compatibility indirect lighting and smoke-aware volumetric shafts.
 
 ## Persistence and Store
 
 - `js/engine/scene-store.js`
-  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, reusable Logic Element definitions/instances, sound sets, and shared scene/entity factories. It also loads `demo/demo-project.lkep.json` on hosted origins as the bundled online demo, localizes embedded `data:` model/texture assets into IndexedDB, and preserves the player `headingMode`/`transform` data needed for stable visible heading and runtime driving direction.
+  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, reusable Logic Element definitions/instances, sound sets, and shared scene/entity factories. It loads `demo/demo-project.lkep.json` for the hosted chooser and an explicit DEMO start, then preserves the visitor's editable browser-local copy on later reloads; embedded `data:` model/texture assets are localized into IndexedDB.
 
 This file is runtime-adjacent rather than inside `js/runtime/`, but it is part of runtime boot because saved projects are applied before play and editor preview.
 
@@ -212,7 +232,7 @@ The editor loader is included here because it controls when runtime-shared modul
 These files live under `js/editor/`, but they directly coordinate with runtime/store systems and should be understood when tracing behavior:
 
 - `js/editor/project-io.js`
-  Editor project metadata, browser-based Projects overlay, active project save/load, import/export, and active level/project round-trip. Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data, while project storage in the editor remains scoped to the current browser origin. In online-demo mode, export is allowed as a browser download, while imports and saves are blocked.
+  Editor project metadata, browser-based Projects overlay, active project save/load, import/export, active level/project round-trip, and persisted `meta.levelRole` (`gameplay`, `editor-menu`, `game-menu`). Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data. Hosted imports/saves stay blocked only before local-folder consent; afterward they use browser storage and the authorized workspace, never the hosting server.
 
 - `js/editor/logic-elements-inspector.js`
   Runtime-adjacent Logic Element authoring surface. Owns Graph/Viewport tabs, hierarchy/components/variables/functions, dependency list inspection, asset-ref picker/relink controls, shared-definition editing, exposed instance overrides, contextual validator diagnostics, and local graph Play/Stop without duplicating the runtime interpreter.
@@ -224,7 +244,7 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
   Editor enter/exit, Play Preview/Simulate, frame-loop handoff, editor camera sync, player-camera preview rendering, runtime/editor state guards, Cinema Studio runtime-trigger scanning, and runtime camera handoff when a Cinema Studio is active in Play Preview. It converts runtime player heading back to visible editor heading when returning from preview and should remain an orchestration layer; viewport layout and Cinema Studio authoring behavior are delegated to focused modules. Simulate uses the same runtime stepping path as Play Preview while keeping editor viewport/input/save behavior active; `LOT_KING.state.editorPreviewMode = "simulate"` tells runtime input/camera/touch handling to stay passive.
 
 - `js/editor/viewport-layout.js`
-  Runtime-adjacent editor viewport module. Owns quad/single viewport rendering, secondary view selectors, independent secondary perspective cameras, orthographic view cameras, per-view render modes, split handles, viewport overlays, and FPS/performance stats. The performance overlay reports draw calls, triangle counts, memory counters, heap where available, max frame time, frame spikes over 100 ms, and browser long-task counters. It is loaded before `editor-runtime.js` and is used by the runtime frame handoff while editing.
+  Runtime-adjacent editor viewport module. Owns quad/single viewport rendering, secondary cameras, render modes, split handles, overlays, FPS/performance stats and the Quick Video entry. Normal Lit views can use the shared project Video composer; diagnostic modes render directly.
 
 - `js/editor/scene-menu-actions.js`, `js/editor/selection-manager.js`, `js/editor/history-manager.js`, `js/editor/inspector-controller.js`, `js/editor/player-blueprints.js`
   Editor modules that can mutate player position/direction. These should route player spawn updates through `GAME.player.syncSpawnFromVisibleTransform()` instead of writing runtime physics heading directly, so visible editor heading, saved spawn, and runtime driving heading remain stable.

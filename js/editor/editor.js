@@ -71,18 +71,22 @@ let outliner = null;
 let editorMenus = null;
 let inspectorUi = null;
 let materialEditor = null;
+let meshEditor = null;
 let musicLibraryPanel = null;
 let objectInspector = null;
 let inspectorController = null;
 let editorRuntime = null;
 let selectionManager = null;
 let viewportEvents = null;
+let viewportPointerNavigation = false;
+let viewportWheelUntil = 0;
 let playerCameraInspector = null;
 let playerLightsInspector = null;
 let playerAttachmentsInspector = null;
 let playerSetupInspector = null;
 let hudInspector = null;
 let environmentInspector = null;
+let renderingInspector = null;
 let logicInspector = null;
 let projectIo = null;
 let inputSettings = null;
@@ -96,6 +100,7 @@ function status(msg){ if(statusUi) statusUi.status(msg); else $('#lkStatusRight'
 function beginStatusWork(title, step, state){ return statusUi ? statusUi.beginWork(title, step, state) : null; }
 function updateStatusWork(token, pct, step, state, title){ if(statusUi) statusUi.updateWork(token, pct, step, state, title); }
 function finishStatusWork(token, msg, step, state){ if(statusUi) statusUi.finishWork(token, msg, step, state); }
+function setEditorLoading(open, title, name, pct, step){ if(statusUi) statusUi.setEditorLoading(open, title, name, pct, step); }
 function setLevelLoading(open, name, pct, step){ if(statusUi) statusUi.setLevelLoading(open, name, pct, step); }
 function setAssetLoading(open, name, pct, step){ if(statusUi) statusUi.setAssetLoading(open, name, pct, step); }
 function confirmEditorAction(opts){ return dialogUi ? dialogUi.confirm(opts) : Promise.resolve(window.confirm((opts && opts.message) || 'Confirm?')); }
@@ -159,6 +164,10 @@ flyCamera = window.LK_EDITOR_FLY_CAMERA && window.LK_EDITOR_FLY_CAMERA.create({
   shouldEnableOrbit: shouldEnableOrbitForActiveViewport,
   getActiveCamera: () => activeViewportCamera(),
   getActiveCameraRig: () => activeViewportCameraRig(),
+  getActiveViewportTarget: () => {
+    const view = activeViewportSpec();
+    return view.slot === 0 && orbit ? orbit.target.clone() : editorViewTarget(view.slot);
+  },
   onActiveCameraRigChange,
   panActiveViewport: (dx, dy) => panActiveViewport(dx, dy),
 });
@@ -200,7 +209,7 @@ function setTool(tool){ return gizmoControls.setTool(tool); }
 function updateEditorControls(dt){ return gizmoControls.updateFly(dt); }
 function syncQuickAudio(){ if(quickAudio) quickAudio.sync(); }
 toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
-  root, ED, $, THREE,
+  root, ED, $, THREE, lang:editorLang,
   getGizmo: () => gizmo,
   getPlayableExport: () => playableExport,
   getCamHelper: () => camHelper,
@@ -212,6 +221,8 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   newTrack, saveAsTrack, setLevelsOverlayOpen, setProjectsOverlayOpen, createBrowserProject, setProjectImportTarget, importProjectFile,
   confirmEditorAction, exportProject, stopPlayPreview, startPlayPreview,
   exitEditor, restoreFloatingPanels, updateSelectionAndDropHelpers,
+  setLevelLoading, setEditorLoading,
+  requestWarmup: requestEditorWarmup,
 });
 sidePanels = window.LK_EDITOR_SIDE_PANELS && window.LK_EDITOR_SIDE_PANELS.create({
   root, ED, $, status, refreshOutliner, refreshAssetsPanel,
@@ -222,7 +233,7 @@ function editorLang(){ return preferences ? preferences.lang() : 'en'; }
 function setPrefsOpen(open){ if(preferences) preferences.setOpen(open); }
 function applyPrefs(){ if(preferences) preferences.apply(); }
 preferences = window.LK_EDITOR_PREFERENCES && window.LK_EDITOR_PREFERENCES.create({
-  root, ED, $, status, refreshOutliner,
+  root, ED, GAME, $, status, refreshOutliner, buildInspector,
 });
 quickAudio = window.LK_EDITOR_QUICK_AUDIO && window.LK_EDITOR_QUICK_AUDIO.create({
   GAME, ED, $,
@@ -242,7 +253,11 @@ pluginManager = window.LK_PLUGIN_MANAGER && window.LK_PLUGIN_MANAGER.create({
 if(pluginManager && window.LK_LOGIC_ELEMENT_PLUGIN) pluginManager.register(window.LK_LOGIC_ELEMENT_PLUGIN);
 lockEditorTrackSelector();
 assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status});
-thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({THREE, active: () => ED.active && !ED.playPreview});
+thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({
+  THREE,
+  active:() => ED.active && !ED.playPreview,
+  canProcessHeavy:() => !fly.rmb && !gizmoPointerActive && !(gizmo && (gizmo.dragging || gizmo.axis)),
+});
 editorLayout = window.LK_EDITOR_LAYOUT && window.LK_EDITOR_LAYOUT.create({
   root, ED, $, status,
   camE,
@@ -386,7 +401,7 @@ function editorOrthoCamera(slot, kind, rect){
 }
 function editorCameraForView(slot, rect){
   const spec = ED.viewportSlots[slot] || ['perspective', 'top', 'right', 'front'][slot] || 'top';
-  if(slot === 0 || spec === 'perspective') return editorPerspectiveCamera(slot, rect);
+  if(spec === 'perspective') return editorPerspectiveCamera(slot, rect);
   if(spec.indexOf('timeline:') === 0){
     const id = spec.slice(9);
     const studio = cinemaStudioById(id);
@@ -418,13 +433,15 @@ function editorCameraForView(slot, rect){
 function editorPickView(clientX, clientY){
   const viewRect = editorViewportRect();
   if(ED.viewportMode !== 'quad'){
-    return {slot:0, rect:viewRect, camera:camE};
+    const spec = ED.viewportSlots[0] || 'perspective';
+    return {slot:0, rect:viewRect, spec, camera:editorCameraForView(0, viewRect)};
   }
   const rects = editorQuadRects(viewRect);
   for(let i = 0; i < rects.length; i++){
     const r = rects[i];
     if(clientX >= r.x && clientX <= r.x + r.w && clientY >= r.y && clientY <= r.y + r.h){
-      return {slot:i, rect:r, camera:editorCameraForView(i, r)};
+      const spec = ED.viewportSlots[i] || ['perspective', 'top', 'right', 'front'][i] || 'top';
+      return {slot:i, rect:r, spec, camera:editorCameraForView(i, r)};
     }
   }
   return null;
@@ -432,13 +449,12 @@ function editorPickView(clientX, clientY){
 function activeViewportSpec(){
   if(ED.viewportMode !== 'quad'){
     const rect = editorViewportRect();
-    camE.aspect = rect.w / Math.max(1, rect.h);
-    camE.updateProjectionMatrix();
-    return {slot:0, rect, spec:'perspective', camera:camE};
+    const spec = ED.viewportSlots[0] || 'perspective';
+    return {slot:0, rect, spec, camera:editorCameraForView(0, rect)};
   }
   const slot = Math.max(0, Math.min(3, ED.activeViewportSlot || 0));
   const rect = editorQuadRects(editorViewportRect())[slot];
-  const spec = slot === 0 ? 'perspective' : (ED.viewportSlots[slot] || ['perspective', 'top', 'right', 'front'][slot] || 'top');
+  const spec = ED.viewportSlots[slot] || ['perspective', 'top', 'right', 'front'][slot] || 'top';
   return {slot, rect, spec, camera:editorCameraForView(slot, rect)};
 }
 function setActiveViewportAt(clientX, clientY){
@@ -455,10 +471,16 @@ function setActiveViewportSlot(slot){
     gizmo.camera = view.camera;
     if(gizmo.updateMatrixWorld) gizmo.updateMatrixWorld(true);
   }
+  const renderSelect = document.getElementById('lkViewportRenderMode');
+  if(renderSelect){
+    renderSelect.dataset.viewportSlot = String(view.slot);
+    renderSelect.value = ED.viewportRenderModes[view.slot] || 'normal';
+  }
   return view;
 }
 function shouldEnableOrbitForActiveViewport(){
-  return !!(ED.active && !ED.playPreview && (ED.viewportMode !== 'quad' || (ED.activeViewportSlot || 0) === 0));
+  const view = activeViewportSpec();
+  return !!(ED.active && !ED.playPreview && view.slot === 0 && view.spec === 'perspective');
 }
 function activeViewportCamera(){
   return activeViewportSpec().camera || camE;
@@ -475,7 +497,15 @@ function activeViewportCameraRig(){
   return sceneCameraHolderFromSpec(view.spec);
 }
 function isActiveViewportCameraDriven(){
-  return !!activeViewportCameraRig();
+  return !isActiveViewportNavigationLocked() && !!activeViewportCameraRig();
+}
+function isActiveViewportNavigationLocked(){
+  const spec = activeViewportSpec().spec || '';
+  return spec.indexOf('cam:') === 0 || spec.indexOf('timeline:') === 0;
+}
+function isActiveViewportPerspectiveSecondary(){
+  const view = activeViewportSpec();
+  return view.spec === 'perspective' && !(view.slot === 0 && orbit && orbit.enabled);
 }
 function onActiveCameraRigChange(rig){
   if(!rig) return;
@@ -490,23 +520,42 @@ function onActiveCameraRigChange(rig){
 }
 function panActiveViewport(dx, dy){
   const view = activeViewportSpec();
-  if(!view.camera || !view.camera.isOrthographicCamera) return false;
+  if(!view.camera) return false;
   const key = view.spec || 'top';
-  if(key.indexOf('cam:') === 0) return false;
+  if(key.indexOf('cam:') === 0 || key.indexOf('timeline:') === 0) return false;
   const current = editorViewTarget(view.slot);
-  const span = Math.max(2, editorViewState(view.slot).span || 48);
+  const span = view.camera.isOrthographicCamera
+    ? Math.max(2, editorViewState(view.slot).span || 48)
+    : Math.max(2, view.camera.position.distanceTo(current) * 1.1);
   const scale = span / Math.max(80, view.rect.h || 1);
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(view.camera.quaternion).normalize();
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(view.camera.quaternion).normalize();
-  current.addScaledVector(right, -dx * scale);
-  current.addScaledVector(up, dy * scale);
+  const delta = right.multiplyScalar(-dx * scale).add(up.multiplyScalar(dy * scale));
+  current.add(delta);
   setEditorViewTarget(view.slot, current);
+  if(view.camera.isPerspectiveCamera) view.camera.position.add(delta);
+  if(view.camera === camE && orbit){ orbit.target.add(delta); orbit.update(); }
   return true;
 }
 function zoomActiveViewport(deltaY, clientX, clientY){
   const picked = clientX == null ? activeViewportSpec() : editorPickView(clientX, clientY);
-  if(!picked || !picked.camera || !picked.camera.isOrthographicCamera) return false;
+  if(!picked || !picked.camera) return false;
   const slot = picked.slot || 0;
+  if(picked.camera.isPerspectiveCamera){
+    if(slot === 0 && orbit && orbit.enabled) return false;
+    // Scene/Timeline cameras are authored cameras: do not change their transform
+    // from a passive hover-wheel, but consume the event so OrbitControls cannot
+    // accidentally zoom the main Perspective viewport underneath.
+    if(picked.spec && (picked.spec.indexOf('cam:') === 0 || picked.spec.indexOf('timeline:') === 0)) return true;
+    const target = slot === 0 && orbit ? orbit.target.clone() : editorViewTarget(slot);
+    const direction = new THREE.Vector3().subVectors(picked.camera.position, target);
+    const distance = Math.max(.5, direction.length());
+    const nextDistance = Math.max(.5, Math.min(2000, distance * (deltaY > 0 ? 1.12 : .88)));
+    picked.camera.position.copy(target).addScaledVector(direction.normalize(), nextDistance);
+    picked.camera.lookAt(target);
+    return true;
+  }
+  if(!picked.camera.isOrthographicCamera) return false;
   const state = editorViewState(slot);
   setEditorViewSpan(slot, (state.span || 48) * (deltaY > 0 ? 1.12 : .88));
   return true;
@@ -540,7 +589,7 @@ viewportPicking = window.LK_EDITOR_VIEWPORT_PICKING && window.LK_EDITOR_VIEWPORT
   registry: () => GAME.world.registry,
   helperGroup: () => helperGroup,
   selected: () => ED.selected,
-  hoverSuppressed: () => !!(ED.playPreview || ED.levelsOpen || ED.projectsOpen || (gizmo && (gizmo.dragging || gizmo.axis)) || gizmoPointerActive),
+  hoverSuppressed: () => !!(viewportPointerNavigation || performance.now() < viewportWheelUntil || fly.rmb || ED.playPreview || ED.levelsOpen || ED.projectsOpen || (gizmo && (gizmo.dragging || gizmo.axis)) || gizmoPointerActive),
 });
 if(!viewportPicking){
   viewportPicking = {
@@ -548,6 +597,7 @@ if(!viewportPicking){
     pickMaterialAt:()=>null,
     materialSlotInfo:()=>null,
     setMaterialPickHelper:()=>{},
+    setMaterialPickHelpers:()=>{},
     clearMaterialPickHelper:()=>{},
     groundPointAt:()=>spawnPointAhead(),
     spawnPointAhead:()=>camE.position.clone().setY(0),
@@ -569,7 +619,7 @@ function createGlbEntryFromAsset(asset, at){ return assetLibrary ? assetLibrary.
 function createTextureEntryFromAsset(asset, at){ return assetLibrary ? assetLibrary.createTextureEntry(asset, at) : {}; }
 
 assetImports = window.LK_EDITOR_ASSET_IMPORTS && window.LK_EDITOR_ASSET_IMPORTS.create({
-  GAME, STORE, THREE, status, setAssetLoading, confirmEditorAction, refreshAssetsPanel, finishAdd,
+  GAME, STORE, THREE, status, setAssetLoading, confirmEditorAction, refreshAssetsPanel, refreshOutliner, finishAdd,
   spawnPointAhead, performDeleteEntity, selected: () => ED.selected,
   assetLibraryLoad, assetLibrarySave, supportedAssetFiles, assetKeyFromFile, assetDbKeyFromFile,
   resolveImportedAssetUrl, upsertImportedAsset, createGlbEntryFromAsset, createTextureEntryFromAsset,
@@ -609,6 +659,40 @@ playerBlueprints = window.LK_EDITOR_PLAYER_BLUEPRINTS && window.LK_EDITOR_PLAYER
 });
 function currentPlayerBlueprint(){ return playerBlueprints ? playerBlueprints.currentPlayerBlueprint() : null; }
 function copyPlayerBlueprintAsset(){ if(playerBlueprints) playerBlueprints.copyPlayerBlueprintAsset(); }
+function convertPlayerToLogicElement(at){
+  if(!playerBlueprints || !playerBlueprints.playerLogicElementAsset) return;
+  const label = editorLang() === 'it' ? 'Player Car Logic Element' : 'Player Car Logic Element';
+  setAssetLoading(true, label, 10, editorLang() === 'it' ? 'Copia configurazione Player Car' : 'Copying Player Car configuration');
+  const asset = playerBlueprints.playerLogicElementAsset();
+  if(!asset){ setAssetLoading(false); return status(editorLang() === 'it' ? 'Conversione Player Car non riuscita' : 'Player Car conversion failed'); }
+  const p = GAME.player.car.position;
+  setAssetLoading(true, label, 35, editorLang() === 'it' ? 'Caricamento modello e rig' : 'Loading model and rig');
+  const point = at || {x:p.x, y:p.y, z:p.z};
+  const object = addLogicElement(point, asset);
+  const pawnTransform = asset.graph && asset.graph.playerPawnBlueprint && asset.graph.playerPawnBlueprint.transform;
+  if(object && pawnTransform && Array.isArray(pawnTransform.s)){
+    object.scale.fromArray(pawnTransform.s);
+    object.updateMatrixWorld(true);
+    if(object.userData && object.userData.addedEntry){
+      object.userData.addedEntry.t = object.userData.addedEntry.t || {};
+      object.userData.addedEntry.t.s = pawnTransform.s.slice();
+    }
+  }
+  refreshAssetsPanel();
+  Promise.resolve(object && object.userData && object.userData.logicElementAssetReady).then(results => {
+    const failed = Array.isArray(results) && results.find(item => item && item.status === 'rejected');
+    if(failed) throw failed.reason || new Error('GLB load failed');
+    setAssetLoading(true, label, 100, editorLang() === 'it' ? 'Player Car Logic pronto' : 'Player Car Logic ready');
+    setTimeout(() => setAssetLoading(false), 350);
+    status(editorLang() === 'it'
+      ? 'Player Car duplicato come Logic Element riutilizzabile'
+      : 'Player Car duplicated as a reusable Logic Element');
+  }).catch(err => {
+    setAssetLoading(false);
+    status((editorLang() === 'it' ? 'Caricamento Player Car Logic fallito: ' : 'Player Car Logic load failed: ') + (err && err.message || err));
+  });
+  return object;
+}
 function applyPlayerBlueprintAsset(player, opts){ if(playerBlueprints) playerBlueprints.applyPlayerBlueprintAsset(player, opts); }
 function setDefaultPlayerBlueprintAsset(asset){ if(playerBlueprints) playerBlueprints.setDefaultPlayerBlueprintAsset(asset); }
 function deletePlayerBlueprintAsset(asset){ if(playerBlueprints) playerBlueprints.deletePlayerBlueprintAsset(asset); }
@@ -627,6 +711,7 @@ keyboardShortcuts = window.LK_EDITOR_KEYBOARD_SHORTCUTS && window.LK_EDITOR_KEYB
   ED, fly, GAME, closeMenu, setPrefsOpen, setLevelsOverlayOpen, setProjectsOverlayOpen, stopPlayPreview,
   saveAsTrack, saveScene, newTrack, duplicateEntity, undo, redo, applyLastTransform,
   setTool, focusSelected, setGrid, requestDeleteEntity, requestDeleteSelection,
+  getEditorKeymap:() => preferences && preferences.prefs && preferences.prefs.editorKeys,
 });
 
 playableExport = window.LK_EDITOR_PLAYABLE_EXPORT && window.LK_EDITOR_PLAYABLE_EXPORT.create({
@@ -671,6 +756,8 @@ function commitTransformHistory(label){ return historyManager.commitTransformHis
 function withTransformHistory(label, fn){ return historyManager.withTransformHistory(label, fn); }
 function beginColliderHistory(o){ return historyManager.beginColliderHistory(o); }
 function commitColliderHistory(label){ return historyManager.commitColliderHistory(label); }
+function beginInspectorHistory(o){ return historyManager.beginInspectorHistory(o); }
+function commitInspectorHistory(label){ return historyManager.commitInspectorHistory(label); }
 function applyLastTransform(){ return historyManager.applyLastTransform(); }
 function hasLastTransformRepeat(){ return historyManager.hasLastTransformRepeat(); }
 function isHudHistorySuppress(){ return historyManager.isHudHistorySuppress(); }
@@ -679,6 +766,7 @@ function markDirty(){
   ED.dirty = true;
   $('#lkDirty').classList.add('show');
 }
+addEventListener('lotking:video-project-change', () => markDirty());
 function commitNumberInput(target){
   if(!(target && target.matches && target.matches('input[type="number"]'))) return false;
   target.dispatchEvent(new Event('input', {bubbles:true}));
@@ -862,6 +950,7 @@ function setViewMode(m, scope){
 root.querySelectorAll('.lk-pin').forEach(p => {
   p.addEventListener('click', () => {
     if(p.dataset.special === 'env') selectSpecial('env');
+    else if(p.dataset.special === 'rendering') selectSpecial('rendering');
     else if(p.dataset.special === 'hud') selectSpecial('hud');
     else if(p.dataset.special === 'logic') selectSpecial('logic');
     else selectObject(GAME.player.car);
@@ -884,6 +973,7 @@ assetCatalog = window.LK_EDITOR_ASSET_CATALOG && window.LK_EDITOR_ASSET_CATALOG.
   placeProjectAsset,
   placeImportedAsset,
   addLogicElement:(at, asset) => addLogicElement(at, asset),
+  convertPlayerToLogicElement,
   spawnPointAhead,
   status,
   duplicateEntity,
@@ -943,6 +1033,13 @@ function placeProjectAsset(rawAsset, at){
       }
       STORE.registerAdded(GAME, obj, nextEntry);
       finishAdd(obj);
+      if(nextEntry.kind === 'glb' && STORE.extractEmbeddedLights){
+        const converted = STORE.extractEmbeddedLights(GAME, obj, nextEntry);
+        if(converted.length){
+          status(editorLang() === 'it' ? (converted.length + ' luci GLB incorporate convertite') : (converted.length + ' embedded GLB lights converted'));
+          refreshOutliner();
+        }
+      }
       setAssetLoading(true, entry.name || entry.kind || 'project asset', 100, editorLang() === 'it' ? 'Posizionato' : 'Placed');
       setTimeout(() => setAssetLoading(false), 300);
     })
@@ -1047,6 +1144,7 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   currentPlayerBlueprint,
   applyPlayerBlueprintAsset,
   copyPlayerBlueprintAsset,
+  convertPlayerToLogicElement,
   setDefaultPlayerBlueprintAsset,
   deletePlayerBlueprintAsset,
   collectAssets,
@@ -1107,6 +1205,7 @@ selectionManager = window.LK_EDITOR_SELECTION_MANAGER && window.LK_EDITOR_SELECT
 });
 function selectObject(o){
   if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== o) clearLiveMaterialSelection();
+  if(ED.liveMeshSelection && ED.liveMeshSelection.object !== o) clearLiveMeshSelection();
   if(o && o.userData && o.userData.editorType === 'cinemaStudio'){
     ED.cinemaTimelineClosedId = null;
     ED.cinemaTimelineId = o.userData.editorId;
@@ -1148,6 +1247,7 @@ function selectPlayerCollider(){
 }
 function selectMultiObjects(objects){
   if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  if(ED.liveMeshSelection) clearLiveMeshSelection();
   return selectionManager.selectMultiObjects(objects);
 }
 function selectObjectWithModifiers(o, opts){
@@ -1160,10 +1260,12 @@ function selectSimilarObjects(o){
 }
 function selectSpecial(kind){
   if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  if(ED.liveMeshSelection) clearLiveMeshSelection();
   return selectionManager.selectSpecial(kind);
 }
 function deselect(){
   if(ED.liveMaterialSelection) clearLiveMaterialSelection();
+  if(ED.liveMeshSelection) clearLiveMeshSelection();
   return selectionManager.deselect();
 }
 function isPlayerCameraSelection(){ return selectionManager.isPlayerCameraSelection(); }
@@ -1208,12 +1310,13 @@ function clearLiveMaterialSelection(){
 function syncLiveMaterialSelection(o){
   if(!isLiveMaterialSelectionActive(o)) return;
   const root = liveMaterialRoot(o);
-  const key = o && o.userData && o.userData.materialEditorSlot;
-  if(!root || !key || key === 'all'){
+  const keys = Array.from(ED.liveMaterialSelection.ids || []);
+  if(!root || !keys.length || keys.includes('all')){
     viewportPicking.clearMaterialPickHelper();
     return;
   }
-  viewportPicking.setMaterialPickHelper(viewportPicking.materialSlotInfo(root, key), 0xffd166);
+  viewportPicking.setMaterialPickHelpers(keys.map(key => ({slot:viewportPicking.materialSlotInfo(root, key), color:0x22d3ee})));
+  ED.liveMaterialSelection.hoverKey = null;
 }
 function toggleLiveMaterialSelection(o){
   if(!o) return;
@@ -1222,7 +1325,11 @@ function toggleLiveMaterialSelection(o){
     status(editorLang() === 'it' ? 'Live Mat Selection disattivata' : 'Live Mat Selection off');
     return;
   }
-  ED.liveMaterialSelection = {object:o};
+  clearLiveMeshSelection();
+  const initial = Array.isArray(o.userData.materialEditorSlots) && o.userData.materialEditorSlots.length
+    ? o.userData.materialEditorSlots
+    : [o.userData.materialEditorSlot || 'all'];
+  ED.liveMaterialSelection = {object:o, ids:new Set(initial)};
   clearHoverPickHelper();
   syncLiveMaterialSelection(o);
   status(editorLang() === 'it'
@@ -1234,9 +1341,14 @@ function updateLiveMaterialSelection(e){
   const o = ED.liveMaterialSelection.object;
   const hit = viewportPicking.pickMaterialAt(liveMaterialRoot(o), e.clientX, e.clientY);
   if(hit){
-    const current = o && o.userData && o.userData.materialEditorSlot;
-    viewportPicking.setMaterialPickHelper(hit, hit.key === current ? 0xffd166 : 0x52b7ff);
+    if(ED.liveMaterialSelection.hoverKey === hit.key) return true;
+    const selected = Array.from(ED.liveMaterialSelection.ids || []);
+    const entries = selected.filter(key => key !== 'all').map(key => ({slot:viewportPicking.materialSlotInfo(liveMaterialRoot(o), key), color:0x22d3ee}));
+    if(!selected.includes(hit.key)) entries.push({slot:hit, color:0xffd166});
+    viewportPicking.setMaterialPickHelpers(entries);
+    ED.liveMaterialSelection.hoverKey = hit.key;
   } else {
+    if(ED.liveMaterialSelection.hoverKey == null) return true;
     syncLiveMaterialSelection(o);
   }
   return true;
@@ -1246,29 +1358,190 @@ function commitLiveMaterialSelection(e){
   const o = ED.liveMaterialSelection.object;
   const hit = viewportPicking.pickMaterialAt(liveMaterialRoot(o), e.clientX, e.clientY);
   if(hit){
-    o.userData.materialEditorSlot = hit.key;
-    viewportPicking.setMaterialPickHelper(hit, 0xffd166);
+    const ids = new Set(ED.liveMaterialSelection.ids || []);
+    if(e.ctrlKey || e.metaKey || e.shiftKey){
+      ids.delete('all');
+      if(ids.has(hit.key)) ids.delete(hit.key); else ids.add(hit.key);
+    } else { ids.clear(); ids.add(hit.key); }
+    if(!ids.size) ids.add(hit.key);
+    ED.liveMaterialSelection.ids = ids;
+    ED.liveMaterialSelection.hoverKey = null;
+    o.userData.materialEditorSlots = Array.from(ids);
+    o.userData.materialEditorSlot = ids.size === 1 ? Array.from(ids)[0] : '__multi__';
+    syncLiveMaterialSelection(o);
     buildInspector();
-    status('Material target: ' + hit.label);
+    status(editorLang() === 'it' ? ('Materiali selezionati: ' + ids.size) : ('Material targets: ' + ids.size));
   } else {
     status(editorLang() === 'it' ? 'Nessun materiale sotto il puntatore' : 'No material under pointer');
   }
+  return true;
+}
+function meshEditRoot(o){ return meshEditor && meshEditor.editableRoot ? meshEditor.editableRoot(o) : o; }
+function isLiveMeshSelectionActive(o){
+  const target = o || ED.selected;
+  return !!(target && ED.liveMeshSelection && ED.liveMeshSelection.active && ED.liveMeshSelection.object === target && ED.selected === target);
+}
+function clearLiveMeshHelpers(){
+  const state = ED.liveMeshSelection;
+  const helpers = state && state.helpers || [];
+  helpers.forEach(helper => {
+    helperGroup.remove(helper);
+    if(helper.geometry && helper.geometry.dispose) helper.geometry.dispose();
+    if(helper.material && helper.material.dispose) helper.material.dispose();
+  });
+  if(state && state.hoverHelper){
+    helperGroup.remove(state.hoverHelper);
+    if(state.hoverHelper.geometry && state.hoverHelper.geometry.dispose) state.hoverHelper.geometry.dispose();
+    if(state.hoverHelper.material && state.hoverHelper.material.dispose) state.hoverHelper.material.dispose();
+    state.hoverHelper = null;
+    state.hoverMesh = null;
+  }
+  if(state) state.helpers = [];
+}
+function clearLiveMeshHover(){
+  const state = ED.liveMeshSelection;
+  if(!state || !state.hoverHelper) return;
+  helperGroup.remove(state.hoverHelper);
+  if(state.hoverHelper.geometry && state.hoverHelper.geometry.dispose) state.hoverHelper.geometry.dispose();
+  if(state.hoverHelper.material && state.hoverHelper.material.dispose) state.hoverHelper.material.dispose();
+  state.hoverHelper = null;
+  state.hoverMesh = null;
+}
+function liveMeshIds(o){
+  return ED.liveMeshSelection && ED.liveMeshSelection.object === o ? Array.from(ED.liveMeshSelection.ids || []) : [];
+}
+function syncLiveMeshSelection(o){
+  if(!ED.liveMeshSelection || ED.liveMeshSelection.object !== o) return;
+  clearLiveMeshHelpers();
+  const ids = ED.liveMeshSelection.ids || new Set();
+  const root = meshEditRoot(o);
+  root.traverse(mesh => {
+    if(!mesh.isMesh || !mesh.userData || !ids.has(mesh.userData.lkMeshEditId) || !mesh.visible) return;
+    const helper = new THREE.BoxHelper(mesh, 0x22d3ee);
+    helper.userData.helperOnly = true;
+    helper.material.depthTest = false;
+    helper.renderOrder = 1002;
+    helperGroup.add(helper);
+    ED.liveMeshSelection.helpers.push(helper);
+  });
+}
+function setLiveMeshIds(o, ids){
+  if(!ED.liveMeshSelection || ED.liveMeshSelection.object !== o){
+    clearLiveMeshSelection();
+    ED.liveMeshSelection = {object:o, active:false, ids:new Set(), helpers:[]};
+  }
+  ED.liveMeshSelection.ids = new Set(ids || []);
+  syncLiveMeshSelection(o);
+}
+function clearLiveMeshSelection(){
+  clearLiveMeshHelpers();
+  clearHoverPickHelper();
+  ED.liveMeshSelection = null;
+}
+function toggleLiveMeshSelection(o){
+  if(isLiveMeshSelectionActive(o)){
+    ED.liveMeshSelection.active = false;
+    clearLiveMeshHelpers();
+    status(editorLang() === 'it' ? 'Live Mesh Editing disattivato' : 'Live Mesh Editing off');
+    return;
+  }
+  clearLiveMaterialSelection();
+  clearHoverPickHelper();
+  if(!ED.liveMeshSelection || ED.liveMeshSelection.object !== o){
+    clearLiveMeshSelection();
+    ED.liveMeshSelection = {object:o, active:true, ids:new Set(), helpers:[]};
+  } else {
+    ED.liveMeshSelection.active = true;
+  }
+  if(STORE.assignMeshEditIds) STORE.assignMeshEditIds(meshEditRoot(o));
+  syncLiveMeshSelection(o);
+  status(editorLang() === 'it' ? 'Live Mesh Editing: clicca parti della mesh, Ctrl/Shift per selezione multipla' : 'Live Mesh Editing: click mesh parts, Ctrl/Shift for multi-selection');
+}
+function updateLiveMeshSelection(e){
+  if(!isLiveMeshSelectionActive()) return false;
+  const state = ED.liveMeshSelection;
+  const hit = viewportPicking.pickMaterialAt(meshEditRoot(state.object), e.clientX, e.clientY);
+  if(!hit || !hit.mesh || !hit.mesh.visible){ clearLiveMeshHover(); return true; }
+  const id = hit.mesh.userData && hit.mesh.userData.lkMeshEditId;
+  const selected = state.ids && state.ids.has(id);
+  if(state.hoverHelper && state.hoverMesh === hit.mesh){
+    state.hoverHelper.material.color.setHex(selected ? 0x67e8f9 : 0xffd166);
+    hit.mesh.updateMatrixWorld(true);
+    state.hoverHelper.matrix.copy(hit.mesh.matrixWorld);
+    return true;
+  }
+  clearLiveMeshHover();
+  const edges = new THREE.EdgesGeometry(hit.mesh.geometry, 1);
+  const material = new THREE.LineBasicMaterial({color:selected ? 0x67e8f9 : 0xffd166, transparent:true, opacity:selected ? .9 : .75, depthTest:false});
+  const helper = new THREE.LineSegments(edges, material);
+  helper.userData.helperOnly = true;
+  helper.matrixAutoUpdate = false;
+  helper.frustumCulled = false;
+  hit.mesh.updateMatrixWorld(true);
+  helper.matrix.copy(hit.mesh.matrixWorld);
+  helper.renderOrder = 1003;
+  helperGroup.add(helper);
+  state.hoverHelper = helper;
+  state.hoverMesh = hit.mesh;
+  return true;
+}
+function viewportHoverSuspended(){
+  return !!(viewportPointerNavigation || performance.now() < viewportWheelUntil || fly.rmb || ED.playPreview || ED.levelsOpen || ED.projectsOpen || gizmoPointerActive || (gizmo && (gizmo.dragging || gizmo.axis)));
+}
+function updateLiveEditorSelection(e){
+  if(viewportHoverSuspended()){
+    clearLiveMeshHover();
+    if(viewportPicking && viewportPicking.clearMaterialPickHelper) viewportPicking.clearMaterialPickHelper();
+    return true;
+  }
+  if(isLiveMaterialSelectionActive()) return updateLiveMaterialSelection(e);
+  if(isLiveMeshSelectionActive()) return updateLiveMeshSelection(e);
+  return false;
+}
+function commitLiveEditorSelection(e){
+  if(isLiveMaterialSelectionActive()) return commitLiveMaterialSelection(e);
+  if(!isLiveMeshSelectionActive()) return false;
+  const o = ED.liveMeshSelection.object;
+  const hit = viewportPicking.pickMaterialAt(meshEditRoot(o), e.clientX, e.clientY);
+  if(!hit || !hit.mesh || !hit.mesh.userData || !hit.mesh.userData.lkMeshEditId) return true;
+  const id = hit.mesh.userData.lkMeshEditId;
+  const ids = new Set(ED.liveMeshSelection.ids || []);
+  if(e.ctrlKey || e.metaKey || e.shiftKey){ if(ids.has(id)) ids.delete(id); else ids.add(id); }
+  else { ids.clear(); ids.add(id); }
+  setLiveMeshIds(o, Array.from(ids));
+  buildInspector();
   return true;
 }
 viewportEvents = window.LK_EDITOR_VIEWPORT_EVENTS && window.LK_EDITOR_VIEWPORT_EVENTS.create({
   ED, GAME, canvas,
   clearHoverPickHelper,
   updateHover: e => viewportPicking.updateHover(e),
-  isLiveMaterialSelectionActive,
-  updateLiveMaterialSelection,
-  commitLiveMaterialSelection,
+  isLiveMaterialSelectionActive: () => isLiveMaterialSelectionActive() || isLiveMeshSelectionActive(),
+  updateLiveMaterialSelection:updateLiveEditorSelection,
+  commitLiveMaterialSelection:commitLiveEditorSelection,
   setActiveViewportAt,
   flyStart,
   flyMove,
   flyEnd,
   isFlyActive: () => fly.rmb,
   flyMoved: () => fly.moved,
+  setNavigationActive:active => {
+    viewportPointerNavigation = !!active;
+    if(active){
+      clearHoverPickHelper();
+      clearLiveMeshHover();
+      if(viewportPicking && viewportPicking.clearMaterialPickHelper) viewportPicking.clearMaterialPickHelper();
+    }
+  },
+  markWheelNavigation:() => {
+    viewportWheelUntil = performance.now() + 180;
+    clearHoverPickHelper();
+    clearLiveMeshHover();
+    if(viewportPicking && viewportPicking.clearMaterialPickHelper) viewportPicking.clearMaterialPickHelper();
+  },
   isActiveViewportCameraDriven,
+  isActiveViewportNavigationLocked,
+  isActiveViewportPerspectiveSecondary,
   zoomActiveViewport,
   adjustFlySpeed: deltaY => {
     fly.speed = Math.max(2, Math.min(80, fly.speed * (deltaY > 0 ? .85 : 1.18)));
@@ -1323,6 +1596,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   requestDeleteSelection,
   buildInspector,
   copyPlayerBlueprintAsset,
+  convertPlayerToLogicElement,
   deselect,
   setGrid,
   saveScene,
@@ -1402,6 +1676,7 @@ musicLibraryPanel = window.LK_EDITOR_MUSIC_LIBRARY_PANEL && window.LK_EDITOR_MUS
   section,
   selectRow,
   el,
+  confirmEditorAction,
 });
 materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_EDITOR.create({
   THREE,
@@ -1422,15 +1697,43 @@ materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_E
     isActive: isLiveMaterialSelectionActive,
     toggle: toggleLiveMaterialSelection,
     sync: syncLiveMaterialSelection,
+    setIds:(o, ids) => {
+      if(!isLiveMaterialSelectionActive(o)) return;
+      ED.liveMaterialSelection.ids = new Set(ids || []);
+      syncLiveMaterialSelection(o);
+    },
   },
   requestWarmup: label => requestEditorWarmup(label),
   btnRow,
   el,
 });
+meshEditor = window.LK_EDITOR_MESH_EDITOR && window.LK_EDITOR_MESH_EDITOR.create({
+  THREE,
+  GAME,
+  STORE,
+  section,
+  btnRow,
+  el,
+  buildInspector,
+  markDirty,
+  refreshOutliner,
+  status,
+  pushHistory,
+  removeEntity,
+  restoreEntity,
+  selectObject,
+  liveSelection:{
+    isActive:isLiveMeshSelectionActive,
+    toggle:toggleLiveMeshSelection,
+    ids:liveMeshIds,
+    selectIds:setLiveMeshIds,
+  },
+});
 function getFirstMaterial(o){ return materialEditor.getFirstMaterial(o); }
 function applyMaterialPatch(o, patch){ return materialEditor.applyMaterialPatch(o, patch); }
 function musicLibrarySection(title, api){ return musicLibraryPanel.build(title, api); }
 function buildMaterialEditor(box, o){ return materialEditor.build(box, o); }
+function buildMeshEditor(box, o){ return meshEditor && meshEditor.build ? meshEditor.build(box, o) : null; }
 
   const tf = {inputs: null};   // live transform inputs for sync during gizmo drag
 function syncTransformFields(){ if(inspectorController) inspectorController.syncTransformFields(); }
@@ -1459,12 +1762,15 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   commitTransformHistory,
   beginColliderHistory,
   commitColliderHistory,
+  beginInspectorHistory,
+  commitInspectorHistory,
   resetTransform,
   syncTransformFields,
   onGizmoChange,
   setColliderEnabled,
   setPhysicsEnabled,
   buildMaterialEditor,
+  buildMeshEditor,
   duplicateEntity,
   requestDeleteEntity,
   replaceSelectedGlb: beginReplaceObject,
@@ -1527,6 +1833,8 @@ playerSetupInspector = window.LK_EDITOR_PLAYER_SETUP_INSPECTOR && window.LK_EDIT
   focusSelected,
   section,
   sliderRow,
+  selectRow,
+  checkRow,
   btnRow,
   el,
 });
@@ -1542,6 +1850,7 @@ hudInspector = window.LK_EDITOR_HUD_INSPECTOR && window.LK_EDITOR_HUD_INSPECTOR.
 });
 environmentInspector = window.LK_EDITOR_ENVIRONMENT_INSPECTOR && window.LK_EDITOR_ENVIRONMENT_INSPECTOR.create({
   GAME,
+  STORE,
   markDirty,
   buildInspector,
   selectObject,
@@ -1549,6 +1858,14 @@ environmentInspector = window.LK_EDITOR_ENVIRONMENT_INSPECTOR && window.LK_EDITO
   sliderRow,
   checkRow,
   btnRow,
+  el,
+});
+renderingInspector = window.LK_EDITOR_RENDERING_INSPECTOR && window.LK_EDITOR_RENDERING_INSPECTOR.create({
+  GAME,
+  markDirty,
+  section,
+  selectRow,
+  checkRow,
   el,
 });
 logicInspector = window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR && window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR.create({
@@ -1590,12 +1907,14 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
   objectInspector,
   hudInspector,
   environmentInspector,
+  renderingInspector,
   logicInspector,
   playerCameraInspector,
   playerLightsInspector,
   playerAttachmentsInspector,
   playerSetupInspector,
   buildMaterialEditor,
+  buildMeshEditor,
   copyPlayerBlueprintAsset,
   currentPlayerBlueprint,
   applyPlayerBlueprintAsset,
@@ -1603,6 +1922,7 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
   onGizmoChange,
   beginTransformHistory,
   commitTransformHistory,
+  pushHistory,
   updateSelectionAndDropHelpers,
 });
 function buildInspector(){ return inspectorController.buildInspector(); }
@@ -1725,5 +2045,4 @@ GAME.editor = {
   setLeftMode,
   refreshAssetsPanel,
 };
-console.info('LotKing: engine editor ready');
 })();

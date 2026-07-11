@@ -72,7 +72,7 @@ function create(options){
     for(const c of colliders.circle){
       if(!c || c.enabled === false || c.physics || isDriveSurfaceCollider(c)) continue;
       activeCircles++;
-      parts.push([c.x, c.y || 0, c.z, c.r, colliderMass(c)].map(v => Math.round(v * 100)).join(','));
+      parts.push([c.x, c.y || 0, c.z, c.r, c.hy || c.r, colliderMass(c)].map(v => Math.round(v * 100)).join(','));
     }
     parts.unshift('b' + activeBoxes, 'c' + activeCircles);
     return parts.join('|');

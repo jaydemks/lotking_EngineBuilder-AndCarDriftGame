@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LOT KING ENGINE EDITOR & CAR DRIFT GAME</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/lot-king.css">
 </head>
 <body>
@@ -226,39 +227,50 @@
     </div>
 
     <div class="settingsSection" data-settings-section="video">
-      <div class="settingsRow">
+      <div class="settingsRow" data-video-setting="quality">
         <div class="settingsMeta">
           <div class="settingsName">Render quality</div>
           <div class="settingsDesc">Visual profile for the engine editor and viewport.</div>
         </div>
         <select id="videoQuality" class="settingsSelect">
-          <option>High</option>
-          <option>Balanced</option>
-          <option>Performance</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high" selected>High</option>
+          <option value="superhigh">Super High</option>
+          <option value="extreme">Extreme</option>
         </select>
       </div>
-      <div class="settingsRow">
+      <div class="settingsRow" data-video-setting="antialiasing">
         <div class="settingsMeta">
           <div class="settingsName">Antialiasing</div>
-          <div class="settingsDesc">Sharpens edges and lines in the game and editor.</div>
+          <div class="settingsDesc">FXAA is mobile-friendly; 2× and 4× supersampling render edges at a higher internal resolution.</div>
         </div>
         <select id="videoAA" class="settingsSelect">
-          <option>High</option>
-          <option>Normal</option>
-          <option>Performance</option>
+          <option value="off">Off</option>
+          <option value="fxaa">FXAA / mobile</option>
+          <option value="ssaa2x" selected>Supersampling 2×</option>
+          <option value="ssaa4x">Supersampling 4×</option>
         </select>
       </div>
-      <div class="settingsRow">
+      <div class="settingsRow" data-video-setting="rendererMode">
         <div class="settingsMeta">
           <div class="settingsName">Renderer</div>
-          <div class="settingsDesc">Standard WebGL or experimental raytracing preset with safe fallback.</div>
+          <div class="settingsDesc">Standard rendering or enhanced ray lighting with automatic WebGL compatibility.</div>
         </div>
         <select id="videoRenderer" class="settingsSelect">
           <option value="webgl">Three.js WebGL</option>
-          <option value="raytracing">Raytracing experimental</option>
+          <option value="raytracing">Ray lighting</option>
         </select>
       </div>
-      <div class="settingsRow">
+      <div class="settingsRow" data-video-setting="shadows">
+        <div class="settingsMeta"><div class="settingsName">Dynamic shadows</div><div class="settingsDesc">Quality-scaled realtime scene shadows.</div></div>
+        <label class="settingsToggle"><input id="videoShadows" type="checkbox" checked><span>Enabled</span></label>
+      </div>
+      <div class="settingsRow" data-video-setting="reflections">
+        <div class="settingsMeta"><div class="settingsName">Material reflections</div><div class="settingsDesc">Environment response for reflective materials.</div></div>
+        <label class="settingsToggle"><input id="videoReflections" type="checkbox" checked><span>Enabled</span></label>
+      </div>
+      <div class="settingsRow" data-video-setting="volumetricLighting">
         <div class="settingsMeta">
           <div class="settingsName">Volumetric lighting</div>
           <div class="settingsDesc">Enables screen-space light rays in the current renderer.</div>
@@ -333,6 +345,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="js/runtime/console-policy.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
@@ -341,6 +354,10 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/FXAAShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/SimplexNoise.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSRShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSRPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
 <script src="js/runtime/assets.js"></script>
