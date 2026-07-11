@@ -2,6 +2,18 @@
 
 [▶ Watch the Lot King Engine demo video](docs/media/lot-king-engine-demo.mp4)
 
+## Project Status And Demo Availability
+
+The complete author demo project (`.lkep.json`) is currently too large to publish directly in this GitHub repository. A separate download and a browser-based live demo that requires no installation are planned for upcoming releases.
+
+Cloning or downloading the repository locally already provides the editor's default project template and the bundled level content available at that point in development. This should be enough to explore a substantial part of the current editor while the complete author demo is being prepared for separate distribution.
+
+The editor cannot yet produce a fully featured finished car game on its own. Several reusable gameplay-authoring systems are still missing beyond the current drift-points foundation, including customizable objectives, broader game rules and more high-level Logic Element methods. The current release is a capable experimental engine/editor, but it should not yet be treated as a complete production game toolkit.
+
+Many releases were developed in a short period during my available extra time. Development will continue, although updates may now arrive more slowly because the project has already become large for a single developer.
+
+If a community grows around the project, everyone is welcome to create, exchange and share their own Lot King projects with other users.
+
 Lot King is a browser drift game and a local-first 3D engine/editor being built around it.
 
 The simplest way to describe it is this: you can download the project, run it locally, build a small but fairly complete browser car game, export a playable version, and publish that build on your own site without a traditional install/build pipeline. The same editor can also be published as a read-only online demo, or used more creatively as a browser 3D authoring tool for interactive scenes, cinematic pages, prototypes, and small game-like web experiences.
