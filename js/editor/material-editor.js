@@ -31,6 +31,15 @@ function create(deps){
     if(o && o.userData && o.userData.editorType === 'player' && GAME && GAME.player && GAME.player.getModel){
       return GAME.player.getModel() || o;
     }
+    if(o && o.userData && o.userData.playerCarLogicElement && o.traverse){
+      let model = null;
+      o.traverse(node => {
+        if(model || !node.userData) return;
+        const id = String(node.userData.logicElementSceneId || '').toLowerCase();
+        if(id === 'vehicle_model' || id === 'model' || node.userData.logicVehicleModel === true) model = node;
+      });
+      if(model) return model;
+    }
     return o;
   }
 

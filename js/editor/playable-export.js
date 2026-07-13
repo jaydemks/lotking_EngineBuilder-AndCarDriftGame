@@ -372,6 +372,7 @@ function create(deps){
     getCurrentPlayableProject,
     buildPlayableBundle,
     buildPlayableHtml,
+    buildPlayableProjectZip,
     exportPlayableProject,
     exportCurrentPlayableProjectZip,
     exportCurrentPlayableProject,

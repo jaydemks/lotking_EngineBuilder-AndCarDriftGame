@@ -81,7 +81,7 @@ function create(options){
   }
 
   function setTracks(list){
-    if(!Array.isArray(list) || !list.length) return;
+    if(!Array.isArray(list)) return;
     const curId = current && current.id;
     tracks.length = 0;
     list.forEach(t => tracks.push(Object.assign({}, t)));

@@ -55,6 +55,86 @@ function create(deps){
     return null;
   }
 
+  const ROOT_ASSET_PREFIXES = ['models/', 'media/', 'musics/'];
+  const ROOT_ASSET_PROBE_CACHE = new Map();
+
+  function normalizeRootAssetPath(value){
+    if(typeof value !== 'string') return null;
+    let raw = value.trim();
+    if(!raw || /^(data:|blob:)/i.test(raw)) return null;
+    try {
+      if(/^https?:\/\//i.test(raw)){
+        const url = new URL(raw, location.href);
+        if(url.origin !== location.origin) return null;
+        raw = url.pathname || '';
+      }
+    } catch(err){}
+    raw = raw.replace(/\\/g, '/').replace(/[?#].*$/, '').replace(/^\/+/, '').replace(/^\.\/+/, '');
+    return ROOT_ASSET_PREFIXES.some(prefix => raw.indexOf(prefix) === 0) ? raw : null;
+  }
+
+  function fileNameFromAssetValue(value){
+    if(typeof value !== 'string') return null;
+    const clean = value.trim().replace(/\\/g, '/').replace(/[?#].*$/, '');
+    if(!clean || /^(data:|blob:|https?:)/i.test(clean) || clean.indexOf(':') >= 0) return null;
+    const name = clean.split('/').pop();
+    return name && /\.[a-z0-9]{2,5}$/i.test(name) ? name : null;
+  }
+
+  function rootAssetCandidates(owner, prop, label, meta){
+    const values = [
+      meta && meta.src,
+      meta && meta.source,
+      meta && meta.name,
+      owner && owner[prop],
+      owner && owner.source,
+      owner && owner.fileName,
+      owner && owner.name,
+      owner && owner.asset && owner.asset.source,
+      owner && owner.asset && owner.asset.name,
+      label,
+    ];
+    const candidates = [];
+    const seen = new Set();
+    const add = path => {
+      const p = normalizeRootAssetPath(path);
+      if(p && !seen.has(p)){ seen.add(p); candidates.push(p); }
+    };
+    values.forEach(add);
+    values.forEach(value => {
+      const name = fileNameFromAssetValue(value);
+      if(!name) return;
+      if(/\.(glb|gltf)$/i.test(name)) add('models/' + name);
+      else if(/\.(mp3|wav|ogg|m4a|flac)$/i.test(name)){
+        if(/music\.menu|menu/i.test(String(label || ''))) add('musics/menu/' + name);
+        add('musics/' + name);
+        add('musics/menu/' + name);
+      } else if(/\.(png|jpe?g|webp|gif|avif|hdr)$/i.test(name)){
+        add('media/' + name);
+        add('media/images/' + name);
+      }
+    });
+    return candidates;
+  }
+
+  async function rootAssetPathExists(path){
+    if(!path || typeof fetch !== 'function') return false;
+    if(ROOT_ASSET_PROBE_CACHE.has(path)) return ROOT_ASSET_PROBE_CACHE.get(path);
+    const probe = fetch(path, {method:'HEAD', cache:'no-store'}).then(response => response.ok).catch(() => false);
+    ROOT_ASSET_PROBE_CACHE.set(path, probe);
+    return probe;
+  }
+
+  async function resolveRootAssetPath(owner, prop, label, meta){
+    const direct = normalizeRootAssetPath(meta && meta.src) || normalizeRootAssetPath(owner && owner[prop]);
+    if(direct) return direct;
+    const candidates = rootAssetCandidates(owner, prop, label, meta);
+    for(const candidate of candidates){
+      if(await rootAssetPathExists(candidate)) return candidate;
+    }
+    return null;
+  }
+
   async function normalizePlayableAssetRef(owner, prop, label, dbCache, library, warnings, dbProp){
     if(!owner) return;
     const explicitDbProp = dbProp || 'dbKey';
@@ -66,13 +146,33 @@ function create(deps){
       src: owner[prop],
       dbKey: owner[explicitDbProp] || owner.dbKey || (owner.asset && owner.asset.dbKey),
       key: owner.key || owner.id || (owner.asset && owner.asset.key),
+      source: owner.source || (owner.asset && owner.asset.source),
+      name: owner.name || (owner.asset && owner.asset.name),
     };
+    const rootPath = await resolveRootAssetPath(owner, prop, label, meta);
+    if(rootPath){
+      owner[prop] = rootPath;
+      if(owner[explicitDbProp]) owner[explicitDbProp] = null;
+      if(owner.dbKey) owner.dbKey = null;
+      if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+      return;
+    }
     if((!meta.src || /^blob:/i.test(meta.src)) && !meta.dbKey){
       const lib = findAssetLibraryEntry(library, meta);
       if(lib){
         if(lib.src && !/^blob:/i.test(lib.src)) meta.src = lib.src;
         if(lib.dbKey) meta.dbKey = lib.dbKey;
+        if(lib.source) meta.source = lib.source;
+        if(lib.name) meta.name = lib.name;
       }
+    }
+    const libraryRootPath = await resolveRootAssetPath(owner, prop, label, meta);
+    if(libraryRootPath){
+      owner[prop] = libraryRootPath;
+      if(owner[explicitDbProp]) owner[explicitDbProp] = null;
+      if(owner.dbKey) owner.dbKey = null;
+      if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+      return;
     }
     if(typeof meta.src === 'string' && /^blob:/i.test(meta.src)){
       meta.dbKey = meta.dbKey || meta.src.slice(5);
@@ -121,6 +221,7 @@ function create(deps){
 
   async function preparePlayableProject(project){
     const prepared = JSON.parse(JSON.stringify(project || {}));
+    if(Object.prototype.hasOwnProperty.call(prepared, 'embeddedLevels')) delete prepared.embeddedLevels;
     const scene = prepared.scene || prepared;
     const warnings = [];
     const dbCache = new Map();
@@ -138,16 +239,24 @@ function create(deps){
           await normalizePlayableAssetRef(entry.props, 'src', 'added.texture' + (entry.name ? ' "' + entry.name + '"' : ''), dbCache, library, warnings);
         }
         if(entry && entry.kind === 'logicElement'){
+          if(entry.props) await normalizePlayableObjectBlobs(entry.props, 'logicElement.materials', dbCache, library, warnings, 0);
+          if(entry.meshEdits) await normalizePlayableObjectBlobs(entry.meshEdits, 'logicElement.meshEdits', dbCache, library, warnings, 0);
           const logicScene = entry.graph && entry.graph.logicScene;
           const elements = logicScene ? [logicScene.root].concat(logicScene.elements || []) : [];
           for(const element of elements){
             if(element && element.asset) await normalizePlayableAssetRef(element.asset, 'src', 'logicElement.' + (element.name || element.id || 'mesh'), dbCache, library, warnings);
+            if(element && (element.matProps || element.materials || element.props)) await normalizePlayableObjectBlobs(element.matProps || element.materials || element.props, 'logicElement.materials.' + (element.name || element.id || 'element'), dbCache, library, warnings, 0);
           }
           const assetScene = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.logicScene;
           const assetElements = assetScene ? [assetScene.root].concat(assetScene.elements || []) : [];
           for(const element of assetElements){
             if(element && element.asset) await normalizePlayableAssetRef(element.asset, 'src', 'logicElementAsset.' + (element.name || element.id || 'mesh'), dbCache, library, warnings);
+            if(element && (element.matProps || element.materials || element.props)) await normalizePlayableObjectBlobs(element.matProps || element.materials || element.props, 'logicElementAsset.materials.' + (element.name || element.id || 'element'), dbCache, library, warnings, 0);
           }
+          const vehicleAudio = entry.graph && entry.graph.vehiclePawn && entry.graph.vehiclePawn.engineAudio;
+          if(vehicleAudio && vehicleAudio.set) await normalizePlayableObjectBlobs(vehicleAudio.set, 'logicElement.vehiclePawn.engineAudio.set', dbCache, library, warnings, 0);
+          const assetVehicleAudio = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.vehiclePawn && entry.logicAsset.graph.vehiclePawn.engineAudio;
+          if(assetVehicleAudio && assetVehicleAudio.set) await normalizePlayableObjectBlobs(assetVehicleAudio.set, 'logicElementAsset.vehiclePawn.engineAudio.set', dbCache, library, warnings, 0);
         }
       }
     }

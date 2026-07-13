@@ -18,8 +18,6 @@ function create(deps){
     {remote: 'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js', local: 'vendor/cannon.min.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js', local: 'vendor/GLTFLoader.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js', local: 'vendor/SkeletonUtils.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js', local: 'vendor/FontLoader.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js', local: 'vendor/TextGeometry.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js', local: 'vendor/Lensflare.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js', local: 'vendor/EffectComposer.js'},
     {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js', local: 'vendor/RenderPass.js'},
@@ -173,6 +171,17 @@ function create(deps){
     }
   }
 
+  async function runExportQueue(tasks, concurrency){
+    let cursor = 0;
+    const workers = Array.from({length: Math.min(concurrency || 6, tasks.length)}, async () => {
+      while(cursor < tasks.length){
+        const task = tasks[cursor++];
+        await task();
+      }
+    });
+    await Promise.all(workers);
+  }
+
   async function buildPlayableProjectZip(bundle, onProgress){
     const report = typeof onProgress === 'function'
       ? onProgress
@@ -272,18 +281,20 @@ function create(deps){
     ].join('\n')
     );
     zip.file(RUNTIME_TEMPLATE, runtimeHtml);
-    for(const ref of runtimeRefs){
+    const packTasks = [];
+    runtimeRefs.forEach(ref => packTasks.push(async () => {
       await addFileToZip(zip, ref, ref, warnings, ref.startsWith('js/') || ref.startsWith('css/') || /^js\/(runtime|engine)\//.test(ref));
       setProgress(done(), 'Copiamento risorse runtime (' + doneCount + '/' + (totalToPack - 1) + ')');
-    }
-    for(const lib of VENDOR_LIBS){
+    }));
+    VENDOR_LIBS.forEach(lib => packTasks.push(async () => {
       await addFileToZip(zip, lib.remote, lib.local, warnings, true);
       setProgress(done(), 'Copiamento vendor (' + doneCount + '/' + (totalToPack - 1) + ')');
-    }
-    for(const asset of referencedAssets){
+    }));
+    referencedAssets.forEach(asset => packTasks.push(async () => {
       await addFileToZip(zip, asset, asset, warnings, false);
       setProgress(done(), 'Copiamento asset (' + doneCount + '/' + (totalToPack - 1) + ')');
-    }
+    }));
+    await runExportQueue(packTasks, 6);
     setProgress(done(), 'Creazione archivio ZIP', 'loading');
     const blob = await zip.generateAsync({type: 'blob'});
     const a = document.createElement('a');

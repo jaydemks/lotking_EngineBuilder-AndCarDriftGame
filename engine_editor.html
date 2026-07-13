@@ -94,6 +94,7 @@
         <div class="tuneHint">0 = base style</div>
       </div>
       <div class="tunePresetBar">
+        <button class="tunePreset" type="button" data-tune-preset="default">Default</button>
         <button class="tunePreset" type="button" data-tune-preset="race">Race mode</button>
         <button class="tunePreset" type="button" data-tune-preset="drift">Drift mode</button>
       </div>
@@ -355,8 +356,6 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="js/runtime/console-policy.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js"></script>
@@ -382,6 +381,10 @@
 <script src="js/runtime/sky.js"></script>
 <script src="js/runtime/post.js"></script>
 <script src="js/runtime/physics-world.js"></script>
+<script src="js/runtime/vehicle-visual-controller.js?v=0.6.7-menu-sequence-1"></script>
+<script src="js/runtime/vehicle-raycast-actuator.js?v=0.6.7-menu-sequence-1"></script>
+<script src="js/runtime/vehicle-steering-controller.js?v=0.6.7-menu-sequence-1"></script>
+<script src="js/runtime/vehicle-engine-controller.js?v=0.6.7-menu-sequence-1"></script>
 <script src="js/runtime/drive-tuning.js"></script>
 <script src="js/runtime/player-data-widgets.js"></script>
 <script src="js/runtime/game-hud.js"></script>
@@ -404,7 +407,10 @@
 <script src="js/runtime/input/mapping-overlay.js"></script>
 <script src="js/runtime/input/touch-controls.js"></script>
 <script src="js/runtime/input/input-menu.js"></script>
-<script src="js/lot-king.js"></script>
+<script src="js/runtime/pawn-core.js"></script>
+<script src="js/lot-king.js?v=0.6.7-menu-sequence-1"></script>
+<script src="js/runtime/vehicle-physics-backends.js"></script>
+<script src="js/runtime/vehicle-pawns.js"></script>
 <script src="js/plugins/plugin-api.js"></script>
 <script src="js/plugins/plugin-manager.js"></script>
 <script src="js/plugins/logic-element-plugin.js"></script>
@@ -460,13 +466,14 @@
 <script src="js/editor/mesh-editor.js"></script>
 <script src="js/editor/object-inspector.js"></script>
 <script src="js/editor/player-camera-inspector.js"></script>
+<script src="js/editor/player-collider-inspector.js"></script>
 <script src="js/editor/player-lights-inspector.js"></script>
 <script src="js/editor/player-attachments-inspector.js"></script>
-<script src="js/editor/player-setup-inspector.js"></script>
+<script src="js/editor/player-setup-inspector.js?v=0.6.7-player-model-1"></script>
 <script src="js/editor/hud-inspector.js"></script>
 <script src="js/editor/environment-inspector.js"></script>
 <script src="js/editor/rendering-inspector.js"></script>
-<script src="js/editor/logic-elements-inspector.js"></script>
+<script src="js/editor/logic-elements-inspector.js?v=0.6.7-player-model-1"></script>
 <script src="js/editor/inspector-controller.js"></script>
 <script src="js/editor/cinema-studio.js"></script>
 <script src="js/editor/viewport-layout.js"></script>
@@ -475,7 +482,7 @@
 <script src="js/editor/playable-export-assets.js"></script>
 <script src="js/editor/playable-export-zip.js"></script>
 <script src="js/editor/playable-export.js"></script>
-<script src="js/editor/editor.js"></script>
+<script src="js/editor/editor.js?v=0.6.7-player-model-1"></script>
 <script>
   addEventListener('load', function(){
     if(!window.LOT_KING || !LOT_KING.editor || !LOT_KING.editor.enter) return;
@@ -484,6 +491,7 @@
     var ready = assets && assets.ensureReady ? assets.ensureReady('editor') : Promise.resolve();
     ready.then(function(){
       LOT_KING.editor.enter();
+      document.body.classList.add('lk-editor-ui-open');
       if(assets && assets.finishLoading) assets.finishLoading();
     }).catch(function(err){
       console.warn('LotKing editor: avvio editor incompleto', err);

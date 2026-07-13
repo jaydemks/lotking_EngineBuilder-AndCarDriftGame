@@ -54,7 +54,8 @@ function create(deps){
     status('player_car Logic copied, promoted to Base, and applied: ' + asset.name);
     refreshAssetsPanel();
   }
-  function playerLogicElementAsset(){
+  function playerLogicElementAsset(opts){
+    const options = opts || {};
     const bp = currentPlayerBlueprint();
     if(!bp || !STORE.logicElementAssets || !window.LK_LOGIC_GRAPH) return null;
     const pawn = JSON.parse(JSON.stringify(bp));
@@ -67,6 +68,7 @@ function create(deps){
       src:bp.modelSrc || null, dbKey:bp.modelDbKey || null, name:bp.modelName || 'Player Car GLB', fit:5.6,
     } : null;
     graph.name = 'Player Car Logic Element';
+    graph.vehiclePawn = Object.assign({}, graph.vehiclePawn || {}, {proceduralFallback:'native-player-visual-v1'});
     if(assetRef){
       graph.logicScene = {
         root:{id:'root', name:'Player Car Root / Imported GLB', type:'mesh', asset:assetRef, linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#7dd3fc'},
@@ -96,22 +98,47 @@ function create(deps){
       });
     });
     const variable = (name, type, value, category) => ({id:'var_' + name, name, type, value, defaultValue:value, exposed:true, category});
-    graph.variables = [
-      variable('PawnEnabled', 'boolean', bp.enabled !== false, 'Pawn'),
-      variable('Hidden', 'boolean', bp.hidden === true, 'Pawn'),
-      Object.assign(variable('ControllerPlayerId', 'number', pawn.controllerIndex == null ? -1 : pawn.controllerIndex + 1, 'Input'), {ui:'player-id'}),
-      variable('Horsepower', 'number', Number(bp.tuning && bp.tuning.horsepower) || 450, 'Driving'),
-      variable('Torque', 'number', Number(bp.tuning && bp.tuning.torque) || 0, 'Driving'),
-      variable('MaxSpeed', 'number', Number(bp.tuning && bp.tuning.maxSpeed) || 0, 'Driving'),
-      variable('CameraMode', 'string', bp.cam && bp.cam.mode || 'arcade', 'Camera'),
-      variable('HeadlightsEnabled', 'boolean', !(bp.lights && bp.lights.enabled === false), 'Lights'),
-      variable('ExhaustEnabled', 'boolean', !(bp.exhaust && bp.exhaust.enabled === false), 'Effects'),
-      variable('SkidsEnabled', 'boolean', !(bp.skids && bp.skids.enabled === false), 'Effects'),
-    ];
-    // Full source snapshot is retained for the future multi-Pawn runtime adapter.
+    const authoredTuning = pawn.tuning || {};
+    const pawnRuntimeTuning = Object.assign({}, authoredTuning, {
+      horsepower:Number(authoredTuning.horsepower) || 450,
+      torque:Number(authoredTuning.torque) || 5,
+      maxSpeed:Math.max(8, 38 + (Number(authoredTuning.maxSpeed) || 0) * 2),
+      acceleration:Math.max(4, 16 + (Number(authoredTuning.torque) || 0) * .8),
+      brake:Math.max(8, 24 + (Number(authoredTuning.brake) || 0)),
+      steer:Math.max(.6, 2.2 + (Number(authoredTuning.steer) || 0) * .12),
+      grip:Math.max(.25, Math.min(1, .84 + (Number(authoredTuning.grip) || 0) * .025)),
+    });
+    const maxSpeedVariable = graph.variables.find(item => item.name === 'MaxSpeed');
+    if(maxSpeedVariable) maxSpeedVariable.value = maxSpeedVariable.defaultValue = pawnRuntimeTuning.maxSpeed;
+    graph.vehiclePawn = window.LK_RUNTIME_VEHICLE_PAWNS
+      ? window.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig(Object.assign({}, pawn, {
+          id:'player-car-logic-' + Date.now().toString(36),
+          playerId:pawn.controllerIndex == null ? null : pawn.controllerIndex + 1,
+          possessed:pawn.controllerIndex != null,
+          proceduralFallback:'native-player-visual-v1',
+          tuning:pawnRuntimeTuning,
+          effects:{
+            neonEnabled:!(pawn.lights && pawn.lights.neon && pawn.lights.neon.enabled === false),
+            exhaustEnabled:!(pawn.exhaust && pawn.exhaust.enabled === false),
+            skidEnabled:!(pawn.skids && pawn.skids.enabled === false),
+            smokeIntensity:Number(pawn.exhaust && pawn.exhaust.intensity) || 1,
+            skidLife:Number(pawn.skids && pawn.skids.life) || 12,
+          },
+        }))
+      : Object.assign({}, pawn, {schemaVersion:2, playerId:pawn.controllerIndex == null ? null : pawn.controllerIndex + 1, proceduralFallback:'native-player-visual-v1', tuning:pawnRuntimeTuning});
+    const valueAt = (source, path) => String(path || '').split('.').reduce((value, key) => value == null ? undefined : value[key], source);
+    graph.variables = (graph.variables || []).map(variableDef => {
+      const next = Object.assign({}, variableDef, {exposed:variableDef.exposed === true});
+      const bound = valueAt(graph.vehiclePawn, next.binding);
+      if(bound !== undefined) next.value = next.defaultValue = JSON.parse(JSON.stringify(bound));
+      return next;
+    });
+    // The full source snapshot remains available for lossless v0.6.6 migration.
     graph.playerPawnBlueprint = pawn;
-    return STORE.logicElementAssets.saveAsset('Player Car Logic Element', graph, {
-      migration:{kind:'player-pawn-snapshot', version:1, sourceLevelId:ED.trackId || null},
+    return STORE.logicElementAssets.saveAsset(options.name || 'Player Car Logic Element', graph, {
+      id:options.id || undefined,
+      createdAt:options.createdAt || undefined,
+      migration:{kind:'vehicle-pawn', version:2, sourceLevelId:ED.trackId || null},
     });
   }
   function applyPlayerBlueprintAsset(player, opts){

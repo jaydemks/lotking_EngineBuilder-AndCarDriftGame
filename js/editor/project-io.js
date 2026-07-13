@@ -36,6 +36,7 @@ function create(deps){
   let projectFileHandle = null;
   let projectFileBusy = false;
   let activeBrowserProjectId = null;
+  let workspaceProjectSyncBusy = false;
   let startupProjectsShown = false;
   let projectsLanguageBound = false;
   let projectImportTarget = 'project';
@@ -112,13 +113,48 @@ function create(deps){
     const workspace = window.LK_PROJECT_WORKSPACE;
     const linked = workspace && ((workspace.isFileMode && workspace.isFileMode()) || (workspace.isFolderMode && workspace.isFolderMode()));
     if(!workspace || !linked || !workspace.saveProject) return;
+    const folderMode = workspace.isFolderMode && workspace.isFolderMode();
+    const projectName = browserProjectName(project);
+    const folderSyncTitle = (en, it) => tr('Syncing local folder to: ', 'Allineando cartella locale a: ') + tr(en, it);
+    const progressToken = beginStatusWork(
+      folderMode ? folderSyncTitle('project preparation', 'preparazione progetto') : tr('Syncing LKEP file', 'Sincronizzazione file LKEP'),
+      folderMode ? projectName : tr('Preparing project file', 'Preparazione file progetto'),
+      'loading'
+    );
     preparePortableProject(project).then(result => {
-      return workspace.saveProject(result.project, {name:browserProjectName(result.project)}).then(info => ({result, info}));
+      updateStatusWork(
+        progressToken,
+        45,
+        folderMode ? projectName : tr('Writing linked project file', 'Scrittura file progetto collegato'),
+        'loading',
+        folderMode ? folderSyncTitle('workspace catalog and project files', 'catalogo workspace e file progetto') : null
+      );
+      return workspace.saveProject(result.project, {id:activeBrowserProjectId, name:browserProjectName(result.project)}).then(info => ({result, info}));
     }).then(bundle => {
       const warning = bundle.result.warnings && bundle.result.warnings.length ? ' (' + bundle.result.warnings[0] + ')' : '';
+      updateStatusWork(
+        progressToken,
+        92,
+        bundle.info.file,
+        'loading',
+        folderMode ? folderSyncTitle('finalization', 'finalizzazione') : null
+      );
+      finishStatusWork(
+        progressToken,
+        folderMode ? tr('Local folder synced', 'Cartella locale allineata') : tr('LKEP file synced', 'File LKEP sincronizzato'),
+        bundle.info.file + warning,
+        bundle.result.warnings && bundle.result.warnings.length ? 'warning' : 'success'
+      );
       status('Workspace copy saved: ' + bundle.info.file + warning);
     }).catch(err => {
-      status('Workspace copy failed: ' + (err && err.message ? err.message : err));
+      const message = err && err.message ? err.message : String(err || 'Error');
+      finishStatusWork(
+        progressToken,
+        folderMode ? tr('Local folder sync failed', 'Allineamento cartella fallito') : tr('LKEP file sync failed', 'Sincronizzazione file LKEP fallita'),
+        message,
+        'error'
+      );
+      status('Workspace copy failed: ' + message);
     });
   }
 
@@ -219,6 +255,7 @@ function create(deps){
     const name = opts.name || browserProjectName(project);
     const id = targetId || uniqueBrowserProjectId(idx, name);
     const record = browserProjectRecord(idx, id) || {id};
+    const makeActive = opts.active !== false;
     const saved = JSON.parse(JSON.stringify(project || {}));
     saved.savedAt = now;
     saved.meta = Object.assign({}, saved.meta || {}, {trackId: saved.meta && saved.meta.trackId || id, trackName: name});
@@ -227,9 +264,9 @@ function create(deps){
     record.name = name;
     record.savedAt = now;
     if(!browserProjectRecord(idx, id)) idx.projects.push(record);
-    idx.activeId = id;
+    if(makeActive) idx.activeId = id;
     writeBrowserProjectIndex(idx);
-    setBrowserMarker(record);
+    if(makeActive) setBrowserMarker(record);
     return record;
   }
 
@@ -621,7 +658,7 @@ function create(deps){
   async function createBrowserProject(options){
     options = options || {};
     if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
-    const next = await promptEditorAction({title:tr('New project', 'Nuovo progetto'), message:tr('New project name:', 'Nome del nuovo progetto:'), value:'New Project', okText:tr('Create', 'Crea')});
+    const next = options.name || await promptEditorAction({title:tr('New project', 'Nuovo progetto'), message:tr('New project name:', 'Nome del nuovo progetto:'), value:'New Project', okText:tr('Create', 'Crea')});
     if(!next || !next.trim()) return;
     if(ED.dirty){
       const ok = await confirmEditorAction({
@@ -741,6 +778,51 @@ function create(deps){
     }).catch(err => status('Export failed: ' + (err && err.message ? err.message : err)));
   }
 
+  async function syncWorkspaceProjectCatalog(options){
+    options = options || {};
+    const workspace = window.LK_PROJECT_WORKSPACE;
+    if(workspaceProjectSyncBusy || !workspace || !workspace.isFolderMode || !workspace.isFolderMode() || !workspace.readWorkspaceProjects) return;
+    workspaceProjectSyncBusy = true;
+    try {
+      const bundle = await workspace.readWorkspaceProjects();
+      const entries = bundle && Array.isArray(bundle.projects) ? bundle.projects : [];
+      if(!entries.length) return;
+      const before = slugifyTrackName(activeBrowserProjectId || (getBrowserMarker() && getBrowserMarker().id) || browserProjectIndex().activeId || '');
+      let imported = 0;
+      entries.forEach(entry => {
+        if(!entry || !entry.text) return;
+        let project = null;
+        try { project = STORE.parseProject ? STORE.parseProject(entry.text) : JSON.parse(entry.text); }
+        catch(err){ return; }
+        const record = entry.record || {};
+        const name = record.name || importedProjectName({name:record.file || 'workspace-project.lkep.json'}, project);
+        writeBrowserProject(project, {id:record.id || (project.meta && project.meta.trackId) || name, name, active:false});
+        imported += 1;
+      });
+      const idx = browserProjectIndex();
+      const activeId = slugifyTrackName((bundle && bundle.activeId) || (entries[0] && entries[0].record && entries[0].record.id) || idx.activeId || '');
+      const activeRecord = browserProjectRecord(idx, activeId);
+      if(activeRecord){
+        idx.activeId = activeRecord.id;
+        writeBrowserProjectIndex(idx);
+        setBrowserMarker(activeRecord);
+      }
+      if(ED.projectsOpen) refreshProjectsOverlay();
+      if(imported) status(tr('Workspace projects linked: ', 'Progetti workspace collegati: ') + imported);
+      if(options.openActive && activeRecord && before !== slugifyTrackName(activeRecord.id)){
+        const project = readBrowserProject(activeRecord.id);
+        if(project){
+          STORE.importProject(JSON.stringify(project));
+          reopenEditorAndReload('Workspace project loaded', activeRecord.name || activeRecord.id);
+        }
+      }
+    } catch(err){
+      status(tr('Workspace catalog sync failed: ', 'Sincronizzazione catalogo workspace fallita: ') + (err && err.message ? err.message : err));
+    } finally {
+      workspaceProjectSyncBusy = false;
+    }
+  }
+
   function bindWorkspaceProjectImport(){
     if(bindWorkspaceProjectImport.done) return;
     bindWorkspaceProjectImport.done = true;
@@ -749,6 +831,10 @@ function create(deps){
       if(!detail.text) return;
       const progressToken = beginStatusWork(tr('Workspace import', 'Importazione workspace'), tr('Reading local project', 'Lettura progetto locale'), 'loading');
       importProjectAsBrowserProject({name:detail.name || 'workspace-project.lkep.json'}, detail.text, progressToken);
+    });
+    window.addEventListener('lot-king:workspace-state', event => {
+      const detail = event.detail || {};
+      if(detail.mode === 'folder') setTimeout(() => syncWorkspaceProjectCatalog({openActive:false}), 120);
     });
   }
 
@@ -760,8 +846,11 @@ function create(deps){
 
   bindWorkspaceProjectImport();
   const workspace = window.LK_PROJECT_WORKSPACE;
-  if(workspace && workspace.consumeStartupTemplate && workspace.consumeStartupTemplate() === 'empty'){
-    setTimeout(() => createBrowserProject({empty:true}), 650);
+  const openingEmptyWorkspace = workspace && workspace.consumeStartupTemplate && workspace.consumeStartupTemplate('empty') === 'empty';
+  if(openingEmptyWorkspace){
+    setTimeout(() => createBrowserProject({empty:true, name:'New Project'}), 650);
+  } else {
+    setTimeout(() => syncWorkspaceProjectCatalog({openActive:true}), 650);
   }
 
   return Object.freeze({

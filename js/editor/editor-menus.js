@@ -14,12 +14,45 @@ function create(deps){
   const $ = deps.$;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
+  function deleteReusableLogicAssets(items){
+    const assets = (items || []).filter(item => item && item.kind === 'logic-blueprint' && item.raw && item.raw.id);
+    if(!assets.length || !STORE.logicElementAssets || !STORE.logicElementAssets.deleteAsset) return;
+    const ids = new Set(assets.map(item => item.raw.id));
+    const linked = GAME.world && Array.isArray(GAME.world.registry) ? GAME.world.registry.filter(instance =>
+      instance && instance.userData && instance.userData.logicLinked && ids.has(instance.userData.logicAssetId)
+    ) : [];
+    if(linked.length){
+      deps.status(tr(
+        'Deletion blocked: ' + linked.length + ' linked scene instance(s). Make them local or delete them first.',
+        'Eliminazione bloccata: ' + linked.length + ' istanza/e collegate nella scena. Rendile locali o eliminale prima.'
+      ));
+      return;
+    }
+    deps.confirmEditorAction({
+      title:tr('Delete reusable Logic assets?', 'Eliminare gli asset Logic riutilizzabili?'),
+      message:tr('Delete ' + assets.length + ' selected project asset(s)? Built-in templates are never included.', 'Eliminare ' + assets.length + ' asset di progetto selezionati? I template built-in non vengono mai inclusi.'),
+      okText:tr('Delete selected', 'Elimina selezionati'),
+    }).then(ok => {
+      if(!ok) return;
+      const assignments = deps.folderAssignments && deps.folderAssignments('assets');
+      assets.forEach(item => {
+        STORE.logicElementAssets.deleteAsset(item.raw.id);
+        if(assignments) delete assignments[item.ref];
+      });
+      if(deps.writeFolderState) deps.writeFolderState();
+      deps.markDirty();
+      deps.refreshAssetsPanel();
+      deps.status(tr('Reusable Logic assets deleted', 'Asset Logic riutilizzabili eliminati'));
+    });
+  }
+
   function assetContextMenuItems(item){
     if(!item) return [];
     const selectedRefs = Array.isArray(ED.selectedAssets) && ED.selectedAssets.includes(item.ref) ? ED.selectedAssets.slice() : [];
     if(selectedRefs.length > 1 && deps.getAssetByRef){
       const selectedItems = selectedRefs.map(ref => deps.getAssetByRef(ref)).filter(Boolean);
       const placeable = selectedItems.filter(asset => ['imported-glb','imported-texture','scene','project-asset','logic-blueprint'].includes(asset.kind));
+      const deletableLogic = selectedItems.filter(asset => asset.kind === 'logic-blueprint');
       return [
         {label:'Add selected to level', icon:'＋', disabled:!placeable.length, action:() => {
           placeable.forEach((asset, index) => {
@@ -36,6 +69,8 @@ function create(deps){
             deps.refreshAssetsPanel();
           }
         }},
+        {sep:true},
+        {label:tr('Delete selected reusable assets', 'Elimina asset riutilizzabili selezionati'), icon:'🗑', disabled:!deletableLogic.length, action:() => deleteReusableLogicAssets(deletableLogic)},
       ];
     }
     if(item.kind === 'level'){
@@ -112,6 +147,8 @@ function create(deps){
     if(item.kind === 'logic-blueprint'){
       return [
         {label:'Place linked instance', icon:'＋', action:() => deps.placeAssetRef(item, deps.spawnPointAhead())},
+        {sep:true},
+        {label:tr('Delete reusable asset', 'Elimina asset riutilizzabile'), icon:'🗑', action:() => deleteReusableLogicAssets([item])},
       ];
     }
     return [];

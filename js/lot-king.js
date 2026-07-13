@@ -5,8 +5,28 @@
 (function(){
 'use strict';
 
+const REQUIRED_RUNTIME_MODULES = [
+  ['LK_RUNTIME_VEHICLE_VISUAL_CONTROLLER', 'js/runtime/vehicle-visual-controller.js', 'create'],
+  ['LK_RUNTIME_VEHICLE_RAYCAST_ACTUATOR', 'js/runtime/vehicle-raycast-actuator.js', 'create'],
+  ['LK_RUNTIME_VEHICLE_STEERING_CONTROLLER', 'js/runtime/vehicle-steering-controller.js', 'update'],
+  ['LK_RUNTIME_VEHICLE_ENGINE_CONTROLLER', 'js/runtime/vehicle-engine-controller.js', 'create'],
+];
+const missingRuntimeModules = REQUIRED_RUNTIME_MODULES.filter(item => !window[item[0]] || typeof window[item[0]][item[2]] !== 'function');
+if(missingRuntimeModules.length){
+  const missingFiles = missingRuntimeModules.map(item => item[1]);
+  const message = 'LotKing runtime: moduli mancanti o non aggiornati: ' + missingFiles.join(', ');
+  console.error(message);
+  const loadText = document.getElementById('loadTxt');
+  if(loadText) loadText.textContent = message;
+  if(window.parent && window.parent !== window){
+    window.parent.postMessage({type:'lot-king:menu-background-progress', progress:0, label:'runtime incompleto', error:message}, '*');
+    window.parent.postMessage({type:'lot-king:menu-background', ready:false, progress:0, error:message}, '*');
+  }
+  return;
+}
+
 const GAME = window.LOT_KING = {
-  version: '0.6.6',
+  version: '0.6.7',
   assets: null,
   core: {},
   world: {},
@@ -465,6 +485,15 @@ function ensureSkidRigs(){
 function updatePlayerLights(){ (PLAYER_LIGHT_RIG.syncTimeOfDay || PLAYER_LIGHT_RIG.update)(); }
 function setPlayerLightConfig(patch){ PLAYER_LIGHT_RIG.setConfig(patch); }
 function addPlayerAuxLight(preset){ return PLAYER_LIGHT_RIG.addAux(preset); }
+function cleanupDetachedPlayerEntities(prefix){
+  for(let i=REGISTRY.length-1;i>=0;i--){
+    const item = REGISTRY[i], id = item && item.userData && item.userData.editorId;
+    if(String(id || '').indexOf(prefix) === 0 && !item.parent) REGISTRY.splice(i, 1);
+  }
+}
+function removePlayerAuxLight(index){ const result = PLAYER_LIGHT_RIG.removeAux(index); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
+function duplicatePlayerAuxLight(index){ const result = PLAYER_LIGHT_RIG.duplicateAux(index); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
+function movePlayerAuxLight(index, direction){ const result = PLAYER_LIGHT_RIG.moveAux(index, direction); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
 function applyPlayerExhaustConfig(){
   ensureExhaustRigs();
   const show = !!PLAYER_EXHAUST_CFG.dummyVisible && !!GAME.state.editorActive;
@@ -534,6 +563,36 @@ function addPlayerExhaustSource(preset){
   applyPlayerExhaustConfig();
   return playerExhaustRig.sources[idx] && playerExhaustRig.sources[idx].anchor;
 }
+function rebuildPlayerSourceRigs(runtime, ensure){
+  const removed = new Set();
+  runtime.sources.forEach(item => {
+    if(item && item.anchor){ removed.add(item.anchor); if(item.anchor.parent) item.anchor.parent.remove(item.anchor); }
+  });
+  if(GAME.world && Array.isArray(GAME.world.registry)){
+    for(let i=GAME.world.registry.length-1;i>=0;i--) if(removed.has(GAME.world.registry[i])) GAME.world.registry.splice(i, 1);
+  }
+  runtime.sources.length = 0;
+  ensure();
+}
+function editPlayerSource(config, runtime, ensure, index, action, direction){
+  const i = Number(index) | 0;
+  if(i < 0 || i >= config.sources.length) return false;
+  if(action === 'remove') config.sources.splice(i, 1);
+  else if(action === 'duplicate') config.sources.splice(i + 1, 0, JSON.parse(JSON.stringify(config.sources[i])));
+  else {
+    const to = i + (Number(direction) < 0 ? -1 : 1);
+    if(to < 0 || to >= config.sources.length) return false;
+    const item = config.sources.splice(i, 1)[0]; config.sources.splice(to, 0, item);
+  }
+  rebuildPlayerSourceRigs(runtime, ensure);
+  return true;
+}
+function removePlayerExhaustSource(index){ const ok = editPlayerSource(PLAYER_EXHAUST_CFG, playerExhaustRig, ensureExhaustRigs, index, 'remove'); applyPlayerExhaustConfig(); return ok; }
+function duplicatePlayerExhaustSource(index){ const ok = editPlayerSource(PLAYER_EXHAUST_CFG, playerExhaustRig, ensureExhaustRigs, index, 'duplicate'); applyPlayerExhaustConfig(); return ok; }
+function movePlayerExhaustSource(index, direction){ const ok = editPlayerSource(PLAYER_EXHAUST_CFG, playerExhaustRig, ensureExhaustRigs, index, 'move', direction); applyPlayerExhaustConfig(); return ok; }
+function removePlayerSkidSource(index){ const ok = editPlayerSource(PLAYER_SKID_CFG, playerSkidRig, ensureSkidRigs, index, 'remove'); applyPlayerSkidConfig(); return ok; }
+function duplicatePlayerSkidSource(index){ const ok = editPlayerSource(PLAYER_SKID_CFG, playerSkidRig, ensureSkidRigs, index, 'duplicate'); applyPlayerSkidConfig(); return ok; }
+function movePlayerSkidSource(index, direction){ const ok = editPlayerSource(PLAYER_SKID_CFG, playerSkidRig, ensureSkidRigs, index, 'move', direction); applyPlayerSkidConfig(); return ok; }
 PLAYER_LIGHT_RIG.build();
 PLAYER_LIGHT_RIG.apply();
 ensureExhaustRigs();
@@ -543,13 +602,19 @@ applyPlayerSkidConfig();
 const wheelGeo = new THREE.CylinderGeometry(.38,.38,.32,14);
 const wheelMat = new THREE.MeshStandardMaterial({color:0x101216, roughness:.9});
 const rimMat = new THREE.MeshStandardMaterial({color:0xd9d9d9, roughness:.3, metalness:.8});
+const brakeDiscMat = new THREE.MeshStandardMaterial({color:0x6b7280, roughness:.42, metalness:.85});
 const wheels = [];
-for(const [wx, wz, front] of [[-.92,1.35,1],[.92,1.35,1],[-.92,-1.35,0],[.92,-1.35,0]]){
+const SHARED_VEHICLE_VISUALS = window.LK_RUNTIME_VEHICLE_VISUAL_CONTROLLER.create();
+const SHARED_RAYCAST_ACTUATOR = window.LK_RUNTIME_VEHICLE_RAYCAST_ACTUATOR.create();
+for(const [wheelId, wx, wz, front] of [['wheel_front_left',-.92,1.35,1],['wheel_front_right',.92,1.35,1],['wheel_rear_left',-.92,-1.35,0],['wheel_rear_right',.92,-1.35,0]]){
   const pivot = new THREE.Group(); pivot.position.set(wx,.38,wz);
+  pivot.userData.logicVehicleWheelVisual = true;
+  pivot.userData.logicVehicleWheelId = wheelId;
   const w = new THREE.Mesh(wheelGeo, wheelMat); w.rotation.z = Math.PI/2; w.castShadow = true;
   const rim = new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.34,8), rimMat); rim.rotation.z = Math.PI/2;
-  pivot.add(w); pivot.add(rim); carVisual.add(pivot);
-  wheels.push({pivot, mesh:w, rim, front:!!front, spin:0});
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(.27,.27,.065,20), brakeDiscMat); disc.rotation.z = Math.PI/2; disc.userData.logicVehicleBrakeDisc = true;
+  pivot.add(w); pivot.add(disc); pivot.add(rim); carVisual.add(pivot);
+  wheels.push({id:wheelId, pivot, mesh:w, rim, disc, front:!!front, spin:0, suspensionVisual:0, spinTargets:[w,rim]});
 }
 scene.add(car);
 tagEntity(car, 'player_car (Logic)', 'player');
@@ -662,6 +727,10 @@ const GEARBOX = Object.freeze({
   tops: [13, 22, 31, 40, 52],     // m/s per gear at redline
   torque: [1.55, 1.34, 1.16, 1.02, .92],
 });
+const SHARED_ENGINE_CONTROLLER = window.LK_RUNTIME_VEHICLE_ENGINE_CONTROLLER.create({
+  state:ENGINE, gearbox:GEARBOX, drive:DRIVE,
+  sampleCurve:(key,rpm01,fallback) => sampleDriveCurve(key,rpm01,fallback),
+});
 
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 function dampAlpha(rate, dt){ return 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dt)); }
@@ -677,6 +746,8 @@ function sampleDriveCurve(key, rpm01, fallback){
   return curves.sample(curves[key], clamp(rpm01 || 0, 0, 1));
 }
 function resetEngine(){
+  return SHARED_ENGINE_CONTROLLER.reset();
+  /* legacy body retained temporarily for reference during parity extraction */
   ENGINE.gear = 1;
   ENGINE.rpm = GEARBOX.idle;
   ENGINE.rpm01 = 0;
@@ -690,6 +761,8 @@ function resetEngine(){
   ENGINE.driftShiftSpeed = 0;
 }
 function updateEngineModel(vF, throttle, sliding, dt, driftCtx){
+  return SHARED_ENGINE_CONTROLLER.update(vF,throttle,sliding,dt,driftCtx);
+  /* legacy body retained temporarily for reference during parity extraction */
   driftCtx = driftCtx || {};
   const speed = Math.abs(vF);
   const driftSpeed = Number.isFinite(driftCtx.speedTot) ? Math.abs(driftCtx.speedTot) : speed;
@@ -799,6 +872,7 @@ const rebuildPlayerPhysicsBody = PHYS_WORLD.rebuildPlayer;
 const disposePhysicsWorld = PHYS_WORLD.dispose;
 const setSurfaceWorldCollision = PHYS_WORLD.setSurfaceWorldCollision;
 
+let activeDriveTuningPawnId = null;
 const DRIVE_TUNING = window.LK_RUNTIME_DRIVE_TUNING.create({
   config: CFG,
   baseConfig: BASE_CFG,
@@ -812,10 +886,51 @@ const DRIVE_TUNING = window.LK_RUNTIME_DRIVE_TUNING.create({
   onCollisionChange: () => { if(PHYS.world && rebuildPlayerPhysicsBody) rebuildPlayerPhysicsBody(); },
   onChange: () => { if(GAME.editor && GAME.editor.state && GAME.editor.state.active && GAME.editor.markDirty) GAME.editor.markDirty(); },
   onExport: () => popup('TUNING EXPORTED', '#4be3a0'),
+  resolveTarget: () => {
+    const pinned = activeDriveTuningPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(activeDriveTuningPawnId) : null;
+    if(pinned && pinned.kind === 'logic-element' && pinned.possessed) return pinned;
+    const possessed = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+    if(possessed && possessed.kind === 'logic-element') return possessed;
+    const outputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
+    const pawnId = outputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
+    const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
+    return pawn && pawn.kind === 'logic-element' ? pawn : null;
+  },
+  applyTarget: (pawn, values) => {
+    if(!pawn || !pawn.setDriveSetup) return;
+    pawn.setDriveSetup(values);
+    const graph = pawn.owner && pawn.owner.userData && pawn.owner.userData.logicGraph;
+    if(graph && graph.vehiclePawn){
+      graph.vehiclePawn.driveSetup = JSON.parse(JSON.stringify(pawn.config.driveSetup || values));
+      graph.vehiclePawn.tuning = Object.assign({}, graph.vehiclePawn.tuning || {}, pawn.config.tuning || {});
+      (graph.variables || []).forEach(variable => {
+        const binding = String(variable && variable.binding || '');
+        if(binding.indexOf('tuning.') !== 0) return;
+        const key = binding.slice(7);
+        if(Object.prototype.hasOwnProperty.call(graph.vehiclePawn.tuning, key)) variable.value = graph.vehiclePawn.tuning[key];
+      });
+      if(GAME.editor && GAME.editor.markDirty) GAME.editor.markDirty();
+    }
+  },
   clamp,
 });
-const setTuneOpen = DRIVE_TUNING.setOpen;
-const toggleTunePanel = DRIVE_TUNING.toggle;
+function activeLogicTuningPawn(){
+  const pinned = activeDriveTuningPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(activeDriveTuningPawnId) : null;
+  if(pinned && pinned.kind === 'logic-element' && pinned.possessed) return pinned;
+  const possessed = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+  if(possessed && possessed.kind === 'logic-element') return possessed;
+  const outputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
+  const pawnId = outputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
+  const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
+  return pawn && pawn.kind === 'logic-element' ? pawn : null;
+}
+function syncActiveTuningTarget(){
+  const pawn = activeLogicTuningPawn();
+  activeDriveTuningPawnId = pawn ? pawn.id : null;
+  if(pawn) DRIVE_TUNING.syncInputs(pawn.config.driveSetup || DRIVE_TUNING.presets.default);
+}
+const setTuneOpen = open => { if(open) syncActiveTuningTarget(); DRIVE_TUNING.setOpen(open); };
+const toggleTunePanel = () => { syncActiveTuningTarget(); DRIVE_TUNING.toggle(); };
 
 const AUDIO = {
   master: 1,
@@ -1156,8 +1271,11 @@ function updateCarCannon(dt){
   const up = throttleAmt > 0.05, down = brakeAmt > 0.05;
   handbrake = drive.handbrake;
   const steerTarget = clamp(drive.steer, -1, 1);
-  const steerRate = DRIVE.steerResponse * (steerTarget === 0 || steerTarget * P.steer < 0 ? 1.6 : 1);
-  P.steer += (steerTarget - P.steer) * Math.min(1, dt*steerRate);
+  const steeringState = window.LK_RUNTIME_VEHICLE_STEERING_CONTROLLER.update({
+    target:steerTarget,current:P.steer,dt,response:DRIVE.steerResponse,
+    speed:Math.hypot(body.velocity.x,body.velocity.z),maxAngle:CFG.steerMax,highSpeed:CFG.steerHiSpeed,
+  });
+  P.steer = steeringState.value;
 
   P.heading = yawQuat(body.quaternion);
   const fwd = new THREE.Vector3(Math.sin(P.heading), 0, Math.cos(P.heading));
@@ -1168,8 +1286,7 @@ function updateCarCannon(dt){
   const speed = Math.abs(vx);
   const speedTot = Math.hypot(vx, vy);
   const grounded = wheelsOnGround();
-  const steerScale = CFG.steerHiSpeed + (1 - CFG.steerHiSpeed) * Math.exp(-speed / 20);
-  const delta = P.steer * CFG.steerMax * steerScale;
+  const delta = steeringState.angle;
   lastSteerAngle = delta;
 
   const L = CFG.axleF + CFG.axleR;
@@ -1284,19 +1401,14 @@ function updateCarCannon(dt){
   // ---- map onto the raycast wheels: RWD engine force, braking, steering,
   // per-wheel grip (the drift character lives in the frictionSlip modulation)
   const rearForce = CANNON_FWD_SIGN * ax * mass * .5;
-  vehicle.applyEngineForce(rearForce, 2);
-  vehicle.applyEngineForce(rearForce, 3);
-  vehicle.setSteeringValue(delta, 0);
-  vehicle.setSteeringValue(delta, 1);
   const brakeForce = mass * brakeA * (DRIVE.brakeWheelScale == null ? .36 : DRIVE.brakeWheelScale);
   const frontBrake = brakeForce * DRIVE.brakeBias * .5 + burnoutFrontBrakeForce * .5;
   const rearBrake = brakeForce * (1 - DRIVE.brakeBias) * .5 + handbrakeForce * .5;
-  vehicle.setBrake(frontBrake, 0);
-  vehicle.setBrake(frontBrake, 1);
-  vehicle.setBrake(rearBrake, 2);
-  vehicle.setBrake(rearBrake, 3);
-  vehicle.wheelInfos[0].frictionSlip = vehicle.wheelInfos[1].frictionSlip = WHEEL_GRIP * muFl;
-  vehicle.wheelInfos[2].frictionSlip = vehicle.wheelInfos[3].frictionSlip = WHEEL_GRIP * muRl;
+  SHARED_RAYCAST_ACTUATOR.apply({
+    vehicle, driven:[2,3], engineForce:rearForce * 2, steering:[0,1], steer:delta,
+    brakes:[frontBrake,frontBrake,rearBrake,rearBrake],
+    frictionSlip:[WHEEL_GRIP * muFl,WHEEL_GRIP * muFl,WHEEL_GRIP * muRl,WHEEL_GRIP * muRl],
+  });
 
   // ---- arcade drift assists on top of the raycast model (wheels grounded)
   if(grounded >= 2){
@@ -1441,16 +1553,11 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
   for(let i = 0; i < wheels.length; i++){
     const w = wheels[i];
     const wi = vehicle.wheelInfos[i];
-    if(wi){
-      const compress = clamp(PHYS.suspension.restLength - wi.suspensionLength, -PHYS.suspension.travel, PHYS.suspension.travel);
-      wheelSuspVis[i] += (compress - wheelSuspVis[i]) * dampAlpha(18, dt);
-    }
-    if(wi && Number.isFinite(wi.rotation)) w.spin = -wi.rotation;
-    else w.spin += vF * dt / .38;
-    w.mesh.rotation.x = w.spin;
-    w.rim.rotation.x = w.spin;
-    if(w.front) w.pivot.rotation.y = visSteer;
-    w.pivot.position.y = .38 - chassisLift + (wheelSuspVis[i] || 0);
+    const state = SHARED_VEHICLE_VISUALS.updateWheel({
+      visual:w, wheelInfo:wi, suspension:PHYS.suspension, dt, forwardSpeed:vF,
+      radius:.38, front:w.front, steerAngle, steerVisualScale:1.25, baseY:.38, chassisLift,
+    });
+    wheelSuspVis[i] = state ? state.suspension : 0;
   }
   RIG.drive(vF, dt, visSteer);
   if(RIG.setSuspension) RIG.setSuspension(wheelSuspVis.map(v => (v || 0) - chassisLift));
@@ -1828,7 +1935,7 @@ for(let i=0;i<EXHAUST_N;i++){
   exhaustPool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1, fire:false});
 }
 let exhaustIdx = 0, exhaustSmokeAcc = 0, exhaustFireAcc = 0;
-function spawnExhaustParticle(anchor, fire, intensity){
+function spawnExhaustParticle(anchor, fire, intensity, sourceVelocity){
   const p = exhaustPool[exhaustIdx++ % EXHAUST_N];
   const pos = new THREE.Vector3();
   const quat = new THREE.Quaternion();
@@ -1842,7 +1949,7 @@ function spawnExhaustParticle(anchor, fire, intensity){
   if(fire){
     p.max = .22 + Math.random() * .16;
     p.size = (.72 + Math.random() * .42) * intensity;
-    p.vel.copy(dir).multiplyScalar(8.5 + Math.random() * 5.5).addScaledVector(P.vel, .08);
+    p.vel.copy(dir).multiplyScalar(8.5 + Math.random() * 5.5).addScaledVector(sourceVelocity || P.vel, .08);
     p.s.material.map = flameTex;
     p.s.material.blending = THREE.AdditiveBlending;
     p.s.material.color.setHex(0xffffff);
@@ -1851,7 +1958,7 @@ function spawnExhaustParticle(anchor, fire, intensity){
   } else {
     p.max = 1.25 + Math.random() * 1.15;
     p.size = (.32 + Math.random() * .42) * intensity;
-    p.vel.copy(dir).multiplyScalar(.45 + Math.random() * 1.25).add(new THREE.Vector3((Math.random()-.5)*.42, .62 + Math.random()*.72, (Math.random()-.5)*.42)).addScaledVector(P.vel, .025);
+    p.vel.copy(dir).multiplyScalar(.45 + Math.random() * 1.25).add(new THREE.Vector3((Math.random()-.5)*.42, .62 + Math.random()*.72, (Math.random()-.5)*.42)).addScaledVector(sourceVelocity || P.vel, .025);
     p.s.material.map = smokeTex;
     p.s.material.blending = THREE.NormalBlending;
     p.s.material.color.setHex(0xbec3cc);
@@ -1930,16 +2037,17 @@ for(let i=0;i<SKID_N;i++){
   scene.add(m); skidPool.push({m, life:0, opacity:0});
 }
 let skidIdx = 0;
-function spawnSkid(x, z, heading, widthScale, lengthScale, strength){
-  if(!PLAYER_SKID_CFG.enabled) return;
+function spawnSkid(x, z, heading, widthScale, lengthScale, strength, configOverride, groundY){
+  const skidConfig = configOverride || PLAYER_SKID_CFG;
+  if(skidConfig.enabled === false) return;
   const p = skidPool[skidIdx++ % SKID_N];
-  const baseW = PLAYER_SKID_CFG.width == null ? .24 : PLAYER_SKID_CFG.width;
-  const baseL = PLAYER_SKID_CFG.length == null ? .7 : PLAYER_SKID_CFG.length;
+  const baseW = skidConfig.width == null ? .24 : skidConfig.width;
+  const baseL = skidConfig.length == null ? .7 : skidConfig.length;
   const slip = clamp(strength == null ? 1 : strength, 0, 1);
-  const opacity = PLAYER_SKID_CFG.opacity == null ? .55 : PLAYER_SKID_CFG.opacity;
-  const life = PLAYER_SKID_CFG.life == null ? 14 : PLAYER_SKID_CFG.life;
+  const opacity = skidConfig.opacity == null ? .55 : skidConfig.opacity;
+  const life = skidConfig.life == null ? 14 : skidConfig.life;
   p.m.visible = true;
-  p.m.position.set(x, .015 + (skidIdx%7)*0.0004, z);
+  p.m.position.set(x, (Number.isFinite(groundY) ? groundY : 0) + .015 + (skidIdx%7)*0.0004, z);
   p.m.rotation.z = -heading;
   p.m.scale.set((baseW / .24) * (widthScale || 1), (baseL / .7) * (lengthScale || 1) * (.78 + slip * .42), 1);
   p.opacity = opacity * (.22 + slip * .78);
@@ -2032,6 +2140,130 @@ function copySceneCameraToGame(holder){
   camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
   return true;
 }
+function timelineProps(studio){
+  const props = studio && studio.userData && studio.userData.cinemaProps || {};
+  if(!Array.isArray(props.movieTrack)) props.movieTrack = Array.isArray(props.cameraCuts) ? props.cameraCuts : [];
+  if(!Array.isArray(props.cameraCuts)) props.cameraCuts = props.movieTrack;
+  if(!Array.isArray(props.objectTracks)) props.objectTracks = [];
+  if(!Array.isArray(props.lensTracks)) props.lensTracks = [];
+  if(!Array.isArray(props.eventTracks)) props.eventTracks = [];
+  return props;
+}
+function timelineTargetById(id){
+  const value = String(id || '');
+  if(!value) return null;
+  return GAME.world.registry.find(item => item && item.userData && item.userData.editorId === value) || null;
+}
+function timelineLerpArray(a, b, t){
+  return a.map((value, index) => value + ((b[index] == null ? value : b[index]) - value) * t);
+}
+function timelineCurveAlpha(t, mode){
+  const x = clamp(Number(t) || 0, 0, 1);
+  if(mode === 'ease-in') return x * x;
+  if(mode === 'ease-out') return 1 - Math.pow(1 - x, 2);
+  if(mode === 'ease-in-out' || mode === 'manual') return x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+  return x;
+}
+function timelineKeyPair(keys, time){
+  const sorted = (keys || []).slice().sort((a,b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+  if(!sorted.length) return null;
+  let prev = sorted[0], next = sorted[sorted.length - 1];
+  for(let i = 0; i < sorted.length; i++){
+    if((Number(sorted[i].time) || 0) <= time) prev = sorted[i];
+    if((Number(sorted[i].time) || 0) >= time){ next = sorted[i]; break; }
+  }
+  return {prev, next};
+}
+function applyRuntimeTransformKey(obj, key){
+  if(!obj || !key) return;
+  if(key.position) obj.position.fromArray(key.position);
+  if(key.rotation) obj.rotation.set(key.rotation[0] || 0, key.rotation[1] || 0, key.rotation[2] || 0);
+  if(key.scale) obj.scale.fromArray(key.scale);
+  if(window.LK_STORE && window.LK_STORE.syncCollider) window.LK_STORE.syncCollider(obj);
+  obj.updateMatrixWorld(true);
+}
+function applyRuntimeObjectTrack(track, time){
+  const obj = timelineTargetById(track && track.targetId);
+  const pair = timelineKeyPair(track && track.keyframes, time);
+  if(!obj || !pair) return;
+  const prev = pair.prev, next = pair.next;
+  if(prev === next || (Number(next.time) || 0) === (Number(prev.time) || 0)){
+    applyRuntimeTransformKey(obj, prev);
+    return;
+  }
+  const alpha = timelineCurveAlpha((time - (Number(prev.time) || 0)) / ((Number(next.time) || 0) - (Number(prev.time) || 0)), prev.curve || 'linear');
+  applyRuntimeTransformKey(obj, {
+    position:timelineLerpArray(prev.position || [obj.position.x, obj.position.y, obj.position.z], next.position || [obj.position.x, obj.position.y, obj.position.z], alpha),
+    rotation:timelineLerpArray(prev.rotation || [obj.rotation.x, obj.rotation.y, obj.rotation.z], next.rotation || [obj.rotation.x, obj.rotation.y, obj.rotation.z], alpha),
+    scale:timelineLerpArray(prev.scale || [obj.scale.x, obj.scale.y, obj.scale.z], next.scale || [obj.scale.x, obj.scale.y, obj.scale.z], alpha),
+  });
+}
+function applyRuntimeCameraFov(holder, fov){
+  if(!holder || !holder.userData) return;
+  const nextFov = clamp(Number(fov) || 50, 1, 179);
+  holder.userData.cameraProps = Object.assign({}, holder.userData.cameraProps || {}, {fov:nextFov});
+  const src = holder.userData.sceneCamera;
+  if(src){
+    src.fov = nextFov;
+    if(src.updateProjectionMatrix) src.updateProjectionMatrix();
+  }
+}
+function applyRuntimeLensTrack(track, time){
+  const holder = sceneCameraHolder(track && track.targetId);
+  const pair = timelineKeyPair(track && track.keyframes, time);
+  if(!holder || !pair) return;
+  const prev = pair.prev, next = pair.next;
+  if(prev === next || (Number(next.time) || 0) === (Number(prev.time) || 0)){
+    applyRuntimeCameraFov(holder, prev.fov);
+    return;
+  }
+  const alpha = timelineCurveAlpha((time - (Number(prev.time) || 0)) / ((Number(next.time) || 0) - (Number(prev.time) || 0)), prev.curve || 'linear');
+  const fov = (Number(prev.fov) || 50) + ((Number(next.fov) || 50) - (Number(prev.fov) || 50)) * alpha;
+  applyRuntimeCameraFov(holder, fov);
+}
+function runtimeActiveShot(props, time){
+  const shots = (props.movieTrack || props.cameraCuts || []).slice().sort((a,b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+  return shots.find(shot => time >= (Number(shot.time) || 0) && time < (Number(shot.time) || 0) + (Number(shot.duration) || 0)) ||
+    shots.filter(shot => (Number(shot.time) || 0) <= time).pop() ||
+    shots[0] || null;
+}
+function runtimePlayerOutput(value){
+  const index = Number(value);
+  return Number.isInteger(index) && index >= 0 && index <= 3 ? index + 1 : null;
+}
+function runtimeShouldStartPlayerCinema(props){
+  return !!props && runtimePlayerOutput(props.outputPlayerIndex) != null && props.trigger === 'on-play';
+}
+function dispatchRuntimeTimelineEvent(studio, event, state){
+  if(!studio || !event || !event.name) return;
+  window.dispatchEvent(new CustomEvent('lotking:timelineevent', {detail:{
+    studioId:studio.userData.editorId,
+    studioName:studio.userData.editorName || studio.userData.editorId,
+    eventId:event.id,
+    eventName:event.name,
+    time:Number(event.time) || 0,
+    payload:event.payload || '',
+    runtime:true,
+    source:state && state.source || 'runtime',
+  }}));
+}
+function dispatchRuntimeTimelineEventsBetween(studio, props, fromTime, toTime, state, includeStart){
+  const from = clamp(Number(fromTime) || 0, 0, Number(props.duration) || 6);
+  const to = clamp(Number(toTime) || 0, 0, Number(props.duration) || 6);
+  const eps = .0001;
+  (props.eventTracks || []).slice().sort((a,b) => (Number(a.time) || 0) - (Number(b.time) || 0)).forEach(event => {
+    const t = Number(event.time) || 0;
+    const afterStart = includeStart ? t >= from - eps : t > from + eps;
+    if(afterStart && t <= to + eps) dispatchRuntimeTimelineEvent(studio, event, state);
+  });
+}
+function applyRuntimeTimeline(studio, time, state){
+  const props = timelineProps(studio);
+  const t = clamp(Number(time) || 0, 0, Number(props.duration) || 6);
+  props.objectTracks.forEach(track => applyRuntimeObjectTrack(track, t));
+  props.lensTracks.forEach(track => applyRuntimeLensTrack(track, t));
+  return runtimeActiveShot(props, t);
+}
 function updateSceneCameraOverride(dt){
   const levelKey = String(GAME.state && GAME.state.activeLevel || 'default');
   if(levelKey !== runtimeCinemaAutoLevelKey){
@@ -2043,32 +2275,41 @@ function updateSceneCameraOverride(dt){
       if(GAME.state) GAME.state.runtimeActiveSceneCameraId = null;
     }
   }
-  if(!runtimeCinemaState && !(GAME.state && GAME.state.editorActive)){
+  const editorAuthoring = !!(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview);
+  if(!runtimeCinemaState && !editorAuthoring){
     const autoStudio = GAME.world.registry.find(item => {
       if(!item || !item.userData || item.userData.editorType !== 'cinemaStudio') return false;
       const props = item.userData.cinemaProps || {};
       const id = item.userData.editorId || item.uuid;
-      return props.trigger === 'on-play' && props.outputPlayerIndex === 0 && !runtimeCinemaAutoStarted.has(id);
+      return runtimeShouldStartPlayerCinema(props) && !runtimeCinemaAutoStarted.has(id);
     });
     if(autoStudio){
       const id = autoStudio.userData.editorId || autoStudio.uuid;
       runtimeCinemaAutoStarted.add(id);
-      runtimeCinemaState = {studioId:id, time:0};
+      runtimeCinemaState = {studioId:id, playerId:runtimePlayerOutput(autoStudio.userData.cinemaProps.outputPlayerIndex), time:0, source:'on-play'};
     }
   }
   if(runtimeCinemaState){
     const studio = cinemaStudioHolder(runtimeCinemaState.studioId);
     if(!studio){ runtimeCinemaState = null; return false; }
-    const props = studio.userData.cinemaProps || {};
+    const props = timelineProps(studio);
     const duration = Math.max(.1, Number(props.duration) || 6);
+    const beforeTime = clamp(Number(runtimeCinemaState.time) || 0, 0, duration);
     runtimeCinemaState.time += Math.max(0, Number(dt) || 0);
     if(runtimeCinemaState.time > duration){
       if(props.playback === 'loop') runtimeCinemaState.time %= duration;
       else { runtimeCinemaState = null; return false; }
     }
-    const cuts = (props.cameraCuts || props.movieTrack || []).slice().sort((a,b) => (Number(a.time)||0) - (Number(b.time)||0));
-    let cut = null;
-    cuts.forEach(item => { if((Number(item.time) || 0) <= runtimeCinemaState.time) cut = item; });
+    const cut = applyRuntimeTimeline(studio, runtimeCinemaState.time, runtimeCinemaState);
+    if((Number(dt) || 0) > 0){
+      if(props.playback === 'loop' && runtimeCinemaState.time < beforeTime){
+        dispatchRuntimeTimelineEventsBetween(studio, props, beforeTime, duration, runtimeCinemaState, false);
+        dispatchRuntimeTimelineEventsBetween(studio, props, 0, runtimeCinemaState.time, runtimeCinemaState, true);
+      } else {
+        dispatchRuntimeTimelineEventsBetween(studio, props, beforeTime, runtimeCinemaState.time, runtimeCinemaState, false);
+      }
+      runtimeCinemaState.lastEventTime = runtimeCinemaState.time;
+    }
     const cameraId = cut && cut.cameraId || props.previewCamera;
     if(cameraId) return copySceneCameraToGame(sceneCameraHolder(cameraId));
   }
@@ -2078,6 +2319,11 @@ function updateSceneCameraOverride(dt){
     if(runtimeCamera) return copySceneCameraToGame(runtimeCamera);
     GAME.state.runtimeActiveSceneCameraId = null;
   }
+  const logicCameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
+  const logicCameraPawnId = logicCameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
+  const logicCameraPawn = logicCameraPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(logicCameraPawnId) : null;
+  if(logicCameraPawn && logicCameraPawn.possessed && logicCameraPawn.hidden !== true) return updateLogicPawnCameraOverride(dt);
+  if(logicCameraPawnId && !logicCameraPawn) GAME.state.runtimeVehicleCameraPawnId = null;
   if(GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true && GAME.player.controllerIndex != null) return false;
   const cameras = GAME.world.registry.filter(item => item && item.userData && item.userData.editorType === 'camera' && item.userData.cameraProps);
   const active = cameras.find(item => item.userData.cameraProps.activeLevelCamera === true)
@@ -2085,17 +2331,27 @@ function updateSceneCameraOverride(dt){
   return copySceneCameraToGame(active);
 }
 window.addEventListener('lotking:cinemastart', event => {
-  if(GAME.state && GAME.state.editorActive) return;
+  if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview) return;
   const detail = event && event.detail || {};
   const studio = cinemaStudioHolder(detail.studio);
-  if(studio) runtimeCinemaState = {studioId:studio.userData.editorId, time:Math.max(0, Number(detail.time) || 0)};
+  if(studio) runtimeCinemaState = {studioId:studio.userData.editorId, playerId:runtimePlayerOutput(studio.userData.cinemaProps && studio.userData.cinemaProps.outputPlayerIndex) || Math.max(1, Math.min(4, Number(detail.playerId) || 1)), time:Math.max(0, Number(detail.time) || 0), source:detail.source || detail.eventName || 'runtime-event'};
 });
-window.addEventListener('lotking:cinemastop', () => { if(!(GAME.state && GAME.state.editorActive)) runtimeCinemaState = null; });
+window.addEventListener('lotking:cinemastop', event => {
+  if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview) return;
+  const playerId = Number(event && event.detail && event.detail.playerId) || null;
+  if(!playerId || !runtimeCinemaState || runtimeCinemaState.playerId === playerId) runtimeCinemaState = null;
+});
 function activeCameraMode(){
   return runtimeCameraMode || CAM_CFG.mode || 'free';
 }
 function resetCameraState(preserveRuntimeMode){
   if(!preserveRuntimeMode) runtimeCameraMode = null;
+  if(!preserveRuntimeMode){
+    runtimeCinemaState = null;
+    runtimeCinemaAutoStarted.clear();
+    runtimeCinemaAutoLevelKey = '';
+    if(GAME.state) GAME.state.runtimeActiveSceneCameraId = null;
+  }
   dragging = false;
   camMode = 0;
   camPitch = .32;
@@ -2120,6 +2376,7 @@ function cycleGameplayCameraMode(){
   const current = activeCameraMode();
   runtimeCameraMode = modes[(Math.max(0, modes.indexOf(current)) + 1) % modes.length];
   resetCameraState(true);
+  if(GAME.pawns && GAME.pawns.list) GAME.pawns.list().forEach(pawn => { if(pawn) pawn.cameraRuntime = null; });
   if(runtimeCameraMode === 'free'){
     camMode = 1;
     userCamTimer = 1e9;
@@ -2237,6 +2494,13 @@ function setCameraConfig(patch, reset){
 }
 const LETTERBOX_COLOR = new THREE.Color(0x141518);
 let TOUCH_CONTROLS = null;
+let runtimePointerPlayerId = null;
+function activeRuntimePlayerId(){
+  const cameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
+  const pawnId = cameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
+  const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
+  return Math.max(1, Math.min(4, Number(pawn && pawn.playerId || (GAME.player && GAME.player.controllerIndex != null ? GAME.player.controllerIndex + 1 : 1)) || 1));
+}
 function letterboxColor(){
   if(CAM_CFG.letterboxColor){ try { LETTERBOX_COLOR.set(CAM_CFG.letterboxColor); } catch(err){} }
   return LETTERBOX_COLOR;
@@ -2246,8 +2510,11 @@ function letterboxColor(){
 function syncHudRect(css){
   const hud = document.getElementById('hud');
   if(!hud) return;
+  const framePlayerId = activeRuntimePlayerId();
+  if(!GAME.state.runtimePlayerFrames) GAME.state.runtimePlayerFrames = {};
   const portrait = css ? (css.h > css.w) : (innerHeight > innerWidth);
   if(css){
+    GAME.state.runtimePlayerFrames[framePlayerId] = {x:css.x, y:css.y, w:css.w, h:css.h};
     // Constrain HUD layout to the actual rendered camera rectangle.
     // This keeps every HUD control anchored to the playable frame.
     hud.style.left = css.x + 'px'; hud.style.top = css.y + 'px';
@@ -2263,6 +2530,7 @@ function syncHudRect(css){
     if(RADIO && RADIO.setFrameRect) RADIO.setFrameRect(css);
     if(TOUCH_CONTROLS && TOUCH_CONTROLS.setFrameRect) TOUCH_CONTROLS.setFrameRect(css);
   } else {
+    GAME.state.runtimePlayerFrames = {};
     hud.style.left = hud.style.top = hud.style.width = hud.style.height = hud.style.right = hud.style.bottom = '';
     hud.style.setProperty('--ui-mask-top', '0px');
     hud.style.setProperty('--ui-mask-right', '0px');
@@ -2281,7 +2549,7 @@ function shouldHideForFinalGameplayRender(node){
     ud.helperOnly ||
     ud.colliderPreview ||
     ud.editorOnly ||
-    ud.nonExportable ||
+    (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false)) ||
     ud.editorCameraHelper ||
     ud.editorCameraHelperPick ||
     ud.editorLightHandle
@@ -2347,14 +2615,87 @@ function renderPlayerCamera(targetRect){
     syncHudRect(null);
   }
 }
+function localPlayerFrameRects(count){
+  const n = Math.max(1, Math.min(4, Number(count) || 1));
+  const w = innerWidth, h = innerHeight;
+  if(n === 1) return [{x:0,y:0,w,h}];
+  if(n === 2) return [{x:0,y:0,w:Math.floor(w/2),h},{x:Math.floor(w/2),y:0,w:w-Math.floor(w/2),h}];
+  const halfW = Math.floor(w/2), halfH = Math.floor(h/2);
+  if(n === 3) return [
+    {x:0,y:halfH,w,h:h-halfH},
+    {x:0,y:0,w:halfW,h:halfH},
+    {x:halfW,y:0,w:w-halfW,h:halfH},
+  ];
+  return [
+    {x:0,y:halfH,w:halfW,h:h-halfH}, {x:halfW,y:halfH,w:w-halfW,h:h-halfH},
+    {x:0,y:0,w:halfW,h:halfH}, {x:halfW,y:0,w:w-halfW,h:halfH},
+  ];
+}
+function localPlayerCameraPawns(){
+  if(!GAME.pawns || !GAME.pawns.list) return [];
+  const requested = Math.max(1, Math.min(4, Number(GAME.settings.localPlayerCount) || 4));
+  return GAME.pawns.list().filter(pawn => pawn && pawn.possessed && pawn.playerId != null && pawn.hidden !== true)
+    .sort((a,b) => a.playerId - b.playerId).slice(0, requested);
+}
+function localPlayerOutputs(){
+  const byPlayer = new Map();
+  localPlayerCameraPawns().forEach(pawn => byPlayer.set(pawn.playerId, {playerId:pawn.playerId, pawn}));
+  GAME.world.registry.forEach(item => {
+    if(!item || !item.userData || item.userData.editorType !== 'camera') return;
+    const props = item.userData.cameraProps || {};
+    const output = props.activeLevelCamera === true ? 0 : props.outputPlayerIndex;
+    if(output == null || Number(output) < 0 || Number(output) > 3) return;
+    const playerId = Number(output) + 1;
+    const entry = byPlayer.get(playerId) || {playerId, pawn:null};
+    if(!entry.camera || props.activeLevelCamera === true) entry.camera = item;
+    byPlayer.set(playerId, entry);
+  });
+  return Array.from(byPlayer.values()).sort((a,b) => a.playerId - b.playerId)
+    .slice(0, Math.max(1, Math.min(4, Number(GAME.settings.localPlayerCount) || 4)));
+}
+function renderLocalMultiplayer(dt){
+  const outputs = localPlayerOutputs();
+  if(outputs.length < 2) return false;
+  const previousPawnId = GAME.state.runtimeVehicleCameraPawnId;
+  const frames = localPlayerFrameRects(outputs.length);
+  GAME.state.runtimePlayerFrames = {};
+  outputs.forEach((output, index) => {
+    const pawn = output.pawn;
+    GAME.state.runtimeVehicleCameraPawnId = pawn && pawn.id || null;
+    GAME.state.runtimePlayerFrames[output.playerId] = frames[index];
+    const cinemaOwnsFrame = runtimeCinemaState && runtimeCinemaState.playerId === output.playerId;
+    if(cinemaOwnsFrame){
+      const studio = cinemaStudioHolder(runtimeCinemaState.studioId);
+      const props = studio && timelineProps(studio);
+      const cut = studio && applyRuntimeTimeline(studio, runtimeCinemaState.time, runtimeCinemaState);
+      const cameraId = cut && cut.cameraId || props && props.previewCamera;
+      if(cameraId) copySceneCameraToGame(sceneCameraHolder(cameraId));
+    } else if(output.camera) copySceneCameraToGame(output.camera);
+    else if(pawn && pawn.kind === 'logic-element') updateLogicPawnCameraOverride(dt, pawn);
+    else if(pawn) updateCamera(0);
+    else return;
+    HUD.setActivePlayer(output.playerId);
+    if(RADIO.setActivePlayer) RADIO.setActivePlayer(output.playerId);
+    renderPlayerCamera(frames[index]);
+  });
+  GAME.state.runtimeVehicleCameraPawnId = previousPawnId;
+  return true;
+}
 function requestRuntimeCameraPointerLock(){
   if(!canvas.requestPointerLock || document.pointerLockElement === canvas) return;
+  runtimePointerPlayerId = activeRuntimePlayerId();
+  canvas.dataset.pointerPlayerId = String(runtimePointerPlayerId);
   try {
     const result = canvas.requestPointerLock();
     if(result && result.catch) result.catch(() => {});
   } catch(err){}
 }
 function pointInRuntimeViewport(e){
+  const playerId = activeRuntimePlayerId();
+  const playerFrame = GAME.state && GAME.state.runtimePlayerFrames && GAME.state.runtimePlayerFrames[playerId];
+  if(playerFrame){
+    return e.clientX >= playerFrame.x && e.clientX <= playerFrame.x + playerFrame.w && e.clientY >= playerFrame.y && e.clientY <= playerFrame.y + playerFrame.h;
+  }
   if(!GAME.state.editorPreview) return true;
   const rect = GAME.editor && GAME.editor.viewportRect ? GAME.editor.viewportRect() : null;
   if(!rect) return true;
@@ -2402,7 +2743,11 @@ canvas.addEventListener('pointerup', e => {
 canvas.addEventListener('pointercancel', () => dragging = false);
 addEventListener('pointerup', () => dragging = false);
 addEventListener('pointerlockchange', () => {
-  if(document.pointerLockElement !== canvas) dragging = false;
+  if(document.pointerLockElement !== canvas){
+    dragging = false;
+    runtimePointerPlayerId = null;
+    delete canvas.dataset.pointerPlayerId;
+  }
 });
 function isCameraUiTarget(target){
   return !!(target && target.closest && target.closest('#lkEditor, #settingsOverlay, #tunePanel, #radio, #overlay'));
@@ -2444,8 +2789,9 @@ function shouldShowRuntimeCursor(){
 }
 function syncRuntimeCursorState(){
   const cursorVisible = shouldShowRuntimeCursor() && runtimeSessionActive();
+  const pointerOwnerChanged = runtimePointerPlayerId != null && runtimePointerPlayerId !== activeRuntimePlayerId();
   document.body.classList.toggle('lk-game-ui-cursor', cursorVisible);
-  if(cursorVisible){
+  if(cursorVisible || pointerOwnerChanged){
     document.body.classList.remove('lk-free-camera-cursor-hidden');
     if(document.pointerLockElement === canvas && document.exitPointerLock){
       try { document.exitPointerLock(); } catch(err){}
@@ -2478,6 +2824,7 @@ addEventListener('pointermove', e => {
   const freeMouseLook = !dragging && activeCameraMode() === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
     !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e.target);
   const locked = document.pointerLockElement === canvas;
+  if(locked && runtimePointerPlayerId !== activeRuntimePlayerId()) return;
   if((!dragging && !freeMouseLook && !locked) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
   const dx = locked ? (e.movementX || 0) : (dragging ? (e.clientX-lastMX) : (e.movementX || 0));
   const dy = locked ? (e.movementY || 0) : (dragging ? (e.clientY-lastMY) : (e.movementY || 0));
@@ -2493,6 +2840,51 @@ addEventListener('wheel', e => {
   if(runtimeWheelBelongsToUi(e.target)) return;
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist + Math.sign(e.deltaY)*1.1));
 }, {passive:true});
+
+const logicPawnCameraPosition = new THREE.Vector3();
+const logicPawnCameraQuaternion = new THREE.Quaternion();
+const logicPawnCameraForward = new THREE.Vector3();
+let runtimeCameraInputPlayerId = null;
+function updateLogicPawnCameraOverride(dt, pawnRef){
+  const cameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
+  const pawnId = pawnRef && pawnRef.id || pawnRef || cameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
+  const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
+  if(!pawn || !pawn.owner || !pawn.possessed || pawn.hidden === true) return false;
+  const owner = pawn.owner;
+  owner.updateMatrixWorld(true);
+  owner.getWorldPosition(logicPawnCameraPosition);
+  owner.getWorldQuaternion(logicPawnCameraQuaternion);
+  logicPawnCameraForward.set(0,0,1).applyQuaternion(logicPawnCameraQuaternion).setY(0);
+  if(logicPawnCameraForward.lengthSq() < .0001) logicPawnCameraForward.set(0,0,1);
+  logicPawnCameraForward.normalize();
+  const previous = {
+    position:P.pos.clone(), heading:P.heading, steer:P.steer,
+    speedKmh, lastCamVF, lastCamVR, lastCamDrifting, driftAngle,
+    reverseActive:ENGINE.reverseActive,
+  };
+  P.pos.copy(logicPawnCameraPosition);
+  P.heading = Math.atan2(logicPawnCameraForward.x, logicPawnCameraForward.z);
+  P.steer = Number(pawn.state && pawn.state.steer) || 0;
+  speedKmh = Number(pawn.state && pawn.state.speedKmh) || 0;
+  lastCamVF = Number(pawn.state && pawn.state.speed) || 0;
+  lastCamVR = P.steer * Math.abs(lastCamVF) * .25;
+  lastCamDrifting = pawn.state && pawn.state.drift === true;
+  driftAngle = lastCamDrifting ? Math.min(.82, Math.abs(P.steer) * .82) : 0;
+  ENGINE.reverseActive = pawn.state && pawn.state.reverse === true;
+  runtimeCameraInputPlayerId = pawn.playerId;
+  updateCamera(dt);
+  runtimeCameraInputPlayerId = null;
+  P.pos.copy(previous.position);
+  P.heading = previous.heading;
+  P.steer = previous.steer;
+  speedKmh = previous.speedKmh;
+  lastCamVF = previous.lastCamVF;
+  lastCamVR = previous.lastCamVR;
+  lastCamDrifting = previous.lastCamDrifting;
+  driftAngle = previous.driftAngle;
+  ENGINE.reverseActive = previous.reverseActive;
+  return true;
+}
 
 function updateCamera(dt){
   const snap = camSnapNext;
@@ -2607,6 +2999,7 @@ const ENGINE_AUDIO = window.LK_RUNTIME_ENGINE_AUDIO.create({
   audio: SFX,
   engine: ENGINE,
   gearbox: GEARBOX,
+  gearbox: GEARBOX,
   getSpeed: () => speedKmh,
   getTimescale: () => TS.cur,
   resolveSrc: src => {
@@ -2670,7 +3063,7 @@ addEventListener('keydown', e => {
   if(key === 'c'){
     e.preventDefault();
     if(e.repeat) return;
-    if(!INPUT) cycleGameplayCameraMode();
+    cycleGameplayCameraMode();
   }
   if(key === 'm'){ const m = SFX.toggleMute(); popup(m?'MUTED':'SOUND ON','#9aa3b8'); }
   if(key === 'f' && !isEditorSimulationPreview()){
@@ -2701,7 +3094,15 @@ const INPUT = window.LK_RUNTIME_INPUT_MANAGER ? window.LK_RUNTIME_INPUT_MANAGER.
 GAME.input = INPUT;
 let lastResetHeld = false;
 let lastGamepadActions = {};
+let lastUiGamepadActions = {};
 let lastCameraModeHeld = false;
+const LOCAL_MULTIPLAYER_POLICY = Object.freeze({
+  uiOwnerPlayerIndex: 0,
+  audioListenerMode: 'shared-active-frame',
+  audioListenerPlayerIndex: 0,
+  description: 'Player 1 owns global menu/pause/radio commands and the shared stereo listener; Pawn engine/effect emitters remain independently mixed.',
+});
+GAME.systems.localMultiplayerPolicy = LOCAL_MULTIPLAYER_POLICY;
 
 function neutralPlayerDrive(){
   if(window.LK_RUNTIME_INPUT_ACTIONS && window.LK_RUNTIME_INPUT_ACTIONS.neutralDrive) return window.LK_RUNTIME_INPUT_ACTIONS.neutralDrive();
@@ -2738,6 +3139,11 @@ function playerControllerIndex(){
 function readDriveInput(){
   if(GAME.state.paused) return neutralPlayerDrive();
   if(runtimeCinemaState || GAME.state.cinemaInputLocked) return neutralPlayerDrive();
+  if(runtimeCameraInputPlayerId != null && INPUT && INPUT.player){
+    const cameraPlayer = Math.max(1, Math.min(4, Number(runtimeCameraInputPlayerId) || 1));
+    if(INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(cameraPlayer - 1);
+    return INPUT.player(cameraPlayer - 1).drive();
+  }
   if(!GAME.player || GAME.player.enabled === false || playerControllerIndex() < 0) return neutralPlayerDrive();
   if(isEditorSimulationPreview()) return neutralPlayerDrive();
   if(INPUT){
@@ -2776,35 +3182,38 @@ function gamepadActions(){
   if(!p || p.deviceType() !== 'gamepad') return null;
   return p.drive();
 }
-function gamepadEdge(state, key){
-  return !!(state && state[key] && !lastGamepadActions[key]);
+function gamepadEdge(state, key, previous){
+  return !!(state && state[key] && !(previous || lastGamepadActions)[key]);
 }
 function handleGamepadActions(){
   if(GAME.state.editorActive && !GAME.state.editorPreview){
     lastGamepadActions = {};
+    lastUiGamepadActions = {};
     lastCameraModeHeld = false;
     return;
   }
   const controllerIndex = playerControllerIndex();
   const mappedPlayer = !runtimeCinemaState && !GAME.state.cinemaInputLocked && INPUT && INPUT.player && controllerIndex >= 0 ? INPUT.player(controllerIndex) : null;
   const mappedState = mappedPlayer && mappedPlayer.drive ? mappedPlayer.drive() : null;
-  const cameraModeHeld = !!(mappedState && mappedState.cameraMode);
+  const cameraModeHeld = !!(mappedPlayer && mappedPlayer.deviceType && mappedPlayer.deviceType() === 'gamepad' && mappedState && mappedState.cameraMode);
   if(!GAME.state.paused && cameraModeHeld && !lastCameraModeHeld) cycleGameplayCameraMode();
   lastCameraModeHeld = cameraModeHeld;
   const state = gamepadActions();
-  if(state){
-    if(!GAME.state.paused && gamepadEdge(state, 'pauseMenu')) toggleSettingsMenu('game', {source: 'gamepad'});
+  const uiPlayer = INPUT && INPUT.player ? INPUT.player(LOCAL_MULTIPLAYER_POLICY.uiOwnerPlayerIndex) : null;
+  const uiState = uiPlayer && uiPlayer.deviceType && uiPlayer.deviceType() === 'gamepad' && uiPlayer.drive ? uiPlayer.drive() : null;
+  if(uiState){
+    if(!GAME.state.paused && gamepadEdge(uiState, 'pauseMenu', lastUiGamepadActions)) toggleSettingsMenu('game', {source: 'gamepad', playerIndex:LOCAL_MULTIPLAYER_POLICY.uiOwnerPlayerIndex});
     if(!GAME.state.paused){
-      if(gamepadEdge(state, 'radioToggle')) RADIO.toggleOpen();
-      if(gamepadEdge(state, 'radioPlay')) RADIO.togglePlay();
-      if(gamepadEdge(state, 'radioNext')) RADIO.next();
-      if(gamepadEdge(state, 'radioPrev')) RADIO.prev();
-      if(gamepadEdge(state, 'tuningMenu')) toggleTunePanel();
-      if(gamepadEdge(state, 'mute')){
+      if(gamepadEdge(uiState, 'radioToggle', lastUiGamepadActions)) RADIO.toggleOpen();
+      if(gamepadEdge(uiState, 'radioPlay', lastUiGamepadActions)) RADIO.togglePlay();
+      if(gamepadEdge(uiState, 'radioNext', lastUiGamepadActions)) RADIO.next();
+      if(gamepadEdge(uiState, 'radioPrev', lastUiGamepadActions)) RADIO.prev();
+      if(gamepadEdge(uiState, 'tuningMenu', lastUiGamepadActions)) toggleTunePanel();
+      if(gamepadEdge(uiState, 'mute', lastUiGamepadActions)){
         const muted = SFX.toggleMute();
         popup(muted ? 'MUTED' : 'SOUND ON', '#9aa3b8');
       }
-      if(gamepadEdge(state, 'legend')){
+      if(gamepadEdge(uiState, 'legend', lastUiGamepadActions)){
         const legend = document.getElementById('legend');
         if(legend) legend.classList.toggle('collapsed');
       }
@@ -2812,6 +3221,7 @@ function handleGamepadActions(){
   }
   PLAYER_LIGHT_RIG.setHighBeams(!GAME.state.paused && !isEditorSimulationPreview() && !!(keys['f'] || (state && state.highBeams)));
   lastGamepadActions = state ? Object.assign({}, state) : {};
+  lastUiGamepadActions = uiState ? Object.assign({}, uiState) : {};
 }
 function checkResetEdge(){
   if(!INPUT) return;
@@ -2945,6 +3355,9 @@ const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
 const TS = {cur:1, get target(){ return RADIO.isOpen() ? 0.1 : 1; }};
 
 const IS_EMBEDDED_GAMEPLAY = !!window.__LK_EMBEDDED_GAMEPLAY;
+const MENU_PREVIEW_MODE = window.__LK_MENU_PREVIEW === 'editor' || window.__LK_MENU_PREVIEW === 'game'
+  ? window.__LK_MENU_PREVIEW
+  : '';
 const DEFAULT_MENU_MUSIC_TRACKS = [
   {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Menu default'},
 ];
@@ -3061,12 +3474,84 @@ LOADING.setBar(0);
 function preloadMenuShell(){
   if(!overlay) return;
   const tasks = [];
-  const setMenuProgress = (pct, label) => {
-    if(loadBar) loadBar.style.width = Math.max(0, Math.min(100, pct)) + '%';
-    if(loadTxt) loadTxt.textContent = label + '... ' + Math.round(pct) + '%';
+  const formatBytes = value => {
+    const n = Number(value) || 0;
+    if(n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1) + ' MB';
+    if(n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+    return Math.round(n) + ' B';
+  };
+  const formatDuration = seconds => {
+    const n = Math.max(0, Number(seconds) || 0);
+    if(n >= 90) return Math.ceil(n / 60) + ' min';
+    return Math.ceil(n) + ' s';
+  };
+  const progressText = (label, value, detail) => {
+    const info = detail || {};
+    const parts = [(label || 'loading menu') + '... ' + Math.round(value) + '%'];
+    if(info.total && info.loaded) parts.push(formatBytes(info.loaded) + ' / ' + formatBytes(info.total));
+    else if(info.loaded) parts.push(formatBytes(info.loaded));
+    if(info.bps) parts.push(formatBytes(info.bps) + '/s');
+    if(info.eta != null && Number.isFinite(Number(info.eta)) && Number(info.eta) > 0){
+      parts.push('~' + formatDuration(info.eta) + ' left');
+    }
+    if(info.error) parts.push(String(info.error));
+    return parts.join(' · ');
+  };
+  const setMenuProgress = (pct, label, detail) => {
+    const value = Math.max(0, Math.min(100, Number(pct) || 0));
+    if(loadBar) loadBar.style.width = value + '%';
+    if(loadTxt) loadTxt.textContent = progressText(label, value, detail);
+    if(MENU_PREVIEW_MODE && window.parent && window.parent !== window){
+      window.parent.postMessage({
+        type: 'lot-king:menu-background-progress',
+        progress: value,
+        label,
+        step: detail && detail.step || label || '',
+        loaded: detail && detail.loaded || null,
+        total: detail && detail.total || null,
+        bps: detail && detail.bps || null,
+        eta: detail && detail.eta != null ? detail.eta : null,
+        error: detail && detail.error || '',
+        level: GAME.state && GAME.state.menuBackgroundLevel || null,
+      }, '*');
+    }
+  };
+  const postMenuBackgroundReady = hasBackground => {
+    if(MENU_PREVIEW_MODE && window.parent && window.parent !== window){
+      window.parent.postMessage({
+        type: 'lot-king:menu-background',
+        ready: !!hasBackground,
+        progress: hasBackground ? 100 : 0,
+        label: hasBackground ? 'menu role level ready' : 'menu ready',
+        level: GAME.state && GAME.state.menuBackgroundLevel || null,
+      }, '*');
+    }
+  };
+  const waitForMenuBackgroundPaint = hasBackground => {
+    if(!hasBackground) return Promise.resolve(false);
+    setMenuProgress(88, 'rendering role menu level');
+    return new Promise(resolve => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            setMenuProgress(96, 'warming role menu level');
+            resolve(true);
+          }, 120);
+        });
+      });
+    });
   };
   setMenuProgress(8, 'loading menu');
   setMenuProgress(46, 'loading menu background');
+  window.addEventListener('lotking:bundled-demo-progress', event => {
+    const detail = event && event.detail || {};
+    setMenuProgress(detail.progress == null ? 46 : detail.progress, detail.step || 'loading role menu level', detail);
+  });
+  const menuBackgroundTask = scheduleMenuRoleBackground().then(applied => {
+    if(applied) setMenuProgress(76, 'loading role menu level');
+    return waitForMenuBackgroundPaint(applied);
+  });
+  tasks.push(menuBackgroundTask);
   if(MENU_MUSIC && MENU_MUSIC.audio){
     tasks.push(new Promise(resolve => {
       const audio = MENU_MUSIC.audio;
@@ -3083,10 +3568,18 @@ function preloadMenuShell(){
       setTimeout(done, 1800);
     }).then(() => setMenuProgress(82, 'loading menu music')));
   }
-  Promise.all(tasks).then(() => {
-    setMenuProgress(100, 'menu ready');
+  Promise.all(tasks).then(results => {
+    const hasRoleBackground = results.some(Boolean) || !!(GAME.state && GAME.state.menuBackgroundLevel);
+    setMenuProgress(100, hasRoleBackground ? 'menu role level ready' : 'menu ready');
+    postMenuBackgroundReady(hasRoleBackground);
     setTimeout(() => {
       if(GAME.state.editorActive){
+        overlay.classList.remove('menu-preloading');
+        overlay.classList.remove('choosing-level');
+        overlay.classList.add('hidden');
+        return;
+      }
+      if(MENU_PREVIEW_MODE){
         overlay.classList.remove('menu-preloading');
         overlay.classList.remove('choosing-level');
         overlay.classList.add('hidden');
@@ -3098,6 +3591,33 @@ function preloadMenuShell(){
       LOADING.setIdleText('choose track');
       LOADING.setBar(0);
     }, 280);
+  });
+}
+function menuBackgroundRoleOrder(){
+  if(MENU_PREVIEW_MODE === 'editor') return ['editor-menu', 'game-menu'];
+  if(MENU_PREVIEW_MODE === 'game') return ['game-menu', 'editor-menu'];
+  return ['game-menu', 'editor-menu'];
+}
+function scheduleMenuRoleBackground(){
+  if(window.__LK_STANDALONE_EDITOR && !MENU_PREVIEW_MODE) return Promise.resolve(false);
+  return new Promise(resolve => {
+    let attempts = 0;
+    const done = value => resolve(!!value);
+    const tick = () => {
+      const store = window.LK_STORE;
+      if(store && store.ensureMenuBackgroundApplied){
+        store.ensureMenuBackgroundApplied(GAME, menuBackgroundRoleOrder()).then(data => {
+          const hasBackground = !!data || !!(GAME.state && GAME.state.menuBackgroundLevel);
+          if(hasBackground && document.body) document.body.classList.add('lk-menu-role-bg');
+          done(hasBackground);
+        }, () => done(false));
+        return;
+      }
+      attempts += 1;
+      if(attempts > 45){ done(false); return; }
+      setTimeout(tick, 80);
+    };
+    tick();
   });
 }
 const editorWorkspacePending = !!(window.__LK_STANDALONE_EDITOR && window.LK_PROJECT_WORKSPACE
@@ -3183,6 +3703,8 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
     SFX.init();
     ENGINE_AUDIO.start();   // sample engine + accensione (fallback synth se set assente)
   },
+  beginLogicRuntime: () => { if(GAME.systems && GAME.systems.logic && GAME.systems.logic.rebuild) GAME.systems.logic.rebuild(); },
+  stopLogicRuntime: () => { if(GAME.systems && GAME.systems.logic && GAME.systems.logic.dispose) GAME.systems.logic.dispose(); },
   pauseMenuMusic: () => {
     if(MENU_MUSIC.fadeOut) return MENU_MUSIC.fadeOut(2200);
     return MENU_MUSIC.pause();
@@ -3271,17 +3793,22 @@ Object.assign(GAME.player, {
     this.controllerIndex = index == null || index === 'none' ? null : Math.max(0, Math.min(3, Number(index) | 0));
     if(this.controllerIndex != null && INPUT && INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(this.controllerIndex);
     lastGamepadActions = {}; lastResetHeld = false; lastCameraModeHeld = false;
+    if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer();
     return this.controllerIndex;
   },
   setEnabled(value){
     this.enabled = value !== false;
     if(!this.enabled && PHYS.carBody){
-      PHYS.carBody.velocity.set(0,0,0); PHYS.carBody.angularVelocity.set(0,0,0);
+      PHYS.carBody.velocity.set(0,0,0);
+      PHYS.carBody.angularVelocity.set(0,0,0);
       if(PHYS.carBody.sleep) PHYS.carBody.sleep();
-    } else if(this.enabled && PHYS.carBody && PHYS.carBody.wakeUp) PHYS.carBody.wakeUp();
+    } else if(this.enabled && PHYS.carBody && PHYS.carBody.wakeUp){
+      PHYS.carBody.wakeUp();
+    }
+    if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer();
     return this.enabled;
   },
-  setHidden(value){ this.hidden = value === true; car.visible = !this.hidden; return this.hidden; },
+  setHidden(value){ this.hidden = value === true; car.visible = !this.hidden; if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer(); return this.hidden; },
   visual: carVisual,
   wheels,
   physics: P,
@@ -3304,14 +3831,24 @@ Object.assign(GAME.player, {
   lights: PLAYER_LIGHT_CFG,
   setLights: setPlayerLightConfig,
   addLight: addPlayerAuxLight,
+  removeLight: removePlayerAuxLight,
+  duplicateLight: duplicatePlayerAuxLight,
+  moveLight: movePlayerAuxLight,
   updateLights: updatePlayerLights,
   dataWidgets: PLAYER_DATA_WIDGETS.config,
   setDataWidgets: PLAYER_DATA_WIDGETS.set,
+  addDataWidget: PLAYER_DATA_WIDGETS.add,
+  removeDataWidget: PLAYER_DATA_WIDGETS.remove,
+  duplicateDataWidget: PLAYER_DATA_WIDGETS.duplicate,
+  moveDataWidget: PLAYER_DATA_WIDGETS.move,
   updateDataWidgets: PLAYER_DATA_WIDGETS.update,
   syncDataWidget: PLAYER_DATA_WIDGETS.syncFromAnchor,
   skids: PLAYER_SKID_CFG,
   setSkids: setPlayerSkidConfig,
   addSkid: addPlayerSkidSource,
+  removeSkid: removePlayerSkidSource,
+  duplicateSkid: duplicatePlayerSkidSource,
+  moveSkid: movePlayerSkidSource,
   syncSkid: syncPlayerSkidSource,
   updateSkids: applyPlayerSkidConfig,
   engineAudio: PLAYER_ENGINE_AUDIO_CFG,
@@ -3319,8 +3856,18 @@ Object.assign(GAME.player, {
   exhaust: PLAYER_EXHAUST_CFG,
   setExhaust: setPlayerExhaustConfig,
   addExhaust: addPlayerExhaustSource,
+  removeExhaust: removePlayerExhaustSource,
+  duplicateExhaust: duplicatePlayerExhaustSource,
+  moveExhaust: movePlayerExhaustSource,
   updateExhaust: updatePlayerExhaust,
   testExhaust: testPlayerExhaust,
+  vehicleEffects: Object.freeze({
+    spawnExhaust(anchor, fire, intensity, velocity){ spawnExhaustParticle(anchor, fire === true, intensity, velocity); },
+    spawnSkid(point, heading, config, strength){
+      if(!point) return;
+      spawnSkid(point.x, point.z, heading, 1, 1, strength, config || {}, point.y);
+    },
+  }),
   cameraCfg: CAM_CFG,
   cameraAspects: CAMERA_ASPECTS,
   cameraAspectValue,
@@ -3375,6 +3922,8 @@ Object.assign(GAME.actions, {
   stepGameplayPreview: dt => stepGameplayFrame(dt, false),
   renderGameplayCamera: renderPlayerCamera,
   renderGameplayCameraRect: renderPlayerCamera,
+  localPlayerFrameRects,
+  setLocalPlayerCount: count => (GAME.settings.localPlayerCount = Math.max(1, Math.min(4, Number(count) || 1))),
   unloadLevel: unloadCurrentLevel,
   prepareEditorLevel,
   backToMenu: backToMainMenu,
@@ -3514,8 +4063,14 @@ function stepGameplayFrame(dt, shouldRender){
   updateSmoke(sdt);
   updateSkids(sdt);
   updateWind(sdt, speedKmh);
+  if(GAME.systems && GAME.systems.logic && GAME.systems.logic.update) GAME.systems.logic.update(sdt);
   for(const h of GAME.hooks.frame) h(sdt);   // editor-added effects (emitters, ...)
-  updateCamera(dt);                       // camera stays responsive in slow-mo
+  const playerCameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
+  const playerOneLogicCameraId = playerCameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
+  const playerOneLogicCameraPawn = playerOneLogicCameraId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(playerOneLogicCameraId) : null;
+  if(!(playerOneLogicCameraPawn && playerOneLogicCameraPawn.kind === 'logic-element' && playerOneLogicCameraPawn.possessed && playerOneLogicCameraPawn.hidden !== true)){
+    updateCamera(dt);                     // native camera only when it owns Player 1
+  }
   updateSceneCameraOverride(dt);          // level/cinema camera owns the final Player 1 frame
   SKY.update(sdt);                        // day/night cycle (slows down with slow-mo)
 
@@ -3534,28 +4089,33 @@ function stepGameplayFrame(dt, shouldRender){
   SFX.update(rpm01 * TS.cur, throttle * TS.cur, screech01 * TS.cur);
   ENGINE_AUDIO.update(sdt);
 
-  RADIO.updateHUD(dt, rpm01, throttle);
-
-  const gearLabel = (ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1);
+  const hudPawnId = GAME.state && GAME.state.runtimeVehicleCameraPawnId;
+  const hudPawn = hudPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(hudPawnId) : null;
+  const hudState = hudPawn && hudPawn.state || null;
+  const hudPlayerId = hudPawn && hudPawn.playerId || (playerControllerIndex() >= 0 ? playerControllerIndex() + 1 : 1);
+  const hudSpeedKmh = hudState ? Number(hudState.speedKmh) || 0 : speedKmh;
+  const hudRpm = hudState ? Number(hudState.rpm) || 0 : ENGINE.rpm;
+  const gearLabel = hudState
+    ? (hudState.reverse ? 'R' : String(hudState.gear || 1))
+    : ((ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1));
   const modeLabel = DRIVE_TUNING.getMode ? DRIVE_TUNING.getMode() : 'custom';
-  const vehicleHud = document.getElementById('vehicleHud');
-  if(vehicleHud){
-    const mode = String(modeLabel || 'custom').toLowerCase();
-    vehicleHud.classList.toggle('race', mode === 'race');
-    vehicleHud.classList.toggle('custom', mode !== 'race' && mode !== 'drift');
-    const kmh2 = document.getElementById('kmh2');
-    const gear2 = document.getElementById('gearHud2');
-    const rpmHud = document.getElementById('rpmHud');
-    const rpmBar = document.getElementById('rpmBar');
-    const driveType = document.getElementById('driveTypeHud');
-    if(kmh2) kmh2.textContent = String(Math.max(0, Math.round(speedKmh || 0)));
-    if(gear2) gear2.textContent = gearLabel;
-    if(rpmHud) rpmHud.textContent = String(Math.round(ENGINE.rpm || 0));
-    if(rpmBar) rpmBar.style.width = (clamp((ENGINE.rpm || 0) / GEARBOX.limiter, 0, 1) * 100).toFixed(1) + '%';
-    if(driveType) driveType.textContent = mode === 'race' ? 'RACE' : (mode === 'drift' ? 'DRIFT' : 'CUSTOM');
-  }
-  HUD.setSpeedGear(speedKmh, gearLabel);
-  if(shouldRender) renderPlayerCamera();
+  const playerTelemetry = hudState ? Object.assign({}, hudState, {speedKmh:hudSpeedKmh}) : null;
+  HUD.setActivePlayer(hudPlayerId);
+  HUD.setVehicleData(hudPlayerId, {speedKmh:hudSpeedKmh, gearLabel, rpm:hudRpm, rpm01:clamp((hudRpm || 0) / GEARBOX.limiter, 0, 1), mode:modeLabel});
+  if(RADIO.setActivePlayer) RADIO.setActivePlayer(hudPlayerId);
+  RADIO.updateHUD(dt, rpm01, throttle, playerTelemetry);
+  if(shouldRender && !renderLocalMultiplayer(dt)) renderPlayerCamera();
+}
+
+function stepMenuBackgroundFrame(dt){
+  if(!(GAME.state && GAME.state.menuBackgroundLevel) || GAME.state.editorActive) return false;
+  const sdt = Math.max(0, Number(dt) || 0);
+  if(GAME.systems && GAME.systems.logic && GAME.systems.logic.update) GAME.systems.logic.update(sdt);
+  for(const h of GAME.hooks.frame) h(sdt);
+  updateSceneCameraOverride(sdt);
+  SKY.update(sdt);
+  renderPlayerCamera();
+  return true;
 }
 
 function loop(now){
@@ -3566,7 +4126,10 @@ function loop(now){
   if(dt > .05) dt = .05;                 // clamp: no physics explosions on tab-back
   if(!GAME.state.paused && (SESSION.isStarted() || GAME.state.editorPreview)) checkResetEdge();
   if(GAME.hooks.frameOverride){ GAME.hooks.frameOverride(dt); return; }   // editor takes over
-  if(!SESSION.isStarted()){ renderPlayerCamera(); return; }
+  if(!SESSION.isStarted()){
+    if(!stepMenuBackgroundFrame(dt)) renderPlayerCamera();
+    return;
+  }
   stepGameplayFrame(dt, true);
 }
 requestAnimationFrame(loop);

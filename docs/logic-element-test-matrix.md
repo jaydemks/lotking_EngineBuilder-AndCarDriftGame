@@ -27,6 +27,14 @@ This matrix tracks implementation-side verification for Logic Element Part 1. Us
 | Template clone isolation | `tests/logic-core.test.js` | Automated |
 | Logic Element dependency manifest | `tests/logic-core.test.js` | Automated |
 | Logic Element definition asset migration | `tests/logic-core.test.js` | Automated |
+| Vehicle Pawn registry and per-instance motion isolation | `tests/logic-core.test.js` | Passing |
+| Pawn Core lifecycle/component reuse | `tests/logic-core.test.js` | Passing for Human and Animal mock components |
+| Player slot conflict and forced possession transfer | `tests/logic-core.test.js` | Passing |
+| Player Car template Vehicle Pawn nodes and Function validity | Focused Node validator run | Passing, zero warnings |
+| Function data consistency after state mutation | `tests/logic-core.test.js` multi-output Function case | Passing |
+| Complete Logic core regression suite | `tests/logic-core.test.js` | Passing |
+| Pawn event/node catalog | `tests/logic-core.test.js` | Passing for drift, gear, reset and possession contracts |
+| Legacy Player snapshot → Vehicle Pawn v2 migration | `tests/logic-core.test.js` | Passing, lossless snapshot retained |
 | Graph Inspector dependency list | Graph Inspector shows collected dependency references and found/external/missing status | Automated browser spec present |
 | Dependency relink base | Graph Inspector can relink compatible mesh/texture/audio dependencies from the asset library | Automated browser spec present |
 | Dependency report/fallback base | Graph Inspector can copy a dependency report and mark missing refs as manual/external fallbacks | Manual/browser smoke pending |

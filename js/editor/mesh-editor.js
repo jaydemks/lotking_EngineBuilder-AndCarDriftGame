@@ -27,6 +27,15 @@ function create(deps){
     if(object && object.userData && object.userData.editorType === 'player' && deps.GAME && deps.GAME.player && deps.GAME.player.getModel){
       return deps.GAME.player.getModel() || object;
     }
+    if(object && object.userData && object.userData.playerCarLogicElement && object.traverse){
+      let model = null;
+      object.traverse(node => {
+        if(model || !node.userData) return;
+        const id = String(node.userData.logicElementSceneId || '').toLowerCase();
+        if(id === 'vehicle_model' || id === 'model' || node.userData.logicVehicleModel === true) model = node;
+      });
+      if(model) return model;
+    }
     return object;
   }
   function editsOf(object){

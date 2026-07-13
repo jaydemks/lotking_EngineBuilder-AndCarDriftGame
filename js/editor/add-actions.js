@@ -208,13 +208,20 @@ function create(deps){
       ? window.LK_LOGIC_GRAPH.createStarterGraph('Logic Element ' + id, 'element')
       : {version:1, name:'Logic Element ' + id, scope:'element', enabled:true, variables:[], nodes:[], edges:[]};
     const name = asset && asset.name || template && template.name || 'Logic Element';
+    const variableOverrides = {};
+    (graph.variables || []).forEach(variable => {
+      if(variable.binding === 'spawn.x') variableOverrides[variable.name] = Number(at.x) || 0;
+      else if(variable.binding === 'spawn.y') variableOverrides[variable.name] = Number(at.y) || .15;
+      else if(variable.binding === 'spawn.z') variableOverrides[variable.name] = Number(at.z) || 0;
+      else if(variable.binding === 'spawn.heading') variableOverrides[variable.name] = 0;
+    });
     const obj = STORE.createLogicElement({
       graph,
       name,
       logicAssetId:asset && asset.id,
       logicLinked:!!asset,
       logicAsset:asset,
-      variableOverrides:{},
+      variableOverrides,
     });
     const entry = {id, kind:'logicElement', name, collide:false,
       graph,
@@ -225,10 +232,11 @@ function create(deps){
     if(asset){
       entry.logicAssetId = asset.id;
       entry.logicLinked = true;
-      entry.variableOverrides = {};
+      entry.variableOverrides = Object.assign({}, variableOverrides);
       entry.logicAsset = window.LK_LOGIC_GRAPH.clone(asset);
     }
     STORE.registerAdded(GAME, obj, entry);
+    obj.userData.logicVariableOverrides = Object.assign({}, variableOverrides);
     obj.userData.assetKey = entry.asset.key;
     obj.userData.assetName = entry.asset.name;
     obj.userData.assetSource = entry.asset.source;
@@ -289,9 +297,11 @@ function create(deps){
         const f = e.target.files && e.target.files[0];
         e.target.value = '';
         if(!f) return;
-        replacePlayerModelWithFile(f);
-        markDirty();
-        buildInspector();
+        Promise.resolve(replacePlayerModelWithFile(f)).then(changed => {
+          if(!changed) return;
+          markDirty();
+          buildInspector();
+        });
       });
     }
   }

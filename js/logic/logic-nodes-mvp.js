@@ -39,6 +39,13 @@ function registerAll(registry){
   registry.register({type:'event.onWindowResize', title:'On Window Resize', category:'Events', description:'Runs after the game viewport changes size.', event:'OnWindowResize', outputs:[thenOut, dataOut('width', 'number'), dataOut('height', 'number')]});
   registry.register({type:'event.tickEvery', title:'Tick Every', category:'Events', description:'Runs at a safe configurable interval.', event:'OnUpdate', inputs:[dataIn('seconds', 'number', .5)], outputs:[thenOut]});
   registry.register({type:'event.onCollisionBegin', title:'On Collision Begin', category:'Events', description:'Runs when a logic physics body begins a collision.', event:'OnCollisionBegin', outputs:[thenOut, dataOut('body', 'physicsBody'), dataOut('otherBody', 'physicsBody'), dataOut('object', 'object3d'), dataOut('otherObject', 'object3d'), dataOut('contact', 'any')]});
+  registry.register({type:'event.onPawnDriftStart', title:'On Pawn Drift Start', category:'Pawn Events', description:'Runs when this Pawn starts drifting.', event:'OnPawnDriftStart', outputs:[thenOut, dataOut('pawn', 'vehiclePawn')]});
+  registry.register({type:'event.onPawnDriftEnd', title:'On Pawn Drift End', category:'Pawn Events', description:'Runs when this Pawn stops drifting.', event:'OnPawnDriftEnd', outputs:[thenOut, dataOut('pawn', 'vehiclePawn')]});
+  registry.register({type:'event.onPawnGearChanged', title:'On Pawn Gear Changed', category:'Pawn Events', description:'Runs when this Pawn changes gear.', event:'OnPawnGearChanged', outputs:[thenOut, dataOut('pawn', 'vehiclePawn'), dataOut('gear', 'number'), dataOut('previousGear', 'number')]});
+  registry.register({type:'event.onPawnReset', title:'On Pawn Reset', category:'Pawn Events', description:'Runs after this Pawn resets to spawn.', event:'OnPawnReset', outputs:[thenOut, dataOut('pawn', 'vehiclePawn')]});
+  registry.register({type:'event.onPawnPossessed', title:'On Pawn Possessed', category:'Pawn Events', description:'Runs when a Player ID possesses this Pawn.', event:'OnPawnPossessed', outputs:[thenOut, dataOut('pawn', 'vehiclePawn'), dataOut('playerId', 'number')]});
+  registry.register({type:'event.onPawnUnpossessed', title:'On Pawn Unpossessed', category:'Pawn Events', description:'Runs when this Pawn loses its Player ID.', event:'OnPawnUnpossessed', outputs:[thenOut, dataOut('pawn', 'vehiclePawn'), dataOut('playerId', 'number')]});
+  registry.register({type:'event.onPawnDeviceChanged', title:'On Pawn Device Changed', category:'Pawn Events', description:'Runs when the possessed Player profile changes input device.', event:'OnPawnDeviceChanged', outputs:[thenOut, dataOut('pawn', 'vehiclePawn'), dataOut('playerId', 'number'), dataOut('device', 'string'), dataOut('previousDevice', 'string')]});
   registry.register({type:'event.custom', title:'Custom Event', category:'Events', description:'Entry point for named runtime events.', event:'Custom', inputs:[dataIn('eventName', 'string', '')], outputs:[thenOut, dataOut('payload', 'any')]});
 
   registry.register({
@@ -58,6 +65,171 @@ function registerAll(registry){
       if(pin === 'handbrake') return drive.handbrake === true;
       if(pin === 'device') return drive.device || '';
       return Number(drive.throttle) || 0;
+    },
+  });
+
+  registry.register({
+    type:'pawn.getSelf', title:'Get Self Vehicle Pawn', category:'Vehicle Pawn', description:'Returns the Vehicle Pawn owned by this Logic Element.',
+    outputs:[dataOut('pawn', 'vehiclePawn')],
+    evaluate(api){ return api.services.pawns ? api.services.pawns.self() : null; },
+  });
+
+  registry.register({
+    type:'pawn.getPlayerPawn', title:'Get Player Pawn', category:'Vehicle Pawn', description:'Returns the Pawn currently possessed by Player 1–4.',
+    inputs:[dataIn('playerId', 'number', 1)], outputs:[dataOut('pawn', 'vehiclePawn')],
+    evaluate(api){ return api.services.pawns ? api.services.pawns.getByPlayerId(api.getInput('playerId')) : null; },
+  });
+
+  registry.register({
+    type:'pawn.getInput', title:'Get Pawn Input', category:'Vehicle Pawn', description:'Reads the possessed Pawn input. Unpossessed/None Pawns always return neutral controls.',
+    inputs:[dataIn('pawn', 'vehiclePawn', null)],
+    outputs:[dataOut('throttle', 'number'), dataOut('brake', 'number'), dataOut('steer', 'number'), dataOut('handbrake', 'boolean'), dataOut('device', 'string')],
+    evaluate(api, pin){
+      const drive = api.services.pawns ? api.services.pawns.input(api.getInput('pawn')) : {};
+      if(pin === 'handbrake') return drive.handbrake === true;
+      if(pin === 'device') return drive.device || '';
+      return Number(drive[pin]) || 0;
+    },
+  });
+
+  registry.register({
+    type:'pawn.possess', title:'Possess Pawn', category:'Vehicle Pawn', description:'Assigns a local Player ID to a Pawn. Existing ownership is preserved unless Force is enabled.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('playerId', 'number', 1), dataIn('force', 'boolean', false)],
+    outputs:[completedOut, dataOut('success', 'boolean')],
+    run(api){
+      api.node.data.__success = !!(api.services.pawns && api.services.pawns.possess(api.getInput('pawn'), api.getInput('playerId'), api.getInput('force')));
+      return {exec:'completed'};
+    },
+    evaluate(api, pin){ return pin === 'success' ? api.node.data.__success === true : null; },
+  });
+
+  registry.register({
+    type:'pawn.possessFirstAvailable', title:'Possess First Available Player', category:'Vehicle Pawn', description:'Assigns the first free Player ID from P1 to P4, or returns None when every slot is occupied.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null)], outputs:[completedOut, dataOut('playerId', 'number'), dataOut('success', 'boolean')],
+    run(api){ const id = api.services.pawns && api.services.pawns.possessFirstAvailable(api.getInput('pawn')); api.node.data.__playerId = id; return {exec:'completed'}; },
+    evaluate(api, pin){ const id = api.node.data.__playerId; return pin === 'success' ? id != null : id; },
+  });
+
+  registry.register({
+    type:'pawn.unpossess', title:'Unpossess Pawn', category:'Vehicle Pawn', description:'Releases the Pawn local Player slot and neutralizes automatic input.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null)], outputs:[completedOut],
+    run(api){ if(api.services.pawns) api.services.pawns.unpossess(api.getInput('pawn')); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'pawn.setDriveInput', title:'Set Pawn Drive Input', category:'Vehicle Pawn', description:'Writes throttle, brake, steering and handbrake to one Pawn without shared global state.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('throttle', 'number', 0), dataIn('brake', 'number', 0), dataIn('steer', 'number', 0), dataIn('handbrake', 'boolean', false)],
+    outputs:[completedOut],
+    run(api){
+      if(api.services.pawns) api.services.pawns.setControl(api.getInput('pawn'), {
+        throttle:clamp01(api.getInput('throttle')), brake:clamp01(api.getInput('brake')),
+        steer:Math.max(-1, Math.min(1, number(api.getInput('steer')))), handbrake:api.getInput('handbrake') === true,
+      });
+      return {exec:'completed'};
+    },
+  });
+
+  registry.register({
+    type:'pawn.reset', title:'Reset Vehicle Pawn', category:'Vehicle Pawn', description:'Resets only the selected Pawn to its authoring spawn transform.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null)], outputs:[completedOut],
+    run(api){ if(api.services.pawns) api.services.pawns.reset(api.getInput('pawn')); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'pawn.setEnabled', title:'Set Pawn Enabled', category:'Vehicle Pawn', description:'Enables or sleeps only the selected Vehicle Pawn.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('enabled', 'boolean', true)], outputs:[completedOut],
+    run(api){ if(api.services.pawns) api.services.pawns.setEnabled(api.getInput('pawn'), api.getInput('enabled')); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'pawn.setTuning', title:'Set Vehicle Tuning', category:'Vehicle Pawn', description:'Updates safe runtime tuning values on one Pawn instance.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('maxSpeed', 'number', 38), dataIn('acceleration', 'number', 16), dataIn('brake', 'number', 24), dataIn('steer', 'number', 2.2), dataIn('grip', 'number', .84)],
+    outputs:[completedOut],
+    run(api){
+      if(api.services.pawns) api.services.pawns.setTuning(api.getInput('pawn'), {
+        maxSpeed:Math.max(.1, number(api.getInput('maxSpeed'))), acceleration:Math.max(.1, number(api.getInput('acceleration'))),
+        brake:Math.max(.1, number(api.getInput('brake'))), steer:Math.max(.05, number(api.getInput('steer'))),
+        grip:Math.max(.1, Math.min(1, number(api.getInput('grip')))),
+      });
+      return {exec:'completed'};
+    },
+  });
+
+  registry.register({
+    type:'pawn.setSuspension', title:'Set Vehicle Suspension', category:'Vehicle Pawn', description:'Updates per-wheel RaycastVehicle suspension without rebuilding other Pawns.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('stiffness', 'number', 32), dataIn('restLength', 'number', .34), dataIn('travel', 'number', .28), dataIn('compression', 'number', 4.4), dataIn('relaxation', 'number', 2.6), dataIn('rollInfluence', 'number', .22)],
+    outputs:[completedOut],
+    run(api){
+      if(api.services.pawns) api.services.pawns.setSuspension(api.getInput('pawn'), {
+        stiffness:Math.max(.1, number(api.getInput('stiffness'))), restLength:Math.max(.01, number(api.getInput('restLength'))),
+        travel:Math.max(.01, number(api.getInput('travel'))), compression:Math.max(.01, number(api.getInput('compression'))),
+        relaxation:Math.max(.01, number(api.getInput('relaxation'))), rollInfluence:Math.max(0, Math.min(1, number(api.getInput('rollInfluence')))),
+      });
+      return {exec:'completed'};
+    },
+  });
+
+  registry.register({
+    type:'pawn.setLights', title:'Set Vehicle Lights', category:'Vehicle Pawn', description:'Enables or disables the selected Pawn light collection. Brake/reverse/turn conditions remain automatic.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('enabled', 'boolean', true)], outputs:[completedOut],
+    run(api){ if(api.services.pawns) api.services.pawns.setLights(api.getInput('pawn'), {enabled:api.getInput('enabled') !== false}); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'pawn.setEffects', title:'Set Vehicle Effects', category:'Vehicle Pawn', description:'Controls per-Pawn neon, exhaust smoke and skid marks.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('neon', 'boolean', true), dataIn('exhaust', 'boolean', true), dataIn('skids', 'boolean', true), dataIn('smokeIntensity', 'number', 1)], outputs:[completedOut],
+    run(api){
+      if(api.services.pawns) api.services.pawns.setEffects(api.getInput('pawn'), {
+        neonEnabled:api.getInput('neon') !== false, exhaustEnabled:api.getInput('exhaust') !== false,
+        skidEnabled:api.getInput('skids') !== false, smokeIntensity:Math.max(0, number(api.getInput('smokeIntensity'))),
+      });
+      return {exec:'completed'};
+    },
+  });
+
+  registry.register({
+    type:'pawn.setCamera', title:'Set Vehicle Camera', category:'Vehicle Pawn', description:'Configures and optionally possesses the game camera for one Pawn.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('mode', 'string', 'arcade'), dataIn('possess', 'boolean', true), dataIn('distance', 'number', 9), dataIn('height', 'number', 3.1), dataIn('lag', 'number', 5.8), dataIn('fov', 'number', 70)], outputs:[completedOut],
+    run(api){
+      const pawn = api.getInput('pawn');
+      if(api.services.pawns){
+        api.services.pawns.setCamera(pawn, {mode:String(api.getInput('mode') || 'arcade'), distance:Math.max(1, number(api.getInput('distance'))), height:Math.max(.2, number(api.getInput('height'))), lag:Math.max(.1, number(api.getInput('lag'))), fov:Math.max(20, Math.min(130, number(api.getInput('fov'))))});
+        api.services.pawns.possessCamera(pawn, api.getInput('possess') !== false);
+      }
+      return {exec:'completed'};
+    },
+  });
+
+  registry.register({
+    type:'pawn.setEngineAudio', title:'Set Pawn Engine Audio', category:'Vehicle Pawn', description:'Controls the independent engine synth for one Vehicle Pawn.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('enabled', 'boolean', true), dataIn('volume', 'number', .28), dataIn('pitch', 'number', 1)], outputs:[completedOut],
+    run(api){
+      if(api.services.pawns) api.services.pawns.setEngineAudio(api.getInput('pawn'), {
+        enabled:api.getInput('enabled') !== false,
+        volume:Math.max(0, Math.min(2, number(api.getInput('volume')))),
+        pitch:Math.max(.2, Math.min(4, number(api.getInput('pitch')))),
+      });
+      return {exec:'completed'};
+    },
+  });
+
+  registry.register({
+    type:'pawn.setDataWidgets', title:'Set Pawn Data Widgets', category:'Vehicle Pawn', description:'Shows or hides the authored 3D metric widgets for one Pawn.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('visible', 'boolean', true)], outputs:[completedOut],
+    run(api){ if(api.services.pawns) api.services.pawns.setDataWidgets(api.getInput('pawn'), {enabled:api.getInput('visible') !== false}); return {exec:'completed'}; },
+  });
+
+  registry.register({
+    type:'pawn.getState', title:'Get Vehicle State', category:'Vehicle Pawn', description:'Reads runtime metrics from the selected Pawn instance.',
+    inputs:[dataIn('pawn', 'vehiclePawn', null)],
+    outputs:[dataOut('speed', 'number'), dataOut('speedKmh', 'number'), dataOut('rpm', 'number'), dataOut('gear', 'number'), dataOut('reverse', 'boolean'), dataOut('drifting', 'boolean'), dataOut('groundedWheels', 'number'), dataOut('physicsMode', 'string')],
+    evaluate(api, pin){
+      const state = api.services.pawns ? api.services.pawns.state(api.getInput('pawn')) : null;
+      if(!state) return pin === 'reverse' || pin === 'drifting' ? false : 0;
+      if(pin === 'drifting') return state.drift === true;
+      if(pin === 'reverse') return state.reverse === true;
+      if(pin === 'physicsMode') return state.physicsMode || 'none';
+      return Number(state[pin]) || 0;
     },
   });
 

@@ -271,7 +271,7 @@
     <div class="lk-prefs-head"><div><div class="lk-prefs-title">⚙ SETTINGS</div><div class="lk-prefs-sub" data-pref-i18n="prefsSub">editor preferences + project general settings</div></div><button id="lkPrefsClose" type="button">×</button></div>
     <div class="lk-prefs-tabs"><button data-prefs-tab="interface" class="on" type="button" data-pref-i18n="tabInterface">Interface</button><button data-prefs-tab="general" type="button" data-pref-i18n="tabGeneral">Project General</button><button data-prefs-tab="theme" type="button" data-pref-i18n="tabTheme">Theme</button><button data-prefs-tab="language" type="button" data-pref-i18n="tabLanguage">Language</button><button data-prefs-tab="controls" type="button" data-pref-i18n="tabControls">Game Input</button><button data-prefs-tab="editorKeys" type="button" data-pref-i18n="tabEditorKeys">Editor Keys</button><button data-prefs-tab="viewport" type="button" data-pref-i18n="tabViewport">Viewport</button></div>
     <div class="lk-prefs-body">
-      <div data-prefs-sec="interface" class="lk-prefs-sec on"><label class="lk-prefs-row"><input id="lkPrefMusicPanel" type="checkbox" checked><span><b data-pref-i18n="musicPanelName">Menu music player</b><i data-pref-i18n="musicPanelDesc">Show the floating quick music player in the editor.</i></span></label></div>
+      <div data-prefs-sec="interface" class="lk-prefs-sec on"><label class="lk-prefs-row"><input id="lkPrefMusicPanel" type="checkbox" checked><span><b data-pref-i18n="musicPanelName">Menu music player</b><i data-pref-i18n="musicPanelDesc">Show the floating quick music player in the editor.</i></span></label><button id="lkShowWelcome" class="lk-prefs-action" type="button">Show welcome and experimental notices</button></div>
       <div data-prefs-sec="general" class="lk-prefs-sec"><div class="lk-prefs-row"><span><b>Project General Settings</b><i>Shared Video, Audio, game input and gameplay settings. The same values drive the editor viewport, Play Preview, gameplay and playable exports.</i></span></div><button id="lkOpenProjectGeneral" class="lk-prefs-action" type="button">Open shared Video / Audio / Controls</button></div>
       <div data-prefs-sec="theme" class="lk-prefs-sec"><label class="lk-prefs-row"><input name="lkPrefTheme" type="radio" value="dark"><span><b data-pref-i18n="themeDark">Dark</b><i data-pref-i18n="themeDarkDesc">The current game-engine dark look.</i></span></label><label class="lk-prefs-row"><input name="lkPrefTheme" type="radio" value="light"><span><b data-pref-i18n="themeLight">Light</b><i data-pref-i18n="themeLightDesc">Bright panels, same layout.</i></span></label></div>
       <div data-prefs-sec="language" class="lk-prefs-sec"><label class="lk-prefs-row"><input name="lkPrefLang" type="radio" value="en"><span><b>English</b><i data-pref-i18n="langEnDesc">Default editor language.</i></span></label><label class="lk-prefs-row"><input name="lkPrefLang" type="radio" value="it"><span><b>Italiano</b><i data-pref-i18n="langItDesc">Main interface in Italian.</i></span></label></div>
@@ -280,6 +280,17 @@
       <div data-prefs-sec="viewport" class="lk-prefs-sec"><label class="lk-prefs-row lk-prefs-color"><input id="lkPrefLetterbox" type="color" value="#141518"><span><b data-pref-i18n="letterboxName">Frame background</b><i data-pref-i18n="letterboxDesc">Colour outside the player-camera frame (letterbox / crop). Saved with the level.</i></span></label></div>
     </div>
 	  </div></div>
+	  <div id="lkWelcomeOverlay" class="lk-welcome-overlay" aria-hidden="true">
+	    <div class="lk-welcome-card" role="dialog" aria-modal="true" aria-labelledby="lkWelcomeTitle">
+	      <div class="lk-welcome-head"><div><span>LOT KING ENGINE</span><h2 id="lkWelcomeTitle">Welcome</h2></div><button id="lkWelcomeClose" type="button" aria-label="Close">×</button></div>
+	      <div class="lk-welcome-lang" role="group" aria-label="Language"><button data-welcome-lang="en" type="button">EN</button><button data-welcome-lang="it" type="button">IT</button></div>
+	      <p id="lkWelcomeIntro"></p>
+	      <div id="lkWelcomeFeatures" class="lk-welcome-features"></div>
+	      <div id="lkWelcomeWarning" class="lk-welcome-warning"></div>
+	      <label class="lk-welcome-hide"><input id="lkWelcomeHide" type="checkbox"><span id="lkWelcomeHideLabel"></span></label>
+	      <button id="lkWelcomeContinue" class="lk-welcome-continue" type="button"></button>
+	    </div>
+	  </div>
 	  <div id="lkCtx"></div>
 	  <div id="lkPluginPanel" class="lk-plugin-panel" aria-hidden="true">
 	    <div class="lk-plugin-head">

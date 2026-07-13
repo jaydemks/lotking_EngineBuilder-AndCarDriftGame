@@ -11,8 +11,6 @@ const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.56, 'loading animation clone tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js'],
   [.58, 'loading editor camera tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js'],
   [.72, 'loading transform tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js'],
-  [.725, 'loading text font tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js'],
-  [.726, 'loading text geometry tools', 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js'],
   // runtime input/UI modules — loaded here too so the editor works even if the
   // host page HTML was cached before these were added (skipped if already present)
   [.73, 'loading window manager', 'js/runtime/ui/window-manager.js'],
@@ -52,6 +50,7 @@ const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.92, 'loading thumbnails', 'js/editor/thumbnail-manager.js'],
   [.925, 'loading floating layout', 'js/editor/floating-layout.js'],
   [.928, 'loading editor preferences', 'js/editor/preferences.js'],
+  [.9285, 'loading editor welcome', 'js/editor/welcome-overlay.js'],
   [.929, 'loading quick audio controls', 'js/editor/quick-audio.js'],
   [.9295, 'loading editor template', 'js/editor/editor-template.js'],
   [.9297, 'loading editor toolbar', 'js/editor/toolbar.js'],

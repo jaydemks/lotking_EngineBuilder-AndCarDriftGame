@@ -62,6 +62,12 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 
 ## Logic Element Runtime
 
+- `js/runtime/pawn-core.js`
+  Generic Pawn foundation: stable identity, authoring/runtime flags, lifecycle, possession callbacks, snapshots and a component-factory registry. Vehicle Pawn consumes this layer; future Human and Animal Pawns can reuse it without inheriting wheel, engine or RaycastVehicle assumptions.
+
+- `js/runtime/vehicle-pawns.js`
+  Versioned `VehiclePawn` v2 contract and registry exposed as `LOT_KING.pawns`. It separates authoring configuration, runtime state and visual ownership; provides lifecycle, reset/sleep/dispose, nullable Player 1–4 possession, an adapter for the untouched native Player Car, Cannon/fallback locomotion, independent synth audio, metric widgets, vehicle effects and Pawn-scoped runtime events.
+
 - `js/logic/logic-graph.js`
   Pure graph JSON helpers. Creates and normalizes Level Logic and Logic Element graphs while preserving variables, nodes, edges, comments, reusable subgraphs/macros, and the internal Logic Element scene model. Also exposes the Logic Element definition version, dependency manifest collection, and reusable definition asset migration/normalization used by the store and exporter.
 
@@ -87,7 +93,7 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
   Built-in Logic Element starter templates used by the Assets panel, including gameplay, interaction, debug and physics starters. Templates are placed as local editable Logic Element copies, not as hidden linked definitions.
 
 - `js/runtime/logic-elements-runner.js`
-  Runtime lifecycle bridge for Level Logic and scene Logic Elements. Builds validated runtimes, routes start/update/fixed-update/input/gamepad/resize/collision/custom/destroy events, starts internal animations, aggregates profiling stats across active graph runtimes, toggles pause-on-breakpoint for all active runtimes, resumes or steps paused breakpoints, and disposes timers and runtime state.
+  Runtime lifecycle bridge for Level Logic and scene Logic Elements. Builds validated runtimes, creates/starts/steps/disposes owned Vehicle Pawns, routes start/update/fixed-update/input/gamepad/resize/collision/custom/destroy events, starts internal animations, aggregates profiling stats across active graph runtimes, and manages breakpoint execution.
 
 `js/engine/scene-store.js` resolves reusable Logic Element definitions before runtime creation. Linked instances share their definition and apply only exposed-variable overrides; saved entries embed the definition and resolved fallback so runtime/playable imports do not depend on another browser's local asset library.
 

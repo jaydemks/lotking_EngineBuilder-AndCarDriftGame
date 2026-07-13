@@ -7,6 +7,7 @@
 
 const VERSION = 1;
 const DEFINITION_VERSION = 1;
+const VEHICLE_PAWN_VERSION = 2;
 
 function clone(value){
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -57,6 +58,45 @@ function normalizeComments(comments){
     h:Math.max(90, Number(c.h) || 180),
     color:String(c.color || '#ffd166'),
   }));
+}
+
+function normalizeVehiclePawn(vehiclePawn, legacyBlueprint){
+  const source = vehiclePawn && typeof vehiclePawn === 'object'
+    ? clone(vehiclePawn)
+    : (legacyBlueprint && typeof legacyBlueprint === 'object' ? clone(legacyBlueprint) : null);
+  if(!source) return null;
+  const legacyController = source.controllerIndex;
+  const rawPlayerId = Object.prototype.hasOwnProperty.call(source, 'playerId')
+    ? source.playerId
+    : (legacyController == null ? null : Number(legacyController) + 1);
+  const playerId = rawPlayerId == null || Number(rawPlayerId) < 1
+    ? null
+    : Math.max(1, Math.min(4, Number(rawPlayerId) | 0));
+  const spawn = source.spawn || {};
+  const tuning = source.tuning || {};
+  const camera = source.camera || source.cam || {};
+  return Object.assign({}, source, {
+    schemaVersion:VEHICLE_PAWN_VERSION,
+    enabled:source.enabled !== false,
+    hidden:source.hidden === true,
+    possessed:source.possessed !== false && playerId != null,
+    playerId,
+    spawn:{
+      x:Number(spawn.x) || 0, y:Number(spawn.y) || 0, z:Number(spawn.z) || 0,
+      heading:Number(spawn.heading) || 0,
+    },
+    tuning:Object.assign({}, tuning),
+    collision:Object.assign({}, source.collision || {}),
+    suspension:Object.assign({}, source.suspension || {}),
+    lights:Object.assign({}, source.lights || {}),
+    effects:Object.assign({}, source.effects || {}),
+    camera:Object.assign({}, camera),
+    migration:Object.assign({}, source.migration || {}, {
+      fromSchemaVersion:Number(source.schemaVersion || source.version || 0) || 0,
+      toSchemaVersion:VEHICLE_PAWN_VERSION,
+      legacyBlueprint:!vehiclePawn && !!legacyBlueprint,
+    }),
+  });
 }
 
 function subgraph(id, name, nodes, edges, variables){
@@ -128,6 +168,8 @@ function normalizeGraph(graph, fallbackName, fallbackScope){
     edges:normalizeEdges(sg.edges),
     comments:normalizeComments(sg.comments),
   }));
+  const vehiclePawn = normalizeVehiclePawn(g.vehiclePawn, g.playerPawnBlueprint);
+  if(vehiclePawn) g.vehiclePawn = vehiclePawn;
   return g;
 }
 
@@ -146,6 +188,14 @@ function addDependency(map, type, ref, owner){
       value:ref.value || null,
       name:ref.name || null,
       source:ref.source || null,
+      version:ref.version || null,
+      apiVersion:ref.apiVersion || null,
+      license:ref.license || null,
+      repository:ref.repository || null,
+      attribution:ref.attribution || null,
+      requested:ref.requested || null,
+      fallback:ref.fallback === true,
+      embedded:ref.embedded === true || !!(ref.samples || ref.layers || ref.tracks || ref.config),
       owners:[],
     });
   }
@@ -163,7 +213,23 @@ function collectGraphDependencies(graph){
   }
   [scene.root].concat(Array.isArray(scene.elements) ? scene.elements : []).filter(Boolean).forEach(element => {
     if(element.asset) addDependency(deps, 'mesh', element.asset, element.id || element.name || 'logicScene');
+    const material = element.matProps || element.materials || element.props;
+    if(material && typeof material === 'object'){
+      ['map','mapSrc','normalMap','normalMapSrc','roughnessMap','roughnessMapSrc','metalnessMap','metalnessMapSrc','alphaMap','alphaMapSrc','emissiveMap','emissiveMapSrc'].forEach(key => {
+        if(material[key]) addDependency(deps, 'texture', refDependency(material[key]), (element.id || 'logicScene') + ':material:' + key);
+      });
+    }
   });
+  const vehicle = g.vehiclePawn;
+  if(vehicle && vehicle.modelAsset) addDependency(deps, 'mesh', vehicle.modelAsset, 'vehiclePawn:model');
+  if(vehicle && vehicle.engineAudio){
+    const soundSet = vehicle.engineAudio.set || vehicle.engineAudio.setId;
+    if(soundSet) addDependency(deps, 'audio-set', refDependency(soundSet), 'vehiclePawn:engineAudio');
+  }
+  if(vehicle && window.LK_RUNTIME_VEHICLE_PHYSICS_BACKENDS){
+    const backend = window.LK_RUNTIME_VEHICLE_PHYSICS_BACKENDS.manifest(vehicle.physicsBackend || 'auto');
+    if(backend) addDependency(deps, 'plugin', backend, 'vehiclePawn:physics');
+  }
   function scanNodes(nodes, owner){
     (Array.isArray(nodes) ? nodes : []).filter(Boolean).forEach(node => {
       const data = node.data || {};
@@ -206,6 +272,7 @@ function normalizeDefinitionAsset(asset, fallbackName, fallbackScope){
 window.LK_LOGIC_GRAPH = Object.freeze({
   VERSION,
   DEFINITION_VERSION,
+  VEHICLE_PAWN_VERSION,
   clone,
   node,
   edge,
@@ -213,6 +280,7 @@ window.LK_LOGIC_GRAPH = Object.freeze({
   createEmptyGraph,
   createStarterGraph,
   normalizeGraph,
+  normalizeVehiclePawn,
   collectGraphDependencies,
   normalizeDefinitionAsset,
 });

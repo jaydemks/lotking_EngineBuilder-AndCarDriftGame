@@ -70,6 +70,7 @@ function create(deps){
   const getSpeed = deps.getSpeed || (() => 0);
   const getTimescale = deps.getTimescale || (() => 1);
   const resolveSrc = deps.resolveSrc || (src => Promise.resolve(src));   // 'blob:...' → object URL
+  const manageFallbackSynth = deps.manageFallbackSynth !== false;
 
   let cfg = null;
   let ctx = null, bus = null, dryGain = null, wetGain = null, convolver = null;
@@ -395,7 +396,7 @@ function create(deps){
   function update(dt){
     limiterTest = Math.max(0, limiterTest - dt);
     const ready = sampleEngineReady();
-    if(audio.setEngineSynthEnabled) audio.setEngineSynthEnabled(!cfg || !ready || !running);
+    if(manageFallbackSynth && audio.setEngineSynthEnabled) audio.setEngineSynthEnabled(!cfg || !ready || !running);
     if(!ctx || !cfg || !built || !running) return;
     const t = ctx.currentTime;
     const st = readState();
@@ -584,7 +585,7 @@ function create(deps){
     for(const k of ['on', 'off']) for(const v of bankVoices[k]) v.gain.gain.setTargetAtTime(0, t, .08);
     for(const key in layerVoices) layerVoices[key].gain.gain.setTargetAtTime(0, t, .08);
     for(const key in skidVoices) skidVoices[key].gain.gain.setTargetAtTime(0, t, .08);
-    if(audio.setEngineSynthEnabled) audio.setEngineSynthEnabled(true);
+    if(manageFallbackSynth && audio.setEngineSynthEnabled) audio.setEngineSynthEnabled(true);
   }
   function setConfig(set){
     cfg = set ? JSON.parse(JSON.stringify(set)) : null;
@@ -593,7 +594,7 @@ function create(deps){
     skidCur.drift = skidCur.brake = skidCur.accel = 0;
     if(!cfg){
       teardownVoices();
-      if(audio.setEngineSynthEnabled) audio.setEngineSynthEnabled(true);
+      if(manageFallbackSynth && audio.setEngineSynthEnabled) audio.setEngineSynthEnabled(true);
       notifyStatus();
       return;
     }

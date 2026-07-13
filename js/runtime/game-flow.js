@@ -109,6 +109,7 @@ function create(options){
     call('initGameplayPhysics');
     setHudVisible(true);
     session.markStarted(editorPreview, editorPreviewMode);
+    call('beginLogicRuntime');
     call('pauseMenuMusic');
     call('beginRadio');
   }
@@ -119,6 +120,7 @@ function create(options){
     document.body.classList.remove('lk-free-camera-cursor-hidden');
     document.body.classList.remove('lk-game-ui-cursor');
     session.markStopped();
+    call('stopLogicRuntime');
     call('setDragging', false);
     call('clearInput');
     setHudVisible(false);

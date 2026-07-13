@@ -12,9 +12,11 @@ function create(deps){
   const section = deps.section;
   const selectRow = deps.selectRow;
   const sliderRow = deps.sliderRow;
+  const btnRow = deps.btnRow;
   const checkRow = deps.checkRow;
   const colorRow = deps.colorRow;
   const el = deps.el;
+  const pushHistory = deps.pushHistory || function(){};
 
   function normalizeCameraConfig(cam){
     cam.mode = cam.mode || 'free';
@@ -34,13 +36,25 @@ function create(deps){
     cam.grade = Object.assign({enabled:false, exposure:1, brightness:0, contrast:1, saturation:1, gamma:1}, cam.grade || {});
   }
 
-  function build(box){
-    const cam = GAME.player.cameraCfg;
+  function build(box, targetPlayer){
+    const player = targetPlayer || deps.player || GAME.player;
+    const cam = player.cameraCfg;
     normalizeCameraConfig(cam);
+    let replaying = false;
+    const restore = snapshot => {
+      replaying = true;
+      Object.keys(cam).forEach(key => delete cam[key]); Object.assign(cam, JSON.parse(JSON.stringify(snapshot)));
+      if(player.setCameraConfig) player.setCameraConfig(JSON.parse(JSON.stringify(snapshot)), true);
+      else if(player.applyCameraCfg) player.applyCameraCfg();
+      markDirty(); replaying = false;
+    };
     const setCam = (patch, reset) => {
-      if(GAME.player.setCameraConfig) GAME.player.setCameraConfig(patch, reset);
-      else { Object.assign(cam, patch); GAME.player.applyCameraCfg(); }
+      const before = JSON.parse(JSON.stringify(cam));
+      if(player.setCameraConfig) player.setCameraConfig(patch, reset);
+      else { Object.assign(cam, patch); player.applyCameraCfg(); }
       markDirty();
+      const after = JSON.parse(JSON.stringify(cam));
+      if(!replaying && JSON.stringify(before) !== JSON.stringify(after)) pushHistory({label:'Vehicle Pawn camera',undo:() => restore(before),redo:() => restore(after)});
     };
     const sc = section('GAME CAMERA');
     sc.body.appendChild(selectRow('Mode', cam.mode, [
@@ -78,11 +92,22 @@ function create(deps){
     sc.body.appendChild(sliderRow('Impact shake', cam.shake, 0, 2, .05, v => setCam({shake:v})).root);
     box.appendChild(sc.root);
 
+    if(Array.isArray(player.cameraAnchors) && player.setActiveCameraAnchor){
+      const anchors = section('CAMERA ANCHORS', false);
+      anchors.body.appendChild(selectRow('Active anchor', player.activeCameraAnchorId || 'camera_anchor', player.cameraAnchors.map(item => ({value:item.id, label:item.label || item.name || item.id})), value => { player.setActiveCameraAnchor(value); markDirty(); }).root);
+      if(btnRow) anchors.body.appendChild(btnRow([
+        {label:'+ Camera anchor', action:() => { if(player.addCameraAnchor) player.addCameraAnchor(); markDirty(); }},
+        {label:'Remove active', action:() => { if(player.removeCameraAnchor) player.removeCameraAnchor(player.activeCameraAnchorId); markDirty(); }},
+      ]));
+      anchors.body.appendChild(el('<div class="lk-hint">Additional anchors remain children of this Pawn and can be positioned from its Logic Hierarchy.</div>'));
+      box.appendChild(anchors.root);
+    }
+
     const sdof = section('DEPTH OF FIELD (DOF)');
     if(!GAME.systems.post || !GAME.systems.post.ok){
       sdof.body.appendChild(el('<div class="lk-hint">Post-processing scripts are not loaded, so DOF is unavailable.</div>'));
     } else {
-      const updDof = patch => { Object.assign(cam.dof, patch); GAME.player.applyCameraCfg(); markDirty(); };
+      const updDof = patch => setCam({dof:Object.assign({}, cam.dof, patch)});
       sdof.body.appendChild(checkRow('Enabled in game camera', cam.dof.enabled, v => updDof({enabled:v})).root);
       sdof.body.appendChild(checkRow('Auto focus player', cam.dof.autoFocus !== false, v => updDof({autoFocus:v})).root);
       sdof.body.appendChild(checkRow('Show focus marker', !!cam.dof.showFocus, v => updDof({showFocus:v})).root);
@@ -100,7 +125,7 @@ function create(deps){
     if(!GAME.systems.post || !GAME.systems.post.ok){
       sgrade.body.appendChild(el('<div class="lk-hint">Post-processing scripts are not loaded, so visual grading is unavailable.</div>'));
     } else {
-      const updGrade = patch => { Object.assign(cam.grade, patch); GAME.player.applyCameraCfg(); markDirty(); };
+      const updGrade = patch => setCam({grade:Object.assign({}, cam.grade, patch)});
       sgrade.body.appendChild(checkRow('Enabled', cam.grade.enabled, v => updGrade({enabled:v})).root);
       sgrade.body.appendChild(sliderRow('Exposure', cam.grade.exposure, .35, 2.4, .01, v => updGrade({exposure:v}), v => (+v).toFixed(2)).root);
       sgrade.body.appendChild(sliderRow('Brightness', cam.grade.brightness, -.35, .35, .01, v => updGrade({brightness:v}), v => (+v).toFixed(2)).root);

@@ -259,6 +259,9 @@ function create(deps){
     }}]));
     box.appendChild(st.root);
 
+    if(deps.playerColliderInspector && deps.playerColliderInspector.build){
+      deps.playerColliderInspector.build(box, GAME.player, {selectedCollider});
+    } else {
     const pc = deps.section(selectedCollider ? 'PLAYER COLLIDER · SELECTED' : 'PLAYER COLLIDER');
     const collision = GAME.player.collision || {};
     const setCollision = patch => {
@@ -322,6 +325,7 @@ function create(deps){
     pc.body.appendChild(playerColliderRow(deps.sliderRow('Body height Y', collision.bodyY == null ? .55 : collision.bodyY, .05, 3, .01, v => setCollision({bodyY:v}), v => (+v).toFixed(2))));
     pc.body.appendChild(playerColliderRow(deps.sliderRow('Arcade radius', collision.radius == null ? 1.4 : collision.radius, .2, 5, .01, v => setCollision({radius:v}), v => (+v).toFixed(2))));
     box.appendChild(pc.root);
+    }
 
     deps.playerCameraInspector.build(box);
     deps.playerLightsInspector.build(box);

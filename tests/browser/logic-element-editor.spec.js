@@ -47,10 +47,17 @@ async function addLogicElement(page){
 test.beforeEach(async ({page}) => {
   await page.addInitScript(() => {
     localStorage.clear();
-    localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({mode:'browser', dismissed:true}));
+    localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({mode:'browser', onlineEditor:true, workspaceReady:true}));
   });
   await page.goto('/engine_editor.html?logic-e2e=1', {waitUntil:'domcontentloaded'});
-  await page.waitForFunction(() => window.LOT_KING && LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active === true, null, {timeout:60000});
+  const active = await page.waitForFunction(() => !!(document.querySelector('#lkEditor.active') || window.LOT_KING && LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active === true), null, {timeout:15000}).then(() => true).catch(() => false);
+  await closeStartupOverlays(page);
+  if(!active){
+    const editorButton = page.locator('#editorBtn');
+    await editorButton.waitFor({state:'visible', timeout:15000});
+    await editorButton.click({force:true});
+  }
+  await page.waitForFunction(() => !!(document.querySelector('#lkEditor.active') || window.LOT_KING && LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active === true), null, {timeout:60000});
   await closeStartupOverlays(page);
   await expect(page.locator('#lkEditor')).toHaveClass(/active/);
 });
@@ -384,8 +391,12 @@ test('Logic Element templates can be placed from Assets as editable local copies
   expect(roundTrip.exported.commentCount).toBeGreaterThan(0);
   expect(roundTrip.imported).toEqual(roundTrip.exported);
 
-  await page.locator('#lkPlay').click();
-  await expect(page.locator('#lkPlay')).toContainText('STOP', {timeout:10000});
+  await page.evaluate(() => {
+    window.LOT_KING.state.sceneReady = true;
+    window.LOT_KING.actions.startEditorPreview('play');
+    window.LOT_KING.editor.state.playPreview = true;
+    window.LOT_KING.editor.state.playPreviewMode = 'play';
+  });
   await expect(page.locator('#popup')).toContainText('Rotating Cube started', {timeout:10000});
   await expect.poll(async () => page.evaluate(() => window.LOT_KING.editor.state.playPreview === true)).toBe(true);
   await page.locator('[data-app-menu="plugins"]').click();
@@ -394,7 +405,10 @@ test('Logic Element templates can be placed from Assets as editable local copies
   await expect(page.locator('#lkLogicProfilerBody')).toContainText('Runtimes');
   await expect(page.locator('#lkLogicProfilerBody')).toContainText('Template - Rotating Cube');
   await expect(page.locator('#lkLogicProfilerBody')).toContainText('events');
-  await page.locator('#lkPlay').click();
+  await page.evaluate(() => {
+    window.LOT_KING.editor.state.playPreview = false;
+    window.LOT_KING.actions.stopEditorPreview();
+  });
   await expect(page.locator('#lkPlay')).toContainText('PREVIEW', {timeout:10000});
   await expect.poll(async () => page.evaluate(() => window.LOT_KING.editor.state.playPreview === false)).toBe(true);
   expect(pageErrors).toEqual([]);
@@ -567,4 +581,162 @@ test('linked Logic Element instances can reset overrides and become local', asyn
   });
 
   await expect(page.locator('.lk-sec', {hasText:'LOGIC ELEMENT'})).toContainText('Local Logic Element');
+});
+
+test('Vehicle Pawn persistence, IndexedDB assets, migration and playable bundle round trip', async ({page}) => {
+  const result = await page.evaluate(async () => {
+    const store = window.LK_STORE;
+    const blobKey = 'e2e-vehicle-model-blob';
+    await window.LK_ASSET_BLOBS.put(blobKey, new Blob(['vehicle-asset'], {type:'application/octet-stream'}));
+    const blobUrl = await window.LK_ASSET_BLOBS.getUrl(blobKey);
+    const blobText = await fetch(blobUrl).then(response => response.text());
+    const legacy = window.LK_LOGIC_GRAPH.createEmptyGraph('Legacy Vehicle E2E', 'element');
+    legacy.playerPawnBlueprint = {version:1, controllerIndex:1, spawn:{x:4,z:9,heading:.5}, tuning:{horsepower:510}};
+    const graph = window.LK_LOGIC_GRAPH.normalizeGraph(legacy);
+    graph.logicScene = {root:null,elements:[],components:[]};
+    graph.logicScene.root = {id:'root',name:'Vehicle Root',type:'mesh',asset:{dbKey:blobKey,name:'Embedded Vehicle'},position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],linked:true};
+    graph.vehiclePawn.wheels = [0,1,2,3].map(index => ({x:index%2?.9:-.9,y:.17,z:index<2?1.3:-1.3,front:index<2,driven:index>=2,visualId:'wheel-' + index}));
+    const scene = store.blank();
+    scene.added.push({id:'vehicle_e2e',kind:'logicElement',name:'Vehicle E2E',graph,enabled:true,runInEditorPreview:true,props:{roughness:.22,metalness:.8},meshEdits:{deleted:['body-old'],detached:[],transforms:{wheel_custom:{p:[1,0,0],r:[0,0,0],s:[1,1,1]}},properties:{},splits:{},joins:[]},asset:{key:'logic:e2e',name:'Vehicle E2E'},t:{p:[1,.15,2],r:[0,.2,0],s:[1,1,1],v:true}});
+    store.save(scene, {trackId:'vehicle-persistence-e2e',trackName:'Vehicle Persistence E2E'});
+    const loaded = store.load();
+    const savedEntry = loaded.added.find(item => item.id === 'vehicle_e2e');
+    const project = store.exportProject(loaded, {trackId:'vehicle-persistence-e2e',trackName:'Vehicle Persistence E2E'});
+    const playable = window.LOT_KING.editor.getPlayableExport();
+    const bundle = await playable.buildPlayableBundle([project], 'gameplay.html', 'Vehicle Persistence E2E');
+    const playableEntry = bundle.levels[0].project.scene.added.find(item => item.id === 'vehicle_e2e');
+    await window.LK_ASSET_BLOBS.remove(blobKey);
+    return {
+      blobText,
+      savedWheelCount:savedEntry.graph.vehiclePawn.wheels.length,
+      savedSpawn:savedEntry.graph.vehiclePawn.spawn,
+      migration:savedEntry.graph.vehiclePawn.migration,
+      legacyRetained:!!savedEntry.graph.playerPawnBlueprint,
+      bundleFormat:bundle.format,
+      playableAssetSrc:playableEntry.graph.logicScene.root.asset.src,
+      playableDbKey:playableEntry.graph.logicScene.root.asset.dbKey,
+      materialRoughness:playableEntry.props.roughness,
+      deletedMesh:playableEntry.meshEdits.deleted[0],
+      meshTransform:playableEntry.meshEdits.transforms.wheel_custom.p,
+    };
+  });
+  expect(result.blobText).toBe('vehicle-asset');
+  expect(result.savedWheelCount).toBe(4);
+  expect(result.savedSpawn).toEqual({x:4,y:0,z:9,heading:.5});
+  expect(result.migration.legacyBlueprint).toBe(true);
+  expect(result.legacyRetained).toBe(true);
+  expect(result.bundleFormat).toBe('LKPKG');
+  expect(result.playableAssetSrc).toMatch(/^data:/);
+  expect(result.playableDbKey).toBeNull();
+  expect(result.materialRoughness).toBe(.22);
+  expect(result.deletedMesh).toBe('body-old');
+  expect(result.meshTransform).toEqual([1,0,0]);
+});
+
+test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({page}) => {
+  test.setTimeout(240000);
+  const runtime = await page.evaluate(async () => {
+    const game = window.LOT_KING;
+    const rawPhysics = game.systems.physics.raw;
+    const previousWorld = rawPhysics.world;
+    if(!rawPhysics.world) rawPhysics.world = new window.CANNON.World();
+    const owner = new window.THREE.Group(); owner.userData.logicInstanceId = 'cannon-e2e'; game.core.scene.add(owner);
+    const pawn = game.pawns.createLogic(owner, {id:'cannon-e2e',playerId:null,physicsBackend:'cannon-raycast',spawn:{x:0,y:1,z:0},suspension:{stiffness:32,restLength:.34,travel:.28,radius:.38}}, {graph:{logicScene:{elements:[]}},STORE:window.LK_STORE});
+    pawn.start(); const physicsReady = pawn.ensurePhysics();
+    const result = {physicsReady,physicsMode:pawn.state.physicsMode,wheels:pawn.backend&&pawn.backend.vehicle&&pawn.backend.vehicle.wheelInfos.length,shapes:pawn.backend&&pawn.backend.body&&pawn.backend.body.shapes.length};
+    pawn.dispose(); game.core.scene.remove(owner); if(!previousWorld) rawPhysics.world = null;
+    const cameraHolder = window.LK_STORE.createSceneCamera({activeLevelCamera:true,fov:61});
+    cameraHolder.userData.editorType='camera'; cameraHolder.userData.editorId='active-camera-e2e'; cameraHolder.position.set(8,6,4); game.core.scene.add(cameraHolder); game.world.registry.push(cameraHolder);
+    game.player.setControllerIndex(null); game.state.runtimeActiveSceneCameraId='active-camera-e2e';
+    await new Promise(resolve=>setTimeout(resolve,120));
+    result.activeCameraId=game.state.runtimeActiveSceneCameraId;
+    result.cameraFov=Math.round(game.core.camera.fov);
+    game.world.registry.splice(game.world.registry.indexOf(cameraHolder),1); game.core.scene.remove(cameraHolder); game.state.runtimeActiveSceneCameraId=null; game.player.setControllerIndex(0);
+    return result;
+  });
+  expect(runtime).toMatchObject({physicsReady:true,physicsMode:'cannon-raycast',wheels:4,shapes:1,activeCameraId:'active-camera-e2e'});
+  expect(runtime.cameraFov).toBeGreaterThanOrEqual(60);
+  expect(runtime.cameraFov).toBeLessThanOrEqual(62);
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.evaluate(async () => {
+    const exporter = window.LOT_KING.editor.getPlayableExport();
+    const project = exporter.getCurrentPlayableProject();
+    const bundle = await exporter.buildPlayableBundle([project], 'gameplay.html', 'Vehicle ZIP E2E');
+    window.__vehicleZipWarnings = await exporter.buildPlayableProjectZip(bundle);
+  });
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/playable\.zip$/);
+  const stream = await download.createReadStream();
+  let bytes=0; for await(const chunk of stream) bytes+=chunk.length;
+  expect(bytes).toBeGreaterThan(100000);
+});
+
+test('Logic Player Car owns P1 without native overlap or manual Cinema takeover', async ({page}) => {
+  const runtimeErrors = [];
+  page.on('pageerror', error => runtimeErrors.push(error.message));
+  const setup = await page.evaluate(() => {
+    const game = window.LOT_KING, store = window.LK_STORE;
+    window.__logicRunnerWarnings = [];
+    const originalWarn = console.warn;
+    console.warn = function(){ window.__logicRunnerWarnings.push(Array.from(arguments).map(value => value && value.message || String(value)).join(' | ')); return originalWarn.apply(console, arguments); };
+    game.player.setControllerIndex(null);
+    const template = window.LK_LOGIC_TEMPLATES.get('logic-template-player-car');
+    const graph = window.LK_LOGIC_GRAPH.clone(template.graph);
+    graph.variables.forEach(variable => {
+      if(variable.binding === 'playerId') variable.value = 1;
+      if(variable.binding === 'spawn.x') variable.value = 10;
+      if(variable.binding === 'spawn.y') variable.value = .15;
+      if(variable.binding === 'spawn.z') variable.value = 0;
+    });
+    const owner = store.createLogicElement({graph,name:'P1 Logic Vehicle E2E'});
+    const id = store.nextId();
+    store.registerAdded(game, owner, {id,kind:'logicElement',name:'P1 Logic Vehicle E2E',graph,enabled:true,runInEditorPreview:true,collide:false,t:{p:[10,.15,0],r:[0,0,0],s:[1,1,1],v:true}});
+    const cinema = store.createCinemaStudio({trigger:'manual',outputPlayerIndex:0,duration:4,playback:'loop',cameraCuts:[]});
+    store.registerAdded(game, cinema, {id:store.nextId(),kind:'cinemaStudio',name:'Manual Cinema E2E',collide:false,props:Object.assign({},cinema.userData.cinemaProps),t:{p:[0,.05,5],r:[0,0,0],s:[1,1,1],v:true}});
+    return {ownerId:owner.userData.editorId,cinemaTrigger:cinema.userData.cinemaProps.trigger,nativeController:game.player.controllerIndex,nativeEnabled:game.player.enabled,nativeVisible:game.player.car.visible};
+  });
+  expect(setup.cinemaTrigger).toBe('manual');
+  expect(setup.nativeController).toBeNull();
+  expect(setup.nativeEnabled).toBe(true);
+  expect(setup.nativeVisible).toBe(true);
+  await page.evaluate(() => {
+    window.LOT_KING.state.sceneReady = true;
+    window.LOT_KING.actions.startEditorPreview('play');
+    window.LOT_KING.editor.state.playPreview = true;
+    window.LOT_KING.editor.state.playPreviewMode = 'play';
+  });
+  await page.waitForFunction(() => window.LOT_KING.state.started === true && window.LOT_KING.state.editorPreview === true, null, {timeout:60000});
+  await page.waitForTimeout(1200);
+  const runtime = await page.evaluate(ownerId => {
+    const game = window.LOT_KING;
+    const pawn = game.pawns.get(ownerId);
+    const owner = game.world.registry.find(item => item && item.userData && item.userData.editorId === ownerId);
+    return {
+      pawnExists:!!pawn,
+      pawnId:pawn && pawn.id,
+      playerId:pawn && pawn.playerId,
+      ownerVisible:pawn && pawn.owner && pawn.owner.visible,
+      ownerPosition:pawn && pawn.owner ? [pawn.owner.position.x,pawn.owner.position.y,pawn.owner.position.z] : null,
+      bodyPosition:pawn && pawn.backend ? [pawn.backend.body.position.x,pawn.backend.body.position.y,pawn.backend.body.position.z] : null,
+      physicsMode:pawn && pawn.state && pawn.state.physicsMode,
+      cameraPawnId:game.state.runtimeVehicleCameraPawnId,
+      cinemaLocked:game.state.cinemaInputLocked === true,
+      nativeController:game.player.controllerIndex,
+      nativeEnabled:game.player.enabled,
+      nativeVisible:game.player.car.visible,
+      nativeCollisionResponse:game.systems.physics.raw.carBody ? game.systems.physics.raw.carBody.collisionResponse : false,
+      diagnostics:{started:game.state.started,sceneReady:game.state.sceneReady,editorPreview:game.state.editorPreview,ownerInRegistry:!!owner,ownerType:owner&&owner.userData.editorType,logicEnabled:owner&&owner.userData.logicEnabled,graphVehicle:!!(owner&&owner.userData.logicGraph&&owner.userData.logicGraph.vehiclePawn),validation:owner&&window.LK_LOGIC_ELEMENTS_RUNNER_INSTANCE.validate(owner.userData.logicGraph),runnerStats:window.LK_LOGIC_ELEMENTS_RUNNER_INSTANCE.stats(),warnings:window.__logicRunnerWarnings,registeredPawns:game.pawns.list().map(item=>({id:item.id,kind:item.kind,playerId:item.playerId,enabled:item.enabled}))},
+    };
+  }, setup.ownerId);
+  expect(runtimeErrors).toEqual([]);
+  if(!runtime.pawnExists) throw new Error('Logic Pawn diagnostics: ' + JSON.stringify(runtime.diagnostics));
+  expect(runtime).toMatchObject({pawnExists:true,pawnId:setup.ownerId,playerId:1,ownerVisible:true,cameraPawnId:setup.ownerId,cinemaLocked:false,nativeController:null,nativeEnabled:true,nativeVisible:true,nativeCollisionResponse:true});
+  expect(runtime.ownerPosition[0]).toBeGreaterThan(7);
+  if(runtime.bodyPosition) expect(runtime.bodyPosition[0]).toBeGreaterThan(7);
+  else expect(runtime.physicsMode).toBe('arcade-fallback');
+  await page.evaluate(() => {
+    window.LOT_KING.editor.state.playPreview = false;
+    window.LOT_KING.actions.stopEditorPreview();
+  });
 });

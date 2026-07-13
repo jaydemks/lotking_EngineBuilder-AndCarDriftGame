@@ -24,6 +24,10 @@ This is the short operational guide for extending the current Logic Element syst
 
 Templates are local editable starters, not linked reusable assets. Placing a template creates a normal scene Logic Element copy, so users can change it freely without mutating a hidden built-in definition.
 
+The Player Car template is a special Vehicle Pawn definition. Keep its persistent authoring data in `graph.vehiclePawn` (schema v2) and retain `graph.playerPawnBlueprint` only as the lossless migration/reference snapshot. Runtime speed, RPM, gear and temporary control state belong to the Pawn instance and must never be written back into the graph during Play Preview.
+
+Reusable vehicle behavior should be authored as Functions/Subgraphs. The built-in template demonstrates this with `Apply Player Drive`; control and queries must use explicit `vehiclePawn` references through the Vehicle Pawn node category instead of reading or mutating `GAME.player`.
+
 Each template should include:
 
 - a stable id prefixed with `logic-template-`;

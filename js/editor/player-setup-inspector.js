@@ -15,6 +15,8 @@ function create(deps){
   const buildInspector = deps.buildInspector;
   const openSoundDesigner = deps.openSoundDesigner;
   const openPlayerModelPicker = deps.openPlayerModelPicker;
+  const modelAssets = deps.modelAssets || function(){ return []; };
+  const replaceModelWithAsset = deps.replaceModelWithAsset || function(){};
   const focusSelected = deps.focusSelected;
   const section = deps.section;
   const sliderRow = deps.sliderRow;
@@ -24,15 +26,15 @@ function create(deps){
   const el = deps.el;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
-  function buildPawnInput(box){
+  function buildPawnInput(box, player){
     const input = section(tr('PAWN / LOCAL PLAYER', 'PAWN / GIOCATORE LOCALE'), false);
-    const index = GAME.player.controllerIndex == null ? null : Math.max(0, Math.min(3, Number(GAME.player.controllerIndex) | 0));
-    input.body.appendChild(checkRow(tr('Pawn enabled', 'Pawn attivo'), GAME.player.enabled !== false, value => {
-      if(GAME.player.setEnabled) GAME.player.setEnabled(value); else GAME.player.enabled = value;
+    const index = player.controllerIndex == null ? null : Math.max(0, Math.min(3, Number(player.controllerIndex) | 0));
+    input.body.appendChild(checkRow(tr('Pawn enabled', 'Pawn attivo'), player.enabled !== false, value => {
+      if(player.setEnabled) player.setEnabled(value); else player.enabled = value;
       markDirty();
     }).root);
-    input.body.appendChild(checkRow(tr('Hidden in scene/runtime', 'Nascosto in scena/runtime'), GAME.player.hidden === true, value => {
-      if(GAME.player.setHidden) GAME.player.setHidden(value); else { GAME.player.hidden = value; GAME.player.car.visible = !value; }
+    input.body.appendChild(checkRow(tr('Hidden in scene/runtime', 'Nascosto in scena/runtime'), player.hidden === true, value => {
+      if(player.setHidden) player.setHidden(value); else { player.hidden = value; if(player.car) player.car.visible = !value; }
       markDirty();
     }).root);
     input.body.appendChild(selectRow(tr('Controlled by', 'Controllato da'), index == null ? 'none' : String(index), [
@@ -41,8 +43,8 @@ function create(deps){
       {value:'2', label:'Player 3'}, {value:'3', label:'Player 4'},
     ], value => {
       const next = value === 'none' ? null : Number(value);
-      if(GAME.player.setControllerIndex) GAME.player.setControllerIndex(next);
-      else GAME.player.controllerIndex = next;
+      if(player.setControllerIndex) player.setControllerIndex(next);
+      else player.controllerIndex = next;
       markDirty(); buildInspector();
     }).root);
     const snapshot = GAME.input && GAME.input.describe ? GAME.input.describe() : null;
@@ -57,25 +59,26 @@ function create(deps){
     box.appendChild(input.root);
   }
 
-  function buildDrivingTuning(box){
+  function buildDrivingTuning(box, player){
     const sg = section(tr('DRIVING (SETUP)', 'GUIDA (SETUP)'), false);
-    const tun = GAME.player.tuning.values;
+    const tun = player.tuning.values;
     const exposed = tun.exposed || {};
     const applyPreset = (name, label) => {
-      const preset = GAME.player.tuning.presets && GAME.player.tuning.presets[name];
+      const preset = player.tuning.presets && player.tuning.presets[name];
       if(!preset) return;
-      GAME.player.setTuning({...preset});
+      player.setTuning({...preset});
       markDirty();
       if(status) status(tr('Driving preset: ', 'Preset guida: ') + label);
       buildInspector();
     };
     sg.body.appendChild(btnRow([
+      {label:'Default', action:() => applyPreset('default', 'Default')},
       {label:'Race mode', action:() => applyPreset('race', 'Race mode')},
       {label:'Drift mode', action:() => applyPreset('drift', 'Drift mode')},
-      {label:'Power curves', action:() => GAME.player.tuning.openCurves && GAME.player.tuning.openCurves()},
+      {label:'Power curves', action:() => player.tuning.openCurves && player.tuning.openCurves()},
       {label:'Export tuning', action:() => {
-        if(GAME.player.tuning.exportTuning){
-          GAME.player.tuning.exportTuning();
+        if(player.tuning.exportTuning){
+          player.tuning.exportTuning();
           if(status) status(tr('Vehicle tuning exported as JSON; clipboard copy is attempted when the browser allows it.', 'Tuning veicolo esportato in JSON; copia negli appunti tentata se il browser la consente.'));
         }
       }},
@@ -86,11 +89,11 @@ function create(deps){
     exportCb.type = 'checkbox';
     exportCb.checked = exposed.exportTuning === true;
     exportCb.addEventListener('change', () => {
-      if(GAME.player.tuning.setExposed) GAME.player.tuning.setExposed('exportTuning', exportCb.checked);
+      if(player.tuning.setExposed) player.tuning.setExposed('exportTuning', exportCb.checked);
       else {
         const next = Object.assign({}, tun.exposed || {});
         next.exportTuning = exportCb.checked;
-        GAME.player.setTuning({exposed:next});
+        player.setTuning({exposed:next});
       }
       markDirty();
     });
@@ -108,11 +111,11 @@ function create(deps){
       cb.type = 'checkbox';
       cb.checked = exposed[key] !== false;
       cb.addEventListener('change', () => {
-        if(GAME.player.tuning.setExposed) GAME.player.tuning.setExposed(key, cb.checked);
+        if(player.tuning.setExposed) player.tuning.setExposed(key, cb.checked);
         else {
           const next = Object.assign({}, tun.exposed || {});
           next[key] = cb.checked;
-          GAME.player.setTuning({exposed:next});
+          player.setTuning({exposed:next});
         }
         markDirty();
       });
@@ -124,15 +127,15 @@ function create(deps){
     };
     const tRow = (key, label, min, max) => exposeWrap(key, sliderRow(label, tun[key] == null ? 0 : tun[key], min, max, 1, v => {
       const patch = {}; patch[key] = v;
-      GAME.player.setTuning(patch); markDirty();
+      player.setTuning(patch); markDirty();
     }).root);
     const tFloatRow = (key, label, min, max, step, fallback) => exposeWrap(key, sliderRow(label, tun[key] == null ? fallback : tun[key], min, max, step, v => {
       const patch = {}; patch[key] = v;
-      GAME.player.setTuning(patch); markDirty();
+      player.setTuning(patch); markDirty();
     }, v => (+v).toFixed(2)).root);
     sg.body.appendChild(tRow('torque', tr('Torque', 'Coppia'), 0, 10));
     sg.body.appendChild(exposeWrap('horsepower', sliderRow('Horsepower', tun.horsepower == null ? 450 : tun.horsepower, 15, 1500, 5, v => {
-      GAME.player.setTuning({horsepower:v}); markDirty();
+      player.setTuning({horsepower:v}); markDirty();
     }, v => Math.round(+v) + ' hp').root));
     sg.body.appendChild(tRow('maxSpeed', tr('Top speed', 'Vel. massima'), 0, 10));
     sg.body.appendChild(tRow('oversteer', tr('Oversteer', 'Sovrasterzo'), -10, 10));
@@ -150,20 +153,35 @@ function create(deps){
     box.appendChild(sg.root);
   }
 
-  function buildModel(box){
+  function buildModel(box, player){
     const sm = section(tr('3D MODEL', 'MODELLO 3D'), false);
-    sm.body.appendChild(el('<div class="lk-hint">' + (GAME.player.getModel() ? tr('GLB model loaded', 'Modello GLB caricato') : tr('Procedural body (no GLB)', 'Corpo procedurale (nessun GLB)')) + '</div>'));
-    sm.body.appendChild(btnRow([{label:'📦 Replace GLB model...', action:openPlayerModelPicker}]));
+    sm.body.appendChild(el('<div class="lk-hint">' + (player.getModel && player.getModel() ? tr('GLB model loaded', 'Modello GLB caricato') : tr('Procedural body (no GLB)', 'Corpo procedurale (nessun GLB)')) + '</div>'));
+    const available = (player.modelAssets ? player.modelAssets() : modelAssets()).filter(asset => asset && asset.kind === 'glb');
+    if(available.length){
+      const select = document.createElement('select');
+      select.appendChild(new Option(tr('Choose imported GLB...', 'Scegli GLB importato...'), ''));
+      available.forEach(asset => select.appendChild(new Option(asset.name || asset.source || asset.key || 'GLB', asset.id || asset.key || asset.dbKey || asset.src || '')));
+      select.addEventListener('change', () => {
+        const asset = available.find(item => [item.id, item.key, item.dbKey, item.src].filter(Boolean).includes(select.value));
+        if(asset) (player.replaceModelWithAsset || replaceModelWithAsset)(asset);
+      });
+      sm.body.appendChild(select);
+    }
+    sm.body.appendChild(btnRow([{label:'📦 Replace / import GLB...', action:player.openModelPicker || openPlayerModelPicker}]));
+    sm.body.appendChild(el('<div class="lk-hint">' + tr(
+      'The model is rebuilt through the vehicle rig pipeline; wheel pivots, collision, cameras, lights and attachment anchors remain part of the Pawn.',
+      'Il modello viene ricostruito tramite la pipeline rig del veicolo; pivot ruote, collisione, camere, luci e anchor degli attachment restano nel Pawn.'
+    ) + '</div>'));
     box.appendChild(sm.root);
   }
 
-  function buildEngineSound(box){
+  function buildEngineSound(box, player){
     const snd = section('ENGINE SOUND', false);
     const SS = STORE.soundSets;
     if(!SS){
       snd.body.appendChild(el('<div class="lk-empty">' + tr('Sound sets unavailable.', 'Sound sets non disponibili.') + '</div>'));
     } else {
-      const assigned = GAME.player.engineAudio && GAME.player.engineAudio.setId;
+      const assigned = player.engineAudio && player.engineAudio.setId;
       const sets = SS.list();
       const sel = document.createElement('select');
       sel.className = 'lk-soundset-select';
@@ -171,7 +189,7 @@ function create(deps){
       for(const s of sets) sel.appendChild(new Option(s.name, s.id, false, s.id === assigned));
       sel.value = assigned || '';
       sel.addEventListener('change', () => {
-        GAME.player.setEngineSound(sel.value || null);
+        player.setEngineSound(sel.value || null);
         markDirty();
         status(sel.value ? tr('Sound set "', 'Sound set "') + sel.options[sel.selectedIndex].text + tr('" assigned to vehicle', '" assegnato al veicolo') : tr('Engine using synthetic fallback', 'Motore in fallback sintetico'));
         buildInspector();
@@ -197,7 +215,7 @@ function create(deps){
           if(!name || !name.trim()) return;
           const id = SS.create(name.trim());
           if(!id){ status(tr('⚠ Set creation failed', '⚠ Creazione set fallita')); return; }
-          GAME.player.setEngineSound(id);
+          player.setEngineSound(id);
           markDirty();
           buildInspector();
           openSoundDesigner(id);
@@ -208,11 +226,12 @@ function create(deps){
     box.appendChild(snd.root);
   }
 
-  function build(box){
-    buildPawnInput(box);
-    buildDrivingTuning(box);
-    buildModel(box);
-    buildEngineSound(box);
+  function build(box, targetPlayer){
+    const player = targetPlayer || deps.player || GAME.player;
+    buildPawnInput(box, player);
+    buildModel(box, player);
+    buildDrivingTuning(box, player);
+    buildEngineSound(box, player);
     box.appendChild(btnRow([{label:'🔍 Focus', action: focusSelected}]));
   }
 

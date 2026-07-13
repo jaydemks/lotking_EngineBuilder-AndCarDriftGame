@@ -40,7 +40,7 @@ function create(deps){
   function makeCard(item){
     if(!assetOrder.includes(item.ref)) assetOrder.push(item.ref);
     const div = documentRef.createElement('div');
-    div.className = 'lk-asset-item lk-asset-' + item.kind + (selectedAssetRefs().includes(item.ref) ? ' sel' : '') + (item.active ? ' active' : '');
+    div.className = 'lk-asset-item lk-asset-' + item.kind + (item.elementType ? ' lk-element-' + item.elementType : '') + (selectedAssetRefs().includes(item.ref) ? ' sel' : '') + (item.active ? ' active' : '');
     div.dataset.assetRef = item.ref;
     div.draggable = true;
 
@@ -310,15 +310,52 @@ function create(deps){
 
   function logicBlueprintItems(q){
     const STORE = deps.STORE;
-    const templates = window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.list ? window.LK_LOGIC_TEMPLATES.list().map(template => ({
+    const classify = graph => {
+      if(graph && graph.vehiclePawn) return {type:'vehicle', label:'Vehicle Logic', icon:'🚗'};
+      const components = graph && graph.logicScene && graph.logicScene.components || [];
+      if(components.some(item => item && /anim/i.test(item.type || item.name || ''))) return {type:'animation', label:'Animation', icon:'▶'};
+      if(components.some(item => item && /rig|skeleton|bone/i.test(item.type || item.name || ''))) return {type:'rig', label:'Rig', icon:'♙'};
+      return {type:'logic', label:'Logic', icon:'◇'};
+    };
+    const deleteReusableLogicAsset = asset => {
+      if(!asset || !STORE.logicElementAssets || !STORE.logicElementAssets.deleteAsset) return;
+      const linked = deps.GAME && deps.GAME.world && Array.isArray(deps.GAME.world.registry)
+        ? deps.GAME.world.registry.filter(item => item && item.userData && item.userData.logicLinked && item.userData.logicAssetId === asset.id)
+        : [];
+      if(linked.length){
+        deps.status(tr(
+          'Cannot delete "' + asset.name + '": ' + linked.length + ' linked scene instance(s). Make them local or delete them first.',
+          'Impossibile eliminare "' + asset.name + '": ' + linked.length + ' istanza/e della scena collegate. Rendile locali o eliminale prima.'
+        ));
+        return;
+      }
+      deps.confirmEditorAction({
+        title:tr('Delete reusable Logic Element?', 'Eliminare il Logic Element riutilizzabile?'),
+        message:tr('Delete "' + asset.name + '" from this project?', 'Eliminare "' + asset.name + '" da questo progetto?'),
+        okText:tr('Delete', 'Elimina'),
+      }).then(ok => {
+        if(!ok) return;
+        STORE.logicElementAssets.deleteAsset(asset.id);
+        const ref = 'logic-blueprint:' + asset.id;
+        delete deps.folderAssignments('assets')[ref];
+        deps.writeFolderState();
+        deps.markDirty();
+        deps.refreshAssetsPanel();
+        deps.status(tr('Reusable Logic Element deleted', 'Logic Element riutilizzabile eliminato'));
+      });
+    };
+    const templates = window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.list ? window.LK_LOGIC_TEMPLATES.list().map(template => {
+      const category = classify(template.graph);
+      return {
       kind:'logic-template',
       ref:'logic-template:' + template.id,
       id:template.id,
       name:template.name || 'Logic Element Template',
       sub:(template.category || 'Template') + ' template · local editable copy',
       source:'Built-in Logic Element template',
-      icon:'◇',
-      badges:[{type:'info', label:'Template'}],
+      icon:category.icon,
+      elementType:category.type,
+      badges:[{type:category.type, label:category.label}, {type:'template', label:'Master Template'}],
       filterType:'blueprint',
       draggable:true,
       raw:template,
@@ -326,23 +363,28 @@ function create(deps){
       actions:[
         {label:'+', title:tr('Place editable local copy', 'Piazza copia locale editabile'), fn:() => deps.placeAssetRef({kind:'logic-template', ref:'logic-template:' + template.id, id:template.id, name:template.name, raw:template}, deps.spawnPointAhead())},
       ],
-    })) : [];
-    const assets = STORE.logicElementAssets ? STORE.logicElementAssets.list().map(asset => ({
+    };}) : [];
+    const assets = STORE.logicElementAssets ? STORE.logicElementAssets.list().map((asset, assetIndex) => {
+      const category = classify(asset.graph);
+      return {
       kind:'logic-blueprint',
       ref:'logic-blueprint:' + asset.id,
       id:asset.id,
       name:asset.name || 'Logic Element',
-      sub:'reusable Logic Element · ' + (asset.graph && asset.graph.nodes ? asset.graph.nodes.length : 0) + ' nodes',
+      sub:'Project Asset ' + (assetIndex + 1) + ' · ' + (asset.graph && asset.graph.nodes ? asset.graph.nodes.length : 0) + ' nodes · ' + String(asset.id || '').slice(-7),
       source:'Reusable Logic Element',
-      icon:'◇',
+      icon:category.icon,
+      elementType:category.type,
+      badges:[{type:category.type, label:category.label}, {type:'project', label:'Project Asset'}],
       filterType:'blueprint',
       draggable:true,
       raw:asset,
       defaultAction:() => deps.placeAssetRef({kind:'logic-blueprint', ref:'logic-blueprint:' + asset.id, id:asset.id, name:asset.name, raw:asset}, deps.spawnPointAhead()),
       actions:[
         {label:'+', title:tr('Place linked instance', 'Piazza istanza collegata'), fn:() => deps.placeAssetRef({kind:'logic-blueprint', ref:'logic-blueprint:' + asset.id, id:asset.id, name:asset.name, raw:asset}, deps.spawnPointAhead())},
+        {label:'×', title:tr('Delete reusable asset', 'Elimina asset riutilizzabile'), fn:() => deleteReusableLogicAsset(asset)},
       ],
-    })) : [];
+    };}) : [];
     return templates.concat(assets).filter(item => visible(item, q));
   }
 
@@ -397,7 +439,10 @@ function create(deps){
     allFolderedItems.push(...blueprints);
 
     const logicBlueprints = logicBlueprintItems(q);
-    addGroup(box, 'LOGIC ELEMENTS', logicBlueprints);
+    addGroup(box, 'LOGIC ELEMENTS · PLAYER CAR', logicBlueprints.filter(item => item.elementType === 'vehicle'));
+    addGroup(box, 'LOGIC ELEMENTS · GENERAL', logicBlueprints.filter(item => item.elementType === 'logic'));
+    addGroup(box, 'ANIMATION ELEMENTS', logicBlueprints.filter(item => item.elementType === 'animation'));
+    addGroup(box, 'RIG ELEMENTS', logicBlueprints.filter(item => item.elementType === 'rig'));
     allFolderedItems.push(...logicBlueprints);
 
     const sounds = soundSetItems(q);

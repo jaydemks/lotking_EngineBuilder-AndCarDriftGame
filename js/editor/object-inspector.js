@@ -96,6 +96,28 @@ function create(deps){
     };
   }
 
+  function clearPlayerOutputs(playerIndex, except){
+    const wanted = Number(playerIndex);
+    let clearedCinema = false;
+    GAME.world.registry.forEach(item => {
+      if(item === except || !item || !item.userData) return;
+      if(item.userData.editorType === 'camera'){
+        const current = item.userData.cameraProps || {};
+        if(Number(current.outputPlayerIndex) !== wanted && !(wanted === 0 && current.activeLevelCamera === true)) return;
+        item.userData.cameraProps = Object.assign({}, current, {activeLevelCamera:false, outputPlayerIndex:null});
+        if(item.userData.addedEntry) item.userData.addedEntry.props = Object.assign({}, item.userData.addedEntry.props || {}, {activeLevelCamera:false, outputPlayerIndex:null});
+      } else if(item.userData.editorType === 'cinemaStudio'){
+        const current = item.userData.cinemaProps || {};
+        if(Number(current.outputPlayerIndex) !== wanted) return;
+        item.userData.cinemaProps = Object.assign({}, current, {outputPlayerIndex:null});
+        if(item.userData.addedEntry) item.userData.addedEntry.props = Object.assign({}, item.userData.addedEntry.props || {}, {outputPlayerIndex:null});
+        clearedCinema = true;
+      }
+    });
+    if(clearedCinema) window.dispatchEvent(new CustomEvent('lotking:cinemastop', {detail:{playerId:wanted + 1, reason:'player-output-reassigned'}}));
+    return clearedCinema;
+  }
+
   function transformAxes(){
     if(ED.space !== 'engine') return [
       {label:'X', prop:'x'},
@@ -263,19 +285,17 @@ function create(deps){
       camSec.body.appendChild(sliderRow('Far clip', props.far || 800, 10, 3000, 10, v => updateCamera({far:Math.max(10, v)}), v => Math.round(v) + 'm').root);
       camSec.body.appendChild(sliderRow('Helper size', props.helperSize || 1.2, .25, 8, .05, v => updateCamera({helperSize:v}), v => (+v).toFixed(2) + 'm').root);
       camSec.body.appendChild(checkRow('Show helper', props.preview !== false, v => updateCamera({preview:v})).root);
-      camSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), (props.activeLevelCamera === true || props.outputPlayerIndex === 0) ? '0' : 'none', [
+      const cameraOutput = props.activeLevelCamera === true ? 0 : props.outputPlayerIndex;
+      camSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), cameraOutput == null ? 'none' : String(cameraOutput), [
         {value:'none', label:tr('None', 'Nessuna')},
         {value:'0', label:'Player 1'},
+        {value:'1', label:'Player 2'},
+        {value:'2', label:'Player 3'},
+        {value:'3', label:'Player 4'},
       ], v => {
-        const active = v === '0';
-        if(active){
-          GAME.world.registry.forEach(item => {
-            if(item === o || !item.userData || item.userData.editorType !== 'camera') return;
-            item.userData.cameraProps = Object.assign({}, item.userData.cameraProps || {}, {activeLevelCamera:false, outputPlayerIndex:null});
-            if(item.userData.addedEntry) item.userData.addedEntry.props = Object.assign({}, item.userData.addedEntry.props || {}, {activeLevelCamera:false, outputPlayerIndex:null});
-          });
-        }
-        updateCamera({activeLevelCamera:active, outputPlayerIndex:active ? 0 : null});
+        const output = v === 'none' ? null : Number(v);
+        if(output != null) clearPlayerOutputs(output, o);
+        updateCamera({activeLevelCamera:output === 0, outputPlayerIndex:output});
       }).root);
       camSec.body.appendChild(btnRow([
         {label:'Align to view', action:alignCameraToView},
@@ -318,10 +338,21 @@ function create(deps){
         {value:'on-play', label:'On Preview/Simulate'},
         {value:'runtime-event', label:'Runtime event'},
       ], v => saveCinema({trigger:v})).root);
-      cinemaSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), props.outputPlayerIndex === 0 ? '0' : 'none', [
+      cinemaSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), props.outputPlayerIndex == null ? 'none' : String(props.outputPlayerIndex), [
         {value:'none', label:tr('None', 'Nessuna')},
         {value:'0', label:'Player 1'},
-      ], v => saveCinema({outputPlayerIndex:v === '0' ? 0 : null})).root);
+        {value:'1', label:'Player 2'},
+        {value:'2', label:'Player 3'},
+        {value:'3', label:'Player 4'},
+      ], v => {
+        const output = v === 'none' ? null : Number(v);
+        const previousOutput = props.outputPlayerIndex == null ? null : Number(props.outputPlayerIndex);
+        if(output != null) clearPlayerOutputs(output, o);
+        saveCinema({outputPlayerIndex:output});
+        if(previousOutput != null && previousOutput !== output){
+          window.dispatchEvent(new CustomEvent('lotking:cinemastop', {detail:{playerId:previousOutput + 1, reason:'cinema-output-changed'}}));
+        }
+      }).root);
       const eventRow = el('<div class="lk-row"><label>Event name</label><input type="text"></div>');
       const eventInput = eventRow.querySelector('input');
       eventInput.value = props.eventName || '';

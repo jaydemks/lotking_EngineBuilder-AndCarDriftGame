@@ -15,7 +15,16 @@ function create(){
   const popupEl = byId('popup');
   const kmh = byId('kmh');
   const gear = byId('gearHud');
+  const root = byId('hud');
+  const vehicle = byId('vehicleHud');
+  const kmh2 = byId('kmh2');
+  const gear2 = byId('gearHud2');
+  const rpmHud = byId('rpmHud');
+  const rpmBar = byId('rpmBar');
+  const driveType = byId('driveTypeHud');
   let popupTimer = null;
+  let activePlayerId = 1;
+  const vehicleByPlayer = new Map();
 
   function popup(txt, color, duration){
     if(!popupEl) return;
@@ -45,7 +54,37 @@ function create(){
     if(gear) gear.textContent = gearLabel == null ? '1' : String(gearLabel);
   }
 
-  return {popup, setTotal, showDrift, hideDrift, setSpeedGear};
+  function setActivePlayer(playerId){
+    activePlayerId = Math.max(1, Math.min(4, Number(playerId) || 1));
+    if(root) root.dataset.playerId = String(activePlayerId);
+    renderVehicleData();
+  }
+
+  function renderVehicleData(){
+    const data = vehicleByPlayer.get(activePlayerId);
+    if(!data) return;
+    const mode = String(data.mode || 'custom').toLowerCase();
+    setSpeedGear(data.speedKmh, data.gearLabel);
+    if(vehicle){
+      vehicle.dataset.playerId = String(activePlayerId);
+      vehicle.classList.toggle('race', mode === 'race');
+      vehicle.classList.toggle('custom', mode !== 'race' && mode !== 'drift');
+    }
+    if(kmh2) kmh2.textContent = String(Math.max(0, Math.round(data.speedKmh || 0)));
+    if(gear2) gear2.textContent = data.gearLabel == null ? '1' : String(data.gearLabel);
+    if(rpmHud) rpmHud.textContent = String(Math.round(data.rpm || 0));
+    if(rpmBar) rpmBar.style.width = (Math.max(0, Math.min(1, Number(data.rpm01) || 0)) * 100).toFixed(1) + '%';
+    if(driveType) driveType.textContent = mode === 'race' ? 'RACE' : (mode === 'drift' ? 'DRIFT' : 'CUSTOM');
+  }
+
+  function setVehicleData(playerId, data){
+    const id = Math.max(1, Math.min(4, Number(playerId) || 1));
+    vehicleByPlayer.set(id, Object.assign({}, data));
+    if(id === activePlayerId) renderVehicleData();
+  }
+
+  setActivePlayer(1);
+  return {popup, setTotal, showDrift, hideDrift, setSpeedGear, setActivePlayer, setVehicleData, activePlayer:() => activePlayerId};
 }
 
 window.LK_RUNTIME_GAME_HUD = Object.freeze({create});

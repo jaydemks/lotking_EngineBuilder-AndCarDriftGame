@@ -6,13 +6,17 @@
 'use strict';
 
 const PRESETS = Object.freeze({
+  default: Object.freeze({
+    torque:3, horsepower:360, maxSpeed:4, oversteer:1, handbrake:2, steer:2, brake:0, grip:1,
+    reverseDelay:.5, suspension:2, damping:4, travel:0, ride:0, roll:-4, chassisLift:0,
+  }),
   race: Object.freeze({
-    torque:1, horsepower:420, maxSpeed:2, oversteer:-1, handbrake:0, steer:4, brake:0, grip:1,
-    reverseDelay:.5, suspension:0, damping:0, travel:0, ride:0, roll:0, chassisLift:0,
+    torque:3, horsepower:430, maxSpeed:6, oversteer:-2, handbrake:0, steer:4, brake:1, grip:4,
+    reverseDelay:.5, suspension:5, damping:6, travel:-2, ride:-1, roll:-6, chassisLift:0,
   }),
   drift: Object.freeze({
-    torque:10, horsepower:700, maxSpeed:2, oversteer:-8, handbrake:2, steer:0, brake:-3, grip:-10,
-    reverseDelay:.45, suspension:-1, damping:0, travel:3, ride:-1, roll:-3, chassisLift:0,
+    torque:5, horsepower:400, maxSpeed:4, oversteer:7, handbrake:7, steer:5, brake:0, grip:-5,
+    reverseDelay:.45, suspension:2, damping:4, travel:1, ride:-1, roll:-5, chassisLift:0,
   }),
 });
 const TUNE_PARAMS = Object.freeze([
@@ -50,7 +54,7 @@ function create(options){
   const baseCfg = opts.baseConfig;
   const drive = opts.drive;
   const baseDrive = opts.baseDrive;
-  const values = Object.assign({...PRESETS.drift}, opts.values || {});
+  const values = Object.assign({...PRESETS.default}, opts.values || {});
   values.curves = normalizeCurves(values.curves);
   values.exposed = normalizeExposed(values.exposed);
   const susp = opts.suspension || null;
@@ -60,7 +64,7 @@ function create(options){
   let lastCollisionLift = null;
   let setOpen = () => {};
   let toggle = () => {};
-  let activePreset = 'drift';
+  let activePreset = 'default';
   let curveOverlay = null;
   let curveSelect = null;
   let curveCanvas = null;
@@ -194,6 +198,16 @@ function create(options){
 
   function apply(nextValues){
     if(nextValues) Object.assign(values, nextValues);
+    const externalTarget = typeof opts.resolveTarget === 'function' ? opts.resolveTarget() : null;
+    if(externalTarget && typeof opts.applyTarget === 'function'){
+      values.horsepower = clamp(values.horsepower == null ? 450 : Number(values.horsepower), 15, 1500);
+      values.curves = normalizeCurves(values.curves);
+      values.exposed = normalizeExposed(values.exposed);
+      opts.applyTarget(externalTarget, JSON.parse(JSON.stringify(values)));
+      updatePresetButtons();
+      drawCurve();
+      return;
+    }
     const torque = values.torque / 10;
     const maxSpeed = values.maxSpeed / 10;
     const over = values.oversteer / 10;

@@ -240,7 +240,7 @@ function createInputService(GAME){
     keys:new Set(),
     pointer:{x:0, y:0, deltaX:0, deltaY:0, buttons:0},
   };
-  if(!state.installed){
+  if(!state.installed && typeof root.addEventListener === 'function'){
     state.installed = true;
     root.addEventListener('keydown', e => state.keys.add(String(e.key || '').toLowerCase()));
     root.addEventListener('keyup', e => state.keys.delete(String(e.key || '').toLowerCase()));
@@ -274,10 +274,99 @@ function createInputService(GAME){
       return {
         steer:Number(drive.steer) || 0, throttle:Number(drive.throttle) || 0,
         brake:Number(drive.brake) || 0, handbrake:drive.handbrake === true,
+        highBeams:drive.highBeams === true, reset:drive.reset === true,
         device:view && view.device ? view.device() : null,
       };
     },
     pointer: () => Object.assign({}, state.pointer),
+  });
+}
+
+function createPawnService(GAME, STORE, owner, graph, inputService){
+  const registry = GAME && GAME.pawns
+    ? GAME.pawns
+    : (window.LK_RUNTIME_VEHICLE_PAWNS && GAME ? window.LK_RUNTIME_VEHICLE_PAWNS.install(GAME) : null);
+  const sourceDefinition = graph && (graph.vehiclePawn || graph.playerPawnBlueprint);
+  const variableValues = new Map((graph && Array.isArray(graph.variables) ? graph.variables : []).map(variable => [String(variable && variable.name || ''), variable && variable.value]));
+  const definition = sourceDefinition ? Object.assign({}, sourceDefinition, {
+    enabled:variableValues.has('PawnEnabled') ? variableValues.get('PawnEnabled') !== false : sourceDefinition.enabled,
+    hidden:variableValues.has('Hidden') ? variableValues.get('Hidden') === true : sourceDefinition.hidden,
+    playerId:variableValues.has('ControllerPlayerId') ? variableValues.get('ControllerPlayerId') : sourceDefinition.playerId,
+    tuning:Object.assign({}, sourceDefinition.tuning || {}, {
+      horsepower:variableValues.has('Horsepower') ? variableValues.get('Horsepower') : sourceDefinition.tuning && sourceDefinition.tuning.horsepower,
+      torque:variableValues.has('Torque') ? variableValues.get('Torque') : sourceDefinition.tuning && sourceDefinition.tuning.torque,
+      maxSpeed:variableValues.has('MaxSpeed') ? variableValues.get('MaxSpeed') : sourceDefinition.tuning && sourceDefinition.tuning.maxSpeed,
+    }),
+    lights:Object.assign({}, sourceDefinition.lights || {}, {
+      enabled:variableValues.has('HeadlightsEnabled') ? variableValues.get('HeadlightsEnabled') !== false : !(sourceDefinition.lights && sourceDefinition.lights.enabled === false),
+    }),
+    effects:Object.assign({}, sourceDefinition.effects || {}, {
+      exhaustEnabled:variableValues.has('ExhaustEnabled') ? variableValues.get('ExhaustEnabled') !== false : !(sourceDefinition.effects && sourceDefinition.effects.exhaustEnabled === false),
+      skidEnabled:variableValues.has('SkidsEnabled') ? variableValues.get('SkidsEnabled') !== false : !(sourceDefinition.effects && sourceDefinition.effects.skidEnabled === false),
+      neonEnabled:variableValues.has('NeonEnabled') ? variableValues.get('NeonEnabled') !== false : !(sourceDefinition.effects && sourceDefinition.effects.neonEnabled === false),
+    }),
+    camera:Object.assign({}, sourceDefinition.camera || sourceDefinition.cam || {}, {
+      mode:variableValues.has('CameraMode') ? variableValues.get('CameraMode') : sourceDefinition.camera && sourceDefinition.camera.mode,
+    }),
+  }) : null;
+  if(definition){
+    const setBoundValue = (target, path, value) => {
+      const keys = String(path || '').split('.').filter(Boolean);
+      if(!keys.length) return;
+      let cursor = target;
+      for(let index=0; index<keys.length-1; index++){
+        const key = keys[index];
+        if(!cursor[key] || typeof cursor[key] !== 'object') cursor[key] = {};
+        cursor = cursor[key];
+      }
+      cursor[keys[keys.length - 1]] = value;
+    };
+    (graph.variables || []).forEach(variable => {
+      if(variable && variable.exposed === true && variable.binding) setBoundValue(definition, variable.binding, variable.value);
+    });
+    const overrides = owner && owner.userData && owner.userData.logicVariableOverrides || {};
+    const spawnVariables = (graph.variables || []).filter(variable => variable && /^spawn\.(?:x|y|z|heading)$/.test(String(variable.binding || '')));
+    const hasInstanceSpawn = spawnVariables.some(variable => Object.prototype.hasOwnProperty.call(overrides, variable.name));
+    if(owner && owner.position && !hasInstanceSpawn){
+      definition.spawn = Object.assign({}, definition.spawn || {}, {
+        x:Number(owner.position.x) || 0,
+        y:Number(owner.position.y) || 0,
+        z:Number(owner.position.z) || 0,
+        heading:owner.rotation ? Number(owner.rotation.y) || 0 : 0,
+      });
+    }
+  }
+  let self = registry && owner && definition
+    ? registry.createLogic(owner, definition, {input:inputService, graph, STORE})
+    : (registry && owner ? registry.get(owner) : null);
+  function resolve(ref){
+    if(ref === 'self' || ref == null || ref === '') return self;
+    if(ref && ref.userData) return registry && registry.get(ref);
+    return registry && registry.get(ref);
+  }
+  return Object.freeze({
+    registry,
+    self:() => self,
+    get:resolve,
+    getByPlayerId:playerId => registry && registry.getByPlayerId(playerId),
+    firstAvailablePlayerId:() => registry && registry.firstAvailablePlayerId ? registry.firstAvailablePlayerId() : null,
+    possessFirstAvailable:ref => registry && registry.possessFirstAvailable ? registry.possessFirstAvailable(resolve(ref)) : null,
+    list:() => registry ? registry.list() : [],
+    possess:(ref, playerId, force) => { const pawn = resolve(ref); return !!(pawn && pawn.possess && pawn.possess(playerId, force)); },
+    unpossess:ref => { const pawn = resolve(ref); return !!(pawn && pawn.unpossess && pawn.unpossess()); },
+    setControl:(ref, input) => { const pawn = resolve(ref); return pawn && pawn.setControl ? pawn.setControl(input) : null; },
+    setEnabled:(ref, value) => { const pawn = resolve(ref); return pawn && pawn.setEnabled ? pawn.setEnabled(value) : false; },
+    setTuning:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setTuning ? pawn.setTuning(patch) : null; },
+    setSuspension:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setSuspension ? pawn.setSuspension(patch) : null; },
+    setLights:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setLights ? pawn.setLights(patch) : null; },
+    setEffects:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setEffects ? pawn.setEffects(patch) : null; },
+    setCamera:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setCamera ? pawn.setCamera(patch) : null; },
+    setEngineAudio:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setEngineAudio ? pawn.setEngineAudio(patch) : null; },
+    setDataWidgets:(ref, patch) => { const pawn = resolve(ref); return pawn && pawn.setDataWidgets ? pawn.setDataWidgets(patch) : null; },
+    possessCamera:(ref, value) => { const pawn = resolve(ref); return !!(pawn && pawn.possessCamera && pawn.possessCamera(value)); },
+    input:ref => { const pawn = resolve(ref); return pawn && pawn.readPlayerDrive ? pawn.readPlayerDrive() : {steer:0, throttle:0, brake:0, handbrake:false, device:null}; },
+    reset:ref => { const pawn = resolve(ref); return !!(pawn && pawn.reset && pawn.reset()); },
+    state:ref => { const pawn = resolve(ref); return pawn ? pawn.state : null; },
   });
 }
 
@@ -725,6 +814,8 @@ function createContext(opts){
   const GAME = opts.GAME || window.LOT_KING;
   const STORE = opts.STORE || window.LK_STORE;
   const THREERef = opts.THREE || window.THREE;
+  const inputService = createInputService(GAME);
+  const pawnService = createPawnService(GAME, opts.STORE || null, opts.owner || null, opts.graph || null, inputService);
   return {
     GAME,
     STORE,
@@ -736,7 +827,8 @@ function createContext(opts){
     services: {
       objects: createObjectService(GAME, opts.owner || null),
       transforms: THREERef ? createTransformService(THREERef, STORE) : null,
-      input: createInputService(GAME),
+      input: inputService,
+      pawns: pawnService,
       physics: createPhysicsService(GAME, THREERef),
       materials: THREERef ? createMaterialService(THREERef) : null,
       raycasts: THREERef ? createRaycastService(GAME, THREERef) : null,
@@ -748,5 +840,5 @@ function createContext(opts){
   };
 }
 
-window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService});
+window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService});
 })();

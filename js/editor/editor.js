@@ -17,6 +17,10 @@ const scene = GAME.core.scene;
 const renderer = GAME.core.renderer;
 const gameCam = GAME.core.camera;
 const canvas = GAME.core.canvas;
+if(!canvas || typeof canvas.addEventListener !== 'function'){
+  console.error('LotKing editor: runtime canvas non disponibile; controllare che tutti i moduli runtime siano caricati prima di js/lot-king.js');
+  return;
+}
 
 const ED = window.LK_EDITOR_CORE.createState();
 
@@ -81,6 +85,7 @@ let viewportEvents = null;
 let viewportPointerNavigation = false;
 let viewportWheelUntil = 0;
 let playerCameraInspector = null;
+let playerColliderInspector = null;
 let playerLightsInspector = null;
 let playerAttachmentsInspector = null;
 let playerSetupInspector = null;
@@ -235,6 +240,7 @@ function applyPrefs(){ if(preferences) preferences.apply(); }
 preferences = window.LK_EDITOR_PREFERENCES && window.LK_EDITOR_PREFERENCES.create({
   root, ED, GAME, $, status, refreshOutliner, buildInspector,
 });
+const welcomeOverlay = window.LK_EDITOR_WELCOME && window.LK_EDITOR_WELCOME.create({root, preferences});
 quickAudio = window.LK_EDITOR_QUICK_AUDIO && window.LK_EDITOR_QUICK_AUDIO.create({
   GAME, ED, $,
 });
@@ -634,8 +640,8 @@ function replaceSelectedWithAsset(asset, target){ if(assetImports) assetImports.
 function replaceObjectWithFile(target, file){ if(assetImports) assetImports.replaceObjectWithFile(target, file); }
 function replaceTextureObjectWithAsset(asset, target){ if(assetImports) assetImports.replaceTextureObjectWithAsset(asset, target); }
 function replaceTextureObjectWithFile(target, file){ if(assetImports) assetImports.replaceTextureObjectWithFile(target, file); }
-function replacePlayerModelWithAsset(asset){ if(assetImports) assetImports.replacePlayerModelWithAsset(asset); }
-function replacePlayerModelWithFile(file){ if(assetImports) assetImports.replacePlayerModelWithFile(file); }
+function replacePlayerModelWithAsset(asset){ return assetImports ? assetImports.replacePlayerModelWithAsset(asset) : Promise.resolve(false); }
+function replacePlayerModelWithFile(file){ return assetImports ? assetImports.replacePlayerModelWithFile(file) : Promise.resolve(false); }
 
 levelManager = window.LK_EDITOR_LEVEL_MANAGER && window.LK_EDITOR_LEVEL_MANAGER.create({
   GAME, STORE, ED, $, status, promptEditorAction, confirmEditorAction, beginStatusWork, updateStatusWork,
@@ -659,16 +665,74 @@ playerBlueprints = window.LK_EDITOR_PLAYER_BLUEPRINTS && window.LK_EDITOR_PLAYER
 });
 function currentPlayerBlueprint(){ return playerBlueprints ? playerBlueprints.currentPlayerBlueprint() : null; }
 function copyPlayerBlueprintAsset(){ if(playerBlueprints) playerBlueprints.copyPlayerBlueprintAsset(); }
-function convertPlayerToLogicElement(at){
+async function convertPlayerToLogicElement(at){
   if(!playerBlueprints || !playerBlueprints.playerLogicElementAsset) return;
   const label = editorLang() === 'it' ? 'Player Car Logic Element' : 'Player Car Logic Element';
+  const existing = STORE.logicElementAssets ? STORE.logicElementAssets.list().filter(item => item && item.graph && item.graph.vehiclePawn && (
+    item.migration && item.migration.kind === 'vehicle-pawn' || item.graph.vehiclePawn.proceduralFallback === 'native-player-visual-v1'
+  )) : [];
+  let mode = 'new';
+  let selected = existing[0] || null;
+  if(existing.length){
+    mode = await promptEditorAction({
+      title:editorLang() === 'it' ? 'Player Car Logic già esistente' : 'Existing Player Car Logic',
+      message:editorLang() === 'it'
+        ? 'Esistono già ' + existing.length + ' asset Player Car nel progetto. Scegli cosa fare prima di piazzare il master.'
+        : existing.length + ' Player Car project asset(s) already exist. Choose what to do before placing the master.',
+      value:'use',
+      options:[
+        {value:'use', label:editorLang() === 'it' ? 'Usa asset esistente (consigliato)' : 'Use existing asset (recommended)'},
+        {value:'replace', label:editorLang() === 'it' ? 'Sostituisci asset esistente dal Player nativo' : 'Replace existing from native Player'},
+        {value:'new', label:editorLang() === 'it' ? 'Crea consapevolmente una nuova copia' : 'Create a new copy intentionally'},
+      ],
+      okText:editorLang() === 'it' ? 'Continua' : 'Continue',
+    });
+    if(!mode) return;
+  } else {
+    const approved = await confirmEditorAction({
+      title:editorLang() === 'it' ? 'Creare Player Car Project Asset?' : 'Create Player Car Project Asset?',
+      message:editorLang() === 'it'
+        ? 'Il Master Template copierà configurazione, modello e rig del Player Car nativo in un nuovo asset riutilizzabile del progetto.'
+        : 'The Master Template will copy the native Player Car configuration, model and rig into a new reusable project asset.',
+      okText:editorLang() === 'it' ? 'Crea e piazza' : 'Create and place',
+      danger:false,
+    });
+    if(!approved) return;
+  }
   setAssetLoading(true, label, 10, editorLang() === 'it' ? 'Copia configurazione Player Car' : 'Copying Player Car configuration');
-  const asset = playerBlueprints.playerLogicElementAsset();
+  let asset = mode === 'use' && selected ? selected : null;
+  if(mode === 'use' && asset && STORE.logicElementAssets && window.LK_LOGIC_TEMPLATES){
+    const master = window.LK_LOGIC_TEMPLATES.get('logic-template-player-car');
+    const graph = window.LK_LOGIC_GRAPH.clone(asset.graph);
+    const currentNames = new Set((graph.variables || []).map(variable => variable.name));
+    const valueAt = (source, path) => String(path || '').split('.').reduce((value, key) => value == null ? undefined : value[key], source);
+    (master && master.graph && master.graph.variables || []).forEach(variable => {
+      if(currentNames.has(variable.name)) return;
+      const next = window.LK_LOGIC_GRAPH.clone(variable);
+      const bound = valueAt(graph.vehiclePawn, next.binding);
+      if(bound !== undefined) next.value = next.defaultValue = window.LK_LOGIC_GRAPH.clone(bound);
+      (graph.variables || (graph.variables = [])).push(next);
+    });
+    asset = STORE.logicElementAssets.saveAsset(asset.name, graph, {id:asset.id, createdAt:asset.createdAt, migration:asset.migration});
+  }
+  if(mode === 'replace' && selected){
+    asset = playerBlueprints.playerLogicElementAsset({id:selected.id, name:selected.name, createdAt:selected.createdAt});
+  } else if(mode === 'new'){
+    const nextName = existing.length ? 'Player Car Logic Element ' + (existing.length + 1) : 'Player Car Logic Element';
+    asset = playerBlueprints.playerLogicElementAsset({name:nextName});
+  }
   if(!asset){ setAssetLoading(false); return status(editorLang() === 'it' ? 'Conversione Player Car non riuscita' : 'Player Car conversion failed'); }
   const p = GAME.player.car.position;
   setAssetLoading(true, label, 35, editorLang() === 'it' ? 'Caricamento modello e rig' : 'Loading model and rig');
   const point = at || {x:p.x, y:p.y, z:p.z};
-  const object = addLogicElement(point, asset);
+  let object = null;
+  try {
+    object = addLogicElement(point, asset);
+  } catch(err){
+    setAssetLoading(false);
+    status((editorLang() === 'it' ? 'Creazione Player Car Logic fallita: ' : 'Player Car Logic creation failed: ') + (err && err.message || err));
+    return null;
+  }
   const pawnTransform = asset.graph && asset.graph.playerPawnBlueprint && asset.graph.playerPawnBlueprint.transform;
   if(object && pawnTransform && Array.isArray(pawnTransform.s)){
     object.scale.fromArray(pawnTransform.s);
@@ -1780,15 +1844,27 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   resolveImportedAssetUrl,
   rebuildColliderHelpers,
 });
+playerColliderInspector = window.LK_EDITOR_PLAYER_COLLIDER_INSPECTOR && window.LK_EDITOR_PLAYER_COLLIDER_INSPECTOR.create({
+  GAME,
+  section,
+  sliderRow,
+  el,
+  markDirty,
+  pushHistory,
+  buildInspector,
+  updateSelectionAndDropHelpers,
+});
 playerCameraInspector = window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR && window.LK_EDITOR_PLAYER_CAMERA_INSPECTOR.create({
   GAME,
   markDirty,
   section,
   selectRow,
   sliderRow,
+  btnRow,
   checkRow,
   colorRow,
   el,
+  pushHistory,
 });
 playerLightsInspector = window.LK_EDITOR_PLAYER_LIGHTS_INSPECTOR && window.LK_EDITOR_PLAYER_LIGHTS_INSPECTOR.create({
   GAME,
@@ -1805,6 +1881,7 @@ playerLightsInspector = window.LK_EDITOR_PLAYER_LIGHTS_INSPECTOR && window.LK_ED
   selectRow,
   el,
   requestWarmup: label => requestEditorWarmup(label),
+  pushHistory,
 });
 playerAttachmentsInspector = window.LK_EDITOR_PLAYER_ATTACHMENTS_INSPECTOR && window.LK_EDITOR_PLAYER_ATTACHMENTS_INSPECTOR.create({
   GAME,
@@ -1820,6 +1897,7 @@ playerAttachmentsInspector = window.LK_EDITOR_PLAYER_ATTACHMENTS_INSPECTOR && wi
   selectRow,
   colorRow,
   el,
+  pushHistory,
 });
 playerSetupInspector = window.LK_EDITOR_PLAYER_SETUP_INSPECTOR && window.LK_EDITOR_PLAYER_SETUP_INSPECTOR.create({
   STORE,
@@ -1830,6 +1908,11 @@ playerSetupInspector = window.LK_EDITOR_PLAYER_SETUP_INSPECTOR && window.LK_EDIT
   buildInspector,
   openSoundDesigner,
   openPlayerModelPicker: () => $('#lkPlayerModelInput').click(),
+  modelAssets: () => assetLibraryLoad().filter(asset => asset && asset.kind === 'glb'),
+  replaceModelWithAsset: asset => replacePlayerModelWithAsset(asset).then(changed => {
+    if(changed){ markDirty(); buildInspector(); }
+    return changed;
+  }),
   focusSelected,
   section,
   sliderRow,
@@ -1876,6 +1959,16 @@ logicInspector = window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR && window.LK_EDITOR_L
   section,
   btnRow,
   checkRow,
+  sliderRow,
+  selectRow,
+  colorRow,
+  playerCameraInspector,
+  playerColliderInspector,
+  playerLightsInspector,
+  playerAttachmentsInspector,
+  playerSetupInspector,
+  buildMaterialEditor,
+  buildMeshEditor,
   markDirty,
   buildInspector,
   refreshOutliner,
@@ -1884,6 +1977,7 @@ logicInspector = window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR && window.LK_EDITOR_L
   promptEditorAction,
   refreshAssetsPanel,
   assetLibraryLoad,
+  importAssetFiles,
   beginTransformHistory,
   commitTransformHistory,
 });
@@ -1910,6 +2004,7 @@ inspectorController = window.LK_EDITOR_INSPECTOR_CONTROLLER && window.LK_EDITOR_
   renderingInspector,
   logicInspector,
   playerCameraInspector,
+  playerColliderInspector,
   playerLightsInspector,
   playerAttachmentsInspector,
   playerSetupInspector,
@@ -2044,5 +2139,6 @@ GAME.editor = {
   viewportRect: editorViewportRect,
   setLeftMode,
   refreshAssetsPanel,
+  getPlayableExport:() => playableExport,
 };
 })();

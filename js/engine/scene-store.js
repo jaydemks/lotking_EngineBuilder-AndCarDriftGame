@@ -20,14 +20,85 @@ const LOGIC_ELEMENT_ASSETS_KEY = 'lotking.logicElementAssets.v1';
 const ASSET_DB_NAME = 'lotking-assets';
 const ASSET_DB_STORE = 'blobs';
 const BUNDLED_DEMO_PROJECT_URL = 'demo/demo-project.lkep.json';
+const MENU_ROLE_MANIFEST_URL = 'demo/menu-roles.json';
 const BUNDLED_DEMO_LEVEL_ID = 'online-demo';
 const assetUrlCache = new Map();
 const logicElementAssetCache = new Map();
 let bundledDemoReady = null;
+let bundledDemoProjectCache = null;
 
 function bundledDemoProjectUrl(){
   const sep = BUNDLED_DEMO_PROJECT_URL.indexOf('?') >= 0 ? '&' : '?';
   return BUNDLED_DEMO_PROJECT_URL + sep + 'v=' + Date.now().toString(36);
+}
+
+function reportBundledDemoProgress(detail){
+  if(!detail || typeof window === 'undefined') return;
+  try { window.dispatchEvent(new CustomEvent('lotking:bundled-demo-progress', {detail})); }
+  catch(err){}
+}
+
+function progressPercent(base, span, loaded, total){
+  const n = Number(total) || 0;
+  if(n <= 0) return base;
+  return Math.max(base, Math.min(base + span, base + (Number(loaded) || 0) / n * span));
+}
+
+async function fetchTextWithProgress(url, progressBase, progressSpan, step){
+  const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  reportBundledDemoProgress({progress:progressBase || 0, step:step || 'requesting demo project', url});
+  const response = await fetch(url, {cache:'reload'});
+  if(!response.ok){
+    reportBundledDemoProgress({progress:progressBase || 0, step:'demo project not found', url, error:'HTTP ' + response.status});
+    return null;
+  }
+  const total = Number(response.headers && response.headers.get('content-length')) || 0;
+  if(!response.body || !response.body.getReader){
+    const text = await response.text();
+    reportBundledDemoProgress({
+      progress:(progressBase || 0) + (progressSpan || 0),
+      step:step || 'downloaded demo project',
+      url,
+      loaded:text.length,
+      total:text.length,
+      bps:null,
+      eta:null,
+    });
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let loaded = 0;
+  let text = '';
+  while(true){
+    const chunk = await reader.read();
+    if(chunk.done) break;
+    loaded += chunk.value ? chunk.value.byteLength : 0;
+    text += decoder.decode(chunk.value, {stream:true});
+    const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+    const elapsed = Math.max(.001, (now - startedAt) / 1000);
+    const bps = loaded / elapsed;
+    reportBundledDemoProgress({
+      progress:progressPercent(progressBase || 0, progressSpan || 0, loaded, total),
+      step:step || 'downloading demo project',
+      url,
+      loaded,
+      total,
+      bps,
+      eta:total > 0 && bps > 0 ? (total - loaded) / bps : null,
+    });
+  }
+  text += decoder.decode();
+  reportBundledDemoProgress({
+    progress:(progressBase || 0) + (progressSpan || 0),
+    step:'demo project downloaded',
+    url,
+    loaded,
+    total:total || loaded,
+    bps:null,
+    eta:0,
+  });
+  return text;
 }
 
 function assetDbOpen(){
@@ -135,6 +206,17 @@ function normalizeLogicElementHierarchy(scene){
 }
 function ensureLogicElementScene(graph){
   graph = normalizeLogicGraph(graph, 'Logic Element', 'element');
+  if(graph.vehiclePawn && graph.vehiclePawn.proceduralFallback === 'native-player-visual-v1'){
+    const tuning = graph.vehiclePawn.tuning || (graph.vehiclePawn.tuning = {});
+    const translatedProfile = Number(tuning.horsepower) === 700 && Number(tuning.acceleration) === 45.6 && Math.abs(Number(tuning.maxSpeed) - 41.42) < .01;
+    if(translatedProfile){
+      Object.assign(tuning, {horsepower:450,torque:5,maxSpeed:38,acceleration:16,brake:24,grip:.84});
+      const migratedVariables = {Horsepower:450,Torque:5,MaxSpeed:38,Acceleration:16,BrakeForce:24,Grip:.84};
+      (graph.variables || []).forEach(variable => {
+        if(variable && Object.prototype.hasOwnProperty.call(migratedVariables, variable.name)) variable.value = variable.defaultValue = migratedVariables[variable.name];
+      });
+    }
+  }
   if(!graph.logicScene || typeof graph.logicScene !== 'object') graph.logicScene = {};
   const scene = graph.logicScene;
   if(!scene.root) scene.root = {};
@@ -159,7 +241,37 @@ function ensureLogicElementScene(graph){
       if(!element.textMode) element.textMode = 'plane';
     }
     if(!element.parentId) element.parentId = 'root';
+    if(/^headlight_(?:left|right)$/.test(element.id || '')){
+      if(element.intensity == null) element.intensity = 1.35;
+      if(element.distance == null) element.distance = 30;
+    }
+    if(/^neon_(?:left|right|front|rear)$/.test(element.id || '')){
+      if(element.intensity == null) element.intensity = .8;
+      if(element.distance == null) element.distance = 3;
+    }
   });
+  if(graph.vehiclePawn && graph.vehiclePawn.proceduralFallback){
+    const nativeWheels = {
+      wheel_front_left:[-.92,.38,1.35], wheel_front_right:[.92,.38,1.35],
+      wheel_rear_left:[-.92,.38,-1.35], wheel_rear_right:[.92,.38,-1.35],
+    };
+    Object.keys(nativeWheels).forEach(id => {
+      const wheel = scene.elements.find(element => element && element.id === id);
+      if(!wheel) return;
+      const legacyRotation = Array.isArray(wheel.rotation) && Math.abs((Number(wheel.rotation[2]) || 0) - Math.PI / 2) < .01;
+      const legacyScale = Array.isArray(wheel.scale) && Math.abs((Number(wheel.scale[0]) || 0) - .42) < .01 && Math.abs((Number(wheel.scale[1]) || 0) - .26) < .01;
+      if(!legacyRotation && !legacyScale) return;
+      wheel.position = nativeWheels[id].slice();
+      wheel.rotation = [0,0,90];
+      wheel.scale = [.905,.356,.905];
+    });
+    if(Object.keys(nativeWheels).every(id => scene.elements.some(element => element && element.id === id)) && !scene.elements.some(element => element && /^skid_/.test(element.id || ''))){
+      [
+        ['skid_rear_left',-.92,.03,-1.35], ['skid_rear_right',.92,.03,-1.35],
+        ['skid_front_left',-.92,.03,1.35], ['skid_front_right',.92,.03,1.35],
+      ].forEach(def => scene.elements.push({id:def[0],name:def[0].replace(/_/g,' '),type:'empty',parentId:'root',linked:true,dummyVisible:false,position:def.slice(1),rotation:[0,0,0],scale:[1,1,1],color:'#334155'}));
+    }
+  }
   normalizeLogicElementHierarchy(scene);
   if(!Array.isArray(scene.components)) scene.components = [];
   const oldDefault = scene.elements.find(item => item && item.id === 'default_mesh');
@@ -264,12 +376,24 @@ function createLogicElementPreviewNode(THREERef, element){
   const type = String(element && element.type || 'mesh');
   let node;
   if(type === 'empty'){
-    const geo = new THREERef.SphereGeometry(.18, 16, 8);
-    node = new THREERef.Mesh(geo, logicElementMaterial(THREERef, element, {basic:true, transparent:true, opacity:.72}));
+    const helperKind = String(element && (element.id || element.name) || '').toLowerCase();
+    const geo = /exhaust|scarico/.test(helperKind)
+      ? new THREERef.ConeGeometry(.18, .55, 14)
+      : (/skid/.test(helperKind) ? new THREERef.BoxGeometry(.24,.02,.7) : new THREERef.SphereGeometry(.18, 16, 8));
+    node = new THREERef.Group();
+    const helper = new THREERef.Mesh(geo, logicElementMaterial(THREERef, element, {basic:true, transparent:true, opacity:.72}));
+    if(/exhaust|scarico/.test(helperKind)) helper.rotation.x = Math.PI / 2;
+    if(/skid/.test(helperKind) && helper.material) helper.material.wireframe = true;
+    helper.userData.logicElementRuntimeVisual = false;
+    helper.visible = element && element.dummyVisible === true;
+    node.add(helper);
   } else if(type === 'light'){
     const group = new THREERef.Group();
     const bulb = new THREERef.Mesh(new THREERef.SphereGeometry(.16, 16, 8), logicElementMaterial(THREERef, element, {basic:true, helper:true}));
-    const glow = new THREERef.PointLight(element && element.color || '#facc15', .75, 4);
+    const glow = new THREERef.PointLight(element && element.color || '#facc15', Math.max(0, Number(element && element.intensity) || .75), Math.max(0, Number(element && element.distance) || 4));
+    bulb.userData.logicElementRuntimeVisual = false;
+    bulb.visible = element && element.dummyVisible === true;
+    glow.userData.logicElementRuntimeVisual = true;
     group.add(bulb, glow);
     node = group;
   } else if(type === 'camera'){
@@ -285,7 +409,10 @@ function createLogicElementPreviewNode(THREERef, element){
       new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(.55,.35,-.65),
       new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.55,.35,-.65),
     ];
-    group.add(new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat));
+    const helper = new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat);
+    helper.userData.logicElementRuntimeVisual = false;
+    helper.visible = element && element.dummyVisible === true;
+    group.add(helper);
     node = group;
   } else if(type === 'text'){
     node = createLogicElementTextNode(THREERef, element);
@@ -458,6 +585,7 @@ function hydrateLogicElementPreviewAsset(node, element, owner){
       child.userData.logicElementOwnerId = owner && owner.userData && owner.userData.editorId || null;
       child.userData.editorLocked = true;
       child.userData.nonExportable = true;
+      child.userData.logicElementRuntimeVisual = true;
     });
     const pawn = owner && owner.userData && owner.userData.logicGraph && owner.userData.logicGraph.playerPawnBlueprint;
     if(pawn){
@@ -598,15 +726,87 @@ function syncLogicElementSceneObject(object, graph, opts){
     node.userData.logicElementOwnerId = object.userData.editorId || null;
     node.userData.editorLocked = true;
     node.userData.nonExportable = true;
+    node.userData.logicElementRuntimeVisual = true;
     node.traverse(child => {
       child.userData.logicElementInternal = true;
       child.userData.logicElementSceneId = element.id;
       child.userData.logicElementOwnerId = object.userData.editorId || null;
       child.userData.editorLocked = true;
       child.userData.nonExportable = true;
+      if(child.userData.logicElementRuntimeVisual == null) child.userData.logicElementRuntimeVisual = !(
+        element.type === 'empty' || element.type === 'camera' || (element.type === 'light' && !child.isLight)
+      );
     });
     nodes.set(element.id, node);
     if(element.asset) assetLoads.push(hydrateLogicElementPreviewAsset(node, element, object));
+    else if(element.id === 'vehicle_model' && normalized.vehiclePawn && normalized.vehiclePawn.proceduralFallback && window.LOT_KING && LOT_KING.player && LOT_KING.player.visual){
+      if(node.geometry && node.geometry.dispose) node.geometry.dispose();
+      if(node.material){
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
+        materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+      }
+      node.geometry = new THREERef.BufferGeometry();
+      node.material = new THREERef.MeshBasicMaterial({visible:false});
+      node.position.set(0,0,0);
+      node.rotation.set(0,0,0);
+      node.scale.set(1,1,1);
+      const fallback = cloneLogicElementAsset(LOT_KING.player.visual);
+      Array.from(fallback.children || []).filter(child => {
+        if(child.userData && (child.userData.logicVehicleWheelVisual || child.userData.logicVehicleWheelId)) return true;
+        const x=Math.abs(Number(child.position && child.position.x)||0), z=Math.abs(Number(child.position && child.position.z)||0);
+        return child.type === 'Group' && Math.abs(x-.92)<.08 && Math.abs(z-1.35)<.12;
+      }).forEach(child => fallback.remove(child));
+      fallback.userData.logicVehicleModel = true;
+      fallback.traverse(child => {
+        child.userData.logicElementAssetVisual = true;
+        child.userData.logicElementInternal = true;
+        child.userData.logicElementSceneId = element.id;
+        child.userData.logicElementOwnerId = object.userData.editorId || null;
+        child.userData.editorLocked = true;
+        child.userData.nonExportable = true;
+        child.userData.logicElementRuntimeVisual = true;
+      });
+      node.add(fallback);
+      configureLogicElementAnimation(node, fallback, element, object);
+    } else if(/^wheel_(?:front|rear)_(?:left|right)$/.test(element.id || '') && normalized.vehiclePawn && normalized.vehiclePawn.proceduralFallback && window.LOT_KING && LOT_KING.player && LOT_KING.player.visual){
+      let sourceWheel = null;
+      LOT_KING.player.visual.traverse(child => {
+        if(!sourceWheel && child.userData && child.userData.logicVehicleWheelId === element.id) sourceWheel = child;
+      });
+      if(sourceWheel){
+        if(node.geometry && node.geometry.dispose) node.geometry.dispose();
+        if(node.material){
+          const materials = Array.isArray(node.material) ? node.material : [node.material];
+          materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+        }
+        node.geometry = new THREERef.BufferGeometry();
+        node.material = new THREERef.MeshBasicMaterial({visible:false});
+        node.rotation.set(0,0,0);
+        node.scale.set(1,1,1);
+        const wheelRig = cloneLogicElementAsset(sourceWheel);
+        wheelRig.position.set(0,0,0);
+        wheelRig.rotation.set(0,0,0);
+        wheelRig.scale.set(1,1,1);
+        wheelRig.userData.logicVehicleWheelRig = true;
+        wheelRig.traverse(child => {
+          child.userData.logicElementAssetVisual = true;
+          child.userData.logicElementInternal = true;
+          child.userData.logicElementSceneId = element.id;
+          child.userData.logicElementOwnerId = object.userData.editorId || null;
+          child.userData.editorLocked = true;
+          child.userData.nonExportable = true;
+          child.userData.logicElementRuntimeVisual = true;
+        });
+        let brakeDisc = null;
+        wheelRig.traverse(child => { if(!brakeDisc && child.userData && child.userData.logicVehicleBrakeDisc) brakeDisc = child; });
+        if(brakeDisc && brakeDisc.parent){
+          brakeDisc.parent.remove(brakeDisc);
+          brakeDisc.userData.logicVehicleBrakeDiscVisual = true;
+          node.add(brakeDisc);
+        }
+        node.add(wheelRig);
+      }
+    }
   });
   elements.forEach(element => {
     const node = element && nodes.get(element.id);
@@ -645,11 +845,176 @@ function parseProject(raw){
   if(!scene) throw new Error('Formato progetto non valido');
   return data && data.format === PROJECT_FORMAT ? data : projectFromScene(scene, {importedLegacy:true});
 }
+function isMenuLevelRole(role){
+  return role === 'editor-menu' || role === 'game-menu';
+}
+function projectWithoutEmbeddedLevels(project){
+  const copy = cloneData(project);
+  if(copy && Object.prototype.hasOwnProperty.call(copy, 'embeddedLevels')) delete copy.embeddedLevels;
+  return copy;
+}
+function collectMenuRoleConfig(){
+  const idx = ensureLibrary();
+  const config = {version:1};
+  idx.levels.forEach(entry => {
+    const project = readLevelProject(entry && entry.id);
+    const role = project && project.meta && project.meta.levelRole || entry && entry.levelRole || 'gameplay';
+    if(!isMenuLevelRole(role) || !project) return;
+    const key = role === 'editor-menu' ? 'editorMenu' : 'gameMenu';
+    if(config[key]) return;
+    config[key] = {
+      levelId: normalizeLevelId(entry.id),
+      name: entry.name || project.meta && project.meta.trackName || entry.id,
+      role,
+      sidecar: 'demo/menu-levels/' + role + '.lkep.json',
+    };
+  });
+  return config.editorMenu || config.gameMenu ? config : null;
+}
+function withMenuRoleConfig(project){
+  const menuRoles = collectMenuRoleConfig();
+  project.meta = Object.assign({}, project.meta || {});
+  const ownRole = isMenuLevelRole(project.meta.levelRole) ? project.meta.levelRole : null;
+  if(menuRoles && ownRole === 'editor-menu') delete menuRoles.editorMenu;
+  if(menuRoles && ownRole === 'game-menu') delete menuRoles.gameMenu;
+  if(menuRoles && (menuRoles.editorMenu || menuRoles.gameMenu)) project.meta.menuRoles = menuRoles;
+  else if(Object.prototype.hasOwnProperty.call(project.meta, 'menuRoles')) delete project.meta.menuRoles;
+  if(Object.prototype.hasOwnProperty.call(project, 'embeddedLevels')) delete project.embeddedLevels;
+  return project;
+}
+function installMenuRoleProject(idx, entry, role, project, index){
+  if(!idx || !entry || !isMenuLevelRole(role) || !project) return null;
+  let levelProject = null;
+  try { levelProject = parseProject(project); }
+  catch(err){ console.warn('LotKing store: menu role level non valido', err); return null; }
+  const meta = levelProject.meta || {};
+  const name = entry.name || meta.trackName || meta.levelName || (role === 'editor-menu' ? 'Editor Menu' : 'Game Menu');
+  let id = normalizeLevelId(entry.id || entry.levelId || meta.trackId || name);
+  if(!id) id = uniqueLevelId(idx, role + '-' + ((Number(index) || 0) + 1));
+  let existing = levelEntry(idx, id);
+  if(existing){
+    const existingProject = readLevelProject(id);
+    const existingRole = existingProject && existingProject.meta && existingProject.meta.levelRole || existing.levelRole || 'gameplay';
+    if(!isMenuLevelRole(existingRole)){
+      id = uniqueLevelId(idx, id + '-' + role);
+      existing = null;
+    }
+  }
+  levelProject = projectWithoutEmbeddedLevels(levelProject);
+  levelProject.meta = Object.assign({}, meta, {trackId:id, trackName:name, levelRole:role, menuRoleSidecar:true});
+  levelProject.savedAt = entry.savedAt || levelProject.savedAt || new Date().toISOString();
+  if(!writeLevelProject(id, levelProject)) return null;
+  if(existing){
+    existing.name = name;
+    existing.levelRole = role;
+    existing.savedAt = levelProject.savedAt;
+  } else {
+    idx.levels.push({id, name, levelRole:role, savedAt:levelProject.savedAt});
+  }
+  return {id, name, role};
+}
+function installEmbeddedProjectLevels(project){
+  const embedded = Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : [];
+  if(!embedded.length) return [];
+  const idx = ensureLibrary();
+  const installed = [];
+  embedded.forEach((entry, index) => {
+    if(!entry || !entry.project) return;
+    const role = isMenuLevelRole(entry.role) ? entry.role : null;
+    if(!role) return;
+    const installedEntry = installMenuRoleProject(idx, entry, role, entry.project, index);
+    if(installedEntry) installed.push(installedEntry);
+  });
+  if(installed.length){
+    writeIndex(idx);
+    syncCatalog();
+  }
+  return installed;
+}
+function roleSidecarRefsFromMenuRoles(menuRoles){
+  const refs = [];
+  if(!menuRoles || typeof menuRoles !== 'object') return refs;
+  [['editorMenu', 'editor-menu'], ['gameMenu', 'game-menu']].forEach(pair => {
+    const ref = menuRoles[pair[0]];
+    if(!ref || typeof ref !== 'object') return;
+    const sidecar = ref.sidecar || ref.url || ref.projectUrl || '';
+    if(!sidecar) return;
+    refs.push(Object.assign({}, ref, {role:pair[1], sidecar}));
+  });
+  return refs;
+}
+function sidecarUrl(url){
+  const value = String(url || '').trim();
+  if(!value) return '';
+  if(/^https?:\/\//i.test(value) || value.indexOf('/') === 0) return value;
+  return value;
+}
+function readMenuRoleManifest(){
+  return fetch(MENU_ROLE_MANIFEST_URL, {cache:'reload'})
+    .then(response => response.ok ? response.json() : null)
+    .catch(() => null);
+}
+function refsFromMenuRoleManifest(manifest){
+  if(!manifest || typeof manifest !== 'object') return [];
+  if(Array.isArray(manifest.levels)){
+    return manifest.levels
+      .filter(item => item && isMenuLevelRole(item.role) && (item.sidecar || item.url || item.projectUrl))
+      .map(item => Object.assign({}, item, {sidecar:item.sidecar || item.url || item.projectUrl}));
+  }
+  return roleSidecarRefsFromMenuRoles(manifest.menuRoles || manifest);
+}
+async function installMenuRoleSidecars(project){
+  const metaRefs = roleSidecarRefsFromMenuRoles(project && project.meta && project.meta.menuRoles);
+  const projectRole = isMenuLevelRole(project && project.meta && project.meta.levelRole) ? project.meta.levelRole : null;
+  const refs = metaRefs.filter(ref => !(projectRole && ref && ref.role === projectRole));
+  if(!refs.length) return [];
+  const idx = ensureLibrary();
+  const installed = [];
+  const seen = new Set();
+  for(let i = 0; i < refs.length; i++){
+    const ref = refs[i];
+    const role = isMenuLevelRole(ref && ref.role) ? ref.role : null;
+    const url = sidecarUrl(ref && ref.sidecar);
+    const key = role + ':' + url;
+    if(!role || !url || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const response = await fetch(url, {cache:'reload'});
+      if(!response.ok){
+        console.warn('LotKing store: menu role sidecar non trovato "' + url + '" (HTTP ' + response.status + ')');
+        continue;
+      }
+      const sidecarProject = parseProject(await response.text());
+      await localizePortableProjectAssets(sidecarProject);
+      const entry = installMenuRoleProject(idx, ref, role, sidecarProject, i);
+      if(entry) installed.push(entry);
+    } catch(err){
+      console.warn('LotKing store: menu role sidecar non caricato "' + url + '"', err);
+    }
+  }
+  if(installed.length){
+    writeIndex(idx);
+    syncCatalog();
+  }
+  return installed;
+}
 function exportProject(scene, meta){
-  return projectFromScene(scene, meta);
+  return withMenuRoleConfig(projectFromScene(scene, meta));
+}
+function installEmbeddedLogicElementAssets(scene){
+  const installed = new Set();
+  (scene && Array.isArray(scene.added) ? scene.added : []).forEach(entry => {
+    if(!entry || entry.kind !== 'logicElement' || !entry.logicAsset || !entry.logicAsset.id || installed.has(entry.logicAsset.id)) return;
+    importLogicElementAsset(entry.logicAsset);
+    installed.add(entry.logicAsset.id);
+  });
+  return installed.size;
 }
 function importProject(project){
   const parsed = parseProject(project);
+  installEmbeddedProjectLevels(parsed);
+  installMenuRoleSidecars(parsed);
+  installEmbeddedLogicElementAssets(parsed.scene);
   save(parsed.scene, parsed.meta);
   return parsed;
 }
@@ -706,7 +1071,7 @@ async function moveDataUrlToAssetDb(owner, prop, label, dbProp){
   owner[dbProp || 'dbKey'] = dbKey;
   if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = dbKey;
 }
-async function localizePortableProjectAssets(project){
+async function localizePortableProjectAssets(project, depth){
   const scene = project && sceneFromProject(project);
   if(!scene) return project;
   if(scene.player) await moveDataUrlToAssetDb(scene.player, 'modelSrc', scene.player.modelName || 'player-model', 'modelDbKey');
@@ -737,6 +1102,10 @@ async function localizePortableProjectAssets(project){
         await moveDataUrlToAssetDb(track, 'url', track.fileName || track.title || track.id || 'music-track', 'dbKey');
       }
     }
+  }
+  const embedded = (depth || 0) < 3 && Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : [];
+  for(const entry of embedded){
+    if(entry && entry.project) await localizePortableProjectAssets(entry.project, (depth || 0) + 1);
   }
   return project;
 }
@@ -944,13 +1313,24 @@ function repairIndexFromStoredLevels(idx){
 async function installBundledDemoProject(project){
   if(!project) return null;
   const parsed = parseProject(project);
-  await localizePortableProjectAssets(parsed);
   const meta = parsed.meta || {};
   const name = meta.trackName || meta.levelName || 'Online Demo';
   const id = BUNDLED_DEMO_LEVEL_ID;
   const savedAt = parsed.savedAt || new Date().toISOString();
   parsed.meta = Object.assign({}, meta, {trackId:id, trackName:name, onlineDemo:true});
   parsed.savedAt = savedAt;
+  if(!bundledDemoProjectCache) bundledDemoProjectCache = parsed;
+  try {
+    await localizePortableProjectAssets(parsed);
+  } catch(err){
+    console.warn('LotKing demo: asset portabili non localizzati, uso fallback in memoria', err);
+  }
+  installEmbeddedProjectLevels(parsed);
+  try {
+    await installMenuRoleSidecars(parsed);
+  } catch(err){
+    console.warn('LotKing demo: sidecar menu role non installati', err);
+  }
   const idx = readIndex();
   let entry = levelEntry(idx, id);
   if(!entry){
@@ -972,16 +1352,31 @@ function ensureBundledDemoProject(){
   if(!shouldUseBundledDemoProject()) return Promise.resolve(null);
   if(bundledDemoReady) return bundledDemoReady;
   const url = bundledDemoProjectUrl();
-  bundledDemoReady = fetch(url, {cache:'reload'})
-    .then(response => {
-      if(!response.ok) return null;
-      return response.text();
-    })
-    .then(async text => {
+  bundledDemoReady = fetchTextWithProgress(url, 8, 42, 'downloading demo project')
+    .then(text => {
       if(!text) return null;
-      const project = await installBundledDemoProject(text);
-      if(project){
-        const scene = sceneFromProject(project);
+      reportBundledDemoProgress({progress:54, step:'parsing demo project', url});
+      const project = parseProject(text);
+      const meta = project.meta || {};
+      const name = meta.trackName || meta.levelName || 'Online Demo';
+      const savedAt = project.savedAt || new Date().toISOString();
+      project.meta = Object.assign({}, meta, {trackId:BUNDLED_DEMO_LEVEL_ID, trackName:name, onlineDemo:true});
+      project.savedAt = savedAt;
+      bundledDemoProjectCache = project;
+      reportBundledDemoProgress({progress:60, step:'demo project ready in memory', url});
+      if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.consumeStartupTemplate){
+        LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
+      }
+      const isMenuPreviewFrame = !!(window.__LK_MENU_PREVIEW && window.parent && window.parent !== window);
+      if(!isMenuPreviewFrame){
+        setTimeout(() => {
+          installBundledDemoProject(cloneData(project)).catch(err => {
+            console.warn('LotKing demo: bundled LKEP storage install failed', err);
+          });
+        }, 0);
+      }
+      const scene = sceneFromProject(project);
+      if(scene){
         const player = scene && scene.player;
         const playerRef = player && (player.modelSrc || player.modelDbKey) ? 'player model present' : 'player model missing';
         console.info('LotKing demo: bundled LKEP loaded from ' + url + ' · ' + ((scene && scene.added && scene.added.length) || 0) + ' added · ' + playerRef);
@@ -1749,6 +2144,12 @@ const LEVELS = {
     const idx = ensureLibrary();
     id = normalizeLevelId(id);
     if(!levelEntry(idx, id)) return 'ready';       // track built-in, nulla da fare
+    if(applied && appliedMode === 'menu-background' && normalizeLevelId(appliedLevelId) !== id){
+      LEVELS.setActive(id);
+      try { sessionStorage.setItem('lk.autolaunch', id); } catch(err){}
+      location.reload();
+      return 'reload';
+    }
     if(normalizeLevelId(idx.activeId) === id) return 'ready';
     if(!applied){ LEVELS.setActive(id); return 'ready'; }
     LEVELS.setActive(id);
@@ -1764,7 +2165,11 @@ function catalogTracks(){
   const idx = ensureLibrary();
   if(!idx.levels.length) return null;
   const activeId = normalizeLevelId(idx.activeId);
-  const list = idx.levels.slice().sort((a, b) => {
+  const list = idx.levels.filter(l => {
+    const project = l && readLevelProject(l.id);
+    const role = l && (project && project.meta && project.meta.levelRole || l.levelRole);
+    return role !== 'editor-menu' && role !== 'game-menu';
+  }).sort((a, b) => {
     const aActive = normalizeLevelId(a.id) === activeId ? 1 : 0;
     const bActive = normalizeLevelId(b.id) === activeId ? 1 : 0;
     if(aActive !== bActive) return bActive - aActive;
@@ -3711,6 +4116,7 @@ function registerAdded(GAME, obj, entry){
     }
   }
   GAME.world.register(obj, entry.name || entry.kind, entryType(entry, obj), {id: entry.id, builtin: false, collider: colliderOpt});
+  if(entry.kind === 'logicElement') obj.userData.logicInstanceId = obj.userData.editorId || entry.id;
   GAME.core.scene.add(obj);
   applyT(obj, entry.t);
   if(entry.kind === 'logicElement') syncLogicElementSceneObject(obj, obj.userData.logicGraph || entry.graph || entry.logic);
@@ -3789,10 +4195,10 @@ function collectEnvironment(GAME){
   return env;
 }
 
-function apply(GAME){
+function apply(GAME, sceneOverride){
   builtinIds = GAME.world.registry.filter(o => o.userData.builtin).map(o => o.userData.editorId);
   ensureEffectHook(GAME);
-  const data = load();
+  const data = sceneOverride || load();
   if(!data){
     GAME.state.sceneReady = true;
     return Promise.resolve(null);
@@ -4122,10 +4528,97 @@ function nextId(){
 
 let ready = Promise.resolve(null);
 let applied = false;
+let appliedLevelId = null;
+let appliedMode = null;
 function ensureApplied(GAME){
   if(applied) return ready;
   applied = true;
+  appliedMode = 'active';
+  appliedLevelId = normalizeLevelId(ensureLibrary().activeId);
   ready = ensureBundledDemoProject().then(() => apply(GAME || window.LOT_KING));
+  window.LK_STORE.ready = ready;
+  return ready;
+}
+function menuBackgroundRoles(preferredRoles){
+  const input = Array.isArray(preferredRoles) ? preferredRoles : [preferredRoles];
+  const roles = input.filter(role => role === 'editor-menu' || role === 'game-menu');
+  if(!roles.length) roles.push('game-menu', 'editor-menu');
+  return roles;
+}
+function findMenuBackgroundLevel(preferredRoles){
+  const idx = ensureLibrary();
+  const roles = menuBackgroundRoles(preferredRoles);
+  const entries = idx.levels.slice();
+  for(const role of roles){
+    const activeId = normalizeLevelId(idx.activeId);
+    const active = entries.find(entry => normalizeLevelId(entry.id) === activeId);
+    const ordered = active ? [active].concat(entries.filter(entry => normalizeLevelId(entry.id) !== activeId)) : entries;
+    for(const entry of ordered){
+      const project = readLevelProject(entry.id);
+      const levelRole = project && project.meta && project.meta.levelRole || entry.levelRole || 'gameplay';
+      if(levelRole !== role) continue;
+      return {id: normalizeLevelId(entry.id), name: entry.name, role, project};
+    }
+  }
+  const bundled = findBundledMenuBackgroundLevel(roles);
+  if(bundled) return bundled;
+  return null;
+}
+function findBundledMenuBackgroundLevel(preferredRoles){
+  const roles = menuBackgroundRoles(preferredRoles);
+  const project = bundledDemoProjectCache;
+  if(!project) return null;
+  const meta = project.meta || {};
+  const role = meta.levelRole || 'gameplay';
+  if(!roles.includes(role)) return null;
+  return {
+    id: normalizeLevelId(meta.trackId || BUNDLED_DEMO_LEVEL_ID),
+    name: meta.trackName || meta.levelName || 'Online Demo',
+    role,
+    project,
+  };
+}
+function ensureMenuBackgroundApplied(GAME, preferredRoles){
+  if(applied) return ready;
+  ready = ensureBundledDemoProject().then(() => {
+    const menuLevel = findMenuBackgroundLevel(preferredRoles);
+    if(!menuLevel){
+      reportBundledDemoProgress({progress:62, step:'no ROLE menu level found'});
+      return null;
+    }
+    const scene = sceneFromProject(menuLevel.project);
+    if(!scene){
+      reportBundledDemoProgress({progress:62, step:'ROLE menu project has no scene'});
+      return null;
+    }
+    applied = true;
+    appliedMode = 'menu-background';
+    appliedLevelId = menuLevel.id;
+    reportBundledDemoProgress({progress:66, step:'applying role menu level', level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
+    return apply(GAME || window.LOT_KING, scene)
+      .then(data => {
+        reportBundledDemoProgress({progress:84, step:'role menu level applied', level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
+        return {data, menuLevel};
+      })
+      .catch(err => {
+        reportBundledDemoProgress({progress:84, step:'role menu level failed', error:err && err.message || String(err || 'error'), level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
+        throw err;
+      });
+  }).then(result => {
+    if(!result) return null;
+    const data = result.data;
+    const menuLevel = result.menuLevel;
+    const g = GAME || window.LOT_KING;
+    if(g && g.state){
+      g.state.menuBackgroundLevel = {
+        id: menuLevel.id,
+        name: menuLevel.name,
+        role: menuLevel.role,
+      };
+      g.state.activeLevel = menuLevel.id;
+    }
+    return data;
+  });
   window.LK_STORE.ready = ready;
   return ready;
 }
@@ -4136,12 +4629,13 @@ window.LK_STORE = {
 	  logicElementAssets: logicElementAssetsApi(),
   soundSets: SOUND_SETS,
   isApplied: () => applied,
+  appliedInfo: () => ({applied, mode: appliedMode, levelId: appliedLevelId}),
   load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject, getLevelLogicGraph, setLevelLogicGraph,
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
   lightProps, applyLightProps, applyMatProps,
 	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
-  apply, ensureApplied, collect, nextId,
+  apply, ensureApplied, ensureMenuBackgroundApplied, findMenuBackgroundLevel, collect, nextId,
   ensureBundledDemoProject,
   builtinIds: () => builtinIds.slice(),
   ready,

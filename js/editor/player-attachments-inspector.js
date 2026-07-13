@@ -20,24 +20,27 @@ function create(deps){
   const selectRow = deps.selectRow;
   const colorRow = deps.colorRow;
   const el = deps.el;
+  const pushHistory = deps.pushHistory || function(){};
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
-  function buildExhaust(box){
-    if(!GAME.player.exhaust || !GAME.player.setExhaust) return;
+  function buildExhaust(box, player){
+    if(!player.exhaust || !player.setExhaust) return;
     const sx = section(tr('EXHAUST / SMOKE', 'SCARICO / FUMO'), false);
-    const ex = GAME.player.exhaust;
-    const updEx = patch => { GAME.player.setExhaust(patch); markDirty(); };
+    const ex = player.exhaust;
+    let replayEx = false;
+    const restoreEx = value => { replayEx=true; player.setExhaust(JSON.parse(JSON.stringify(value))); Object.keys(ex).forEach(key=>delete ex[key]); Object.assign(ex,JSON.parse(JSON.stringify(value))); markDirty(); replayEx=false; };
+    const updEx = patch => { const before=JSON.parse(JSON.stringify(ex)); player.setExhaust(patch); markDirty(); const after=JSON.parse(JSON.stringify(ex)); if(!replayEx&&JSON.stringify(before)!==JSON.stringify(after)) pushHistory({label:'Vehicle Pawn exhaust',undo:()=>restoreEx(before),redo:()=>restoreEx(after)}); };
     const selectExhaust = id => {
-      const anchor = GAME.world.registry.find(x => x.userData.editorId === id);
+      const anchor = player.findAnchor ? player.findAnchor(id) : GAME.world.registry.find(x => x.userData.editorId === id);
       if(!anchor) return;
-      GAME.player.setExhaust({dummyVisible:true});
+      player.setExhaust({dummyVisible:true});
       selectObject(anchor);
       if(ED.tool === 'select') setTool('translate');
     };
     const addExhaust = () => {
-      if(!GAME.player.addExhaust) return;
-      const anchor = GAME.player.addExhaust({enabled:true});
-      GAME.player.setExhaust({dummyVisible:true});
+      if(!player.addExhaust) return;
+      const anchor = player.addExhaust({enabled:true});
+      player.setExhaust({dummyVisible:true});
       markDirty();
       refreshOutliner();
       if(anchor){
@@ -48,7 +51,7 @@ function create(deps){
     sx.body.appendChild(el('<div class="lk-hint">Sources attached to the vehicle: place them on the exhaust. Smoke follows throttle, shifting and limiter.</div>'));
     sx.body.appendChild(btnRow([
       {label:tr('+ Exhaust source', '+ Sorgente scarico'), action:addExhaust},
-      {label:tr('Test smoke/fire', 'Prova fumo/fuoco'), action:() => { if(GAME.player.testExhaust) GAME.player.testExhaust(); }},
+      {label:tr('Test smoke/fire', 'Prova fumo/fuoco'), action:() => { if(player.testExhaust) player.testExhaust(); }},
     ]));
     sx.body.appendChild(checkRow(tr('Exhaust enabled', 'Scarico attivo'), ex.enabled, v => updEx({enabled:v})).root);
     sx.body.appendChild(checkRow(tr('Show exhaust dummies', 'Mostra dummy scarico'), ex.dummyVisible !== false, v => updEx({dummyVisible:v})).root);
@@ -68,8 +71,12 @@ function create(deps){
         {label:tr('Test from here', 'Prova da qui'), action:() => {
           const anchor = GAME.world.registry.find(x => x.userData.editorId === 'player_exhaust_' + idx);
           if(anchor) selectExhaust('player_exhaust_' + idx);
-          if(GAME.player.testExhaust) GAME.player.testExhaust(anchor);
+          if(player.testExhaust) player.testExhaust(anchor);
         }},
+        {label:tr('Duplicate', 'Duplica'), action:() => { if(player.duplicateExhaust && player.duplicateExhaust(idx) !== false){ markDirty(); refreshOutliner(); } }},
+        {label:'↑', action:() => { if(player.moveExhaust && player.moveExhaust(idx, -1)){ markDirty(); refreshOutliner(); } }},
+        {label:'↓', action:() => { if(player.moveExhaust && player.moveExhaust(idx, 1)){ markDirty(); refreshOutliner(); } }},
+        {label:tr('Remove', 'Rimuovi'), action:() => { if(player.removeExhaust && player.removeExhaust(idx)){ markDirty(); refreshOutliner(); } }},
       ]));
       ss.body.appendChild(checkRow(tr('Source enabled', 'Attiva sorgente'), src.enabled !== false, v => patch({enabled:v, userDisabled:!v})).root);
       sx.body.appendChild(ss.root);
@@ -77,9 +84,9 @@ function create(deps){
     box.appendChild(sx.root);
   }
 
-  function buildSkids(box){
-    if(!GAME.player.skids || !GAME.player.setSkids) return;
-    const sk = GAME.player.skids;
+  function buildSkids(box, player){
+    if(!player.skids || !player.setSkids) return;
+    const sk = player.skids;
     const skidLabel = (src, idx) => {
       const labels = {
         rearLeft:tr('Rear L', 'Posteriore L'),
@@ -90,18 +97,20 @@ function create(deps){
       return labels[(src && src.wheel) || ''] || (tr('Source ', 'Sorgente ') + (idx + 1));
     };
     const ss = section('SKID MARKS', false);
-    const updSk = patch => { GAME.player.setSkids(patch); markDirty(); };
+    let replaySk = false;
+    const restoreSk = value => { replaySk=true; player.setSkids(JSON.parse(JSON.stringify(value))); Object.keys(sk).forEach(key=>delete sk[key]); Object.assign(sk,JSON.parse(JSON.stringify(value))); markDirty(); replaySk=false; };
+    const updSk = patch => { const before=JSON.parse(JSON.stringify(sk)); player.setSkids(patch); markDirty(); const after=JSON.parse(JSON.stringify(sk)); if(!replaySk&&JSON.stringify(before)!==JSON.stringify(after)) pushHistory({label:'Vehicle Pawn skids',undo:()=>restoreSk(before),redo:()=>restoreSk(after)}); };
     const selectSkid = id => {
-      const anchor = GAME.world.registry.find(x => x.userData.editorId === id);
+      const anchor = player.findAnchor ? player.findAnchor(id) : GAME.world.registry.find(x => x.userData.editorId === id);
       if(!anchor) return;
-      GAME.player.setSkids({dummyVisible:true});
+      player.setSkids({dummyVisible:true});
       selectObject(anchor);
       if(ED.tool === 'select') setTool('translate');
     };
     const addSkid = () => {
-      if(!GAME.player.addSkid) return;
-      const anchor = GAME.player.addSkid({enabled:true});
-      GAME.player.setSkids({dummyVisible:true});
+      if(!player.addSkid) return;
+      const anchor = player.addSkid({enabled:true});
+      player.setSkids({dummyVisible:true});
       markDirty();
       refreshOutliner();
       if(anchor){
@@ -126,37 +135,57 @@ function create(deps){
     (sk.sources || []).forEach((src, idx) => {
       const row = section(tr('SKID ', 'SGOMMATA ') + skidLabel(src, idx), false);
       const patch = p => { const a = []; a[idx] = p; updSk({sources:a}); };
-      row.body.appendChild(btnRow([{label:'Select dummy', action:() => selectSkid('player_skid_' + idx)}]));
+      row.body.appendChild(btnRow([
+        {label:'Select dummy', action:() => selectSkid('player_skid_' + idx)},
+        {label:tr('Duplicate', 'Duplica'), action:() => { if(player.duplicateSkid && player.duplicateSkid(idx) !== false){ markDirty(); refreshOutliner(); } }},
+        {label:'↑', action:() => { if(player.moveSkid && player.moveSkid(idx, -1)){ markDirty(); refreshOutliner(); } }},
+        {label:'↓', action:() => { if(player.moveSkid && player.moveSkid(idx, 1)){ markDirty(); refreshOutliner(); } }},
+        {label:tr('Remove', 'Rimuovi'), action:() => { if(player.removeSkid && player.removeSkid(idx)){ markDirty(); refreshOutliner(); } }},
+      ]));
       row.body.appendChild(checkRow(tr('Source enabled', 'Attiva sorgente'), src.enabled !== false, v => patch({enabled:v})).root);
       ss.body.appendChild(row.root);
     });
     box.appendChild(ss.root);
   }
 
-  function buildDataWidgets(box){
-    if(!GAME.player.dataWidgets || !GAME.player.setDataWidgets) return;
-    const dw = GAME.player.dataWidgets;
+  function buildDataWidgets(box, player){
+    if(!player.dataWidgets || !player.setDataWidgets) return;
+    const dw = player.dataWidgets;
     const sw = section('3D DATA WIDGETS', false);
+    let replayWidgets = false;
+    const restoreWidgets = value => { replayWidgets=true; player.setDataWidgets(JSON.parse(JSON.stringify(value))); Object.keys(dw).forEach(key=>delete dw[key]); Object.assign(dw,JSON.parse(JSON.stringify(value))); markDirty(); replayWidgets=false; };
+    const updateWidgets = patch => { const before=JSON.parse(JSON.stringify(dw)); player.setDataWidgets(patch); markDirty(); const after=JSON.parse(JSON.stringify(dw)); if(!replayWidgets&&JSON.stringify(before)!==JSON.stringify(after)) pushHistory({label:'Vehicle Pawn data widgets',undo:()=>restoreWidgets(before),redo:()=>restoreWidgets(after)}); };
+    sw.body.appendChild(btnRow([{label:'+ Data Widget', action:() => {
+      if(!player.addDataWidget) return;
+      const anchor = player.addDataWidget({key:'data' + ((dw.items || []).length + 1), label:'DATA', metric:'speed', enabled:true});
+      markDirty(); refreshOutliner();
+      if(anchor){ selectObject(anchor); if(ED.tool === 'select') setTool('translate'); }
+    }}]));
     const updWidget = (idx, patch) => {
       const items = [];
       items[idx] = patch;
-      GAME.player.setDataWidgets({items});
-      markDirty();
+      updateWidgets({items});
     };
     const selectWidget = key => {
-      const anchor = GAME.world.registry.find(x => x.userData.editorId === 'player_data_' + key);
+      const id = 'player_data_' + key;
+      const anchor = player.findAnchor ? player.findAnchor(id) : GAME.world.registry.find(x => x.userData.editorId === id);
       if(!anchor) return;
       selectObject(anchor);
       if(ED.tool === 'select') setTool('translate');
     };
     sw.body.appendChild(el('<div class="lk-hint">Floating data text attached to the player. Move each widget with the gizmo, like vehicle lights.</div>'));
     sw.body.appendChild(checkRow('Show helpers in editor', dw.visibleInEditor !== false, v => {
-      GAME.player.setDataWidgets({visibleInEditor:v});
-      markDirty();
+      updateWidgets({visibleInEditor:v});
     }).root);
     (dw.items || []).forEach((item, idx) => {
       const ws = section('WIDGET ' + (item.label || item.key), false);
-      ws.body.appendChild(btnRow([{label:'Select widget', action:() => selectWidget(item.key)}]));
+      ws.body.appendChild(btnRow([
+        {label:'Select widget', action:() => selectWidget(item.key)},
+        {label:tr('Duplicate', 'Duplica'), action:() => { if(player.duplicateDataWidget && player.duplicateDataWidget(idx) !== false){ markDirty(); refreshOutliner(); } }},
+        {label:'↑', action:() => { if(player.moveDataWidget && player.moveDataWidget(idx, -1)){ markDirty(); refreshOutliner(); } }},
+        {label:'↓', action:() => { if(player.moveDataWidget && player.moveDataWidget(idx, 1)){ markDirty(); refreshOutliner(); } }},
+        {label:tr('Remove', 'Rimuovi'), action:() => { if(player.removeDataWidget && player.removeDataWidget(idx)){ markDirty(); refreshOutliner(); } }},
+      ]));
       ws.body.appendChild(checkRow('Enabled', !!item.enabled, v => updWidget(idx, {enabled:v})).root);
       ws.body.appendChild(selectRow('Metric', item.metric, [
         {value:'driftPoints', label:'Drift points'},
@@ -175,10 +204,11 @@ function create(deps){
     box.appendChild(sw.root);
   }
 
-  function build(box){
-    buildExhaust(box);
-    buildSkids(box);
-    buildDataWidgets(box);
+  function build(box, targetPlayer){
+    const player = targetPlayer || deps.player || GAME.player;
+    buildExhaust(box, player);
+    buildSkids(box, player);
+    buildDataWidgets(box, player);
   }
 
   return Object.freeze({build});

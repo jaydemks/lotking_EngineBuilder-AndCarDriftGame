@@ -31,6 +31,7 @@ function compatible(a, b){
   if(a.type === 'any' || b.type === 'any') return true;
   const at = String(a.type || '').toLowerCase();
   const bt = String(b.type || '').toLowerCase();
+  if(bt === 'pawn' && /pawn$/.test(at)) return true;
   if((at === 'string' && bt === 'assetref') || (at === 'assetref' && bt === 'string')) return true;
   return a.type === b.type;
 }
@@ -63,6 +64,7 @@ function validateGraph(graph, registry){
   const outgoingExec = new Map();
   const variableNames = new Set();
   const subgraphRefs = new Set();
+  const rawVehiclePawn = graph && graph.vehiclePawn;
 
   const error = (code, message, details) => {
     const item = addDiagnostic(diagnostics, 'error', code, message, details);
@@ -72,6 +74,13 @@ function validateGraph(graph, registry){
     const item = addDiagnostic(diagnostics, 'warning', code, message, details);
     warnings.push(item);
   };
+
+  if(rawVehiclePawn){
+    if(rawVehiclePawn.id != null && !String(rawVehiclePawn.id).trim()) error('invalid-pawn-id', 'Vehicle Pawn ID cannot be empty.', {field:'vehiclePawn.id'});
+    if(rawVehiclePawn.playerId != null && (!Number.isInteger(Number(rawVehiclePawn.playerId)) || Number(rawVehiclePawn.playerId) < 1 || Number(rawVehiclePawn.playerId) > 4)){
+      error('invalid-player-id', 'Vehicle Pawn Player ID must be None or an integer from 1 to 4.', {field:'vehiclePawn.playerId'});
+    }
+  }
 
   g.variables.forEach(variable => {
     if(variableNames.has(variable.name)) error('duplicate-variable', 'Duplicate variable name: ' + variable.name, {variable:variable.name});
@@ -150,6 +159,10 @@ function validateGraph(graph, registry){
     if(nodes.has(n.id)) error('duplicate-node', 'Duplicate node id: ' + n.id, {node:n.id});
     nodes.set(n.id, n);
     if(!registry.get(n.type)) error('unknown-node', 'Unknown node type: ' + n.type, {node:n.id});
+    if((n.type === 'input.playerDrive' || n.type === 'pawn.getForPlayer' || n.type === 'pawn.possess') && n.data && n.data.playerId != null){
+      const playerId = Number(n.data.playerId);
+      if(!Number.isInteger(playerId) || playerId < 1 || playerId > 4) warn('invalid-node-player-id', 'Player ID must be an integer from 1 to 4.', {node:n.id, pin:'playerId'});
+    }
   });
 
   g.edges.forEach(e => {

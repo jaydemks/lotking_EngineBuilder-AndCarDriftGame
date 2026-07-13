@@ -11,6 +11,9 @@ require('../js/logic/logic-templates.js');
 require('../js/logic/logic-validator.js');
 require('../js/logic/logic-runtime.js');
 require('../js/logic/logic-services.js');
+require('../js/runtime/pawn-core.js');
+require('../js/runtime/vehicle-physics-backends.js');
+require('../js/runtime/vehicle-pawns.js');
 require('../js/runtime/logic-elements-runner.js');
 
 const registry = global.LK_LOGIC_NODES_MVP.createRegistry();
@@ -46,6 +49,210 @@ test('starter graph validates without diagnostics', () => {
   assert.deepEqual(result.warnings, []);
 });
 
+test('Pawn Core lifecycle and component registry are reusable beyond vehicles', () => {
+  const calls = [];
+  const human = global.LK_RUNTIME_PAWN_CORE.createRecord({
+    id:'human-1', kind:'human', config:{enabled:true, playerId:2}, state:{health:100},
+    onStart:pawn => calls.push('start:' + pawn.id),
+    onReset:pawn => { pawn.state.health = 100; calls.push('reset'); return true; },
+    onPossess:(pawn, playerId) => { pawn.playerId = playerId; pawn.possessed = playerId != null; return true; },
+    onUnpossess:pawn => { pawn.playerId = null; pawn.possessed = false; return true; },
+  });
+  human.start();
+  human.state.health = 20;
+  human.reset();
+  human.possess(3);
+  assert.equal(human.kind, 'human');
+  assert.equal(human.state.health, 100);
+  assert.equal(human.playerId, 3);
+  assert.deepEqual(calls, ['start:human-1', 'reset']);
+
+  const components = global.LK_RUNTIME_PAWN_CORE.createComponentRegistry();
+  components.register('human', opts => ({kind:'human', name:opts.name}));
+  components.register('animal', opts => ({kind:'animal', species:opts.species}));
+  assert.deepEqual(components.list(), ['animal', 'human']);
+  assert.deepEqual(components.create('animal', {species:'wolf'}), {kind:'animal', species:'wolf'});
+});
+
+test('Vehicle Pawn registry keeps possession and motion isolated per instance', () => {
+  const game = {player:null, systems:{}};
+  const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
+  const position = (x, y, z) => ({x,y,z,set(nx,ny,nz){ this.x=nx; this.y=ny; this.z=nz; }});
+  const ownerA = {position:position(0,0,0), rotation:{y:0}, visible:true, userData:{}};
+  const ownerB = {position:position(10,0,0), rotation:{y:0}, visible:true, userData:{}};
+  const input = {playerDrive(id){ return id === 1 ? {throttle:1, brake:0, steer:.25, handbrake:false} : {throttle:0, brake:0, steer:0, handbrake:false}; }};
+  const a = registry.createLogic(ownerA, {id:'pawn-a', playerId:1, tuning:{maxSpeed:30}}, {input});
+  const b = registry.createLogic(ownerB, {id:'pawn-b', playerId:2, tuning:{maxSpeed:30}}, {input});
+  a.start(); b.start();
+  registry.stepAll(.1);
+
+  assert.equal(a.state.speed > 0, true);
+  assert.equal(ownerA.position.z > 0, true);
+  assert.equal(b.state.speed, 0);
+  assert.equal(ownerB.position.x, 10);
+  assert.equal(registry.getByPlayerId(1), a);
+  assert.equal(registry.getByPlayerId(2), b);
+  a.setCamera({activeAnchorId:'camera_anchor_2'});
+  assert.equal(a.config.camera.activeAnchorId, 'camera_anchor_2');
+  assert.equal(b.possess(1, false), false);
+  assert.equal(b.possess(1, true), true);
+  assert.equal(a.playerId, null);
+  const bBeforeDisabledStep = ownerB.position.z;
+  b.setEnabled(false);
+  b.setControl({throttle:1});
+  registry.stepAll(.1);
+  assert.equal(ownerB.position.z, bBeforeDisabledStep);
+  a.reset();
+  assert.equal(ownerA.position.x, 0);
+  assert.equal(ownerA.position.z, 0);
+  a.dispose(); b.dispose();
+  assert.equal(registry.list().length, 0);
+});
+
+test('Vehicle Pawn configuration preserves manual wheel pivots and mesh assignments', () => {
+  const wheels = [0,1,2,3,4].map(index => ({x:index,y:.17,z:index<2?1.3:-1.3,front:index<2,driven:index>=2,visualId:'mesh-wheel-' + index}));
+  const config = global.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig({physicsBackend:'arcade-fallback', wheels});
+  assert.equal(config.wheels.length, 5);
+  assert.equal(config.wheels[4].visualId, 'mesh-wheel-4');
+  assert.equal(config.wheels[0].front, true);
+  assert.equal(config.wheels[2].driven, true);
+});
+
+test('Vehicle Pawn arcade parity covers acceleration braking reverse handbrake drift and reset', () => {
+  const game = {player:null, systems:{}};
+  const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
+  const owner = {position:{x:3,y:0,z:7,set(x,y,z){this.x=x;this.y=y;this.z=z;}}, rotation:{y:.25}, visible:true, userData:{}};
+  const pawn = registry.createLogic(owner, {
+    id:'parity-drive', playerId:1, physicsBackend:'arcade-fallback', spawn:{x:3,y:0,z:7,heading:.25},
+    tuning:{maxSpeed:30,reverseSpeed:10,acceleration:16,brake:24,steer:2.2,grip:.84,drag:1.2},
+  }, {});
+  pawn.start();
+  pawn.setControl({throttle:1,brake:0,steer:0,handbrake:false});
+  for(let i=0;i<20;i++) pawn.step(.05);
+  const accelerated = pawn.state.speed;
+  assert.equal(accelerated > 5, true);
+  assert.equal(pawn.state.rpm > 900, true);
+  pawn.setControl({throttle:0,brake:1,steer:0,handbrake:false});
+  for(let i=0;i<8;i++) pawn.step(.05);
+  assert.equal(pawn.state.speed < accelerated, true);
+  for(let i=0;i<20;i++) pawn.step(.05);
+  assert.equal(pawn.state.reverse, true);
+  assert.equal(pawn.state.gear, -1);
+  pawn.setControl({throttle:1,brake:0,steer:.8,handbrake:true});
+  pawn.state.speed = 8;
+  pawn.step(.05);
+  assert.equal(pawn.state.handbrake, true);
+  assert.equal(pawn.state.drift, true);
+  assert.equal(pawn.state.oversteer, true);
+  pawn.state.speed = 0;
+  pawn.setControl({throttle:1,brake:1,steer:.2,handbrake:false});
+  pawn.step(.01);
+  assert.equal(pawn.state.burnout, true);
+  pawn.state.speed = pawn.config.tuning.maxSpeed;
+  pawn.setControl({throttle:1,brake:0,steer:0,handbrake:false});
+  pawn.step(.001);
+  assert.equal(pawn.state.limiter, true);
+  pawn.reset();
+  assert.deepEqual([owner.position.x,owner.position.y,owner.position.z], [3,0,7]);
+  assert.equal(owner.rotation.y, .25);
+  assert.equal(pawn.state.speed, 0);
+  pawn.dispose();
+});
+
+test('Vehicle Pawn camera modes and automatic light conditions remain instance scoped', () => {
+  const game = {player:null, systems:{sky:{getTime(){ return .9; }}}};
+  const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
+  const owner = {position:{x:0,y:0,z:0},rotation:{y:0},visible:true,userData:{}};
+  const pawn = registry.createLogic(owner, {id:'visual-parity',playerId:1,camera:{mode:'free'},lights:{enabled:true,front:{enabled:true,auto:true,autoOnHour:18,autoOffHour:7},rear:{enabled:true},aux:[{enabled:true,condition:'left',intensity:2}]}}, {});
+  for(const mode of ['free','arcade','cinematic']){ pawn.setCamera({mode}); assert.equal(pawn.config.camera.mode, mode); }
+  const light = () => ({visible:false,intensity:0,distance:10,angle:.5});
+  const headlight = light(), brake = light(), reverse = light(), left = light();
+  pawn.backend = {lightVisuals:[
+    {light:headlight,condition:'night',auxIndex:null,baseIntensity:1,baseDistance:10,baseAngle:.5},
+    {light:brake,condition:'brake',auxIndex:null,baseIntensity:1,baseDistance:10,baseAngle:.5},
+    {light:reverse,condition:'reverse',auxIndex:null,baseIntensity:1,baseDistance:10,baseAngle:.5},
+    {light:left,condition:'always',auxIndex:0,baseIntensity:1,baseDistance:10,baseAngle:.5},
+  ]};
+  pawn.updateLights({highBeams:true,brake:1,steer:-.8}, false);
+  assert.equal(headlight.intensity > 2, true);
+  assert.equal(brake.visible, true);
+  assert.equal(reverse.visible, false);
+  assert.equal(left.intensity, 2);
+  pawn.config.lights.front.enabled = false;
+  pawn.updateLights({highBeams:false,brake:0,steer:0}, true);
+  assert.equal(headlight.visible, false);
+  assert.equal(reverse.visible, true);
+  pawn.backend = null;
+  pawn.dispose();
+});
+
+test('Vehicle Pawn disposes exhaust skid widget and audio resources together', () => {
+  const game = {player:null, systems:{}};
+  const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
+  const owner = {position:{x:0,y:0,z:0},rotation:{y:0},visible:true,userData:{}};
+  const pawn = registry.createLogic(owner, {id:'cleanup-parity',playerId:null}, {});
+  let removed=0, geometry=0, material=0, widgets=0, stopped=0, cleared=0;
+  const effect = {object:{parent:{remove(){removed++;}},geometry:{dispose(){geometry++;}},material:{dispose(){material++;}}}};
+  pawn.effectsRuntime.exhaust.push(effect); pawn.effectsRuntime.skids.push(effect);
+  pawn.widgetRuntime = {dispose(){widgets++;}};
+  pawn.audioRuntime = {kind:'samples',manager:{stop(){stopped++;},setConfig(value){if(value===null) cleared++;}}};
+  pawn.dispose();
+  assert.deepEqual({removed,geometry,material,widgets,stopped,cleared},{removed:2,geometry:2,material:2,widgets:1,stopped:1,cleared:1});
+});
+
+test('Vehicle Pawn registry assigns P1-P4 deterministically and preserves None', () => {
+  const game = {player:null, systems:{}};
+  const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
+  const owner = id => ({position:{x:0,y:0,z:0}, rotation:{y:0}, visible:true, userData:{logicInstanceId:id}});
+  const pawns = [1,2,3,4,5].map(index => registry.createLogic(owner('multi-' + index), {id:'multi-' + index, playerId:null}, {}));
+  assert.deepEqual(pawns.slice(0,4).map(pawn => registry.possessFirstAvailable(pawn)), [1,2,3,4]);
+  assert.equal(registry.firstAvailablePlayerId(), null);
+  assert.equal(registry.possessFirstAvailable(pawns[4]), null);
+  assert.equal(pawns[4].playerId, null);
+  pawns[1].unpossess();
+  assert.equal(registry.possessFirstAvailable(pawns[4]), 2);
+  assert.deepEqual([1,2,3,4].map(id => registry.getByPlayerId(id).id), ['multi-1','multi-5','multi-3','multi-4']);
+  pawns.forEach(pawn => pawn.dispose());
+});
+
+test('Vehicle Pawn node catalog exposes control, tuning and telemetry contracts', () => {
+  for(const type of [
+    'pawn.getSelf', 'pawn.getPlayerPawn', 'pawn.getInput', 'pawn.possess', 'pawn.possessFirstAvailable', 'pawn.unpossess',
+    'pawn.setDriveInput', 'pawn.reset', 'pawn.setEnabled', 'pawn.setTuning', 'pawn.setSuspension', 'pawn.setLights', 'pawn.setEffects', 'pawn.setCamera', 'pawn.setEngineAudio', 'pawn.setDataWidgets', 'pawn.getState',
+  ]) assert.equal(!!registry.get(type), true, 'missing Vehicle Pawn node ' + type);
+  assert.equal(registry.get('pawn.getState').outputs.some(pin => pin.name === 'physicsMode'), true);
+  for(const type of ['event.onPawnDriftStart','event.onPawnDriftEnd','event.onPawnGearChanged','event.onPawnReset','event.onPawnPossessed','event.onPawnUnpossessed','event.onPawnDeviceChanged']){
+    assert.equal(!!registry.get(type), true, 'missing Pawn event ' + type);
+  }
+});
+
+test('legacy Player Car snapshots migrate to stable Vehicle Pawn v2 authoring data', () => {
+  const legacy = global.LK_LOGIC_GRAPH.createEmptyGraph('Legacy Player Car', 'element');
+  legacy.playerPawnBlueprint = {
+    version:1, enabled:true, hidden:false, controllerIndex:2,
+    spawn:{x:4, z:-7, heading:1.25},
+    tuning:{horsepower:520, torque:6},
+    collision:{hx:1.1, hy:.5, hz:2},
+    cam:{mode:'cinematic', fov:74},
+  };
+  const migrated = global.LK_LOGIC_GRAPH.normalizeGraph(legacy);
+  assert.equal(migrated.vehiclePawn.schemaVersion, 2);
+  assert.equal(migrated.vehiclePawn.playerId, 3);
+  assert.equal(migrated.vehiclePawn.possessed, true);
+  assert.deepEqual(migrated.vehiclePawn.spawn, {x:4, y:0, z:-7, heading:1.25});
+  assert.equal(migrated.vehiclePawn.tuning.horsepower, 520);
+  assert.equal(migrated.vehiclePawn.collision.hx, 1.1);
+  assert.equal(migrated.vehiclePawn.camera.mode, 'cinematic');
+  assert.equal(migrated.vehiclePawn.migration.legacyBlueprint, true);
+  assert.deepEqual(migrated.playerPawnBlueprint, legacy.playerPawnBlueprint);
+
+  const roundTrip = global.LK_LOGIC_GRAPH.normalizeGraph(JSON.parse(JSON.stringify(migrated)));
+  assert.deepEqual(roundTrip.vehiclePawn.spawn, migrated.vehiclePawn.spawn);
+  assert.deepEqual(roundTrip.vehiclePawn.tuning, migrated.vehiclePawn.tuning);
+  assert.equal(roundTrip.vehiclePawn.playerId, 3);
+  assert.deepEqual(roundTrip.playerPawnBlueprint, legacy.playerPawnBlueprint);
+});
+
 test('validator reports contextual warnings and blocking pin errors', () => {
   const graph = global.LK_LOGIC_GRAPH.createEmptyGraph('Diagnostics Test', 'element');
   graph.nodes.push(
@@ -71,6 +278,16 @@ test('validator reports contextual warnings and blocking pin errors', () => {
   result = global.LK_LOGIC_VALIDATOR.validateGraph(graph, registry);
   assert.equal(result.ok, false);
   assert.equal(result.errors.some(item => item.code === 'pin-type-mismatch'), true);
+});
+
+test('validator rejects invalid Vehicle Pawn and Player references', () => {
+  const graph = global.LK_LOGIC_GRAPH.createEmptyGraph('Pawn Reference Diagnostics', 'element');
+  graph.vehiclePawn = {schemaVersion:2, id:'', playerId:7};
+  graph.nodes.push(global.LK_LOGIC_GRAPH.node('drive', 'input.playerDrive', 0, 0, {playerId:0}));
+  const result = global.LK_LOGIC_VALIDATOR.validateGraph(graph, registry);
+  assert.equal(result.errors.some(item => item.code === 'invalid-pawn-id'), true);
+  assert.equal(result.errors.some(item => item.code === 'invalid-player-id'), true);
+  assert.equal(result.warnings.some(item => item.code === 'invalid-node-player-id'), true);
 });
 
 test('runtime executes start/update flow and keeps variable state', () => {
@@ -291,7 +508,9 @@ test('built-in Logic Element templates are valid editable graph copies', () => {
     assert.equal(Array.isArray(template.graph.comments), true);
     assert.equal(template.graph.comments.length > 0, true);
     assert.equal(Array.isArray(template.graph.logicScene && template.graph.logicScene.elements), true);
-    assert.equal(template.graph.logicScene.elements.some(element => element && element.name === 'Default Mesh'), true);
+    const sceneElements = [template.graph.logicScene.root].concat(template.graph.logicScene.elements || []).filter(Boolean);
+    assert.equal(sceneElements.length > 0, true);
+    if(!template.graph.vehiclePawn) assert.equal(sceneElements.some(element => element.name === 'Default Mesh'), true);
 
     const result = global.LK_LOGIC_VALIDATOR.validateGraph(template.graph, registry);
     assert.equal(result.ok, true, template.name + ' should not have blocking errors');
@@ -312,6 +531,7 @@ test('Logic Element graph dependency manifest collects assets and node refs', ()
       name:'Default Mesh',
       type:'mesh',
       asset:{id:'mesh-1', key:'glb:mesh-1', dbKey:'asset-db-1', name:'Hero Mesh', source:'Imported GLB'},
+      matProps:{normalMapSrc:'textures/vehicle-normal.png'},
     },
     elements:[],
   };
@@ -320,12 +540,37 @@ test('Logic Element graph dependency manifest collects assets and node refs', ()
     global.LK_LOGIC_GRAPH.node('load_texture_asset', 'material.loadTexture', 0, 0, {textureRef:{id:'tex-1', dbKey:'tex-db-1', name:'Panel Texture', kind:'texture'}}),
     global.LK_LOGIC_GRAPH.node('play_sound', 'audio.playSound', 0, 0, {soundRef:'sounds/open.wav'})
   );
+  graph.vehiclePawn = {schemaVersion:2, id:'portable-car', playerId:1, physicsBackend:'arcade-fallback', engineAudio:{setId:'engine-v8'}};
   const deps = global.LK_LOGIC_GRAPH.collectGraphDependencies(graph);
-  assert.equal(deps.length, 4);
+  assert.equal(deps.length, 7);
   assert.equal(deps.some(dep => dep.type === 'mesh' && dep.id === 'mesh-1'), true);
   assert.equal(deps.some(dep => dep.type === 'texture' && dep.value === 'textures/panel.png'), true);
   assert.equal(deps.some(dep => dep.type === 'texture' && dep.id === 'tex-1' && dep.dbKey === 'tex-db-1'), true);
   assert.equal(deps.some(dep => dep.type === 'audio' && dep.value === 'sounds/open.wav'), true);
+  assert.equal(deps.some(dep => dep.type === 'texture' && dep.value === 'textures/vehicle-normal.png'), true);
+  assert.equal(deps.some(dep => dep.type === 'audio-set' && dep.value === 'engine-v8'), true);
+  assert.equal(deps.some(dep => dep.type === 'plugin' && dep.id === 'arcade-fallback' && dep.version === '0.6.7-core'), true);
+});
+
+test('Vehicle physics backend API resolves plugins and safe fallback metadata', () => {
+  const api = global.LK_RUNTIME_VEHICLE_PHYSICS_BACKENDS;
+  api.register({id:'test-vehicle-backend', version:'1.2.3', apiVersion:api.API_VERSION, license:'MIT', create(){ return {}; }});
+  assert.equal(api.resolve('test-vehicle-backend').backend.id, 'test-vehicle-backend');
+  const missing = api.resolve('missing-vehicle-backend');
+  assert.equal(missing.backend.id, 'arcade-fallback');
+  assert.equal(missing.fallback, true);
+  assert.equal(missing.reason.includes('not installed'), true);
+});
+
+test('Player Car template exposes variables bound to Vehicle Pawn components', () => {
+  const template = global.LK_LOGIC_TEMPLATES.get('logic-template-player-car');
+  assert.ok(template && template.graph.vehiclePawn);
+  const bindings = new Map(template.graph.variables.filter(item => item.exposed && item.binding).map(item => [item.name, item.binding]));
+  assert.equal(bindings.get('PawnEnabled'), 'enabled');
+  assert.equal(bindings.get('ControllerPlayerId'), 'playerId');
+  assert.equal(bindings.get('MaxSpeed'), 'tuning.maxSpeed');
+  assert.equal(bindings.get('HeadlightsEnabled'), 'lights.front.enabled');
+  assert.equal(template.graph.vehiclePawn.proceduralFallback, 'native-player-visual-v1');
 });
 
 test('Logic Element definition assets migrate to current version', () => {
@@ -422,8 +667,8 @@ test('Logic runner aggregates runtime profiling stats', () => {
   };
   const runner = global.LK_LOGIC_ELEMENTS_RUNNER.create(fakeGame, fakeStore);
   assert.equal(runner.install(), true);
-  assert.equal(frameHooks.length, 1);
-  frameHooks[0](0.016);
+  assert.equal(frameHooks.length, 0);
+  runner.update(0.016);
   const stats = runner.stats();
   assert.equal(stats.active, true);
   assert.equal(stats.runtimeCount, 1);

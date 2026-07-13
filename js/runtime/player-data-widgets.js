@@ -6,6 +6,7 @@
 'use strict';
 
 const DEFAULT_CONFIG = {
+  enabled:true,
   visibleInEditor:true,
   items:[
     {key:'driftPoints', label:'DRIFT', metric:'driftPoints', enabled:true, dynamicSide:true, mirrorCenterX:0, offset:[1.55,.95,-1.35], scale:1, color:'#ffd166', opacity:.95},
@@ -149,6 +150,7 @@ function create(deps){
 
   function set(patch){
     if(!patch) return;
+    if(patch.enabled != null) config.enabled = patch.enabled !== false;
     if(patch.visibleInEditor != null) config.visibleInEditor = !!patch.visibleInEditor;
     if(Array.isArray(patch.items)){
       patch.items.forEach((itemPatch, i) => {
@@ -171,7 +173,7 @@ function create(deps){
       if(!cfg || !item) continue;
       const selectedInEditor = !!(isEditorActive() && selected === item.anchor);
       if(selectedInEditor) syncFromAnchor(item.anchor);
-      const visible = !!cfg.enabled && metricActive(cfg.metric, metrics);
+      const visible = config.enabled !== false && !!cfg.enabled && metricActive(cfg.metric, metrics);
       item.anchor.visible = visible || (!!isEditorActive() && !!config.visibleInEditor);
       item.helper.visible = !!isEditorActive() && !!config.visibleInEditor;
       if(!selectedInEditor){
@@ -197,8 +199,62 @@ function create(deps){
     }
   }
 
+  function add(item){
+    const index = config.items.length;
+    config.items.push(Object.assign({
+      key:'data' + (index + 1), label:'DATA', metric:'speed', enabled:true,
+      dynamicSide:false, mirrorCenterX:0, offset:[0,1,0], scale:.8, color:'#ffd166', opacity:.9,
+    }, clone(item || {})));
+    ensure();
+    return rig[index] && rig[index].anchor || null;
+  }
+
+  function remove(index){
+    const i = Number(index) | 0;
+    if(i < 0 || i >= config.items.length) return false;
+    dispose();
+    config.items.splice(i, 1);
+    ensure();
+    return true;
+  }
+
+  function duplicate(index){
+    const i = Number(index) | 0;
+    if(i < 0 || i >= config.items.length) return null;
+    const copy = clone(config.items[i]);
+    copy.key = String(copy.key || 'data') + '_copy';
+    return add(copy);
+  }
+
+  function move(index, direction){
+    const from = Number(index) | 0, to = from + (Number(direction) < 0 ? -1 : 1);
+    if(from < 0 || from >= config.items.length || to < 0 || to >= config.items.length) return false;
+    dispose();
+    const item = config.items.splice(from, 1)[0]; config.items.splice(to, 0, item);
+    ensure();
+    return true;
+  }
+
+  function dispose(){
+    rig.forEach(item => {
+      if(!item) return;
+      [item.anchor, item.mirror].forEach(node => {
+        if(node && node.parent) node.parent.remove(node);
+        if(node && node.traverse) node.traverse(child => {
+          if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+          if(child.material){
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+          }
+        });
+      });
+      if(item.tex && item.tex.texture && item.tex.texture.dispose) item.tex.texture.dispose();
+    });
+    rig.length = 0;
+  }
+
   ensure();
-  return {config, update, set, syncFromAnchor};
+  return {config, update, set, add, remove, duplicate, move, syncFromAnchor, dispose};
 }
 
 window.LK_RUNTIME_PLAYER_DATA_WIDGETS = Object.freeze({create});

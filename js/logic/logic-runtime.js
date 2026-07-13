@@ -83,22 +83,42 @@ function create(graph, registry, context, options){
     return p && p.defaultValue;
   }
 
-  function evaluateNodeOutput(nodeId, pinName, stack){
+  function evaluationState(state){
+    const next = state && !Array.isArray(state) ? state : {stack:Array.isArray(state) ? state : []};
+    if(!Array.isArray(next.stack)) next.stack = [];
+    if(!next.dataCache) next.dataCache = new Map();
+    return next;
+  }
+
+  function evaluateNodeOutput(nodeId, pinName, state){
+    const evalState = evaluationState(state);
+    const cacheKey = nodeId + ':' + pinName;
+    if(evalState.dataCache.has(cacheKey)) return evalState.dataCache.get(cacheKey);
     statsState.evaluations += 1;
     const n = nodes.get(nodeId);
     const def = n && registry.get(n.type);
     if(!n || !def) return undefined;
-    if(n.type === 'event.onUpdate' && pinName === 'deltaTime') return eventPayload && Number(eventPayload.deltaTime) || 0;
-    if(n.type === 'event.onFixedUpdate' && pinName === 'fixedDeltaTime') return eventPayload && Number(eventPayload.fixedDeltaTime) || 0;
-    if(n.type === 'event.custom' && pinName === 'payload') return eventPayload && eventPayload.payload;
-    if(def.event && eventPayload && Object.prototype.hasOwnProperty.call(eventPayload, pinName)) return eventPayload[pinName];
-    if(def.evaluate) return def.evaluate(makeApi(n, def, stack || []), pinName);
-    return n.data && n.data[pinName];
+    let value;
+    if(n.type === 'event.onUpdate' && pinName === 'deltaTime') value = eventPayload && Number(eventPayload.deltaTime) || 0;
+    else if(n.type === 'event.onFixedUpdate' && pinName === 'fixedDeltaTime') value = eventPayload && Number(eventPayload.fixedDeltaTime) || 0;
+    else if(n.type === 'event.custom' && pinName === 'payload') value = eventPayload && eventPayload.payload;
+    else if(def.event && eventPayload && Object.prototype.hasOwnProperty.call(eventPayload, pinName)) value = eventPayload[pinName];
+    else if(def.evaluate) value = def.evaluate(makeApi(n, def, evalState), pinName);
+    else value = n.data && n.data[pinName];
+    evalState.dataCache.set(cacheKey, value);
+    return value;
   }
 
-  function readInput(node, def, pinName, stack){
+  function readInput(node, def, pinName, state){
+    const evalState = evaluationState(state);
     const edge = incomingDataEdge(node.id, pinName);
-    if(edge) return evaluateNodeOutput(edge.from.node, edge.from.pin, stack.concat(node.id));
+    if(edge){
+      const previousStack = evalState.stack;
+      evalState.stack = previousStack.concat(node.id);
+      const value = evaluateNodeOutput(edge.from.node, edge.from.pin, evalState);
+      evalState.stack = previousStack;
+      return value;
+    }
     if(node.data && Object.prototype.hasOwnProperty.call(node.data, pinName)) return node.data[pinName];
     return inputDefault(def, pinName);
   }
@@ -120,7 +140,7 @@ function create(graph, registry, context, options){
       context,
       payload:eventPayload,
       inputPin: state && state.inputPin || 'exec',
-      getInput: name => readInput(node, def, name, state && state.stack || []),
+      getInput: name => readInput(node, def, name, state),
       getVariable: name => variables.get(String(name || '')),
       setVariable: (name, value) => variables.set(String(name || ''), window.LK_LOGIC_GRAPH.clone(value)),
       continue: pin => continueFrom(node, pin, state),
@@ -128,7 +148,7 @@ function create(graph, registry, context, options){
         const ms = Math.max(0, Number(seconds) || 0) * 1000;
         const timer = setTimeout(() => {
           timers.delete(timer);
-          if(!stopped) continueFrom(node, pin || 'completed', {steps:0, stack:[]});
+          if(!stopped) continueFrom(node, pin || 'completed', {steps:0, stack:[], dataCache:new Map()});
         }, ms);
         timers.add(timer);
       },
@@ -249,12 +269,12 @@ function create(graph, registry, context, options){
         if(String(n.data.button) !== String(eventPayload.button)) return;
       }
       if(eventType === 'OnGamepadButton'){
-        const wantedPad = Number(readInput(n, def, 'gamepadIndex', [])) || 0;
-        const wantedButton = Number(readInput(n, def, 'button', [])) || 0;
+        const wantedPad = Number(readInput(n, def, 'gamepadIndex', {stack:[], dataCache:new Map()})) || 0;
+        const wantedButton = Number(readInput(n, def, 'button', {stack:[], dataCache:new Map()})) || 0;
         if(wantedPad !== Number(eventPayload.gamepadIndex) || wantedButton !== Number(eventPayload.button)) return;
       }
       if(n.type === 'event.tickEvery' && eventType === 'OnUpdate'){
-        const interval = Math.max(.01, Number(readInput(n, def, 'seconds', [])) || .5);
+        const interval = Math.max(.01, Number(readInput(n, def, 'seconds', {stack:[], dataCache:new Map()})) || .5);
         const elapsed = (eventState.get(n.id) || 0) + (Number(eventPayload.deltaTime) || 0);
         if(elapsed + 1e-9 < interval){
           eventState.set(n.id, elapsed);
@@ -262,7 +282,7 @@ function create(graph, registry, context, options){
         }
         eventState.set(n.id, elapsed % interval);
       }
-      runFromNode(n.id, {steps:0, stack:[]});
+      runFromNode(n.id, {steps:0, stack:[], dataCache:new Map()});
     });
     eventPayload = null;
   }

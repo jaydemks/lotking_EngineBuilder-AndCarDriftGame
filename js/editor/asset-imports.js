@@ -353,9 +353,9 @@ function create(deps){
   }
 
   function replacePlayerModelWithAsset(asset){
-    if(!asset){ status(tr('Invalid player asset', 'Asset player non valido')); return; }
+    if(!asset){ status(tr('Invalid player asset', 'Asset player non valido')); return Promise.resolve(false); }
     setAssetLoading(true, asset.name || 'Player model', 20, 'Loading player model');
-    resolveImportedAssetUrl(asset).then(src => {
+    return resolveImportedAssetUrl(asset).then(src => {
       setAssetLoading(true, asset.name || 'Player model', 72, 'Applying player model');
       markImportedAssetRigged(asset);
       return applyPlayerModelSource(src, asset.name || asset.source || 'imported player model', {
@@ -365,21 +365,23 @@ function create(deps){
     }).then(() => {
       setAssetLoading(true, asset.name || 'Player model', 100, 'Player model replaced');
       setTimeout(() => setAssetLoading(false), 300);
+      return true;
     }).catch(err => {
       setAssetLoading(false);
       status('Player model replace failed: ' + err.message);
+      return false;
     });
   }
 
   function replacePlayerModelWithFile(file){
-    if(!file){ status(tr('Invalid player file', 'File player non valido')); return; }
+    if(!file){ status(tr('Invalid player file', 'File player non valido')); return Promise.resolve(false); }
     setAssetLoading(true, file.name, 12, 'Importing player model');
     const key = assetKeyFromFile(file);
     const dbKey = assetDbKeyFromFile(file, key);
     const put = window.LK_ASSET_BLOBS
       ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
       : readFileAsDataURL(file).then(src => ({src}));
-    put.then(sourceInfo => {
+    return put.then(sourceInfo => {
       const asset = upsertImportedAsset(file, sourceInfo);
       if(asset) markImportedAssetRigged(asset);
       const srcPromise = sourceInfo.dbKey && window.LK_ASSET_BLOBS
@@ -394,9 +396,11 @@ function create(deps){
       if(asset) refreshAssetsPanel();
       setAssetLoading(true, file.name, 100, 'Player model replaced');
       setTimeout(() => setAssetLoading(false), 300);
+      return true;
     }).catch(err => {
       setAssetLoading(false);
       status('Player model replace failed: ' + err.message);
+      return false;
     });
   }
 

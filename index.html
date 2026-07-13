@@ -12,6 +12,36 @@
     <source src="musics/menu/Num0%20%20JustWait.mp3" type="audio/mpeg">
   </audio>
 
+  <script>
+    window.__LK_MENU_BACKGROUND_READY = null;
+    window.__LK_MENU_BACKGROUND_LEVEL = null;
+    window.__LK_MENU_BACKGROUND_PROGRESS = 0;
+    window.__LK_MENU_BACKGROUND_PROGRESS_LABEL = '';
+    window.__LK_MENU_BACKGROUND_PROGRESS_DETAIL = null;
+    window.addEventListener('message', function(event){
+      if(event.origin && event.origin !== 'null' && event.origin !== location.origin) return;
+      if(!event.data) return;
+      if(event.data.type === 'lot-king:menu-background-progress'){
+        window.__LK_MENU_BACKGROUND_PROGRESS = Math.max(window.__LK_MENU_BACKGROUND_PROGRESS || 0, Number(event.data.progress) || 0);
+        window.__LK_MENU_BACKGROUND_PROGRESS_LABEL = event.data.label || window.__LK_MENU_BACKGROUND_PROGRESS_LABEL || '';
+        window.__LK_MENU_BACKGROUND_PROGRESS_DETAIL = event.data;
+        window.dispatchEvent(new CustomEvent('lot-king:index-menu-background-progress', {detail:event.data}));
+        return;
+      }
+      if(event.data.type !== 'lot-king:menu-background') return;
+      window.__LK_MENU_BACKGROUND_READY = !!event.data.ready;
+      window.__LK_MENU_BACKGROUND_LEVEL = event.data.level || null;
+      window.__LK_MENU_BACKGROUND_PROGRESS = event.data.progress || window.__LK_MENU_BACKGROUND_PROGRESS || 0;
+      window.__LK_MENU_BACKGROUND_PROGRESS_DETAIL = event.data;
+      document.body.classList.toggle('lk-menu-role-bg', !!event.data.ready);
+      window.dispatchEvent(new CustomEvent('lot-king:index-menu-background', {detail:event.data}));
+    });
+  </script>
+
+  <div id="menuBgHost" aria-hidden="true">
+    <iframe id="menuBgFrame" title="LOT KING menu level background" src="gameplay.html?embedded=1&amp;menuPreview=editor" data-loaded="1"></iframe>
+  </div>
+
   <div id="menuLayer">
     <div id="overlay" class="menu-preloading">
       <h1>LOT KING ENGINE EDITOR</h1>
@@ -29,10 +59,14 @@
     <iframe id="gameplayFrame" title="LOT KING Gameplay" src="about:blank"></iframe>
   </div>
 
+  <div id="editorHost" aria-hidden="true">
+    <iframe id="editorFrame" title="LOT KING Engine Editor" src="about:blank"></iframe>
+  </div>
+
   <footer id="landingSignature" aria-label="Project signature">
     <div class="landing-signature-main">
       <span>LOT KING ENGINE EDITOR</span>
-      <span class="landing-version">v0.6.6</span>
+      <span class="landing-version">v0.6.7</span>
       <a href="https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame" target="_blank" rel="noopener noreferrer" title="Open public GitHub repository">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.2c0 3.62 2.29 6.69 5.47 7.77.4.08.55-.18.55-.4v-1.4c-2.23.5-2.7-1.1-2.7-1.1-.36-.95-.89-1.2-.89-1.2-.73-.51.06-.5.06-.5.8.06 1.23.85 1.23.85.72 1.27 1.89.9 2.35.69.07-.53.28-.9.51-1.1-1.78-.21-3.64-.91-3.64-4.04 0-.9.31-1.63.82-2.2-.08-.21-.36-1.05.08-2.18 0 0 .67-.22 2.2.84A7.48 7.48 0 0 1 8 3.96c.68 0 1.36.09 2 .28 1.53-1.06 2.2-.84 2.2-.84.44 1.13.16 1.97.08 2.18.51.57.82 1.3.82 2.2 0 3.14-1.87 3.83-3.65 4.03.29.26.54.76.54 1.53v2.27c0 .22.15.48.55.4A8.18 8.18 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z"/>
@@ -49,11 +83,56 @@
       var playBtn = document.getElementById('playBtn');
       var editorBtn = document.getElementById('editorBtn');
       var frame = document.getElementById('gameplayFrame');
+      var editorFrame = document.getElementById('editorFrame');
+      var menuBgFrame = document.getElementById('menuBgFrame');
       var menuMusic = document.getElementById('menuMusicAudio');
       var musicMuteBtn = document.getElementById('landingMusicMute');
       var started = false;
       var fadeTimer = null;
       var playPromise = null;
+      var menuBootDone = false;
+      var menuBootTimer = null;
+      var menuBootProgress = 0;
+      var menuBootLastProgressAt = Date.now();
+      var menuBootLastDetail = null;
+      var editorPreloadStarted = false;
+      var editorPreloadReady = false;
+
+      function formatBootBytes(value){
+        var n = Number(value) || 0;
+        if(n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1) + ' MB';
+        if(n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+        return Math.round(n) + ' B';
+      }
+
+      function formatBootDuration(seconds){
+        var n = Math.max(0, Number(seconds) || 0);
+        if(n >= 90) return Math.ceil(n / 60) + ' min';
+        return Math.ceil(n) + ' s';
+      }
+
+      function bootProgressText(label, value, detail){
+        var info = detail || {};
+        var parts = [(label || info.step || 'loading menu') + '... ' + Math.round(value) + '%'];
+        if(info.total && info.loaded) parts.push(formatBootBytes(info.loaded) + ' / ' + formatBootBytes(info.total));
+        else if(info.loaded) parts.push(formatBootBytes(info.loaded));
+        if(info.bps) parts.push(formatBootBytes(info.bps) + '/s');
+        if(info.eta != null && isFinite(Number(info.eta)) && Number(info.eta) > 0) parts.push('~' + formatBootDuration(info.eta) + ' left');
+        if(info.error) parts.push(String(info.error));
+        return parts.join(' · ');
+      }
+
+      function setBootProgress(pct, label, detail){
+        var value = Math.max(0, Math.min(100, Number(pct) || 0));
+        if(value < menuBootProgress) value = menuBootProgress;
+        menuBootProgress = value;
+        menuBootLastProgressAt = Date.now();
+        menuBootLastDetail = detail || null;
+        var bar = document.getElementById('loadBar');
+        var txt = document.getElementById('loadTxt');
+        if(bar) bar.style.width = value.toFixed(1) + '%';
+        if(txt) txt.textContent = bootProgressText(label, value, detail);
+      }
 
       function syncMusicButton(){
         if(!musicMuteBtn || !menuMusic) return;
@@ -102,8 +181,49 @@
         });
       }
 
+      function loadMenuBackground(){
+        if(!menuBgFrame) return;
+        if(menuBgFrame.dataset.loaded === '1') return;
+        menuBgFrame.dataset.loaded = '1';
+        menuBgFrame.src = 'gameplay.html?embedded=1&menuPreview=editor';
+      }
+
+      function reloadMenuBackground(){
+        if(!menuBgFrame) return;
+        menuBgFrame.dataset.loaded = '1';
+        menuBgFrame.src = 'gameplay.html?embedded=1&menuPreview=editor&menuBgRev=' + Date.now().toString(36);
+      }
+
+      function stopMenuBackground(){
+        if(!menuBgFrame) return;
+        menuBgFrame.dataset.loaded = '0';
+        menuBgFrame.src = 'about:blank';
+      }
+
+      function finishMenuBoot(hasRoleBackground){
+        document.body.classList.toggle('lk-menu-role-bg', !!hasRoleBackground);
+        if(menuBootDone) return;
+        menuBootDone = true;
+        if(menuBootTimer) clearTimeout(menuBootTimer);
+        setBootProgress(100, hasRoleBackground ? 'menu role level ready' : 'menu ready');
+        var overlay = document.getElementById('overlay');
+        setTimeout(function(){
+          if(overlay) overlay.classList.remove('menu-preloading');
+        }, hasRoleBackground ? 180 : 60);
+      }
+
+      function beginDestinationLoad(label){
+        menuBootProgress = 0;
+        menuBootLastDetail = null;
+        setBootProgress(0, label);
+        var overlay = document.getElementById('overlay');
+        if(overlay) overlay.classList.add('menu-preloading');
+      }
+
       function openGameplay(){
         if(!frame) return;
+        stopMenuBackground();
+        beginDestinationLoad('loading game');
         frame.onload = function(){
           document.body.classList.add('showing-gameplay');
           document.body.classList.remove('menu-leaving');
@@ -118,8 +238,35 @@
         document.body.classList.add('menu-leaving');
         setTimeout(function(){
           frame.src = 'about:blank';
+          loadMenuBackground();
           document.body.classList.remove('menu-leaving');
         }, 220);
+      }
+
+      function preloadEditor(){
+        if(!editorFrame || editorPreloadStarted) return;
+        editorPreloadStarted = true;
+        editorFrame.onload = function(){
+          editorPreloadReady = true;
+          editorFrame.onload = null;
+        };
+        editorFrame.src = 'engine_editor.html';
+      }
+
+      function openEditor(){
+        if(!editorFrame){
+          location.href = 'engine_editor.html';
+          return;
+        }
+        stopMenuBackground();
+        beginDestinationLoad('loading engine editor');
+        editorFrame.addEventListener('load', function(){
+          editorPreloadReady = true;
+          document.body.classList.add('showing-editor');
+          document.body.classList.remove('menu-leaving');
+          try { editorFrame.contentWindow.focus(); } catch(err){}
+        }, {once:true});
+        preloadEditor();
       }
 
       playBtn && playBtn.addEventListener('click', function(){
@@ -129,7 +276,7 @@
         startLandingMusic().then(function(){
           return fadeLandingMusic(900);
         }).then(function(){
-          location.href = 'engine_editor.html';
+          openEditor();
         });
       });
 
@@ -154,10 +301,42 @@
         if(event.data.type === 'lot-king:fade-menu-music') fadeLandingMusic(1200);
       });
 
-      setTimeout(function(){
-        var overlay = document.getElementById('overlay');
-        if(overlay) overlay.classList.remove('menu-preloading');
-      }, 300);
+      setBootProgress(4, 'starting menu shell');
+      function menuBootWatchdog(){
+        if(menuBootDone) return;
+        var age = Date.now() - menuBootLastProgressAt;
+        if(menuBootProgress >= 90 && age < 30000){
+          menuBootTimer = setTimeout(menuBootWatchdog, 1600);
+          return;
+        }
+        if(menuBootProgress >= 40){
+          if(age > 30000){
+            setBootProgress(menuBootProgress, 'still loading role menu level', menuBootLastDetail);
+          }
+          menuBootTimer = setTimeout(menuBootWatchdog, 3000);
+          return;
+        }
+        if(menuBootProgress >= 8 && age < 180000){
+          menuBootTimer = setTimeout(menuBootWatchdog, 3000);
+          return;
+        }
+        finishMenuBoot(false);
+      }
+      menuBootTimer = setTimeout(menuBootWatchdog, 18000);
+      window.addEventListener('lot-king:index-menu-background', function(event){
+        finishMenuBoot(!!(event.detail && event.detail.ready));
+      });
+      if(window.__LK_MENU_BACKGROUND_READY !== null) finishMenuBoot(window.__LK_MENU_BACKGROUND_READY);
+      if(window.__LK_MENU_BACKGROUND_PROGRESS) setBootProgress(window.__LK_MENU_BACKGROUND_PROGRESS, window.__LK_MENU_BACKGROUND_PROGRESS_LABEL || 'loading role menu level', window.__LK_MENU_BACKGROUND_PROGRESS_DETAIL);
+      window.addEventListener('lot-king:index-menu-background-progress', function(event){
+        setBootProgress(event.detail && event.detail.progress, event.detail && (event.detail.label || event.detail.step) || 'loading role menu level', event.detail);
+      });
+      window.addEventListener('storage', function(event){
+        var key = event && event.key || '';
+        if(!menuBootDone) return;
+        if(document.body.classList.contains('showing-editor') || document.body.classList.contains('showing-gameplay')) return;
+        if(key === 'lotking.levels.v1' || key.indexOf('lotking.level.') === 0) reloadMenuBackground();
+      });
     })();
   </script>
 </body>

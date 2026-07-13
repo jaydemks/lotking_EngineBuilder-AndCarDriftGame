@@ -270,7 +270,7 @@ function create(opts){
     apply();
     const keys = getKeys() || {};
     const engine = getEngine() || {};
-    const braking = !!(keys['s'] || keys['arrowdown']) && !engine.reverseActive && getSpeed() > 2;
+    const braking = !!(keys['s'] || keys['arrowdown'] || engine.brake === true || Number(engine.brake) > .08) && !engine.reverseActive && getSpeed() > 2;
     const reversing = !!engine.reverseActive;
     const r = config.rear;
     const applyRear = (group, color, intensity) => {
@@ -335,6 +335,41 @@ function create(opts){
     return rig.aux[idx] && rig.aux[idx].anchor;
   }
 
+  function rebuildAux(){
+    rig.aux.forEach(item => {
+      if(!item || !item.anchor) return;
+      if(item.anchor.parent) item.anchor.parent.remove(item.anchor);
+      item.anchor.traverse(child => {
+        if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+        if(child.material){
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+        }
+      });
+    });
+    rig.aux.length = 0;
+    ensureAuxLightRigs();
+    apply(); update();
+  }
+
+  function removeAux(index){
+    const i = Number(index) | 0;
+    if(i < 0 || i >= config.aux.length) return false;
+    config.aux.splice(i, 1); rebuildAux(); return true;
+  }
+
+  function duplicateAux(index){
+    const i = Number(index) | 0;
+    if(i < 0 || i >= config.aux.length) return null;
+    return addAux(JSON.parse(JSON.stringify(config.aux[i])));
+  }
+
+  function moveAux(index, direction){
+    const from = Number(index) | 0, to = from + (Number(direction) < 0 ? -1 : 1);
+    if(from < 0 || from >= config.aux.length || to < 0 || to >= config.aux.length) return false;
+    const item = config.aux.splice(from, 1)[0]; config.aux.splice(to, 0, item); rebuildAux(); return true;
+  }
+
   function setHighBeams(v){
     highBeams = !!v;
     update();
@@ -348,6 +383,9 @@ function create(opts){
     update,
     setConfig,
     addAux,
+    removeAux,
+    duplicateAux,
+    moveAux,
     setHighBeams,
     syncTimeOfDay,
     headlight: () => headlight,

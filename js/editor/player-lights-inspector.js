@@ -21,13 +21,21 @@ function create(deps){
   const selectRow = deps.selectRow;
   const el = deps.el;
   const requestWarmup = deps.requestWarmup || function(){};
+  const pushHistory = deps.pushHistory || function(){};
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
-  function build(box){
-    if(!GAME.player.lights || !GAME.player.setLights) return;
+  function build(box, targetPlayer){
+    const player = targetPlayer || deps.player || GAME.player;
+    if(!player.lights || !player.setLights) return;
     const sh = section(tr('VEHICLE LIGHTS', 'LUCI VEICOLO'), false);
-    const lights = GAME.player.lights;
-    const upd = patch => { GAME.player.setLights(patch); requestWarmup(tr('Warm-up lights...', 'Preparazione luci...')); markDirty(); };
+    const lights = player.lights;
+    let replaying = false;
+    const snapshot = () => JSON.parse(JSON.stringify(lights));
+    const restore = value => { replaying=true; player.setLights(JSON.parse(JSON.stringify(value))); Object.keys(lights).forEach(key => delete lights[key]); Object.assign(lights, JSON.parse(JSON.stringify(value))); requestWarmup(tr('Warm-up lights...', 'Preparazione luci...')); markDirty(); replaying=false; };
+    const upd = patch => {
+      const before=snapshot(); player.setLights(patch); requestWarmup(tr('Warm-up lights...', 'Preparazione luci...')); markDirty(); const after=snapshot();
+      if(!replaying && JSON.stringify(before)!==JSON.stringify(after)) pushHistory({label:'Vehicle Pawn lights',undo:() => restore(before),redo:() => restore(after)});
+    };
     const hourLabel = value => {
       const total = Math.round(Math.max(0, Math.min(24, Number(value) || 0)) * 60) % (24 * 60);
       return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
@@ -35,9 +43,9 @@ function create(deps){
     sh.body.appendChild(el('<div class="lk-hint">' + tr('Spot headlights and reactive rear lights for position, brake and reverse.', 'Fari anteriori spot e luci posteriori reattive per posizione, freno e retromarcia.') + '</div>'));
     sh.body.appendChild(checkRow(tr('Show light dummies', 'Mostra dummy luci'), lights.dummies && lights.dummies.visible, v => { upd({dummies:{visible:v}}); refreshOutliner(); }).root);
     const addVehicleLight = preset => {
-      if(!GAME.player.addLight) return;
-      const anchor = GAME.player.addLight(preset);
-      GAME.player.setLights({dummies:{visible:true}});
+      if(!player.addLight) return;
+      const anchor = player.addLight(preset);
+      player.setLights({dummies:{visible:true}});
       requestWarmup('Warm-up light...');
       markDirty();
       refreshOutliner();
@@ -47,9 +55,9 @@ function create(deps){
       }
     };
     const selectVehicleLight = id => {
-      const anchor = GAME.world.registry.find(x => x.userData.editorId === id);
+      const anchor = player.findAnchor ? player.findAnchor(id) : GAME.world.registry.find(x => x.userData.editorId === id);
       if(!anchor) return;
-      GAME.player.setLights({dummies:{visible:true}});
+      player.setLights({dummies:{visible:true}});
       selectObject(anchor);
       if(ED.tool === 'select') setTool('translate');
     };
@@ -106,7 +114,14 @@ function create(deps){
     (lights.aux || []).forEach((aux, idx) => {
       const sa = section(tr('EXTRA LIGHT ', 'LUCE EXTRA ') + (idx + 1), false);
       const patch = p => { const a = []; a[idx] = p; upd({aux:a}); };
-      sa.body.appendChild(btnRow([{label:'Select dummy', action:() => selectVehicleLight('player_aux_light_' + idx)}]));
+      const edit = (method, arg) => { if(player[method] && player[method](idx, arg) !== false){ markDirty(); refreshOutliner(); } };
+      sa.body.appendChild(btnRow([
+        {label:'Select dummy', action:() => selectVehicleLight('player_aux_light_' + idx)},
+        {label:tr('Duplicate', 'Duplica'), action:() => edit('duplicateLight')},
+        {label:'↑', action:() => edit('moveLight', -1)},
+        {label:'↓', action:() => edit('moveLight', 1)},
+        {label:tr('Remove', 'Rimuovi'), action:() => edit('removeLight')},
+      ]));
       sa.body.appendChild(checkRow(tr('Enabled', 'Attiva'), aux.enabled, v => patch({enabled:v})).root);
       sa.body.appendChild(selectRow(tr('Action', 'Azione'), aux.condition, [
         {value:'always', label:tr('Always', 'Sempre')},

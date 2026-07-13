@@ -344,7 +344,7 @@ function create(deps){
     if(viewportLayout) viewportLayout.renderEditorViewport(viewRect);
     else renderEditorViewportFallback(viewRect);
     renderPip();
-    renderCinemaFloatingPreview(viewRect);
+    renderCinemaFloatingPreview(viewRect, dt);
     if(viewportLayout) viewportLayout.updateStats(dt, viewRect);
     if(cinemaStudio) cinemaStudio.syncTimeline(viewRect);
   }
@@ -549,7 +549,7 @@ function create(deps){
       ud.helperOnly ||
       ud.colliderPreview ||
       ud.editorOnly ||
-      ud.nonExportable ||
+      (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false)) ||
       ud.editorCameraHelper ||
       ud.editorCameraHelperPick ||
       ud.editorLightHandle
@@ -585,12 +585,26 @@ function create(deps){
   function cinemaStudios(){
     return GAME.world.registry.filter(o => o && o.userData && o.userData.editorType === 'cinemaStudio');
   }
+  function isPlayerOutput(value){
+    const index = Number(value);
+    return Number.isInteger(index) && index >= 0 && index <= 3;
+  }
+  function shouldStartPlayerCinema(props){
+    return !!props && isPlayerOutput(props.outputPlayerIndex) && props.trigger === 'on-play';
+  }
+  function playerOneCinemaPreviewState(studio){
+    const id = studio && studio.userData && studio.userData.editorId || '';
+    let state = ED.cinemaPlayerOutputPreview;
+    if(!state || state.id !== id) state = {id, time:0};
+    ED.cinemaPlayerOutputPreview = state;
+    return state;
+  }
   function startOnPlayCinematics(){
     if(!cinemaStudio) return false;
     let started = false;
     cinemaStudios().forEach(studio => {
       const props = cinemaStudio.propsFor(studio);
-      if(props.trigger !== 'on-play' || props.outputPlayerIndex !== 0) return;
+      if(!shouldStartPlayerCinema(props)) return;
       cinemaStudio.playStudio(studio, {time:0, playing:true, runtime:true, source:'on-play'});
       started = true;
     });
@@ -688,21 +702,32 @@ function create(deps){
     gameCam.updateMatrixWorld(true);
     return true;
   }
-  function renderCinemaFloatingPreview(viewRect){
+  function renderCinemaFloatingPreview(viewRect, dt){
     const frame = $('#lkCinemaPreviewFrame');
     if(!frame) return;
-    if(!ED.cinemaFloatPreviewOn || !cinemaStudio || ED.playPreview){
+    if(!cinemaStudio || ED.playPreview){
       frame.classList.remove('on');
       return;
     }
-    const studio = cinemaStudioById(ED.cinemaTimelineId || (ED.cinemaPreview && ED.cinemaPreview.id));
+    let selectedStudio = ED.selected;
+    while(selectedStudio && !(selectedStudio.userData && selectedStudio.userData.editorType === 'cinemaStudio')){
+      selectedStudio = selectedStudio.parent;
+    }
+    const selectedProps = selectedStudio ? cinemaStudio.propsFor(selectedStudio) : null;
+    const selectedPlayerPreview = !!(selectedStudio && selectedProps && isPlayerOutput(selectedProps.outputPlayerIndex));
+    const studio = selectedPlayerPreview
+      ? selectedStudio
+      : (ED.cinemaFloatPreviewOn ? cinemaStudioById(ED.cinemaTimelineId || (ED.cinemaPreview && ED.cinemaPreview.id)) : null);
+    const autoPlayerPreview = selectedPlayerPreview && !ED.cinemaFloatPreviewOn;
     if(!studio){
       frame.classList.remove('on');
       return;
     }
     const props = cinemaStudio.propsFor(studio);
-    const state = ED.cinemaPreview && ED.cinemaPreview.id === studio.userData.editorId ? ED.cinemaPreview : {time:0, playing:false};
-    const shot = cinemaStudio.applyAtTime(studio, state.time || 0, {skipEditableTarget:!state.playing});
+    const activePreviewState = ED.cinemaPreview && ED.cinemaPreview.id === studio.userData.editorId ? ED.cinemaPreview : null;
+    const state = activePreviewState || (autoPlayerPreview ? playerOneCinemaPreviewState(studio) : {time:0, playing:false});
+    const finalOutputPreview = autoPlayerPreview && !activePreviewState;
+    const shot = cinemaStudio.applyAtTime(studio, state.time || 0, {skipEditableTarget:!state.playing && !finalOutputPreview});
     const rightW = deps.panelWidth('right');
     const usableW = Math.max(320, innerWidth - deps.panelWidth('left') - rightW - 28);
     const aspect = cinemaFloatAspect();
@@ -711,16 +736,20 @@ function create(deps){
     const fitW = Math.min(availableW, availableH * aspect);
     const w = Math.round(Math.max(80, Math.min(ED.cinemaFloatPreviewW || 640, fitW)));
     const hgt = Math.round(w / aspect);
-    const defaultPos = {x:viewRect.x + 18, y:viewRect.y + 18};
-    const pos = deps.clampPanelPos(ED.cinemaFloatPreviewPos || defaultPos, w, hgt);
+    const displayW = ED.cinemaFloatPreviewMinimized ? 210 : w;
+    const displayH = ED.cinemaFloatPreviewMinimized ? 26 : hgt;
+    const defaultPos = autoPlayerPreview
+      ? {x:innerWidth - rightW - displayW - 14, y:innerHeight - 40 - displayH - 14}
+      : {x:viewRect.x + 18, y:viewRect.y + 18};
+    const pos = deps.clampPanelPos(ED.cinemaFloatPreviewPos || defaultPos, displayW, displayH);
     const x = pos.x;
     const y = pos.y;
     frame.classList.add('on');
     frame.classList.toggle('minimized', !!ED.cinemaFloatPreviewMinimized);
     frame.style.left = x + 'px';
     frame.style.top = y + 'px';
-    frame.style.width = (ED.cinemaFloatPreviewMinimized ? 210 : w) + 'px';
-    frame.style.height = (ED.cinemaFloatPreviewMinimized ? 26 : hgt) + 'px';
+    frame.style.width = displayW + 'px';
+    frame.style.height = displayH + 'px';
     const minBtn = $('#lkCinemaPreviewMinimize');
     if(minBtn) minBtn.textContent = ED.cinemaFloatPreviewMinimized ? '+' : '-';
     const meta = $('#lkCinemaPreviewMeta');
@@ -731,7 +760,7 @@ function create(deps){
       const camName = shot && shot.cameraId ? (sceneCameraHolderById(shot.cameraId) && (sceneCameraHolderById(shot.cameraId).userData.editorName || shot.cameraId) || shot.cameraId) : 'No active camera';
       const finalMode = (ED.cinemaPreviewMode || 'final') !== 'normal';
       title.textContent = studio.userData.editorName || 'Cinema Studio';
-      info.textContent = (finalMode ? 'Final' : 'Normal') + ' - ' + camName + ' - ' + (state.time || 0).toFixed(2) + ' / ' + (props.duration || 0).toFixed(2) + 's';
+      info.textContent = (autoPlayerPreview ? 'Player 1 - ' : '') + (finalMode ? 'Final' : 'Normal') + ' - ' + camName + ' - ' + (state.time || 0).toFixed(2) + ' / ' + (props.duration || 0).toFixed(2) + 's';
       meta.appendChild(title);
       meta.appendChild(document.createElement('br'));
       meta.appendChild(info);

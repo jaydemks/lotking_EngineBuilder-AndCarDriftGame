@@ -12,7 +12,7 @@ async function closeStartupOverlays(page){
 test.beforeEach(async ({page}) => {
   await page.addInitScript(() => {
     localStorage.clear();
-    localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({mode:'browser', dismissed:true}));
+    localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({mode:'browser', onlineEditor:true, workspaceReady:true}));
   });
   await page.goto('/engine_editor.html?video-e2e=1', {waitUntil:'domcontentloaded'});
   await page.waitForFunction(() => window.LOT_KING && LOT_KING.editor && LOT_KING.editor.state.active === true, null, {timeout:60000});

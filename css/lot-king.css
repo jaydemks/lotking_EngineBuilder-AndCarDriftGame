@@ -8,7 +8,21 @@ html,body {
     font-family:'Segoe UI', Arial, sans-serif; user-select:none; -webkit-user-select:none;
   }
   #menuLayer,
-  #gameplayHost { position:fixed; inset:0; }
+  #gameplayHost,
+  #editorHost { position:fixed; inset:0; }
+  #menuBgHost {
+    position:fixed; inset:0; z-index:8; overflow:hidden; pointer-events:none;
+    background:#000;
+    transition:opacity .42s ease, visibility .42s ease;
+  }
+  #menuBgFrame {
+    width:100%; height:100%; border:0; display:block;
+    background:#000;
+  }
+  body.lk-editor-ui-open #menuBgHost {
+    opacity:0;
+    visibility:hidden;
+  }
   #gameplayHost {
     pointer-events:none;
     transform:translateX(100%);
@@ -20,6 +34,24 @@ html,body {
   #gameplayFrame {
     width:100%; height:100%; border:0;
     background:#000;
+  }
+  #editorHost {
+    pointer-events:none;
+    transform:translateX(100%);
+    opacity:0;
+    filter:blur(8px);
+    transition:transform .58s cubic-bezier(.25, .9, .2, 1), opacity .42s ease, filter .5s ease;
+    z-index:60;
+  }
+  #editorFrame {
+    width:100%; height:100%; border:0; display:block;
+    background:#000;
+  }
+  body.showing-editor #editorHost {
+    pointer-events:auto;
+    transform:translateX(0);
+    opacity:1;
+    filter:blur(0);
   }
   body.showing-gameplay #gameplayHost {
     pointer-events:auto;
@@ -46,6 +78,11 @@ html,body {
   }
   body.menu-leaving #menuLayer #overlay {
     opacity:0;
+  }
+  body.showing-editor #menuLayer,
+  body.showing-editor #landingSignature {
+    opacity:0;
+    pointer-events:none;
   }
   #landingSignature {
     position:fixed;
@@ -121,6 +158,21 @@ html,body {
     background-size:cover, auto, auto, auto;
     background-position:center, center, center, center;
     transition:opacity .6s ease; color:#e8ecf5;
+  }
+  body.lk-menu-role-bg #overlay {
+    background:
+      linear-gradient(rgba(5,7,11,.26), rgba(5,7,11,.64)),
+      radial-gradient(circle at 50% 20%, rgba(255,209,102,.13), transparent 32%),
+      radial-gradient(circle at 64% 44%, rgba(239,71,111,.14), transparent 40%);
+    backdrop-filter:blur(2px) saturate(1.05);
+  }
+  body.lk-menu-role-bg #overlay h1 {
+    text-shadow:0 14px 42px rgba(0,0,0,.72);
+  }
+  body.lk-menu-role-bg #overlay .sub,
+  body.lk-menu-role-bg #loadTxt {
+    color:#d4d9e8;
+    text-shadow:0 4px 22px rgba(0,0,0,.7);
   }
   #overlay.hidden { opacity:0; pointer-events:none; }
   #overlay.loading { z-index:80; backdrop-filter:blur(7px); }
@@ -256,14 +308,50 @@ html,body {
     min-height:42px;
     padding:9px 20px;
   }
+  #lkAppMenuBar #lkWorkspaceBtn.lk-workspace-entry {
+    height:22px;
+    max-width:220px;
+    padding:0 10px;
+    margin-left:auto;
+    border-radius:5px;
+    background:rgba(75,227,160,.08);
+    flex:none;
+  }
+  #lkAppMenuBar #lkWorkspaceBtn.lk-workspace-entry span {
+    max-width:170px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:11px;
+    letter-spacing:.6px;
+  }
+  #lkAppMenuBar #lkWorkspaceBtn.lk-workspace-entry.demo {
+    background:rgba(255,209,102,.1);
+  }
+  #lkAppMenuBar #lkWorkspaceBtn.lk-workspace-entry.folder {
+    background:rgba(75,227,160,.11);
+  }
   #lkTopbar #lkWorkspaceBtn.lk-workspace-entry {
     height:32px;
-    padding:0 10px;
-    margin-left:4px;
+    max-width:190px;
+    padding:0 11px;
+    margin-left:8px;
+    margin-right:4px;
     background:rgba(75,227,160,.08);
+    box-shadow:inset 0 0 0 1px rgba(75,227,160,.08);
+    flex:none;
+  }
+  #lkTopbar #lkWorkspaceBtn.lk-workspace-entry span {
+    max-width:150px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
   }
   #lkTopbar #lkWorkspaceBtn.lk-workspace-entry.demo {
     background:rgba(255,209,102,.1);
+  }
+  #lkTopbar #lkWorkspaceBtn.lk-workspace-entry.folder {
+    background:rgba(75,227,160,.11);
   }
 
   #lkWorkspaceBadge {

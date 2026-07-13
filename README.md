@@ -80,8 +80,11 @@ Current Logic Element work includes:
 - Play Preview/runtime execution without `eval`
 - Logic Profiler with breakpoints, step, timeline filtering and event details
 - JS/TS graph export, runtime-wrapper export and an early imperative compiler foundation for a safe node subset
+- a versioned Vehicle Pawn contract, registry and node category for independent Player Car Logic Elements
 
 It is still marked **Logic Element (Experimental)** because the system is large and needs more browser hardening, more node coverage and more real projects before it can be considered stable.
+
+Experimental features are not feature-complete: some workflows remain untested, some nodes are still missing, and some combinations may not work yet. For current vehicle projects, use the built-in **`player_car (Logic)`**. The **Player Car Logic Element** is an in-development comparison/template candidate and is not yet the recommended production Player Car.
 
 ### Project Workspace And Online Demo
 
@@ -97,9 +100,9 @@ The asset browser can manage imported GLB/GLTF models, scene assets, player car 
 
 The `player_car` is treated as logic, not just a mesh. From the editor I can tune driving values, player collision, camera behavior, lights, underglow, exhaust sources, skid sources, 3D data widgets and reusable car logic presets.
 
-The built-in `player_car (Logic)` remains the reference implementation for now. A Player Car Logic Element template and an exact-current-car conversion path are being developed beside it, but they are not yet a complete replacement: the internal car still owns the mature vehicle physics and specialist Inspector tabs. In future versions the built-in player may be removed in favor of an expandable Logic Element Pawn once vehicle physics, cameras, HUD, lights, exhaust, skid sources, widgets and input possession can all be instantiated independently. Dynamic collections are part of that direction: the current Player Car already supports any number of auxiliary lights—including multiple reverse/brake/turn lights—and the Logic Element version is intended to expose the same freedom through hierarchy elements and nodes.
+The built-in `player_car (Logic)` remains the reference implementation and is now exposed through the same `VehiclePawn` contract as Logic Element cars. Player Car Logic Elements have their own lifecycle, runtime state, Cannon RaycastVehicle, four-wheel suspension, collision ownership, fallback locomotion, reset/spawn and local Player possession; they no longer use a demonstration-only transform chain. The internal car remains the handling reference and still owns specialist Camera, Lights/Neon, Attachments and Engine Sound inspectors, so it will not be removed until those systems reach verified parity.
 
-The Logic Element candidate can already select `None` or Player 1–4 and read that slot through the shared input manager. Its starter graph uses the selected player's throttle for a simple transform-based movement demonstration, making controller/device routing testable while the full independent vehicle-physics adapter is still pending.
+The Logic Element candidate can select `None` or Player 1–4, prevents accidental double possession, and exposes Pawn control/reset/state nodes. Its starter graph uses a reusable `Apply Player Drive` Function. Multiple instances keep physics, speed, steering, gear, camera ownership, reactive lights, exhaust smoke and skid marks separate; the remaining parity work is concentrated in specialist inspectors, audio/HUD and split-screen presentation.
 
 The longer-term goal is to separate vehicle physics behind an individual component/plugin boundary. Besides making multiple Pawns and different vehicle systems easier to add, that boundary will make third-party component provenance, licenses and author credits clearer than keeping every dependency inside one built-in player implementation.
 
@@ -161,11 +164,13 @@ For detailed version notes, see:
 - `docs/releases/`
 - `docs/ARCHITECTURE.md`
 - `docs/RUNTIME_MODULES.md`
+- `docs/vehicle-pawn-parity-checklist.md`
 
 ## Project Layout
 
 - `js/lot-king.js` - runtime bridge, main game setup and the `LOT_KING` API.
 - `js/runtime/` - gameplay systems: physics, cameras, audio, HUD, track flow, input and related modules.
+- `js/runtime/vehicle-pawns.js` - shared Vehicle Pawn registry, native adapter and independent Logic Element Pawn lifecycle.
 - `js/editor/` - editor UI and tools.
 - `js/logic/` - Logic Element graph model, node registry, validator, runtime, services, templates and exporter.
 - `js/plugins/` - plugin host foundation and built-in plugin descriptors.
@@ -246,6 +251,8 @@ The project is not a one-prompt demo anymore. It is an ongoing browser engine/ga
 - IndexedDB
 - plain JavaScript
 - no framework and no bundler
+
+Vehicle backend authorship, licenses and adapter modifications are tracked in [`docs/VEHICLE_PHYSICS_PROVENANCE.md`](docs/VEHICLE_PHYSICS_PROVENANCE.md).
 
 ## License
 

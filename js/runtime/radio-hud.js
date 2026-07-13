@@ -50,6 +50,7 @@ function createRadioHud(deps){
   audio.preload = 'auto';
 
   let idx = 0, shuffle = false, open = false, started = false;
+  let activePlayerId = 1;
   let frameRect = null;
   const $ = id => document.getElementById(id);
   const el = {radio:$('radio'), img:$('radioImg'), screen:$('radioScreen'), title:$('rsTitle'), artist:$('rsArtist'),
@@ -555,8 +556,8 @@ function createRadioHud(deps){
   let oilT = 90, gHist = new Array(60).fill(0), gPtr = 0;
   const artCtx = el.art.getContext('2d'), gCtx = el.gGraph.getContext('2d');
   let artT = 0;
-  function updateHUD(dt, rpm01, throttle){
-    const t = telemetry ? telemetry() : {};
+  function updateHUD(dt, rpm01, throttle, playerTelemetry){
+    const t = playerTelemetry || (telemetry ? telemetry() : {});
     el.play.textContent = audio.paused ? '▶' : '⏸';
     el.shuf.classList.toggle('on', shuffle);
     el.tCur.textContent = fmt(audio.currentTime);
@@ -619,6 +620,13 @@ function createRadioHud(deps){
     setPlayerVol, setBass, getPlayerVol: () => playerVol, getBass: () => bass,
     isOpen: () => open, audio, config: cfg, setConfig, setEditorPreview,
     setFrameRect,
+    setActivePlayer: playerId => {
+      activePlayerId = Math.max(1, Math.min(4, Number(playerId) || 1));
+      if(viewport) viewport.dataset.playerId = String(activePlayerId);
+      if(el.radio) el.radio.dataset.playerId = String(activePlayerId);
+      return activePlayerId;
+    },
+    activePlayer: () => activePlayerId,
     getTracks: options => library.list(options),
     addTracks,
     removeTrack,
