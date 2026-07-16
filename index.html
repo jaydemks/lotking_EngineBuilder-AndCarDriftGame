@@ -18,9 +18,15 @@
     window.__LK_MENU_BACKGROUND_PROGRESS = 0;
     window.__LK_MENU_BACKGROUND_PROGRESS_LABEL = '';
     window.__LK_MENU_BACKGROUND_PROGRESS_DETAIL = null;
+    window.__LK_MENU_BACKGROUND_ACCEPTING = true;
     window.addEventListener('message', function(event){
       if(event.origin && event.origin !== 'null' && event.origin !== location.origin) return;
       if(!event.data) return;
+      var menuFrame = document.getElementById('menuBgFrame');
+      if((event.data.type === 'lot-king:menu-background-progress' || event.data.type === 'lot-king:menu-background') &&
+          menuFrame && event.source !== menuFrame.contentWindow) return;
+      if((event.data.type === 'lot-king:menu-background-progress' || event.data.type === 'lot-king:menu-background') &&
+          window.__LK_MENU_BACKGROUND_ACCEPTING !== true) return;
       if(event.data.type === 'lot-king:menu-background-progress'){
         window.__LK_MENU_BACKGROUND_PROGRESS = Math.max(window.__LK_MENU_BACKGROUND_PROGRESS || 0, Number(event.data.progress) || 0);
         window.__LK_MENU_BACKGROUND_PROGRESS_LABEL = event.data.label || window.__LK_MENU_BACKGROUND_PROGRESS_LABEL || '';
@@ -92,7 +98,7 @@
   <footer id="landingSignature" aria-label="Project signature">
     <div class="landing-signature-main">
       <span>LOT KING ENGINE EDITOR</span>
-      <span class="landing-version">v0.6.8</span>
+      <span class="landing-version">v0.6.9</span>
       <a href="https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame" target="_blank" rel="noopener noreferrer" title="Open public GitHub repository">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.2c0 3.62 2.29 6.69 5.47 7.77.4.08.55-.18.55-.4v-1.4c-2.23.5-2.7-1.1-2.7-1.1-.36-.95-.89-1.2-.89-1.2-.73-.51.06-.5.06-.5.8.06 1.23.85 1.23.85.72 1.27 1.89.9 2.35.69.07-.53.28-.9.51-1.1-1.78-.21-3.64-.91-3.64-4.04 0-.9.31-1.63.82-2.2-.08-.21-.36-1.05.08-2.18 0 0 .67-.22 2.2.84A7.48 7.48 0 0 1 8 3.96c.68 0 1.36.09 2 .28 1.53-1.06 2.2-.84 2.2-.84.44 1.13.16 1.97.08 2.18.51.57.82 1.3.82 2.2 0 3.14-1.87 3.83-3.65 4.03.29.26.54.76.54 1.53v2.27c0 .22.15.48.55.4A8.18 8.18 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z"/>
@@ -118,11 +124,15 @@
       var playPromise = null;
       var menuBootDone = false;
       var menuBootTimer = null;
+      var menuBootEpoch = 0;
       var menuBootProgress = 0;
       var menuBootLastProgressAt = Date.now();
       var menuBootLastDetail = null;
       var editorPreloadStarted = false;
       var editorPreloadReady = false;
+      var destinationEpoch = 0;
+      var activeDestination = 'menu';
+      var returnTimer = null;
       var landingWelcomeOverlay = document.getElementById('landingWelcomeOverlay');
       var landingWelcomeLang = 'en';
       var landingWelcomeScheduled = false;
@@ -131,7 +141,7 @@
       var LANDING_WELCOME_COPY = {
         en: {
           title: 'Welcome to Lot King Engine',
-          intro: 'This landing is the bridge between the playable build and the engine editor. Version 0.6.8 opens the first character-driven gameplay path.',
+          intro: 'This landing bridges the playable build and the engine editor. Version 0.6.9 makes returning here reliable after both gameplay and editor sessions.',
           features: [
             'New Soccer Pawn and reusable character movement foundation',
             'Penalty shootout templates, soccer ball physics and editable stadium level',
@@ -144,7 +154,7 @@
         },
         it: {
           title: 'Benvenuto in Lot King Engine',
-          intro: 'Questa landing collega la build giocabile e l’editor del motore. La versione 0.6.8 apre il primo percorso gameplay guidato da personaggi.',
+          intro: 'Questa landing collega la build giocabile e l’editor del motore. La versione 0.6.9 rende affidabile il ritorno qui sia dal gioco sia dall’editor.',
           features: [
             'Nuovo Soccer Pawn e base riutilizzabile per il character movement',
             'Template per rigori, fisica del pallone e livello stadio modificabile',
@@ -329,21 +339,46 @@
         });
       }
 
-      function loadMenuBackground(){
+      function resetMenuBoot(label, acceptMessages){
+        ++menuBootEpoch;
+        menuBootDone = false;
+        menuBootProgress = 0;
+        menuBootLastProgressAt = Date.now();
+        menuBootLastDetail = null;
+        window.__LK_MENU_BACKGROUND_READY = null;
+        window.__LK_MENU_BACKGROUND_LEVEL = null;
+        window.__LK_MENU_BACKGROUND_PROGRESS = 0;
+        window.__LK_MENU_BACKGROUND_PROGRESS_LABEL = '';
+        window.__LK_MENU_BACKGROUND_PROGRESS_DETAIL = null;
+        window.__LK_MENU_BACKGROUND_ACCEPTING = acceptMessages !== false;
+        document.body.classList.remove('lk-menu-role-bg');
+        if(menuBootTimer) clearTimeout(menuBootTimer);
+        var overlay = document.getElementById('overlay');
+        if(overlay) overlay.classList.add('menu-preloading');
+        setBootProgress(0, label || 'loading menu');
+        menuBootTimer = setTimeout(menuBootWatchdog, 18000);
+      }
+
+      function loadMenuBackground(forceReload){
         if(!menuBgFrame) return;
-        if(menuBgFrame.dataset.loaded === '1') return;
+        if(menuBgFrame.dataset.loaded === '1' && !forceReload) return;
+        window.__LK_MENU_BACKGROUND_ACCEPTING = true;
         menuBgFrame.dataset.loaded = '1';
-        menuBgFrame.src = 'gameplay.html?embedded=1&menuPreview=editor';
+        menuBgFrame.src = 'gameplay.html?embedded=1&menuPreview=editor' +
+          (forceReload ? '&menuBgRev=' + Date.now().toString(36) : '');
       }
 
       function reloadMenuBackground(){
         if(!menuBgFrame) return;
-        menuBgFrame.dataset.loaded = '1';
-        menuBgFrame.src = 'gameplay.html?embedded=1&menuPreview=editor&menuBgRev=' + Date.now().toString(36);
+        resetMenuBoot('loading menu background');
+        loadMenuBackground(true);
       }
 
       function stopMenuBackground(){
         if(!menuBgFrame) return;
+        ++menuBootEpoch;
+        window.__LK_MENU_BACKGROUND_ACCEPTING = false;
+        if(menuBootTimer) clearTimeout(menuBootTimer);
         menuBgFrame.dataset.loaded = '0';
         menuBgFrame.src = 'about:blank';
       }
@@ -351,11 +386,13 @@
       function finishMenuBoot(hasRoleBackground){
         document.body.classList.toggle('lk-menu-role-bg', !!hasRoleBackground);
         if(menuBootDone) return;
+        var epoch = menuBootEpoch;
         menuBootDone = true;
         if(menuBootTimer) clearTimeout(menuBootTimer);
         setBootProgress(100, hasRoleBackground ? 'menu role level ready' : 'menu ready');
         var overlay = document.getElementById('overlay');
         setTimeout(function(){
+          if(epoch !== menuBootEpoch || activeDestination !== 'menu') return;
           if(overlay) overlay.classList.remove('menu-preloading');
           scheduleLandingWelcome();
         }, hasRoleBackground ? 180 : 60);
@@ -371,10 +408,14 @@
 
       function openGameplay(){
         if(!frame) return;
+        var epoch = ++destinationEpoch;
+        activeDestination = 'gameplay';
+        if(returnTimer){ clearTimeout(returnTimer); returnTimer = null; }
         closeLandingWelcome();
         stopMenuBackground();
         beginDestinationLoad('loading game');
         frame.onload = function(){
+          if(epoch !== destinationEpoch || activeDestination !== 'gameplay') return;
           document.body.classList.add('showing-gameplay');
           document.body.classList.remove('menu-leaving');
           frame.onload = null;
@@ -382,16 +423,32 @@
         frame.src = 'gameplay.html?embedded=1';
       }
 
-      function closeGameplay(){
-        if(!document.body.classList.contains('showing-gameplay')) return;
-        document.body.classList.remove('showing-gameplay');
+      function restoreLandingMenu(source){
+        if(activeDestination === 'menu') return;
+        ++destinationEpoch;
+        activeDestination = 'menu';
+        if(returnTimer) clearTimeout(returnTimer);
+        frame.onload = null;
+        editorFrame.onload = null;
+        document.body.classList.remove('showing-gameplay', 'showing-editor');
         document.body.classList.add('menu-leaving');
-        setTimeout(function(){
-          frame.src = 'about:blank';
-          loadMenuBackground();
+        resetMenuBoot('restoring menu', false);
+        returnTimer = setTimeout(function(){
+          returnTimer = null;
+          if(source === 'gameplay' && frame) frame.src = 'about:blank';
+          if(source === 'editor' && editorFrame){
+            editorFrame.src = 'about:blank';
+            editorPreloadStarted = false;
+            editorPreloadReady = false;
+          }
+          loadMenuBackground(true);
           document.body.classList.remove('menu-leaving');
         }, 220);
       }
+
+      function closeGameplay(){ restoreLandingMenu('gameplay'); }
+
+      function closeEditor(){ restoreLandingMenu('editor'); }
 
       function preloadEditor(){
         if(!editorFrame || editorPreloadStarted) return;
@@ -409,9 +466,13 @@
           return;
         }
         closeLandingWelcome();
+        var epoch = ++destinationEpoch;
+        activeDestination = 'editor';
+        if(returnTimer){ clearTimeout(returnTimer); returnTimer = null; }
         stopMenuBackground();
         beginDestinationLoad('loading engine editor');
         editorFrame.addEventListener('load', function(){
+          if(epoch !== destinationEpoch || activeDestination !== 'editor') return;
           editorPreloadReady = true;
           document.body.classList.add('showing-editor');
           document.body.classList.remove('menu-leaving');
@@ -469,7 +530,10 @@
       window.addEventListener('message', function(event){
         if(event.origin && event.origin !== 'null' && event.origin !== location.origin) return;
         if(!event.data) return;
-        if(event.data.type === 'lot-king:return-menu') closeGameplay();
+        if(event.data.type === 'lot-king:return-menu'){
+          if(activeDestination === 'editor' && editorFrame && event.source === editorFrame.contentWindow) closeEditor();
+          else if(activeDestination === 'gameplay' && frame && event.source === frame.contentWindow) closeGameplay();
+        }
         if(event.data.type === 'lot-king:fade-menu-music') fadeLandingMusic(1200);
       });
 

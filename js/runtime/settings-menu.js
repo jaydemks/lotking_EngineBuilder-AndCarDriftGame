@@ -413,7 +413,10 @@ function createMenu(options){
     resume.addEventListener('click', () => setOpen(false));
     backMenu.addEventListener('click', () => {
       setOpen(false);
-      if(currentMode === 'editor' && opts.onEditorExit) opts.onEditorExit();
+      if(currentMode === 'editor' && opts.onEditorExit){
+        opts.onEditorExit();
+        return;
+      }
       if(opts.onBackMenu) opts.onBackMenu();
     });
     if(tuneOpen) tuneOpen.addEventListener('click', () => {

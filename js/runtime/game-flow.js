@@ -146,6 +146,7 @@ function create(options){
   }
 
   function backToMainMenu(){
+    if(call('requestHostMenu') === true) return;
     unloadCurrentLevel();
     gameState.paused = false;
     call('clearInput');

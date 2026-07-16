@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.6.8',
+  version: '0.6.9',
   assets: null,
   core: {},
   world: {},
@@ -3731,6 +3731,11 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   },
   playMenuMusic: () => MENU_MUSIC.play().catch(()=>{}),
   setMenuBusy: RUNTIME_LOADER.setBusy,
+  requestHostMenu: () => {
+    if(!IS_EMBEDDED_GAMEPLAY || MENU_PREVIEW_MODE || !window.parent || window.parent === window) return false;
+    window.parent.postMessage({type:'lot-king:return-menu', source:'gameplay'}, '*');
+    return true;
+  },
 });
 
 // menu music: explicit button (browsers require a user gesture for audio)

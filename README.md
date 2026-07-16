@@ -146,7 +146,7 @@ This is still experimental. The editor is already useful for building and testin
 
 There are many systems left to fix and many more to add, and this is not a photoreal renderer today. Even so, the current browser-only editor can already build levels, interactive scenes, cinematics and playable experiments without requiring a large toolchain. I hope the current state is already fun to explore and that people use it to make many different projects; visual fidelity, extensibility and workflow depth can grow step by step from here.
 
-The active `v0.6.8` milestone expands beyond cars into shared Pawn foundations, character movement and an editor-authored soccer penalty mode. The next practical focus includes reusable game objectives/rules, broader Logic Element coverage, browser hardening and export reliability as the project continues to grow.
+The active `v0.6.9` milestone stabilizes the navigation lifecycle introduced around the expanded landing, gameplay and editor experience. Shared Pawn foundations, character movement and the editor-authored soccer penalty mode remain available, while the next practical focus includes reusable game objectives/rules, broader Logic Element coverage, browser hardening and export reliability.
 
 The main focus areas after this milestone are:
 

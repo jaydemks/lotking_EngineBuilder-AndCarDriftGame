@@ -281,6 +281,10 @@ function create(deps){
     if(!ED.active) return;
     if(ED.playPreview || ED.simulatePreview) stopPlayPreview();
     if(!toPlay && window.__LK_STANDALONE_EDITOR){
+      if(window.parent && window.parent !== window){
+        window.parent.postMessage({type:'lot-king:return-menu', source:'editor'}, '*');
+        return;
+      }
       location.href = 'index.html';
       return;
     }
