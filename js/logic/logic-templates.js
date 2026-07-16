@@ -402,10 +402,32 @@ function makeTemplates(){
   ];
 }
 
-const templates = makeTemplates().map(t => Object.freeze(Object.assign({}, t, {
-  template:true,
-  graph:clone(t.graph),
-})));
+const templates = [];
+
+function freezeTemplate(t){
+  return Object.freeze(Object.assign({}, t, {
+    template:true,
+    graph:clone(t.graph),
+  }));
+}
+
+// External template packs (e.g. logic-templates-soccer.js) register through
+// this API instead of editing the built-in list, so feature teams can own
+// their template file independently.
+function register(items){
+  const added = [];
+  (Array.isArray(items) ? items : [items]).forEach(item => {
+    if(!item || !item.id || !item.graph) return;
+    const index = templates.findIndex(t => t.id === item.id);
+    const frozen = freezeTemplate(item);
+    if(index >= 0) templates[index] = frozen;
+    else templates.push(frozen);
+    added.push(frozen.id);
+  });
+  return added;
+}
+
+register(makeTemplates());
 
 function list(){
   return templates.map(t => Object.assign({}, t, {graph:clone(t.graph)}));
@@ -416,5 +438,5 @@ function get(id){
   return item ? Object.assign({}, item, {graph:clone(item.graph)}) : null;
 }
 
-window.LK_LOGIC_TEMPLATES = Object.freeze({list, get});
+window.LK_LOGIC_TEMPLATES = Object.freeze({list, get, register});
 })();

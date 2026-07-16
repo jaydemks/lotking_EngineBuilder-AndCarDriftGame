@@ -158,7 +158,7 @@ function create(deps){
 
     const hint = document.createElement('div');
     hint.className = 'lk-playable-level-picker-hint';
-    hint.textContent = tr('Check every level to include in the package. The ▶ dot marks which one starts first when you open the exported build.', 'Spunta tutti i livelli da mettere nel pacchetto. Il pallino ▶ indica quale parte per primo quando apri la build esportata.');
+    hint.textContent = tr('Only Gameplay levels are listed here. Editor Menu and Game Menu levels stay in project exports, but never appear in Play Game or playable ZIP level selection. The ▶ dot marks which gameplay level starts first.', 'Qui sono elencati solo i livelli Gameplay. I livelli Editor Menu e Game Menu restano negli export progetto, ma non appaiono mai in Play Game o nella selezione livelli del playable ZIP. Il pallino ▶ indica quale livello gameplay parte per primo.');
 
     controls.appendChild(toggle);
     controls.appendChild(selectCount);

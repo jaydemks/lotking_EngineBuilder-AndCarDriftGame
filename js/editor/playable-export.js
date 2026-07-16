@@ -55,6 +55,14 @@ function create(deps){
       scene: src.scene || src,
     };
   }
+  function levelRoleOf(projectOrLevel){
+    return projectOrLevel && projectOrLevel.meta && projectOrLevel.meta.levelRole ||
+      projectOrLevel && projectOrLevel.levelRole ||
+      'gameplay';
+  }
+  function isGameplayLevel(projectOrLevel){
+    return levelRoleOf(projectOrLevel) !== 'editor-menu' && levelRoleOf(projectOrLevel) !== 'game-menu';
+  }
   async function buildPlayableProjectZip(bundle, onProgress){
     if(!playableExportZip) throw new Error('Playable ZIP module non disponibile');
     return playableExportZip.buildPlayableProjectZip(bundle, onProgress);
@@ -101,6 +109,7 @@ function create(deps){
     for(let i = 0; i < orderedSources.length; i += 1){
       const sourceProject = orderedSources[i];
       if(!sourceProject || (!sourceProject.scene && !sourceProject.meta && !sourceProject.version)) continue;
+      if(!isGameplayLevel(sourceProject)) continue;
       const sourceOrder = Number.isFinite(Number(sourceProject.__lkExportLevelOrder)) ? Number(sourceProject.__lkExportLevelOrder) : i;
       const exportMeta = {};
       if(sourceProject.__lkExportLevelId && String(sourceProject.__lkExportLevelId).trim()){
@@ -137,6 +146,7 @@ function create(deps){
       levels.push({
         id: levelId,
         name: meta.trackName || meta.levelName || baseId || 'track',
+        levelRole:'gameplay',
         description: 'Playable track export',
         savedAt: finalProject.savedAt || now,
         project: finalProject,
@@ -212,6 +222,7 @@ function create(deps){
         levels: levels.map(l => ({
           id: l.id,
           name: l.name || 'track',
+          levelRole: 'gameplay',
           savedAt: safeDate(l.savedAt),
           __lkExportPrimary: !!l.__lkExportPrimary,
           __lkExportOrder: Number.isFinite(Number(l.__lkExportSourceOrder))
@@ -237,6 +248,7 @@ function create(deps){
           index.levels.push({
             id: level.id,
             name: level.name || (project.meta && (project.meta.trackName || project.meta.levelName)) || 'track',
+            levelRole: 'gameplay',
             savedAt: safeDate(level.savedAt || project.savedAt),
             __lkExportPrimary: !!level.__lkExportPrimary,
             __lkExportOrder: Number.isFinite(Number(level.__lkExportSourceOrder))
@@ -304,7 +316,8 @@ function create(deps){
     const LV = levelsApi();
     const list = LV && LV.list ? LV.list() : [];
     const activeId = LV && LV.activeId ? LV.activeId() : null;
-    const selectable = Array.isArray(list) ? list : [];
+    const sourceLevels = Array.isArray(list) ? list : [];
+    const selectable = sourceLevels.filter(isGameplayLevel);
     let projects = null;
     if(selectable.length){
       const selectedLevelProjects = await pickPlayableLevelsForZipExport(selectable, activeId);
@@ -317,6 +330,10 @@ function create(deps){
         return;
       }
       projects = selectedLevelProjects;
+    } else if(sourceLevels.length){
+      finishStatusWork(progressToken, tr('ZIP export cancelled', 'Export ZIP annullato'), tr('No gameplay levels to export', 'Nessun livello gameplay da esportare'), 'warning');
+      status(tr('Playable ZIP exports only Gameplay levels. Editor Menu and Game Menu levels stay in the project but are not launchable from Play Game.', 'Il Playable ZIP esporta solo livelli Gameplay. I livelli Editor Menu e Game Menu restano nel progetto ma non sono lanciabili da Play Game.'));
+      return;
     } else {
       projects = [getCurrentPlayableProject()];
     }

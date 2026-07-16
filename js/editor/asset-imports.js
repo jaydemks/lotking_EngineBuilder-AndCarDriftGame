@@ -172,6 +172,24 @@ function create(deps){
     found.playerModelAt = new Date().toISOString();
     assetLibrarySave(list);
   }
+  function glbMetadataFromObject(obj){
+    const clips = (obj && obj.animations || []).filter(Boolean).map(clip => clip.name || 'Animation');
+    let meshCount = 0, skinnedMeshCount = 0, boneCount = 0;
+    if(obj && obj.traverse) obj.traverse(node => {
+      if(node && node.isMesh) meshCount++;
+      if(node && node.isSkinnedMesh) skinnedMeshCount++;
+      if(node && node.isBone) boneCount++;
+    });
+    return {
+      clips,
+      clipCount:clips.length,
+      hasAnimations:clips.length > 0,
+      meshCount,
+      skinnedMeshCount,
+      boneCount,
+      rigged:skinnedMeshCount > 0 || boneCount > 8 || clips.length > 0,
+    };
+  }
   function saveImportedBlob(file, dbKey){
     return window.LK_ASSET_BLOBS
       ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(err => {
@@ -229,7 +247,7 @@ function create(deps){
         return STORE.loadGlb(objectUrl, 5).then(obj => {
           setAssetLoading(true, file.name, basePct + Math.round(42 / total), 'Saving asset blob');
           return saveImportedBlob(file, dbKey).then(sourceInfo => {
-            const asset = upsertImportedAsset(file, sourceInfo);
+            const asset = upsertImportedAsset(file, Object.assign({}, sourceInfo, glbMetadataFromObject(obj)));
             if(asset) imported.push(asset);
             setAssetLoading(true, file.name, Math.round((index + .75) / total * 100), 'Registering asset');
             if(options.placePoint && asset){
@@ -307,7 +325,7 @@ function create(deps){
     Promise.all([STORE.loadGlb(objectUrl, 5), saveImportedBlob(file, dbKey)]).then(results => {
       const obj = results[0];
       const sourceInfo = results[1] || {};
-      const asset = upsertImportedAsset(file, sourceInfo);
+      const asset = upsertImportedAsset(file, Object.assign({}, sourceInfo, glbMetadataFromObject(obj)));
       const id = STORE.nextId();
       const entry = {
         id, kind:'glb', src:sourceInfo.src || null, dbKey:sourceInfo.dbKey || null, fit:5,

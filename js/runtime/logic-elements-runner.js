@@ -122,6 +122,8 @@ function create(GAME, STORE){
       if(path === 'enabled') pawn.setEnabled(value !== false);
       else if(path === 'hidden') pawn.setHidden(value === true);
       else if(path === 'playerId') value == null || Number(value) < 1 ? pawn.unpossess() : pawn.possess(Number(value), false);
+      // Non-vehicle Pawn kinds (soccer, human...) own their binding dispatch.
+      else if(typeof pawn.applyBinding === 'function' && pawn.applyBinding(path, value)) return;
       else if(path.indexOf('tuning.') === 0){ pawn.setTuning({[path.slice(7)]:value}); tuningBindingChanged = true; }
       else if(path.indexOf('suspension.') === 0) pawn.setSuspension({[path.slice(11)]:value});
       else if(path.indexOf('collision.') === 0 && pawn.setCollision) pawn.setCollision({[path.slice(10)]:value});

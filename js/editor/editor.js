@@ -1640,6 +1640,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   addCamera,
   addCinemaStudio,
   addLogicElement,
+  addSoccerStadium,
   openGlbImportAt,
   setTool,
   selectObject,
@@ -1711,6 +1712,7 @@ function addTexture(kind, at, asset){ return addActions.addTexture(kind, at, ass
 function addCamera(at){ return addActions.addCamera(at); }
 function addCinemaStudio(at){ return addActions.addCinemaStudio(at); }
 function addLogicElement(at, asset){ return addActions.addLogicElement(at, asset); }
+function addSoccerStadium(at){ return addActions.addSoccerStadium(at); }
 function finishAdd(obj){ return addActions.finishAdd(obj); }
 function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
 function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }
@@ -1977,6 +1979,7 @@ logicInspector = window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR && window.LK_EDITOR_L
   promptEditorAction,
   refreshAssetsPanel,
   assetLibraryLoad,
+  assetLibrarySave,
   importAssetFiles,
   beginTransformHistory,
   commitTransformHistory,

@@ -1230,7 +1230,12 @@ function createRegistry(GAME, options){
   function disposeLogic(){ list().filter(pawn => pawn.kind === 'logic-element').forEach(pawn => pawn.dispose()); }
   function ensureNative(){ return GAME && GAME.player ? createNative(GAME.player) : null; }
 
-  const api = Object.freeze({schemaVersion:SCHEMA_VERSION, normalizeConfig, register, unregister, createNative, createLogic, ensureNative, syncNativeFromPlayer, get, getByPlayerId, firstAvailablePlayerId, possessFirstAvailable, list, stepAll, disposeLogic});
+  // Non-vehicle pawn kinds (soccer, human, animal) register their records here
+  // and share the same P1-P4 possession slots through these two entry points.
+  function claimPlayerSlot(pawn, playerId, force){ return claimSlot(pawn, playerId, force); }
+  function releasePlayerSlot(pawn){ releaseSlot(pawn); }
+
+  const api = Object.freeze({schemaVersion:SCHEMA_VERSION, normalizeConfig, register, unregister, createNative, createLogic, ensureNative, syncNativeFromPlayer, get, getByPlayerId, firstAvailablePlayerId, possessFirstAvailable, list, stepAll, disposeLogic, claimPlayerSlot, releasePlayerSlot});
   if(GAME){
     GAME.pawns = api;
     if(GAME.systems) GAME.systems.vehiclePawns = api;

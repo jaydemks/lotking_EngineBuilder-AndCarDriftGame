@@ -143,6 +143,184 @@ html,body {
     border-color:rgba(255,255,255,.22);
     opacity:.86;
   }
+  .landing-welcome-overlay {
+    position:fixed;
+    inset:0;
+    z-index:90;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    color:#e8ecf5;
+    background:rgba(4,6,10,.72);
+    backdrop-filter:blur(10px) saturate(1.05);
+  }
+  .landing-welcome-overlay.open { display:flex; }
+  .landing-welcome-card {
+    width:min(760px, calc(100vw - 32px));
+    max-height:calc(100vh - 40px);
+    overflow:auto;
+    padding:24px;
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:8px;
+    background:
+      linear-gradient(150deg, rgba(17,22,34,.94), rgba(10,12,18,.97) 56%, rgba(20,11,17,.96));
+    box-shadow:0 28px 80px rgba(0,0,0,.46);
+  }
+  .landing-welcome-head {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:18px;
+  }
+  .landing-welcome-kicker {
+    display:block;
+    color:#ffd166;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    margin-bottom:8px;
+  }
+  #landingWelcomeTitle {
+    color:#fff5d5;
+    font-size:30px;
+    line-height:1.12;
+    font-weight:900;
+    letter-spacing:0;
+  }
+  .landing-welcome-icon-btn {
+    width:34px;
+    height:34px;
+    flex:0 0 34px;
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:6px;
+    color:#c6cddd;
+    background:rgba(255,255,255,.06);
+    font-size:24px;
+    line-height:1;
+    cursor:pointer;
+    transition:color .15s, border-color .15s, transform .15s;
+  }
+  .landing-welcome-icon-btn:hover {
+    color:#fff;
+    border-color:rgba(255,209,102,.62);
+    transform:translateY(-1px);
+  }
+  .landing-welcome-lang {
+    display:flex;
+    gap:8px;
+    margin-top:18px;
+  }
+  .landing-welcome-lang button {
+    min-width:44px;
+    padding:7px 10px;
+    border:1px solid rgba(157,180,255,.35);
+    border-radius:6px;
+    color:#9db4ff;
+    background:rgba(8,11,18,.56);
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:1px;
+    cursor:pointer;
+  }
+  .landing-welcome-lang button.on {
+    color:#10131b;
+    border-color:#ffd166;
+    background:#ffd166;
+  }
+  .landing-welcome-intro {
+    margin-top:18px;
+    color:#d8deec;
+    font-size:15px;
+    line-height:1.55;
+  }
+  .landing-welcome-features {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-top:18px;
+  }
+  .landing-welcome-features span {
+    min-height:62px;
+    display:flex;
+    align-items:center;
+    padding:12px 14px;
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:8px;
+    color:#edf1fa;
+    background:rgba(255,255,255,.055);
+    font-size:13px;
+    line-height:1.35;
+  }
+  .landing-welcome-features span::before {
+    content:"";
+    width:3px;
+    height:26px;
+    flex:0 0 3px;
+    margin-right:10px;
+    border-radius:2px;
+    background:#4be3a0;
+  }
+  .landing-welcome-notice {
+    margin-top:18px;
+    padding:12px 14px;
+    border-left:3px solid #ef476f;
+    color:#f1c9d1;
+    background:rgba(239,71,111,.09);
+    font-size:13px;
+    line-height:1.45;
+  }
+  .landing-welcome-actions {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    margin-top:20px;
+  }
+  .landing-welcome-check {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color:#b8c0d3;
+    font-size:12px;
+    line-height:1.35;
+    cursor:pointer;
+  }
+  .landing-welcome-check input { accent-color:#ffd166; }
+  .landing-welcome-continue {
+    flex:0 0 auto;
+    padding:10px 24px;
+    border:0;
+    border-radius:6px;
+    color:#0b0d12;
+    background:linear-gradient(90deg,#ffd166,#ef476f);
+    font-size:13px;
+    font-weight:900;
+    letter-spacing:1px;
+    cursor:pointer;
+    transition:transform .15s, filter .15s;
+  }
+  .landing-welcome-continue:hover {
+    transform:translateY(-1px);
+    filter:saturate(1.08);
+  }
+  @media (max-width:720px){
+    .landing-welcome-overlay { padding:14px; align-items:flex-start; }
+    .landing-welcome-card {
+      width:100%;
+      max-height:calc(100vh - 28px);
+      padding:18px;
+    }
+    #landingWelcomeTitle { font-size:24px; }
+    .landing-welcome-features { grid-template-columns:1fr; }
+    .landing-welcome-features span { min-height:auto; }
+    .landing-welcome-actions {
+      align-items:stretch;
+      flex-direction:column;
+    }
+    .landing-welcome-continue { width:100%; }
+  }
   input, textarea, select { user-select:text; -webkit-user-select:text; }
   #c { display:block; width:100%; height:100%; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-user-drag:none; }
 

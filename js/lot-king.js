@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.6.7',
+  version: '0.6.8',
   assets: null,
   core: {},
   world: {},
@@ -3585,6 +3585,20 @@ function preloadMenuShell(){
         overlay.classList.add('hidden');
         return;
       }
+      // A slow menu-role/asset preload may resolve after LAUNCH TRACK already
+      // started the game. Never reopen Quick Play / Choose Track over a live
+      // session or overwrite the UI while runtime loading is still pending.
+      if((SESSION && SESSION.isStarted()) || GAME.state.started){
+        overlay.classList.remove('menu-preloading');
+        overlay.classList.remove('choosing-level');
+        overlay.classList.add('hidden');
+        return;
+      }
+      if(SESSION && SESSION.isPending()){
+        overlay.classList.remove('menu-preloading');
+        overlay.classList.remove('choosing-level');
+        return;
+      }
       overlay.classList.remove('menu-preloading');
       overlay.classList.remove('choosing-level');
       overlay.classList.remove('hidden');
@@ -3600,10 +3614,16 @@ function menuBackgroundRoleOrder(){
 }
 function scheduleMenuRoleBackground(){
   if(window.__LK_STANDALONE_EDITOR && !MENU_PREVIEW_MODE) return Promise.resolve(false);
+  if(window.__LK_AUTOLAUNCH_LEVEL) return Promise.resolve(false);
   return new Promise(resolve => {
     let attempts = 0;
     const done = value => resolve(!!value);
     const tick = () => {
+      // scene-store.js loads after this file and can discover a pending level
+      // launch while this poll is waiting. In that case the selected gameplay
+      // scene owns the frame; applying a ROLE menu here would leave its 3D
+      // world visible while gameplay audio/logic starts underneath it.
+      if(window.__LK_AUTOLAUNCH_LEVEL){ done(false); return; }
       const store = window.LK_STORE;
       if(store && store.ensureMenuBackgroundApplied){
         store.ensureMenuBackgroundApplied(GAME, menuBackgroundRoleOrder()).then(data => {

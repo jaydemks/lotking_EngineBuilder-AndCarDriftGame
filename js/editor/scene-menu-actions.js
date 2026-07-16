@@ -55,6 +55,9 @@ function create(deps){
 	      {label:'Logic', icon:'◇', sub: [
 	        {label:'Logic Element', icon:'◇', action:() => deps.addLogicElement(P)},
 	      ]},
+	      {label:tr('Level', 'Livello'), icon:'🏟️', sub: [
+	        {label:tr('Soccer Stadium (Penalty)', 'Stadio Calcio (Rigori)'), icon:'⚽', action:() => deps.addSoccerStadium(P)},
+	      ]},
 	      {sep:true},
       {label:tr('Import GLB/texture asset...', 'Importa asset GLB/Texture...'), icon:'📦', action:() => deps.openGlbImportAt(P)},
     ];

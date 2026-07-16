@@ -212,6 +212,7 @@ function create(deps){
       levels: (bundle.levels || []).map(level => ({
         id: level.id,
         name: level.name,
+        levelRole: level.levelRole || 'gameplay',
         savedAt: level.savedAt || null,
         primary: !!level.__lkExportPrimary,
       })),

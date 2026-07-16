@@ -244,6 +244,58 @@ function create(deps){
     return obj;
   }
 
+  function addSoccerStadium(at){
+    const builder = window.LK_RUNTIME_SOCCER_STADIUM;
+    if(!builder){
+      status(tr('Soccer stadium builder unavailable', 'Generatore stadio calcio non disponibile'));
+      return null;
+    }
+    const origin = at || spawnPointAhead();
+    const descriptors = builder.buildEntries({x:origin.x, z:origin.z});
+    const created = [];
+    descriptors.forEach(item => {
+      const id = STORE.nextId();
+      let obj;
+      if(item.kind === 'light'){
+        obj = STORE.createLight(item.light);
+        const entry = {id, kind:'light', light:item.light, name:item.name, collide:false,
+          asset:{key:'light:' + item.light, name:item.name, source:'Soccer Stadium generator'},
+          t:item.t};
+        STORE.registerAdded(GAME, obj, entry);
+        let lightRef = obj.userData.light || null;
+        if(!lightRef && obj.traverse) obj.traverse(n => { if(!lightRef && n.isLight) lightRef = n; });
+        if(lightRef && item.lightProps && STORE.applyLightProps) STORE.applyLightProps(lightRef, item.lightProps);
+        revealLightHandle(obj);
+      } else {
+        obj = STORE.createPrimitive(item.prim);
+        const entry = {id, kind:'primitive', prim:item.prim, name:item.name,
+          collide:item.collide === true, driveSurface:item.driveSurface === true,
+          asset:{key:'primitive:' + item.prim, name:item.name, source:'Soccer Stadium generator'},
+          t:item.t};
+        STORE.registerAdded(GAME, obj, entry);
+        if(STORE.applyMatProps){
+          const props = {color:item.color, roughness:item.roughness, metalness:item.metalness};
+          if(item.emissive){ props.emissive = item.emissive; props.emissiveIntensity = 1.2; }
+          STORE.applyMatProps(obj, props);
+        }
+      }
+      obj.userData.assetKey = 'stadium:' + (item.prim || item.light);
+      obj.userData.assetName = item.name;
+      obj.userData.assetSource = 'Soccer Stadium generator';
+      created.push(obj);
+    });
+    pushHistory({
+      label:'Add Soccer Stadium',
+      undo:() => created.forEach(obj => removeEntity(obj)),
+      redo:() => created.forEach(obj => restoreEntity(obj)),
+    });
+    markDirty(); refreshOutliner(); refreshAssetsPanel();
+    if(created.length) selectObject(created[0]);
+    requestWarmup(tr('Warm-up stadium lights...', 'Riscaldamento luci stadio...'));
+    status(tr('Added: Soccer Stadium (', 'Aggiunto: Stadio Calcio (') + created.length + tr(' objects). Penalty spots at Z ±', ' oggetti). Dischetti a Z ±') + (window.LK_RUNTIME_SOCCER_STADIUM.SPEC.fieldLength / 2 - window.LK_RUNTIME_SOCCER_STADIUM.SPEC.penaltySpot).toFixed(1));
+    return created;
+  }
+
   function finishAdd(obj){
     pushHistory({
       label: 'Add ' + (obj.userData.editorName || 'Entity'),
@@ -308,7 +360,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, addSoccerStadium, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

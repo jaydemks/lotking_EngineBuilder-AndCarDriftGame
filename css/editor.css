@@ -1543,6 +1543,18 @@ body:has(#lkEditor.active) #levelSelect {
   color:#0d1119;
   background:#4be3a0;
 }
+.lk-project-level-picker-visible-label {
+  flex:none;
+  min-width:54px;
+  color:#8b93a7;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.8px;
+}
+.lk-project-level-picker-role {
+  color:#dfe5f1;
+  background:#334057;
+}
 .lk-playable-level-picker-hint {
   padding:8px 10px 2px;
   font-size:11.5px;

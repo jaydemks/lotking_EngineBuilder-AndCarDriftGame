@@ -1,37 +1,40 @@
 # Lot King Engine Editor & Car Drift Game
 
+[![Try on GitHub Pages](https://img.shields.io/badge/TRY_IT_LIVE-GitHub_Pages-2ea44f?style=for-the-badge&logo=github)](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/)
+[![Sponsor on GitHub](https://img.shields.io/badge/SPONSOR-jaydemks-ea4aaa?style=for-the-badge&logo=githubsponsors)](https://github.com/sponsors/jaydemks)
+
+> **Build, play and export 3D browser experiences without leaving the browser.**
+
 https://github.com/user-attachments/assets/6ccccc17-4816-4251-8ef9-867ab7ec009e
 
-## Project Status And Demo Availability
+## Build Something And Put It Online
 
-The complete author demo project (`.lkep.json`) is currently too large to publish directly in this GitHub repository. A separate download and a browser-based live demo that requires no installation are planned for upcoming releases.
+Lot King is a local-first, browser-native 3D engine/editor in active development, built with plain JavaScript, Three.js and Cannon.js. It began as a parking-lot drift prototype and is growing into a broader tool for levels, vehicles, characters, cinematics, interactive scenes and small browser games.
 
-Cloning or downloading the repository locally already provides the editor's default project template and the bundled level content available at that point in development. This should be enough to explore a substantial part of the current editor while the complete author demo is being prepared for separate distribution.
+Today you can already create and test levels, import GLB/GLTF assets, tune gameplay and presentation, prototype visual logic, and export portable Three.js experiences or playable builds for your own website or GitHub Pages. You can [try the live project now](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/); capable hardware and a modern browser are recommended, and supported browsers can use a local workspace and download exports directly from the hosted editor.
 
-The editor cannot yet produce a fully featured finished car game on its own. Several reusable gameplay-authoring systems are still missing beyond the current drift-points foundation, including customizable objectives, broader game rules and more high-level Logic Element methods. The current release is a capable experimental engine/editor, but it should not yet be treated as a complete production game toolkit.
+This is not a finished general-purpose game engine. Reusable editor-authored objectives, broader game rules and several high-level Logic Element workflows are still being built. The project grows with every release, so experimental areas can change and regressions are treated as part of active development rather than hidden behind production claims.
 
-Many releases were developed in a short period during my available extra time. Development will continue, although updates may now arrive more slowly because the project has already become large for a single developer.
+The ambition is not to reproduce Unreal Engine in a browser. It is to keep one substantial, extensible project where creating scenes and games becomes fast, approachable and fun. Contributions, fixes, ideas and reusable systems are welcome at any time. A longer-term direction is optional AI API tooling that can generate structured level foundations quickly, while keeping the author in control instead of requiring every ordinary game detail to be described by hand.
 
-If a community grows around the project, everyone is welcome to create, exchange and share their own Lot King projects with other users.
-
-Lot King is a browser drift game and a local-first 3D engine/editor being built around it.
-
-The simplest way to describe it is this: you can download the project, run it locally, build a small but fairly complete browser car game, export a playable version, and publish that build on your own site without a traditional install/build pipeline. The same editor can also be published as a read-only online demo, or used more creatively as a browser 3D authoring tool for interactive scenes, cinematic pages, prototypes, and small game-like web experiences.
-
-It began as a small parking-lot drift prototype. Over time it turned into a bigger idea: a lightweight browser-only engine where I can build tracks, tune the player car, set up sounds, add assets, author camera sequences, wire gameplay logic, and then play the result without leaving the browser.
-
-The direction is inspired by tools like Unreal Engine, Blender, Premiere Pro and After Effects: not as a clone, and not with the same production scale, but with the same kind of ambition around visual editing, timeline-driven authoring, scene composition and node-based logic. The project stays deliberately simple at the tech level: plain JavaScript, Three.js, Cannon.js, static HTML pages, LocalStorage and IndexedDB. There is no build step right now.
+The direction is inspired by tools like Unreal Engine, Blender, Premiere Pro and After Effects: not as clones or at the same production scale, but as references for visual editing, timelines, scene composition and node-based logic. The project deliberately stays simple at the technical level: static browser files, LocalStorage and IndexedDB, with no mandatory build step.
 
 ## What You Can Do With It
 
-- Make and test a browser drift/car game level locally.
-- Tune the player car, camera, lights, collision, effects, sound and HUD.
-- Import and place GLB/GLTF assets.
-- Build levels in an editor with outliner, inspector, transform tools and Play Preview.
-- Export a playable ZIP that contains the runtime and selected levels, without the editor.
-- Publish a read-only online demo project on a normal static site.
-- Use the editor creatively for 3D web scenes, interactive pages, cinematic shots or experimental browser experiences.
-- Prototype gameplay logic with the experimental Logic Element visual scripting system.
+- Build multi-level browser projects with gameplay, hidden Editor Menu and Game Menu scenes.
+- Shape the environment: procedural sky and day/night state, fog, global lighting, sun bloom, lens flare, volumetric clouds, rain and rendering profiles.
+- Import, place and animate GLB/GLTF assets; edit transforms, materials, mesh parts, lights, primitives, text, FX and collision setups.
+- Work visually with an outliner, inspector, transform gizmos, snapping, multi-selection, undo/redo, Play Preview and Simulate.
+- Tune the built-in Player Car: arcade/RaycastVehicle handling, camera modes, collision, suspension, lights, neon, exhaust, skid marks, sound and reusable setup data.
+- Create independent Logic Element Pawns, reusable graph assets, exposed variables, Functions/Subgraphs, macros, breakpoints and runtime profiling.
+- Design the HUD and Radio layout: custom frame/screen placement, buttons, volume and bass controls, responsive camera framing, vehicle telemetry and 3D data widgets.
+- Build engine Sound Sets with ON/OFF throttle samples, RPM layers, turbo, blow-off, backfire, limiter, gear shifts and ignition, with synthesized fallbacks.
+- Author cinematics in Cinema Studio with scene cameras, camera cuts, transform/FOV keys, markers, timeline events and gameplay triggers.
+- Create character experiments and the v0.6.8 soccer penalty mode with Soccer Pawns, Mixamo animation libraries, blended movement, ball/goal systems and a generated editable stadium.
+- Save/import portable `.lkep.json` projects and choose exactly which included levels remain visible or internal-only.
+- Export selected gameplay levels as a standalone Three.js playable ZIP without the editor.
+- Publish playable builds or inspectable project demos on GitHub Pages, another static host or your own website.
+- Use the same tools for drift tracks, 3D pages, interactive scenes, cinematic shots, prototypes and small game-like web experiences.
 
 ## Main Pages
 
@@ -90,7 +93,7 @@ Experimental features are not feature-complete: some workflows remain untested, 
 
 The editor is local-first. On `localhost`, existing LocalStorage and IndexedDB projects continue to work, and the Project Workspace overlay can also sync a portable `.lkep.json` file where the browser supports file handles.
 
-On hosted/static FTP deployments, the same project becomes a read-only online demo. The site owner can publish a bundled project at `demo/demo-project.lkep.json`; visitors can inspect, play and export the demo, but imports, uploads, saves, deletes and asset mutations are blocked so the server is not used as shared storage.
+On hosted/static deployments, visitors can inspect, play and export the bundled demo without giving the site write access. Full authoring remains local-first: supported browsers can continue from the hosted editor only after the user explicitly authorizes a local workspace folder. Projects and imported assets stay in that folder or browser storage; GitHub Pages and FTP are never used as shared writable storage.
 
 ### Assets
 
@@ -135,7 +138,7 @@ Every slot has a fallback synth sound, so the car still works even before real s
 
 The editor can export a playable ZIP with the gameplay runtime, selected levels and referenced assets. The exported build does not include the editor.
 
-This is the simplest publishing path: build locally in `engine_editor.html`, export the playable package, upload it to a static host or your own site, and share the result as a browser game. If you want people to inspect a project instead, you can publish the whole editor as a read-only online demo with a bundled `.lkep.json` project.
+This is the simplest publishing path: build locally in `engine_editor.html`, export the playable package, upload it to GitHub Pages, another static host or your own site, and share the result as a browser game. To share an inspectable project, publish the editor with a bundled `.lkep.json` demo.
 
 ## Current Status
 
@@ -143,7 +146,7 @@ This is still experimental. The editor is already useful for building and testin
 
 There are many systems left to fix and many more to add, and this is not a photoreal renderer today. Even so, the current browser-only editor can already build levels, interactive scenes, cinematics and playable experiments without requiring a large toolchain. I hope the current state is already fun to explore and that people use it to make many different projects; visual fidelity, extensibility and workflow depth can grow step by step from here.
 
-The `v0.6.5` milestone is implementation-complete for the current Logic Element scope. The next practical focus is manual/browser verification, presentation testing and follow-up hardening.
+The active `v0.6.8` milestone expands beyond cars into shared Pawn foundations, character movement and an editor-authored soccer penalty mode. The next practical focus includes reusable game objectives/rules, broader Logic Element coverage, browser hardening and export reliability as the project continues to grow.
 
 The main focus areas after this milestone are:
 
@@ -155,6 +158,8 @@ The main focus areas after this milestone are:
 - extracting independently instantiable vehicle physics/components behind a plugin-ready, attribution-friendly boundary
 - hardening Logic Element with more browser tests and real use cases
 - expanding the visual scripting compiler and macro system beyond the current foundation
+- adding reusable editor-authored objectives and high-level game rules
+- migrating the legacy Three.js runtime to a modern revision in controlled compatibility stages
 - cleaning up release notes and docs as the project grows
 - doing a proper asset provenance pass before any polished public release
 
@@ -244,13 +249,19 @@ The project is not a one-prompt demo anymore. It is an ongoing browser engine/ga
 
 ## Tech
 
-- Three.js r128
+- Three.js r128 (current legacy runtime baseline; modernization is planned)
 - Cannon.js 0.6.2
 - WebAudio
 - LocalStorage
 - IndexedDB
 - plain JavaScript
 - no framework and no bundler
+
+### Three.js Upgrade Path
+
+The runtime currently targets **Three.js r128**. Upstream Three.js has advanced to **npm 0.185.1 (the r185 generation) as of July 2026**, so this is a substantial modernization gap, not just a small move into the r15x series. The engine is intended to migrate in controlled stages because loaders, addons, color management, shaders, post-processing and renderer APIs changed significantly across those revisions.
+
+Some advanced rendering/editor options currently use guarded fallbacks or can appear inactive because they were designed around capabilities that the legacy runtime does not fully expose. Moving to a modern Three.js baseline is expected to unlock or stabilize more of that work, including newer WebGL/WebGPU, node-material and post-processing paths. It will not automatically fix every experimental feature, so each subsystem will still need migration tests and visual parity checks. See the [Three.js releases](https://github.com/mrdoob/three.js/releases) and [official migration guide](https://github.com/mrdoob/three.js/wiki/Migration-Guide).
 
 Vehicle backend authorship, licenses and adapter modifications are tracked in [`docs/VEHICLE_PHYSICS_PROVENANCE.md`](docs/VEHICLE_PHYSICS_PROVENANCE.md).
 

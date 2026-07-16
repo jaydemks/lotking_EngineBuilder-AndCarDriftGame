@@ -26,6 +26,7 @@ const assetUrlCache = new Map();
 const logicElementAssetCache = new Map();
 let bundledDemoReady = null;
 let bundledDemoProjectCache = null;
+let bundledDemoRequestedLevelId = null;
 
 function bundledDemoProjectUrl(){
   const sep = BUNDLED_DEMO_PROJECT_URL.indexOf('?') >= 0 ? '&' : '?';
@@ -882,6 +883,11 @@ function withMenuRoleConfig(project){
   if(Object.prototype.hasOwnProperty.call(project, 'embeddedLevels')) delete project.embeddedLevels;
   return project;
 }
+function embeddedLevelVisible(entry, project){
+  if(entry && entry.visible === false) return false;
+  if(project && project.meta && project.meta.levelVisible === false) return false;
+  return true;
+}
 function installMenuRoleProject(idx, entry, role, project, index){
   if(!idx || !entry || !isMenuLevelRole(role) || !project) return null;
   let levelProject = null;
@@ -889,6 +895,7 @@ function installMenuRoleProject(idx, entry, role, project, index){
   catch(err){ console.warn('LotKing store: menu role level non valido', err); return null; }
   const meta = levelProject.meta || {};
   const name = entry.name || meta.trackName || meta.levelName || (role === 'editor-menu' ? 'Editor Menu' : 'Game Menu');
+  const visible = embeddedLevelVisible(entry, levelProject);
   let id = normalizeLevelId(entry.id || entry.levelId || meta.trackId || name);
   if(!id) id = uniqueLevelId(idx, role + '-' + ((Number(index) || 0) + 1));
   let existing = levelEntry(idx, id);
@@ -901,17 +908,48 @@ function installMenuRoleProject(idx, entry, role, project, index){
     }
   }
   levelProject = projectWithoutEmbeddedLevels(levelProject);
-  levelProject.meta = Object.assign({}, meta, {trackId:id, trackName:name, levelRole:role, menuRoleSidecar:true});
+  levelProject.meta = Object.assign({}, meta, {trackId:id, trackName:name, levelRole:role, levelVisible:visible, menuRoleSidecar:true});
   levelProject.savedAt = entry.savedAt || levelProject.savedAt || new Date().toISOString();
   if(!writeLevelProject(id, levelProject)) return null;
   if(existing){
     existing.name = name;
     existing.levelRole = role;
     existing.savedAt = levelProject.savedAt;
+    existing.visible = visible;
   } else {
-    idx.levels.push({id, name, levelRole:role, savedAt:levelProject.savedAt});
+    idx.levels.push({id, name, levelRole:role, savedAt:levelProject.savedAt, visible});
   }
   return {id, name, role};
+}
+function embeddedLevelRole(value){
+  return value === 'editor-menu' || value === 'game-menu' ? value : 'gameplay';
+}
+function installEmbeddedLevelProject(idx, entry, index){
+  if(!idx || !entry || !entry.project) return null;
+  const role = embeddedLevelRole(entry.role || entry.levelRole);
+  if(isMenuLevelRole(role)) return installMenuRoleProject(idx, entry, role, entry.project, index);
+  let levelProject = null;
+  try { levelProject = parseProject(entry.project); }
+  catch(err){ console.warn('LotKing store: embedded gameplay level non valido', err); return null; }
+  const meta = levelProject.meta || {};
+  const name = entry.name || meta.trackName || meta.levelName || ('Gameplay Level ' + ((Number(index) || 0) + 1));
+  const visible = embeddedLevelVisible(entry, levelProject);
+  let id = normalizeLevelId(entry.id || entry.levelId || meta.trackId || name);
+  if(!id) id = uniqueLevelId(idx, name);
+  const existing = levelEntry(idx, id);
+  levelProject = projectWithoutEmbeddedLevels(levelProject);
+  levelProject.meta = Object.assign({}, meta, {trackId:id, trackName:name, levelRole:'gameplay', levelVisible:visible});
+  levelProject.savedAt = entry.savedAt || levelProject.savedAt || new Date().toISOString();
+  if(!writeLevelProject(id, levelProject)) return null;
+  if(existing){
+    existing.name = name;
+    existing.levelRole = 'gameplay';
+    existing.savedAt = levelProject.savedAt;
+    existing.visible = visible;
+  } else {
+    idx.levels.push({id, name, levelRole:'gameplay', savedAt:levelProject.savedAt, visible});
+  }
+  return {id, name, role:'gameplay'};
 }
 function installEmbeddedProjectLevels(project){
   const embedded = Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : [];
@@ -920,9 +958,7 @@ function installEmbeddedProjectLevels(project){
   const installed = [];
   embedded.forEach((entry, index) => {
     if(!entry || !entry.project) return;
-    const role = isMenuLevelRole(entry.role) ? entry.role : null;
-    if(!role) return;
-    const installedEntry = installMenuRoleProject(idx, entry, role, entry.project, index);
+    const installedEntry = installEmbeddedLevelProject(idx, entry, index);
     if(installedEntry) installed.push(installedEntry);
   });
   if(installed.length){
@@ -1000,6 +1036,35 @@ async function installMenuRoleSidecars(project){
 }
 function exportProject(scene, meta){
   return withMenuRoleConfig(projectFromScene(scene, meta));
+}
+function exportProjectWithLevels(scene, meta, levels, activeId){
+  const root = exportProject(scene, meta);
+  const list = Array.isArray(levels) ? levels : [];
+  const activeKey = normalizeLevelId(activeId || root.meta && root.meta.trackId);
+  const activeEntry = list.find(entry => normalizeLevelId(entry && entry.id) === activeKey);
+  if(activeEntry) root.meta = Object.assign({}, root.meta || {}, {levelVisible:activeEntry.visible === false ? false : true});
+  const embedded = [];
+  list.forEach((entry, index) => {
+    if(!entry || !entry.project) return;
+    const project = projectWithoutEmbeddedLevels(parseProject(entry.project));
+    const projectMeta = project.meta || {};
+    const id = normalizeLevelId(entry.id || projectMeta.trackId || ('level-' + (index + 1)));
+    if(activeKey && id === activeKey) return;
+    const role = embeddedLevelRole(entry.role || entry.levelRole || projectMeta.levelRole);
+    const visible = entry.visible === false ? false : embeddedLevelVisible(entry, project);
+    project.meta = Object.assign({}, projectMeta, {levelVisible:visible});
+    embedded.push({
+      id,
+      name:entry.name || projectMeta.trackName || projectMeta.levelName || id || ('Level ' + (index + 1)),
+      role,
+      visible,
+      savedAt:entry.savedAt || project.savedAt || null,
+      active:!!(activeKey && id === activeKey),
+      project,
+    });
+  });
+  if(embedded.length) root.embeddedLevels = embedded;
+  return root;
 }
 function installEmbeddedLogicElementAssets(scene){
   const installed = new Set();
@@ -1244,7 +1309,10 @@ function readIndex(){
       if(idx && Array.isArray(idx.levels)){
         idx.activeId = normalizeLevelId(idx.activeId);
         idx.levels = idx.levels
-          .map(entry => Object.assign({}, entry, {id: normalizeLevelId(entry && entry.id)}))
+          .map(entry => Object.assign({}, entry, {
+            id: normalizeLevelId(entry && entry.id),
+            visible: entry && entry.visible === false ? false : true,
+          }))
           .filter(entry => !!entry.id);
         return idx;
       }
@@ -1282,6 +1350,25 @@ function writeLevelProject(id, project){
   catch(err){ console.warn('LotKing store: livello "' + id + '" non salvato (quota?)', err); return false; }
 }
 
+function isPublishedGameplayRuntime(){
+  return shouldUseBundledDemoProject() && !window.__LK_STANDALONE_EDITOR && !window.__LK_MENU_PREVIEW;
+}
+
+function resetPublishedDemoLibrary(){
+  if(!isPublishedGameplayRuntime()) return;
+  const keys = [];
+  try {
+    for(let i = 0; i < localStorage.length; i++){
+      const key = localStorage.key(i);
+      if(key && key.indexOf(LEVEL_PREFIX) === 0) keys.push(key);
+    }
+    keys.forEach(key => localStorage.removeItem(key));
+    localStorage.removeItem(LEVELS_KEY);
+  } catch(err){
+    console.warn('LotKing demo: catalogo pubblicato non ripulito completamente', err);
+  }
+}
+
 function repairIndexFromStoredLevels(idx){
   let changed = false;
   try {
@@ -1297,6 +1384,7 @@ function repairIndexFromStoredLevels(idx){
         id,
         name: meta.trackName || meta.levelName || id,
         savedAt: project.savedAt || new Date().toISOString(),
+        visible: meta.levelVisible === false ? false : true,
       });
       changed = true;
     }
@@ -1325,6 +1413,9 @@ async function installBundledDemoProject(project){
   } catch(err){
     console.warn('LotKing demo: asset portabili non localizzati, uso fallback in memoria', err);
   }
+  // A hosted/static playable is a published snapshot: levels left in this
+  // origin by an older FTP upload must not leak into the current catalog.
+  resetPublishedDemoLibrary();
   installEmbeddedProjectLevels(parsed);
   try {
     await installMenuRoleSidecars(parsed);
@@ -1333,16 +1424,22 @@ async function installBundledDemoProject(project){
   }
   const idx = readIndex();
   let entry = levelEntry(idx, id);
+  const visible = parsed.meta && parsed.meta.levelVisible === false ? false : true;
   if(!entry){
-    entry = {id, name, savedAt};
+    entry = {id, name, savedAt, visible};
     idx.levels.unshift(entry);
   }
   entry.name = name;
   entry.savedAt = savedAt;
+  entry.levelRole = parsed.meta && parsed.meta.levelRole || 'gameplay';
+  entry.visible = visible;
   entry.tag = 'ONLINE DEMO';
-  idx.activeId = id;
-  try { localStorage.setItem(KEY, JSON.stringify(parsed)); } catch(err){}
   writeLevelProject(id, parsed);
+  const requestedId = normalizeLevelId(bundledDemoRequestedLevelId);
+  const requestedEntry = requestedId && levelEntry(idx, requestedId);
+  const requestedProject = requestedEntry && readLevelProject(requestedId);
+  idx.activeId = requestedProject ? requestedId : id;
+  try { localStorage.setItem(KEY, JSON.stringify(requestedProject || parsed)); } catch(err){}
   writeIndex(idx);
   syncCatalog();
   return parsed;
@@ -1351,9 +1448,12 @@ async function installBundledDemoProject(project){
 function ensureBundledDemoProject(){
   if(!shouldUseBundledDemoProject()) return Promise.resolve(null);
   if(bundledDemoReady) return bundledDemoReady;
+  try {
+    bundledDemoRequestedLevelId = sessionStorage.getItem('lk.autolaunch') || sessionStorage.getItem('lk.playableActive') || null;
+  } catch(err){}
   const url = bundledDemoProjectUrl();
   bundledDemoReady = fetchTextWithProgress(url, 8, 42, 'downloading demo project')
-    .then(text => {
+    .then(async text => {
       if(!text) return null;
       reportBundledDemoProgress({progress:54, step:'parsing demo project', url});
       const project = parseProject(text);
@@ -1369,11 +1469,11 @@ function ensureBundledDemoProject(){
       }
       const isMenuPreviewFrame = !!(window.__LK_MENU_PREVIEW && window.parent && window.parent !== window);
       if(!isMenuPreviewFrame){
-        setTimeout(() => {
-          installBundledDemoProject(cloneData(project)).catch(err => {
-            console.warn('LotKing demo: bundled LKEP storage install failed', err);
-          });
-        }, 0);
+        try {
+          await installBundledDemoProject(cloneData(project));
+        } catch(err){
+          console.warn('LotKing demo: bundled LKEP storage install failed', err);
+        }
       }
       const scene = sceneFromProject(project);
       if(scene){
@@ -1405,7 +1505,7 @@ function ensureLibrary(){
       const id = uniqueLevelId(idx, meta.trackId || name);
       project.meta = Object.assign({}, meta, {trackId: id, trackName: name});
       if(writeLevelProject(id, project)){
-        idx.levels.push({id, name, savedAt: project.savedAt || new Date().toISOString()});
+        idx.levels.push({id, name, savedAt: project.savedAt || new Date().toISOString(), visible:meta.levelVisible === false ? false : true});
         idx.activeId = id;
         writeIndex(idx);
       }
@@ -1425,13 +1525,15 @@ function upsertActiveLevel(project){
   idx.activeId = id;
   if(!id){
     id = uniqueLevelId(idx, meta.trackId || meta.trackName || 'level');
-    idx.levels.push({id, name: meta.trackName || id, savedAt: project.savedAt});
+    idx.levels.push({id, name: meta.trackName || id, savedAt: project.savedAt, visible:meta.levelVisible === false ? false : true});
     idx.activeId = id;
   }
   const entry = levelEntry(idx, id);
   if(!entry) return false;
   if(meta.trackName) entry.name = meta.trackName;
   entry.savedAt = project.savedAt || new Date().toISOString();
+  if(meta.levelVisible === false) entry.visible = false;
+  else if(!Object.prototype.hasOwnProperty.call(entry, 'visible')) entry.visible = true;
   const copy = Object.assign({}, project, {meta: Object.assign({}, meta, {trackId: id, trackName: entry.name})});
   if(!writeLevelProject(id, copy)) return false;
   if(!writeIndex(idx)) return false;
@@ -1972,13 +2074,15 @@ function radioHudTemplateFromLevelLibrary(GAME){
 }
 
 const LEVELS = {
-  list(){
+  list(opts){
+    opts = opts || {};
     const idx = ensureLibrary();
     const activeId = normalizeLevelId(idx.activeId);
-    return idx.levels.map(l => {
+    return idx.levels.filter(l => opts.includeHidden || l.visible !== false).map(l => {
       const project = readLevelProject(l.id);
       const levelRole = project && project.meta && project.meta.levelRole || l.levelRole || 'gameplay';
-      return Object.assign({}, l, {levelRole, active: normalizeLevelId(l.id) === activeId});
+      const visible = project && project.meta && project.meta.levelVisible === false ? false : (l.visible === false ? false : true);
+      return Object.assign({}, l, {levelRole, visible, active: normalizeLevelId(l.id) === activeId});
     });
   },
   activeId(){ return normalizeLevelId(ensureLibrary().activeId); },
@@ -1988,7 +2092,7 @@ const LEVELS = {
     const id = uniqueLevelId(idx, name);
     const project = projectFromScene(scene || blank(), Object.assign({trackId: id, trackName: name, levelRole:'gameplay'}, meta || {}));
     if(!writeLevelProject(id, project)) return null;
-    const entry = {id, name, levelRole:project.meta.levelRole || 'gameplay', savedAt: project.savedAt};
+    const entry = {id, name, levelRole:project.meta.levelRole || 'gameplay', savedAt: project.savedAt, visible:true};
     idx.levels.push(entry);
     maybeStorePlayerBlueprintDefault(project, entry);
     maybeStoreRadioHudDefault(project, entry);
@@ -2065,7 +2169,7 @@ const LEVELS = {
     copy.meta = Object.assign({}, copy.meta, {trackId: newId, trackName: newName});
     copy.savedAt = new Date().toISOString();
     if(!writeLevelProject(newId, copy)) return null;
-    idx.levels.push({id: newId, name: newName, levelRole:copy.meta && copy.meta.levelRole || 'gameplay', savedAt: copy.savedAt});
+    idx.levels.push({id: newId, name: newName, levelRole:copy.meta && copy.meta.levelRole || 'gameplay', savedAt: copy.savedAt, visible:src.visible === false ? false : true});
     writeIndex(idx);
     syncCatalog();
     return newId;
@@ -2099,7 +2203,7 @@ const LEVELS = {
     const id = uniqueLevelId(idx, meta.trackId || name);
     project.meta = Object.assign({}, meta, {trackId: id, trackName: name});
     if(!writeLevelProject(id, project)) return null;
-    const entry = {id, name, levelRole:project.meta.levelRole || 'gameplay', savedAt: project.savedAt || new Date().toISOString()};
+    const entry = {id, name, levelRole:project.meta.levelRole || 'gameplay', savedAt: project.savedAt || new Date().toISOString(), visible:project.meta && project.meta.levelVisible === false ? false : true};
     idx.levels.push(entry);
     maybeStorePlayerBlueprintDefault(project, entry);
     maybeStoreRadioHudDefault(project, entry);
@@ -2168,7 +2272,8 @@ function catalogTracks(){
   const list = idx.levels.filter(l => {
     const project = l && readLevelProject(l.id);
     const role = l && (project && project.meta && project.meta.levelRole || l.levelRole);
-    return role !== 'editor-menu' && role !== 'game-menu';
+    const visible = !(l && l.visible === false) && !(project && project.meta && project.meta.levelVisible === false);
+    return visible && role !== 'editor-menu' && role !== 'game-menu';
   }).sort((a, b) => {
     const aActive = normalizeLevelId(a.id) === activeId ? 1 : 0;
     const bActive = normalizeLevelId(b.id) === activeId ? 1 : 0;
@@ -4534,8 +4639,10 @@ function ensureApplied(GAME){
   if(applied) return ready;
   applied = true;
   appliedMode = 'active';
-  appliedLevelId = normalizeLevelId(ensureLibrary().activeId);
-  ready = ensureBundledDemoProject().then(() => apply(GAME || window.LOT_KING));
+  ready = ensureBundledDemoProject().then(() => {
+    appliedLevelId = normalizeLevelId(ensureLibrary().activeId);
+    return apply(GAME || window.LOT_KING);
+  });
   window.LK_STORE.ready = ready;
   return ready;
 }
@@ -4546,8 +4653,15 @@ function menuBackgroundRoles(preferredRoles){
   return roles;
 }
 function findMenuBackgroundLevel(preferredRoles){
-  const idx = ensureLibrary();
   const roles = menuBackgroundRoles(preferredRoles);
+  // The menu iframe does not install the downloaded project into localStorage.
+  // Resolve its root/embedded menu roles directly, and prefer the current FTP
+  // snapshot over stale browser data from an older deployment.
+  if(window.__LK_MENU_PREVIEW){
+    const bundled = findBundledMenuBackgroundLevel(roles);
+    if(bundled) return bundled;
+  }
+  const idx = ensureLibrary();
   const entries = idx.levels.slice();
   for(const role of roles){
     const activeId = normalizeLevelId(idx.activeId);
@@ -4568,15 +4682,33 @@ function findBundledMenuBackgroundLevel(preferredRoles){
   const roles = menuBackgroundRoles(preferredRoles);
   const project = bundledDemoProjectCache;
   if(!project) return null;
-  const meta = project.meta || {};
-  const role = meta.levelRole || 'gameplay';
-  if(!roles.includes(role)) return null;
-  return {
-    id: normalizeLevelId(meta.trackId || BUNDLED_DEMO_LEVEL_ID),
-    name: meta.trackName || meta.levelName || 'Online Demo',
-    role,
+  const candidates = [{
+    id:project.meta && project.meta.trackId || BUNDLED_DEMO_LEVEL_ID,
+    name:project.meta && (project.meta.trackName || project.meta.levelName) || 'Online Demo',
+    role:project.meta && project.meta.levelRole || 'gameplay',
     project,
-  };
+  }].concat((Array.isArray(project.embeddedLevels) ? project.embeddedLevels : []).map(entry => {
+    const embeddedProject = entry && entry.project;
+    const meta = embeddedProject && embeddedProject.meta || {};
+    return {
+      id:entry && (entry.id || entry.levelId) || meta.trackId,
+      name:entry && entry.name || meta.trackName || meta.levelName,
+      role:entry && (entry.role || entry.levelRole) || meta.levelRole || 'gameplay',
+      project:embeddedProject,
+    };
+  }));
+  for(const role of roles){
+    const candidate = candidates.find(item => item && item.project && item.role === role);
+    if(candidate){
+      return {
+        id:normalizeLevelId(candidate.id || role),
+        name:candidate.name || (role === 'editor-menu' ? 'Editor Menu' : 'Game Menu'),
+        role,
+        project:candidate.project,
+      };
+    }
+  }
+  return null;
 }
 function ensureMenuBackgroundApplied(GAME, preferredRoles){
   if(applied) return ready;
@@ -4630,7 +4762,7 @@ window.LK_STORE = {
   soundSets: SOUND_SETS,
   isApplied: () => applied,
   appliedInfo: () => ({applied, mode: appliedMode, levelId: appliedLevelId}),
-  load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, importProject, getLevelLogicGraph, setLevelLogicGraph,
+  load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, exportProjectWithLevels, importProject, getLevelLogicGraph, setLevelLogicGraph,
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
   lightProps, applyLightProps, applyMatProps,
 	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
@@ -4698,6 +4830,10 @@ window.LK_STORE = {
   // autolaunch robusto: aspetta che il catalogo contenga il livello prima di
   // lanciarlo (evita che, per una race, resti visibile il menu "choose track").
   const wantId = normalizeLevelId(auto);
+  // lot-king.js may already be polling for a ROLE menu background while this
+  // module boots. Expose the reload intent so that poll cannot apply the menu
+  // scene in place of the gameplay level selected by the user.
+  window.__LK_AUTOLAUNCH_LEVEL = wantId;
   (function launchWhenReady(attempt){
     attempt = attempt || 0;
     const g = window.LOT_KING;

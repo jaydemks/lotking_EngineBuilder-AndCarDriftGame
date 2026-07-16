@@ -68,6 +68,29 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 - `js/runtime/vehicle-pawns.js`
   Versioned `VehiclePawn` v2 contract and registry exposed as `LOT_KING.pawns`. It separates authoring configuration, runtime state and visual ownership; provides lifecycle, reset/sleep/dispose, nullable Player 1–4 possession, an adapter for the untouched native Player Car, Cannon/fallback locomotion, independent synth audio, metric widgets, vehicle effects and Pawn-scoped runtime events.
 
+## Soccer Game Mode
+
+- `js/runtime/soccer-pawns.js`
+  Humanoid `Soccer Pawn` (schema v1) built on Pawn Core and registered in the shared `LOT_KING.pawns` registry. Roles from striker to goalkeeper with per-role action/animation sets, heading-relative free-movement controller, role actions (shoot/pass/cross/tackle/save/dive), appearance live edit through material-name heuristics, camera possession and the generic `applyBinding` dispatch used by exposed template variables.
+
+- `js/runtime/character-movement.js`
+  Generic humanoid ground-movement controller (design adapted from three-player-controller, dependency-free): camera-relative or heading-relative input, walk/run/sprint smoothing, gravity + jump with air control, ground detection, pushback against the arcade collider lists and camera view presets (third / close / first-person lite). Consumed by the Soccer Pawn and reusable by future human-type Pawns.
+
+- `js/runtime/soccer-locomotion.js`
+  Blendspace-lite motion controller: velocity damping plus a short look-ahead prediction cross-blends idle/walk/run/strafe clip weights on the GLB animation mixer, scales stride playback with real speed and runs a one-shot action layer with completion callbacks. Mixamo clip names resolve fuzzily and missing clips degrade to the nearest available one.
+
+- `js/runtime/soccer-ball.js`
+  Regulation ball with arcade flight physics (gravity, bounce, drag, Magnus curve), kick-toward-target API, goal-line detection against registered regulation goal frames (7.32 x 2.44), goalkeeper save checks and out/stopped detection. Balls register as non-possessable Pawn records so they step and dispose with the Play session. Emits `OnBallKicked` / `OnGoalScored` / `OnBallSaved` / `OnBallOut`.
+
+- `js/runtime/penalty-flow.js`
+  Penalty shootout referee state machine: alternating kicks, configurable kicks per team, sudden death, early mathematical decision, score/history tracking and `OnPenaltyKickReady` / `OnPenaltyPhaseChanged` / `OnPenaltyResult` / `OnShootoutFinished` events consumed from the shared Pawn event bus.
+
+- `js/runtime/soccer-stadium.js`
+  Pure-data stadium level builder used by the editor `Add > Level > Soccer Stadium (Penalty)` action. Generates editable primitive/light descriptors for a regulation pitch with full markings, goals, stands with placeholder fans, entrances, flags and floodlights, plus `gameplayAnchors()` (penalty spots, goal centers/headings, kickoff).
+
+- `js/logic/logic-nodes-soccer.js` / `js/logic/logic-templates-soccer.js`
+  Soccer Logic node pack (registered through `window.LK_LOGIC_NODE_PACKS`) and the soccer template pack (registered through `LK_LOGIC_TEMPLATES.register`): `Template - Player Soccer Element` and `Template - Penalty Shootout Manager`.
+
 - `js/logic/logic-graph.js`
   Pure graph JSON helpers. Creates and normalizes Level Logic and Logic Element graphs while preserving variables, nodes, edges, comments, reusable subgraphs/macros, and the internal Logic Element scene model. Also exposes the Logic Element definition version, dependency manifest collection, and reusable definition asset migration/normalization used by the store and exporter.
 

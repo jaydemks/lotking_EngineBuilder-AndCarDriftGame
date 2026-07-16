@@ -100,6 +100,9 @@ function create(options){
   }
 
   function beginGameplaySession(editorPreview, editorPreviewMode){
+    // Menu-role and asset preloads can finish after a level was selected.
+    // Reassert the running-session UI state at the session boundary.
+    hideMenuOverlay();
     gameState.paused = false;
     gameState.playPreviewCursorVisible = false;
     if(editorPreview) delete gameState.editorPreviewManualEnvironment;

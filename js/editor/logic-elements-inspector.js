@@ -19,6 +19,7 @@ function create(deps){
   const refreshOutliner = deps.refreshOutliner || function(){};
   const status = deps.status || function(){};
   const assetLibraryLoad = deps.assetLibraryLoad || function(){ return []; };
+  const assetLibrarySave = deps.assetLibrarySave || function(){ return false; };
   const importAssetFiles = deps.importAssetFiles || function(){ return Promise.resolve([]); };
   const promptEditorAction = deps.promptEditorAction || function(opts){
     return Promise.resolve(window.prompt((opts && opts.message) || 'Name:', (opts && opts.value) || ''));
@@ -5128,11 +5129,178 @@ function create(deps){
     saveElementGraph(object, graph);
   }
 
+  // ---- Character animation pickers ----------------------------------------
+  let animationDatalistSeq = 0;
+  function parseStoredAssetRef(value){
+    if(value && typeof value === 'object') return value;
+    const text = String(value == null ? '' : value).trim();
+    if(!text) return null;
+    try { const parsed = JSON.parse(text); return parsed && typeof parsed === 'object' ? parsed : null; } catch(err){ return null; }
+  }
+  function storableAssetRef(asset){
+    return JSON.stringify({
+      id:asset.id || null,
+      key:asset.key || null,
+      dbKey:asset.dbKey || null,
+      src:asset.src || asset.url || null,
+      name:asset.name || asset.key || asset.id || 'GLB Asset',
+      kind:asset.kind || 'glb',
+    });
+  }
+  function glbLabelText(asset, fallback){
+    return String(asset && (asset.name || asset.source || asset.key || asset.id) || fallback || 'GLB');
+  }
+  function glbSearchText(asset){
+    return [
+      asset && asset.name, asset && asset.source, asset && asset.key,
+      asset && asset.mime, asset && asset.kind,
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+  function likelyVehicleOrLevelGlb(asset){
+    return /\b(car|vehicle|auto|truck|van|bus|taxi|coupe|sedan|suv|hatchback|ambulance|police|macchina|veicolo|camion|furgone|map|track|level|ground|floor|road|parking|terrain|stadium|stadio)\b/.test(glbSearchText(asset));
+  }
+  function soccerModelCompatible(asset){
+    if(!asset || asset.kind !== 'glb') return false;
+    if(asset.usedAsSoccerPawnModel || asset.usedAsPlayerModel || asset.rigged || Number(asset.skinnedMeshCount) > 0 || Number(asset.boneCount) > 8) return true;
+    if(Array.isArray(asset.clips) && asset.clips.length) return true;
+    if(/\b(player|person|human|character|avatar|mixamo|soccer|football|keeper|goalkeeper|runner|walk|idle|run)\b/.test(glbSearchText(asset))) return true;
+    return !likelyVehicleOrLevelGlb(asset);
+  }
+  function soccerAnimationCompatible(asset){
+    if(!asset || asset.kind !== 'glb') return false;
+    if(Array.isArray(asset.clips)) return asset.clips.length > 0;
+    if(asset.hasAnimations || Number(asset.clipCount) > 0) return true;
+    return /\b(anim|animation|mixamo|idle|walk|run|jump|strafe|soccer|shoot|pass|save|dive|goalkeeper|keeper)\b/.test(glbSearchText(asset));
+  }
+  function markSoccerModelAsset(asset){
+    if(!asset || !asset.id) return;
+    const list = assetLibraryLoad();
+    const found = list.find(item => item && (item.id === asset.id || item.key === asset.key));
+    if(!found) return;
+    found.rigged = true;
+    found.usedAsSoccerPawnModel = true;
+    found.soccerPawnModelAt = new Date().toISOString();
+    assetLibrarySave(list);
+  }
+  function animationLibraryRefOf(object){
+    const graph = graphOf(object);
+    const libraryVariable = (graph.variables || []).find(v => v && (v.binding === 'animationLibrary' || v.ui === 'model-asset'));
+    if(!libraryVariable) return null;
+    const overrides = object.userData.logicVariableOverrides || {};
+    const value = Object.prototype.hasOwnProperty.call(overrides, libraryVariable.name) ? overrides[libraryVariable.name] : libraryVariable.value;
+    return parseStoredAssetRef(value);
+  }
+  function collectAnimationClipNames(object){
+    const names = new Set();
+    if(object && object.traverse) object.traverse(node => {
+      (node.userData && node.userData.logicAnimationClipNames || []).forEach(name => names.add(name));
+    });
+    ((object.userData && object.userData.soccerLibraryClipNames) || []).forEach(name => names.add(name));
+    return Array.from(names).sort();
+  }
+  function fillClipDatalist(datalist, names){
+    datalist.innerHTML = '';
+    names.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      datalist.appendChild(option);
+    });
+  }
+  function ensureLibraryClipNames(object, onReady){
+    const ref = animationLibraryRefOf(object);
+    if(!ref || !window.LK_RUNTIME_SOCCER_PAWNS || object.userData.soccerLibraryClipNames) return;
+    window.LK_RUNTIME_SOCCER_PAWNS.loadAnimationLibrary(ref).then(library => {
+      if(!library) return;
+      object.userData.soccerLibraryClipNames = library.names.slice();
+      if(onReady) onReady(library.names);
+    }).catch(() => {});
+  }
+  // Clip-name field with a native dropdown of every clip found in the model
+  // GLB plus the assigned animation-library GLB.
+  function buildAnimationClipControl(object, variable, row){
+    const listId = 'lkAnimClips_' + (++animationDatalistSeq);
+    const input = el('<input type="text" list="' + listId + '" placeholder="' + tr('clip name (Mixamo)', 'nome clip (Mixamo)') + '">');
+    input.value = variable.value == null ? '' : String(variable.value);
+    input.addEventListener('change', () => updateVariable(object, variable, input.value));
+    const datalist = document.createElement('datalist');
+    datalist.id = listId;
+    fillClipDatalist(datalist, collectAnimationClipNames(object));
+    ensureLibraryClipNames(object, () => fillClipDatalist(datalist, collectAnimationClipNames(object)));
+    row.appendChild(input);
+    row.appendChild(datalist);
+    return row;
+  }
+  // Animation-library picker: choose a GLB from the asset library, import a
+  // new one from disk, or fall back to the clips inside the model GLB.
+  function buildAnimationLibraryControl(object, variable, row){
+    const select = document.createElement('select');
+    const current = parseStoredAssetRef(variable.value);
+    const currentKey = current ? String(current.dbKey || current.key || current.id || current.src || '') : '';
+    select.appendChild(new Option(tr('None (clips from model GLB)', 'Nessuna (clip dal GLB del modello)'), ''));
+    const allGlbs = assetLibraryLoad().filter(asset => asset && asset.kind === 'glb');
+    const assets = allGlbs.filter(soccerAnimationCompatible);
+    let currentListed = false;
+    assets.forEach(asset => {
+      const key = String(asset.dbKey || asset.key || asset.id || asset.src || '');
+      const suffix = Array.isArray(asset.clips) ? ' · ' + asset.clips.length + ' clips' : '';
+      const option = new Option(glbLabelText(asset, key) + ' (GLB' + suffix + ')', 'asset:' + key);
+      option.dataset.assetKey = key;
+      if(key && key === currentKey){ option.selected = true; currentListed = true; }
+      select.appendChild(option);
+    });
+    if(current && !currentListed){
+      const external = new Option((current.name || tr('External GLB', 'GLB esterno')) + ' (external)', 'current');
+      external.selected = true;
+      select.appendChild(external);
+    }
+    select.appendChild(new Option(tr('Import GLB from disk...', 'Importa GLB da disco...'), '__import__'));
+    const apply = asset => {
+      updateVariable(object, variable, asset ? storableAssetRef(asset) : '');
+      delete object.userData.soccerLibraryClipNames;
+      status(asset
+        ? tr('Animation library assigned: ', 'Libreria animazioni assegnata: ') + (asset.name || 'GLB')
+        : tr('Animation library cleared; using model GLB clips.', 'Libreria animazioni rimossa; uso le clip del GLB modello.'));
+      rebuildInspector();
+    };
+    select.addEventListener('change', () => {
+      const value = select.value;
+      if(value === '__import__'){
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.glb,.gltf';
+        input.addEventListener('change', () => {
+          const file = input.files && input.files[0];
+          if(!file){ rebuildInspector(); return; }
+          importAssetFiles([file]).then(imported => {
+            const asset = (imported || []).find(item => item && item.kind === 'glb');
+            if(asset){ apply(asset); refreshAssetsPanel(); }
+            else { status(tr('GLB import failed.', 'Importazione GLB fallita.')); rebuildInspector(); }
+          });
+        }, {once:true});
+        input.click();
+        return;
+      }
+      if(value === ''){ apply(null); return; }
+      if(value === 'current') return;
+      const key = value.slice(6);
+      const asset = allGlbs.find(item => String(item.dbKey || item.key || item.id || item.src || '') === key);
+      if(asset) apply(asset);
+    });
+    row.appendChild(select);
+    return row;
+  }
+
   function buildVariableControl(object, variable){
     const row = el('<div class="lk-row"></div>');
     const label = document.createElement('label');
     label.textContent = variableLabel(variable);
     row.appendChild(label);
+    if(variable.binding && /^animations\./.test(String(variable.binding))){
+      return buildAnimationClipControl(object, variable, row);
+    }
+    if(variable.ui === 'model-asset' || variable.binding === 'animationLibrary'){
+      return buildAnimationLibraryControl(object, variable, row);
+    }
     if(variable.ui === 'player-id' || variable.name === 'ControllerPlayerId'){
       const input = document.createElement('select');
       [
@@ -5233,6 +5401,159 @@ function create(deps){
     }
   }
 
+  function ensureSoccerCharacterElement(graph){
+    const scene = graph.logicScene || (graph.logicScene = {root:{id:'root', name:'Player Soccer Root', type:'empty', linked:true}, elements:[], components:[]});
+    scene.elements = Array.isArray(scene.elements) ? scene.elements : [];
+    scene.components = Array.isArray(scene.components) ? scene.components : [];
+    let modelElement = [scene.root].concat(scene.elements).find(item => item && item.id === 'character_model');
+    if(!modelElement) modelElement = [scene.root].concat(scene.elements).find(item => item && item.asset);
+    if(!modelElement){
+      modelElement = {id:'character_model', name:'Character Model / Mixamo GLB', type:'mesh', primitive:'cube', parentId:'root', linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#334155'};
+      scene.elements.push(modelElement);
+    }
+    if(!scene.components.some(item => item && item.elementId === modelElement.id && item.type === 'render')){
+      scene.components.push({id:modelElement.id + '_render', elementId:modelElement.id, name:'Imported Character Model', type:'render', linked:true});
+    }
+    return modelElement;
+  }
+
+  function serializeSoccerModelAsset(asset, currentFit){
+    return {
+      id:asset.id || null,
+      key:asset.key || null,
+      dbKey:asset.dbKey || null,
+      src:asset.src || asset.url || null,
+      name:asset.name || asset.source || 'Soccer Character GLB',
+      source:asset.source || asset.name || 'Asset Library',
+      kind:'glb',
+      mime:asset.mime || null,
+      fit:Number.isFinite(currentFit) && currentFit > 0 ? currentFit : 1.9,
+      clips:Array.isArray(asset.clips) ? asset.clips.slice() : [],
+    };
+  }
+
+  function hideSoccerPlaceholderRig(graph){
+    const scene = graph.logicScene || {};
+    const placeholders = /^(torso_|hips_|leg_sock_|arm_skin_|head_skin|hair_top)/;
+    (scene.elements || []).forEach(element => {
+      if(element && placeholders.test(String(element.id || ''))) element.linked = false;
+    });
+  }
+
+  function buildSoccerPawnInspector(box, object, graph){
+    if(!graph || !graph.soccerPawn) return;
+    const sec = section(tr('SOCCER PAWN MODEL', 'MODELLO SOCCER PAWN'), false);
+    const modelElement = ensureSoccerCharacterElement(graph);
+    const current = modelElement.asset || null;
+    const currentId = current && String(current.id || current.key || current.dbKey || current.src || '');
+    const compatibleAssets = assetLibraryLoad().filter(soccerModelCompatible);
+
+    sec.body.appendChild(el('<div class="lk-hint">' + tr(
+      'Assign the humanoid GLB used by this Soccer Pawn. Imports are saved in Assets and applied to this selected Logic Element; animation-only GLBs stay in the Animation Library field below.',
+      'Assegna il GLB umanoide usato da questo Soccer Pawn. Gli import vengono salvati in Assets e applicati a questo Logic Element selezionato; i GLB solo animazioni restano nel campo Animation Library sotto.'
+    ) + '</div>'));
+
+    const currentLine = current
+      ? glbLabelText(current, 'GLB') + (Array.isArray(current.clips) && current.clips.length ? ' · ' + current.clips.length + ' clips' : '')
+      : tr('Placeholder rig active', 'Rig placeholder attivo');
+    const currentInfo = document.createElement('div');
+    currentInfo.className = 'lk-hint';
+    currentInfo.appendChild(document.createTextNode(tr('Current model: ', 'Modello attuale: ')));
+    const currentStrong = document.createElement('b');
+    currentStrong.textContent = currentLine;
+    currentInfo.appendChild(currentStrong);
+    sec.body.appendChild(currentInfo);
+
+    const assignModelAsset = asset => {
+      if(!asset) return;
+      const target = ensureSoccerCharacterElement(graph);
+      const previousFit = target.asset && Number(target.asset.fit);
+      target.type = 'mesh';
+      target.parentId = target.parentId || 'root';
+      target.linked = true;
+      target.position = [0,0,0];
+      target.rotation = [0,0,0];
+      target.scale = [1,1,1];
+      target.asset = serializeSoccerModelAsset(asset, previousFit);
+      target.primitive = target.primitive || 'cube';
+      delete target.animation;
+      hideSoccerPlaceholderRig(graph);
+      markSoccerModelAsset(asset);
+      saveElementGraph(object, graph);
+      refreshAssetsPanel();
+      status(tr('Soccer character GLB assigned: ', 'GLB personaggio Soccer assegnato: ') + target.asset.name);
+      rebuildInspector();
+    };
+
+    const row = el('<div class="lk-row"></div>');
+    const label = document.createElement('label');
+    label.textContent = tr('Character GLB', 'GLB personaggio');
+    const select = document.createElement('select');
+    select.appendChild(new Option(tr('Select compatible GLB...', 'Seleziona GLB compatibile...'), ''));
+    let currentListed = false;
+    compatibleAssets.forEach(asset => {
+      const id = String(asset.id || asset.key || asset.dbKey || asset.src || '');
+      const suffix = Array.isArray(asset.clips) && asset.clips.length ? ' · ' + asset.clips.length + ' clips' : '';
+      select.appendChild(new Option(glbLabelText(asset, id) + suffix, 'asset:' + id));
+      if(currentId && id === currentId) currentListed = true;
+    });
+    if(current && !currentListed){
+      const option = new Option(glbLabelText(current, tr('Project GLB', 'GLB progetto')) + tr(' (Project)', ' (Progetto)'), 'current');
+      select.appendChild(option);
+    }
+    select.value = currentId && currentListed ? 'asset:' + currentId : (current ? 'current' : '');
+    select.addEventListener('change', () => {
+      if(select.value === 'current' || !select.value) return;
+      const wanted = select.value.slice(6);
+      const asset = compatibleAssets.find(item => String(item.id || item.key || item.dbKey || item.src || '') === wanted);
+      if(asset) assignModelAsset(asset);
+    });
+    row.appendChild(label);
+    row.appendChild(select);
+    sec.body.appendChild(row);
+
+    const fit = el('<input type="number" min=".2" max="5" step=".05">');
+    fit.value = Math.max(.2, Number(current && current.fit) || 1.9);
+    fit.disabled = !current;
+    fit.addEventListener('change', () => {
+      const target = ensureSoccerCharacterElement(graph);
+      if(!target.asset) return;
+      target.asset.fit = Math.max(.2, Math.min(5, Number(fit.value) || 1.9));
+      saveElementGraph(object, graph);
+    });
+    const fitRow = el('<div class="lk-row"></div>');
+    const fitLabel = document.createElement('label');
+    fitLabel.textContent = tr('Model height fit', 'Fit altezza modello');
+    fitRow.appendChild(fitLabel);
+    fitRow.appendChild(fit);
+    sec.body.appendChild(fitRow);
+
+    sec.body.appendChild(btnRow([
+      {label:tr('Import character GLB...', 'Importa GLB personaggio...'), action:() => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.glb,.gltf';
+        input.addEventListener('change', () => {
+          const file = input.files && input.files[0];
+          if(!file) return;
+          importAssetFiles([file]).then(imported => {
+            const asset = (imported || []).find(item => item && item.kind === 'glb');
+            if(asset) assignModelAsset(asset);
+            else {
+              status(tr('Soccer character GLB import failed.', 'Importazione GLB personaggio Soccer fallita.'));
+              rebuildInspector();
+            }
+          });
+        }, {once:true});
+        input.click();
+      }},
+    ]));
+    if(!compatibleAssets.length){
+      sec.body.appendChild(el('<div class="lk-hint">' + tr('No compatible GLB assets yet. Import a humanoid/Mixamo GLB to add it here.', 'Nessun asset GLB compatibile. Importa un GLB umanoide/Mixamo per aggiungerlo qui.') + '</div>'));
+    }
+    box.appendChild(sec.root);
+  }
+
   function buildElement(box, object){
     const name = object && object.userData && object.userData.editorName || 'Logic Element';
     const graph = graphOf(object);
@@ -5277,7 +5598,7 @@ function create(deps){
     }
     box.appendChild(mg.root);
 
-    if(graph.playerPawnBlueprint || graph.vehiclePawn){
+    if(graph.playerPawnBlueprint || graph.vehiclePawn || graph.soccerPawn){
       const runtimeSection = section(tr('RUNTIME DIAGNOSTICS', 'DIAGNOSTICA RUNTIME'), false);
       const output = el('<pre class="lk-hint" style="white-space:pre-wrap;user-select:text;max-height:260px;overflow:auto"></pre>');
       runtimeSection.body.appendChild(output);
@@ -5290,6 +5611,8 @@ function create(deps){
       refreshRuntimeDiagnostics();
       box.appendChild(runtimeSection.root);
     }
+
+    buildSoccerPawnInspector(box, object, graph);
 
     if(graph.playerPawnBlueprint){
       const pawn = section(tr('VEHICLE PAWN', 'VEHICLE PAWN'), false);

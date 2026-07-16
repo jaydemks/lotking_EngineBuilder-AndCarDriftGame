@@ -219,9 +219,11 @@ function create(deps){
     }
   }
 
-  async function preparePlayableProject(project){
+  async function preparePlayableProject(project, opts){
+    opts = opts || {};
     const prepared = JSON.parse(JSON.stringify(project || {}));
-    if(Object.prototype.hasOwnProperty.call(prepared, 'embeddedLevels')) delete prepared.embeddedLevels;
+    const stripEmbeddedLevels = opts.stripEmbeddedLevels !== false;
+    if(stripEmbeddedLevels && Object.prototype.hasOwnProperty.call(prepared, 'embeddedLevels')) delete prepared.embeddedLevels;
     const scene = prepared.scene || prepared;
     const warnings = [];
     const dbCache = new Map();
@@ -270,6 +272,14 @@ function create(deps){
         for(const track of tracks){
           await normalizePlayableAssetRef(track, 'url', 'music.' + groupName + '.' + (track.fileName || track.title || track.id || 'track'), dbCache, library, warnings);
         }
+      }
+    }
+    if(!stripEmbeddedLevels && Array.isArray(prepared.embeddedLevels)){
+      for(const entry of prepared.embeddedLevels){
+        if(!entry || !entry.project) continue;
+        const nested = await preparePlayableProject(entry.project, {stripEmbeddedLevels:false});
+        entry.project = nested.project;
+        if(nested.warnings && nested.warnings.length) warnings.push(...nested.warnings);
       }
     }
     return {

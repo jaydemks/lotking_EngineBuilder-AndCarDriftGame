@@ -286,7 +286,8 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
   const registry = GAME && GAME.pawns
     ? GAME.pawns
     : (window.LK_RUNTIME_VEHICLE_PAWNS && GAME ? window.LK_RUNTIME_VEHICLE_PAWNS.install(GAME) : null);
-  const sourceDefinition = graph && (graph.vehiclePawn || graph.playerPawnBlueprint);
+  const soccerDefinition = graph && graph.soccerPawn;
+  const sourceDefinition = !soccerDefinition && graph && (graph.vehiclePawn || graph.playerPawnBlueprint) || null;
   const variableValues = new Map((graph && Array.isArray(graph.variables) ? graph.variables : []).map(variable => [String(variable && variable.name || ''), variable && variable.value]));
   const definition = sourceDefinition ? Object.assign({}, sourceDefinition, {
     enabled:variableValues.has('PawnEnabled') ? variableValues.get('PawnEnabled') !== false : sourceDefinition.enabled,
@@ -309,11 +310,12 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
       mode:variableValues.has('CameraMode') ? variableValues.get('CameraMode') : sourceDefinition.camera && sourceDefinition.camera.mode,
     }),
   }) : null;
-  if(definition){
-    const setBoundValue = (target, path, value) => {
+  const applyGraphBindings = target => {
+    if(!target) return target;
+    const setBoundValue = (destination, path, value) => {
       const keys = String(path || '').split('.').filter(Boolean);
       if(!keys.length) return;
-      let cursor = target;
+      let cursor = destination;
       for(let index=0; index<keys.length-1; index++){
         const key = keys[index];
         if(!cursor[key] || typeof cursor[key] !== 'object') cursor[key] = {};
@@ -322,23 +324,30 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
       cursor[keys[keys.length - 1]] = value;
     };
     (graph.variables || []).forEach(variable => {
-      if(variable && variable.exposed === true && variable.binding) setBoundValue(definition, variable.binding, variable.value);
+      if(variable && variable.exposed === true && variable.binding) setBoundValue(target, variable.binding, variable.value);
     });
     const overrides = owner && owner.userData && owner.userData.logicVariableOverrides || {};
     const spawnVariables = (graph.variables || []).filter(variable => variable && /^spawn\.(?:x|y|z|heading)$/.test(String(variable.binding || '')));
     const hasInstanceSpawn = spawnVariables.some(variable => Object.prototype.hasOwnProperty.call(overrides, variable.name));
     if(owner && owner.position && !hasInstanceSpawn){
-      definition.spawn = Object.assign({}, definition.spawn || {}, {
+      target.spawn = Object.assign({}, target.spawn || {}, {
         x:Number(owner.position.x) || 0,
         y:Number(owner.position.y) || 0,
         z:Number(owner.position.z) || 0,
         heading:owner.rotation ? Number(owner.rotation.y) || 0 : 0,
       });
     }
+    return target;
+  };
+  if(definition) applyGraphBindings(definition);
+  let self = null;
+  if(registry && owner && soccerDefinition && window.LK_RUNTIME_SOCCER_PAWNS){
+    self = window.LK_RUNTIME_SOCCER_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(soccerDefinition))), {input:inputService, graph, STORE});
+  } else if(registry && owner && definition){
+    self = registry.createLogic(owner, definition, {input:inputService, graph, STORE});
+  } else if(registry && owner){
+    self = registry.get(owner);
   }
-  let self = registry && owner && definition
-    ? registry.createLogic(owner, definition, {input:inputService, graph, STORE})
-    : (registry && owner ? registry.get(owner) : null);
   function resolve(ref){
     if(ref === 'self' || ref == null || ref === '') return self;
     if(ref && ref.userData) return registry && registry.get(ref);
@@ -809,6 +818,30 @@ function createAnimationService(STORE){
   });
 }
 
+function createSoccerService(GAME){
+  function ballSystem(){
+    return GAME && GAME.systems && GAME.systems.soccerBall
+      || (window.LK_RUNTIME_SOCCER_BALL ? window.LK_RUNTIME_SOCCER_BALL.install(GAME) : null);
+  }
+  function penaltySystem(){
+    return GAME && GAME.systems && GAME.systems.penaltyFlow
+      || (window.LK_RUNTIME_PENALTY_FLOW ? window.LK_RUNTIME_PENALTY_FLOW.install(GAME) : null);
+  }
+  return Object.freeze({
+    spawnBall:options => { const system = ballSystem(); return system ? system.spawn(options) : null; },
+    despawnBall:id => { const system = ballSystem(); return !!(system && system.despawn(id)); },
+    resetBall:id => { const system = ballSystem(); return !!(system && system.reset(id)); },
+    kickBall:(id, options) => { const system = ballSystem(); return !!(system && system.kick(id, options)); },
+    ballState:id => { const system = ballSystem(); return system ? system.state(id) : null; },
+    registerGoal:options => { const system = ballSystem(); return system ? system.registerGoal(options) : null; },
+    configurePenalty:options => { const system = penaltySystem(); return system ? system.configure(options) : null; },
+    startPenalty:() => { const system = penaltySystem(); return system ? system.start() : null; },
+    beginPenaltyKick:() => { const system = penaltySystem(); return system ? system.beginKick() : null; },
+    resetPenalty:() => { const system = penaltySystem(); return system ? system.reset(true) : null; },
+    penaltyState:() => { const system = penaltySystem(); return system ? system.state() : null; },
+  });
+}
+
 function createContext(opts){
   opts = opts || {};
   const GAME = opts.GAME || window.LOT_KING;
@@ -836,9 +869,10 @@ function createContext(opts){
       cinema: createCinemaService(),
       audio: createAudioService(),
       animations: createAnimationService(STORE),
+      soccer: createSoccerService(GAME),
     },
   };
 }
 
-window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService});
+window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService, createSoccerService});
 })();

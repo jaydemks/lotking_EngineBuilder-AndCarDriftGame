@@ -1043,7 +1043,14 @@ function registerAll(registry){
 }
 
 function createRegistry(){
-  return registerAll(window.LK_LOGIC_REGISTRY.create());
+  const registry = registerAll(window.LK_LOGIC_REGISTRY.create());
+  // External node packs (e.g. logic-nodes-soccer.js) push registration
+  // functions into this global list so feature nodes live in their own file.
+  const packs = window.LK_LOGIC_NODE_PACKS;
+  if(Array.isArray(packs)) packs.forEach(pack => {
+    try { if(typeof pack === 'function') pack(registry); } catch(err){ console.warn('LotKing Logic: node pack failed', err); }
+  });
+  return registry;
 }
 
 window.LK_LOGIC_NODES_MVP = Object.freeze({registerAll, createRegistry});

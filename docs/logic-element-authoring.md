@@ -8,12 +8,13 @@ This is the short operational guide for extending the current Logic Element syst
 - `js/logic/logic-nodes-mvp.js` registers node definitions.
 - `js/logic/logic-runtime.js` executes graph JSON through registered nodes.
 - `js/logic/logic-services.js` is the only bridge from nodes to engine systems.
-- `js/logic/logic-templates.js` contains built-in starter Logic Element templates shown in the Assets panel.
+- `js/logic/logic-templates.js` contains built-in starter Logic Element templates shown in the Assets panel and exposes `LK_LOGIC_TEMPLATES.register(...)` for external template packs.
+- `js/logic/logic-nodes-soccer.js` and `js/logic/logic-templates-soccer.js` are the soccer game-mode pack (nodes + templates) and the reference for writing feature packs in their own files.
 - `js/editor/logic-elements-inspector.js` owns authoring UI only.
 
 ## Adding A Node
 
-1. Register the node in `logic-nodes-mvp.js` with a stable `type`.
+1. Register the node in `logic-nodes-mvp.js` with a stable `type`, or — for feature packs — push a registration function into `window.LK_LOGIC_NODE_PACKS` from a dedicated file loaded after `logic-nodes-mvp.js` (see `logic-nodes-soccer.js`).
 2. Give every input/output a stable pin name. Display labels can change; pin ids should not.
 3. Use `run(api)` for exec nodes and `evaluate(api, pin)` for pure data nodes.
 4. Access scene, physics, material, audio, camera, input, animation, and debug only through `api.services`.
@@ -25,6 +26,8 @@ This is the short operational guide for extending the current Logic Element syst
 Templates are local editable starters, not linked reusable assets. Placing a template creates a normal scene Logic Element copy, so users can change it freely without mutating a hidden built-in definition.
 
 The Player Car template is a special Vehicle Pawn definition. Keep its persistent authoring data in `graph.vehiclePawn` (schema v2) and retain `graph.playerPawnBlueprint` only as the lossless migration/reference snapshot. Runtime speed, RPM, gear and temporary control state belong to the Pawn instance and must never be written back into the graph during Play Preview.
+
+The Player Soccer template follows the same contract with `graph.soccerPawn` (schema v1): role, movement, locomotion blending, keeper, animation slots, appearance and camera are persistent authoring data; runtime speed, current action and dive timers live on the Soccer Pawn instance only. Non-vehicle Pawn kinds route exposed-variable bindings through `pawn.applyBinding(path, value)` instead of the vehicle-specific runner dispatch.
 
 Reusable vehicle behavior should be authored as Functions/Subgraphs. The built-in template demonstrates this with `Apply Player Drive`; control and queries must use explicit `vehiclePawn` references through the Vehicle Pawn node category instead of reading or mutating `GAME.player`.
 
@@ -76,6 +79,8 @@ Current editor support:
 - `Template - Patrol Mover`: exposes movement/spin variables and moves the Default Mesh every update.
 - `Template - Toggle Switch`: toggles an exposed boolean with E and swaps material color through a Branch.
 - `Template - Distance Beacon`: compares owner distance from world origin against an exposed radius and swaps material color.
+- `Template - Player Soccer Element` (soccer pack): Soccer Pawn starter with role selection up to goalkeeper, Mixamo animation clip slots per action, motion-blend movement and kit color live edit.
+- `Template - Penalty Shootout Manager` (soccer pack): registers the goal line, spawns the ball on the penalty spot and runs the alternating penalty shootout with score events.
 
 Reusable Logic Element assets also store `definitionVersion` and a dependency manifest. Current dependency collection covers internal mesh assets plus texture/audio references used by graph nodes.
 

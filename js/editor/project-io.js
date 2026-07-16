@@ -106,7 +106,216 @@ function create(deps){
 
   async function preparePortableProject(project){
     if(!projectExportAssets) return {project: JSON.parse(JSON.stringify(project || {})), warnings: []};
-    return projectExportAssets.preparePlayableProject(project);
+    return projectExportAssets.preparePlayableProject(project, {stripEmbeddedLevels:false});
+  }
+
+  function createProjectSnapshotWithLevels(sceneData, exportLevels){
+    const current = createProjectSnapshot(sceneData);
+    const LV = levelsApi();
+    if(!LV || !LV.list || !LV.get || !STORE.exportProjectWithLevels) return current;
+    const optionsById = new Map();
+    if(Array.isArray(exportLevels)){
+      exportLevels.forEach(entry => {
+        if(entry && entry.id != null) optionsById.set(String(entry.id), entry);
+      });
+    }
+    const sourceLevels = LV.list({includeHidden:true}) || [];
+    const levels = sourceLevels.map(level => {
+      if(!level || !level.id) return null;
+      const options = optionsById.size ? optionsById.get(String(level.id)) : null;
+      if(optionsById.size && (!options || options.include === false)) return null;
+      const isActive = level.active || String(level.id) === String(LV.activeId && LV.activeId() || '');
+      const project = isActive ? current : LV.get(level.id);
+      if(!project) return null;
+      const visible = options ? options.visible !== false : level.visible !== false;
+      return {
+        id:level.id,
+        name:level.name || project.meta && (project.meta.trackName || project.meta.levelName) || level.id,
+        levelRole:level.levelRole || project.meta && project.meta.levelRole || 'gameplay',
+        visible,
+        savedAt:level.savedAt || project.savedAt || null,
+        project,
+      };
+    }).filter(Boolean);
+    if(!levels.length) return current;
+    return STORE.exportProjectWithLevels(sceneData, currentTrackMeta(), levels, LV.activeId && LV.activeId());
+  }
+
+  function isMenuLevelRole(role){
+    return role === 'editor-menu' || role === 'game-menu';
+  }
+
+  function projectExportDefaultVisible(level){
+    if(level && level.visible === false) return false;
+    return !isMenuLevelRole(level && level.levelRole);
+  }
+
+  function levelRoleLabel(role){
+    if(role === 'editor-menu') return 'EDITOR MENU';
+    if(role === 'game-menu') return 'GAME MENU';
+    return tr('GAMEPLAY', 'GIOCO');
+  }
+
+  async function pickProjectExportLevels(levels, activeId){
+    const overlay = document.getElementById('lkConfirmOverlay') || $('#lkConfirmOverlay');
+    const title = document.getElementById('lkConfirmTitle') || $('#lkConfirmTitle');
+    const message = document.getElementById('lkConfirmMessage') || $('#lkConfirmMessage');
+    const ok = document.getElementById('lkConfirmOk') || $('#lkConfirmOk');
+    const cancel = document.getElementById('lkConfirmCancel') || $('#lkConfirmCancel');
+    if(!overlay || !title || !message || !ok || !cancel) return null;
+    if(overlay.parentNode !== document.body) document.body.appendChild(overlay);
+    const list = Array.isArray(levels) ? levels.slice() : [];
+    if(!list.length) return [];
+
+    const oldInput = overlay.querySelector('.lk-confirm-input');
+    if(oldInput) oldInput.remove();
+    const oldPicker = overlay.querySelector('.lk-playable-level-picker');
+    if(oldPicker) oldPicker.remove();
+
+    title.textContent = tr('Export project levels', 'Export livelli progetto');
+    ok.textContent = tr('⇩ Export Project', '⇩ Esporta progetto');
+    ok.classList.toggle('danger', false);
+    message.textContent = '';
+
+    const activeKey = activeId != null ? String(activeId) : '';
+    const rows = [];
+    const picker = document.createElement('div');
+    picker.className = 'lk-playable-level-picker lk-project-level-picker';
+
+    const controls = document.createElement('div');
+    controls.className = 'lk-playable-level-picker-controls';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'lk-playable-level-picker-toggle';
+    const count = document.createElement('div');
+    count.className = 'lk-playable-level-picker-count';
+    controls.append(toggle, count);
+
+    const rowsWrapper = document.createElement('div');
+    rowsWrapper.className = 'lk-playable-level-picker-rows';
+
+    const update = () => {
+      let included = 0;
+      let visible = 0;
+      rows.forEach(row => {
+        const isIncluded = row.include.checked || row.locked;
+        if(row.locked) row.include.checked = true;
+        row.visible.disabled = !isIncluded;
+        if(!isIncluded) row.visible.checked = false;
+        row.el.classList.toggle('off', !isIncluded);
+        row.el.classList.toggle('primary', row.active);
+        if(isIncluded) included += 1;
+        if(isIncluded && row.visible.checked) visible += 1;
+      });
+      const optionalRows = rows.filter(row => !row.locked);
+      const allOptionalIncluded = optionalRows.length ? optionalRows.every(row => row.include.checked) : true;
+      toggle.textContent = allOptionalIncluded ? tr('Deselect optional', 'Deseleziona opzionali') : tr('Include all', 'Includi tutto');
+      count.textContent = included + ' / ' + rows.length + tr(' included · ', ' inclusi · ') + visible + tr(' visible', ' visibili');
+    };
+
+    list.forEach(level => {
+      const id = String(level.id || '');
+      const active = id && id === activeKey || level.active;
+      const row = document.createElement('div');
+      row.className = 'lk-playable-level-picker-row lk-project-level-picker-row';
+
+      const include = document.createElement('input');
+      include.type = 'checkbox';
+      include.className = 'lk-playable-level-picker-check';
+      include.checked = true;
+      include.disabled = !!active;
+      include.title = active
+        ? tr('The active level is exported as the project root', 'Il livello attivo viene esportato come root del progetto')
+        : tr('Include this level inside the .lkep project', 'Includi questo livello nel progetto .lkep');
+
+      const visible = document.createElement('input');
+      visible.type = 'checkbox';
+      visible.className = 'lk-playable-level-picker-check lk-project-level-picker-visible';
+      visible.checked = projectExportDefaultVisible(level);
+      visible.title = tr('Show this included level in normal project level lists after import', 'Mostra questo livello incluso nelle liste livelli normali dopo import');
+
+      const label = document.createElement('span');
+      label.className = 'lk-playable-level-picker-label';
+      const name = document.createElement('span');
+      name.textContent = level.name || level.id || tr('Level', 'Livello');
+      const role = document.createElement('span');
+      role.className = 'lk-playable-level-picker-badge lk-project-level-picker-role';
+      role.textContent = levelRoleLabel(level.levelRole);
+      label.append(name, role);
+      if(active){
+        const badge = document.createElement('span');
+        badge.className = 'lk-playable-level-picker-badge';
+        badge.textContent = tr('ROOT', 'ROOT');
+        label.appendChild(badge);
+      }
+
+      const visibleText = document.createElement('span');
+      visibleText.className = 'lk-project-level-picker-visible-label';
+      visibleText.textContent = tr('VISIBLE', 'VISIBILE');
+
+      include.addEventListener('change', update);
+      visible.addEventListener('change', update);
+      row.append(include, visible, visibleText, label);
+      rowsWrapper.appendChild(row);
+      rows.push({id, el:row, include, visible, locked:!!active, active:!!active, level});
+    });
+
+    toggle.addEventListener('click', () => {
+      const optionalRows = rows.filter(row => !row.locked);
+      const allIncluded = optionalRows.length ? optionalRows.every(row => row.include.checked) : true;
+      optionalRows.forEach(row => { row.include.checked = !allIncluded; });
+      update();
+    });
+
+    const hint = document.createElement('div');
+    hint.className = 'lk-playable-level-picker-hint';
+    hint.textContent = tr(
+      'Included levels are written into the .lkep. Visible levels appear in normal project level lists after import. Menu roles can be included but hidden, so they still drive Editor Menu / Game Menu without showing as playable work levels.',
+      'I livelli inclusi vengono scritti nel .lkep. I livelli visibili appaiono nelle liste livelli normali dopo import. I menu role possono essere inclusi ma nascosti, cosi guidano Editor Menu / Game Menu senza comparire come livelli di lavoro giocabili.'
+    );
+
+    picker.append(controls, rowsWrapper, hint);
+    message.appendChild(picker);
+    update();
+
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+
+    return new Promise(resolve => {
+      const close = value => {
+        overlay.classList.remove('open');
+        overlay.setAttribute('aria-hidden', 'true');
+        picker.remove();
+        ok.removeEventListener('click', yes);
+        cancel.removeEventListener('click', no);
+        overlay.removeEventListener('pointerdown', outside);
+        removeEventListener('keydown', key, true);
+        resolve(value);
+      };
+      const yes = () => {
+        const selected = rows.map(row => ({
+          id:row.id,
+          include:row.locked || row.include.checked,
+          visible:(row.locked || row.include.checked) && row.visible.checked,
+        }));
+        if(!selected.some(row => row.include)){
+          status(tr('⚠ Include at least one level', '⚠ Includi almeno un livello'));
+          return;
+        }
+        close(selected);
+      };
+      const no = () => close(null);
+      const outside = e => { if(e.target === overlay) close(null); };
+      const key = e => {
+        if(e.key === 'Escape'){ e.preventDefault(); close(null); }
+        if(e.key === 'Enter'){ e.preventDefault(); yes(); }
+      };
+      ok.addEventListener('click', yes);
+      cancel.addEventListener('click', no);
+      overlay.addEventListener('pointerdown', outside);
+      addEventListener('keydown', key, true);
+      cancel.focus();
+    });
   }
 
   function saveWorkspaceProjectCopy(project){
@@ -474,28 +683,44 @@ function create(deps){
   }
 
   function exportProject(){
-    const progressToken = beginStatusWork('Export LKEP', tr('Serializing current level', 'Serializzazione livello corrente'), 'loading');
+    const progressToken = beginStatusWork('Export LKEP', tr('Serializing project levels', 'Serializzazione livelli progetto'), 'loading');
     flushHudHistory();
     updateStatusWork(progressToken, 10, tr('Data snapshot', 'Snapshot dati'), 'loading');
     const sceneData = STORE.collect(GAME);
-    updateStatusWork(progressToken, 35, tr('Generating project', 'Generazione progetto'), 'loading');
-    const project = createProjectSnapshot(sceneData);
-    let picked;
-    try {
-      picked = (!isOnlineDemo() && canPickProjectFile()) ? pickProjectFile(project) : Promise.resolve(null);
-    } catch(err) {
-      picked = Promise.reject(err);
-    }
-    updateStatusWork(progressToken, 55, tr('Preparing project assets', 'Preparazione asset progetto'), 'loading');
-    picked.then(handle => {
+    const LV = levelsApi();
+    const allLevels = LV && LV.list ? (LV.list({includeHidden:true}) || []) : [];
+    const activeId = LV && LV.activeId ? LV.activeId() : ED.trackId;
+    updateStatusWork(progressToken, 22, tr('Choosing project levels', 'Scelta livelli progetto'), 'loading');
+    Promise.resolve(pickProjectExportLevels(allLevels, activeId)).then(exportLevels => {
+      if(exportLevels === null){
+        finishStatusWork(progressToken, tr('Export cancelled', 'Export annullato'), tr('No file written', 'Nessun file scritto'), 'warning');
+        status('Export cancelled');
+        return null;
+      }
+      updateStatusWork(progressToken, 35, tr('Generating project', 'Generazione progetto'), 'loading');
+      const project = createProjectSnapshotWithLevels(sceneData, exportLevels);
+      let picked;
+      try {
+        picked = (!isOnlineDemo() && canPickProjectFile()) ? pickProjectFile(project) : Promise.resolve(null);
+      } catch(err) {
+        picked = Promise.reject(err);
+      }
+      updateStatusWork(progressToken, 55, tr('Preparing project assets', 'Preparazione asset progetto'), 'loading');
+      return picked.then(handle => ({handle, project}));
+    }).then(bundle => {
+      if(!bundle) return null;
+      const handle = bundle.handle;
+      const project = bundle.project;
       if(handle) projectFileHandle = handle;
       return preparePortableProject(project).then(result => ({handle, result}));
     }).then(bundle => {
+      if(!bundle) return null;
       updateStatusWork(progressToken, 82, bundle.handle ? tr('Writing project file', 'Scrittura file progetto') : tr('Download started', 'Download avviato'), 'loading');
       if(bundle.handle) return writeProjectFile(bundle.handle, bundle.result.project).then(() => bundle.result);
       downloadProject(bundle.result.project);
       return bundle.result;
     }).then(result => {
+      if(!result) return;
       const warningText = result.warnings && result.warnings.length ? tr('With warnings: ', 'Con avvisi: ') + result.warnings[0] : tr('Operation complete', 'Operazione completata');
       finishStatusWork(progressToken, tr('LKEP exported', 'LKEP esportato'), warningText, result.warnings && result.warnings.length ? 'warning' : 'success');
       status(projectFileHandle && !isOnlineDemo() ? 'LKEP saved and linked to Save ✓' : 'LKEP exported');
