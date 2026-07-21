@@ -9,14 +9,18 @@ function create(deps){
   deps = deps || {};
   const el = deps.el;
   const SECTION_STORE_KEY = 'lotking.editor.inspectorSections.v1';
+  let sectionStateCache = null;
 
   function readSectionState(){
-    try { return JSON.parse(localStorage.getItem(SECTION_STORE_KEY) || '{}') || {}; }
-    catch(err){ return {}; }
+    if(sectionStateCache) return sectionStateCache;
+    try { sectionStateCache = JSON.parse(localStorage.getItem(SECTION_STORE_KEY) || '{}') || {}; }
+    catch(err){ sectionStateCache = {}; }
+    return sectionStateCache;
   }
 
   function writeSectionState(state){
-    try { localStorage.setItem(SECTION_STORE_KEY, JSON.stringify(state || {})); }
+    sectionStateCache = state || {};
+    try { localStorage.setItem(SECTION_STORE_KEY, JSON.stringify(sectionStateCache)); }
     catch(err){}
   }
 

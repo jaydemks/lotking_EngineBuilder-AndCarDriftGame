@@ -111,11 +111,28 @@ test('Vehicle Pawn registry keeps possession and motion isolated per instance', 
 
 test('Vehicle Pawn configuration preserves manual wheel pivots and mesh assignments', () => {
   const wheels = [0,1,2,3,4].map(index => ({x:index,y:.17,z:index<2?1.3:-1.3,front:index<2,driven:index>=2,visualId:'mesh-wheel-' + index}));
-  const config = global.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig({physicsBackend:'arcade-fallback', wheels});
+  const skids = {enabled:false,smokeModelVersion:3,smokeEnabled:true,smokeAmount:1.25,smokeThreshold:.4,smokeMinHeat:.5,smokeHeatRate:1.1,smokeCoolRate:.6,smokeOnDrift:true,smokeOnBrake:false,smokeOnAcceleration:true};
+  const config = global.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig({physicsBackend:'arcade-fallback', wheels, skids});
   assert.equal(config.wheels.length, 5);
   assert.equal(config.wheels[4].visualId, 'mesh-wheel-4');
   assert.equal(config.wheels[0].front, true);
   assert.equal(config.wheels[2].driven, true);
+  assert.equal(config.skids.enabled, false);
+  assert.equal(config.skids.smokeAmount, 1.25);
+  assert.equal(config.skids.smokeThreshold, .4);
+  assert.equal(config.skids.smokeOnBrake, false);
+  assert.equal(config.skids.smokeModelVersion, 3);
+  assert.equal(config.skids.smokeMinHeat, .5);
+  assert.equal(config.skids.smokeHeatRate, 1.1);
+  assert.equal(config.skids.smokeCoolRate, .6);
+});
+
+test('Vehicle Pawn migrates legacy always-on tire smoke to the slip and heat model', () => {
+  const config = global.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig({skids:{smokeThreshold:.08}});
+  assert.equal(config.skids.smokeModelVersion, 3);
+  assert.equal(config.skids.smokeAmount, .28);
+  assert.equal(config.skids.smokeThreshold, .35);
+  assert.equal(config.skids.smokeMinHeat, .3);
 });
 
 test('Vehicle Pawn arcade parity covers acceleration braking reverse handbrake drift and reset', () => {
@@ -160,7 +177,8 @@ test('Vehicle Pawn arcade parity covers acceleration braking reverse handbrake d
 });
 
 test('Vehicle Pawn camera modes and automatic light conditions remain instance scoped', () => {
-  const game = {player:null, systems:{sky:{getTime(){ return .9; }}}};
+  let clockHour = 12;
+  const game = {player:null, systems:{sky:{getTime(){ return .25; }, getClockHour(){ return clockHour; }}}};
   const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
   const owner = {position:{x:0,y:0,z:0},rotation:{y:0},visible:true,userData:{}};
   const pawn = registry.createLogic(owner, {id:'visual-parity',playerId:1,camera:{mode:'free'},lights:{enabled:true,front:{enabled:true,auto:true,autoOnHour:18,autoOffHour:7},rear:{enabled:true},aux:[{enabled:true,condition:'left',intensity:2}]}}, {});
@@ -173,6 +191,11 @@ test('Vehicle Pawn camera modes and automatic light conditions remain instance s
     {light:reverse,condition:'reverse',auxIndex:null,baseIntensity:1,baseDistance:10,baseAngle:.5},
     {light:left,condition:'always',auxIndex:0,baseIntensity:1,baseDistance:10,baseAngle:.5},
   ]};
+  pawn.updateLights({highBeams:false,brake:0,steer:0}, false);
+  assert.equal(headlight.visible, false, 'automatic headlights stay off at 12:00');
+  clockHour = 18;
+  pawn.updateLights({highBeams:false,brake:0,steer:0}, false);
+  assert.equal(headlight.visible, true, 'automatic headlights switch on at the authored 18:00 sunset');
   pawn.updateLights({highBeams:true,brake:1,steer:-.8}, false);
   assert.equal(headlight.intensity > 2, true);
   assert.equal(brake.visible, true);
@@ -234,6 +257,7 @@ test('legacy Player Car snapshots migrate to stable Vehicle Pawn v2 authoring da
     tuning:{horsepower:520, torque:6},
     collision:{hx:1.1, hy:.5, hz:2},
     cam:{mode:'cinematic', fov:74},
+    modelShading:'smooth',
   };
   const migrated = global.LK_LOGIC_GRAPH.normalizeGraph(legacy);
   assert.equal(migrated.vehiclePawn.schemaVersion, 2);
@@ -243,6 +267,7 @@ test('legacy Player Car snapshots migrate to stable Vehicle Pawn v2 authoring da
   assert.equal(migrated.vehiclePawn.tuning.horsepower, 520);
   assert.equal(migrated.vehiclePawn.collision.hx, 1.1);
   assert.equal(migrated.vehiclePawn.camera.mode, 'cinematic');
+  assert.equal(migrated.vehiclePawn.modelShading, 'smooth');
   assert.equal(migrated.vehiclePawn.migration.legacyBlueprint, true);
   assert.deepEqual(migrated.playerPawnBlueprint, legacy.playerPawnBlueprint);
 
@@ -571,6 +596,7 @@ test('Player Car template exposes variables bound to Vehicle Pawn components', (
   assert.equal(bindings.get('MaxSpeed'), 'tuning.maxSpeed');
   assert.equal(bindings.get('HeadlightsEnabled'), 'lights.front.enabled');
   assert.equal(template.graph.vehiclePawn.proceduralFallback, 'native-player-visual-v1');
+  assert.equal(template.graph.vehiclePawn.modelShading, 'original');
 });
 
 test('Logic Element definition assets migrate to current version', () => {

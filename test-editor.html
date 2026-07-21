@@ -3,7 +3,7 @@
 <head><meta charset="UTF-8"><title>LK editor test</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/lot-king.css">
-<link rel="stylesheet" href="css/editor.css">
+<link rel="stylesheet" href="css/editor.css?v=0.7.0-developer-debugger-3">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -37,24 +37,40 @@
     </div>
   </div>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="vendor/three-r185-compat.min.js?v=0.185.1-lk2"></script>
+<script src="vendor/cannon-0.6.2.min.js?v=0.6.2-lk1"></script>
 <script src="js/runtime/console-policy.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/FXAAShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/SimplexNoise.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSRShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSRPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
+<script src="js/runtime/assets.js"></script>
+<script src="js/runtime/music-library.js?v=0.7.0-music-order-1"></script>
+<script src="js/runtime/menu-music.js?v=0.7.0-music-order-1"></script>
+<script src="js/runtime/player-camera.js?v=0.7.0-camera-helper-1"></script>
+<script src="js/runtime/radio-hud.js?v=0.7.0-music-order-1"></script>
+<script src="js/runtime/audio.js"></script>
+<script src="js/runtime/engine-audio.js"></script>
+<script src="js/runtime/volumetric-clouds.js?v=0.7.0-cinematic-optics-1"></script>
+<script src="js/runtime/rain.js?v=0.7.0-rain-ribbons-1"></script>
+<script src="js/runtime/sky.js?v=0.7.0-stable-flare-fallback-1"></script>
+<script src="js/runtime/cinematic-lens-flare.js?v=0.7.0-stable-flare-fallback-1"></script>
+<script src="js/runtime/post.js?v=0.7.0-stable-flare-fallback-1"></script>
+<script src="js/runtime/physics-world.js"></script>
+<script src="js/runtime/vehicle-visual-controller.js?v=0.7.0-three-r185-1"></script>
+<script src="js/runtime/vehicle-raycast-actuator.js?v=0.7.0-three-r185-1"></script>
+<script src="js/runtime/vehicle-steering-controller.js?v=0.7.0-three-r185-1"></script>
+<script src="js/runtime/vehicle-engine-controller.js?v=0.7.0-three-r185-1"></script>
+<script src="js/runtime/drive-tuning.js"></script>
+<script src="js/runtime/player-data-widgets.js?v=0.7.0-three-r185-1"></script>
+<script src="js/runtime/game-hud.js"></script>
+<script src="js/runtime/track-catalog.js"></script>
+<script src="js/runtime/loading-flow.js"></script>
+<script src="js/runtime/runtime-loader.js"></script>
+<script src="js/runtime/model-assets.js"></script>
+<script src="js/runtime/player-model.js?v=0.7.0-shading-r185-1"></script>
+<script src="js/runtime/player-light-rig.js?v=0.7.0-split-rear-colors-1"></script>
+<script src="js/runtime/world-state.js"></script>
+<script src="js/runtime/world-generation.js?v=0.7.0-three-r185-1"></script>
+<script src="js/runtime/session-flow.js"></script>
+<script src="js/runtime/settings-menu.js?v=0.7.0-reflections-r185-1"></script>
+<script src="js/runtime/game-flow.js"></script>
 <script src="js/runtime/ui/window-manager.js"></script>
 <script src="js/runtime/input/input-actions.js"></script>
 <script src="js/runtime/input/input-devices.js"></script>
@@ -63,43 +79,44 @@
 <script src="js/runtime/input/mapping-overlay.js"></script>
 <script src="js/runtime/input/touch-controls.js"></script>
 <script src="js/runtime/input/input-menu.js"></script>
-<script src="js/runtime/player-light-rig.js"></script>
-<script src="js/lot-king.js"></script>
+<script src="js/runtime/pawn-core.js"></script>
+<script src="js/lot-king.js?v=0.7.0-developer-debugger-2"></script>
 <script src="js/plugins/plugin-api.js"></script>
 <script src="js/plugins/plugin-manager.js"></script>
 <script src="js/plugins/logic-element-plugin.js"></script>
-<script src="js/logic/logic-graph.js"></script>
+<script src="js/logic/logic-graph.js?v=0.7.0-shading-r185-1"></script>
 <script src="js/logic/logic-exporter.js"></script>
-<script src="js/logic/logic-templates.js"></script>
+<script src="js/logic/logic-templates.js?v=0.7.0-neon-area-1"></script>
 <script src="js/logic/logic-registry.js"></script>
 <script src="js/logic/logic-validator.js"></script>
 <script src="js/logic/logic-services.js"></script>
 <script src="js/logic/logic-runtime.js"></script>
 <script src="js/logic/logic-nodes-mvp.js"></script>
-<script src="js/engine/scene-store.js"></script>
+<script src="js/engine/scene-store.js?v=0.7.0-port-independent-assets-2"></script>
 <script src="js/runtime/logic-elements-runner.js"></script>
-<script src="js/editor/editor-core.js"></script>
+<script src="js/editor/editor-core.js?v=0.7.0-camera-helper-1"></script>
 <script src="js/editor/editor-layout.js"></script>
 <script src="js/editor/viewport-picking.js"></script>
-<script src="js/editor/viewport-events.js"></script>
+<script src="js/editor/viewport-events.js?v=0.7.0-pointer-recovery-1"></script>
 <script src="js/editor/fly-camera.js"></script>
-<script src="js/editor/gizmo-controls.js"></script>
+<script src="js/editor/gizmo-controls.js?v=0.7.0-pointer-recovery-1"></script>
 <script src="js/editor/visual-helpers.js"></script>
 <script src="js/editor/asset-library.js"></script>
 <script src="js/editor/asset-imports.js"></script>
 <script src="js/editor/status-ui.js"></script>
 <script src="js/editor/dialogs.js"></script>
 <script src="js/editor/context-menu.js"></script>
-<script src="js/editor/level-manager.js"></script>
-<script src="js/editor/player-blueprints.js"></script>
+<script src="js/editor/level-manager.js?v=0.7.0-complete-level-library-1"></script>
+<script src="js/editor/player-blueprints.js?v=0.7.0-shading-r185-1"></script>
 <script src="js/editor/folder-manager.js"></script>
 <script src="js/editor/keyboard-shortcuts.js"></script>
-<script src="js/editor/thumbnail-manager.js"></script>
+<script src="js/editor/thumbnail-manager.js?v=0.7.0-three-r185-1"></script>
 <script src="js/editor/floating-layout.js"></script>
 <script src="js/editor/preferences.js"></script>
 <script src="js/editor/quick-audio.js"></script>
-<script src="js/editor/editor-template.js"></script>
-<script src="js/editor/toolbar.js"></script>
+<script src="js/editor/editor-template.js?v=0.7.0-developer-debugger-3"></script>
+<script src="js/editor/developer-debugger.js?v=0.7.0-developer-debugger-3"></script>
+<script src="js/editor/toolbar.js?v=0.7.0-developer-debugger-1"></script>
 <script src="js/editor/side-panels.js"></script>
 <script src="js/editor/editor-menus.js"></script>
 <script src="js/editor/editor-menu-bar.js"></script>
@@ -107,35 +124,35 @@
 <script src="js/editor/asset-properties.js"></script>
 <script src="js/editor/asset-catalog.js"></script>
 <script src="js/editor/asset-dnd.js"></script>
-<script src="js/editor/outliner.js"></script>
-<script src="js/editor/selection-manager.js"></script>
+<script src="js/editor/outliner.js?v=0.7.0-selection-scroll-source-1"></script>
+<script src="js/editor/selection-manager.js?v=0.7.0-selection-scroll-source-1"></script>
 <script src="js/editor/history-manager.js"></script>
-<script src="js/editor/project-io.js"></script>
+<script src="js/editor/project-io.js?v=0.7.0-port-independent-project-2"></script>
 <script src="js/editor/input-settings.js"></script>
 <script src="js/editor/add-actions.js"></script>
 <script src="js/editor/scene-menu-actions.js"></script>
 <script src="js/editor/inspector-ui.js"></script>
-<script src="js/editor/music-library-panel.js"></script>
-<script src="js/editor/material-editor.js"></script>
+<script src="js/editor/music-library-panel.js?v=0.7.0-music-order-1"></script>
+<script src="js/editor/material-editor.js?v=0.7.0-persistence-audit-1"></script>
 <script src="js/editor/mesh-editor.js"></script>
-<script src="js/editor/object-inspector.js"></script>
-<script src="js/editor/player-camera-inspector.js"></script>
-<script src="js/editor/player-lights-inspector.js"></script>
+<script src="js/editor/object-inspector.js?v=0.7.0-persistence-audit-1"></script>
+<script src="js/editor/player-camera-inspector.js?v=0.7.0-camera-helper-1"></script>
+<script src="js/editor/player-lights-inspector.js?v=0.7.0-split-rear-colors-1"></script>
 <script src="js/editor/player-attachments-inspector.js"></script>
-<script src="js/editor/player-setup-inspector.js"></script>
+<script src="js/editor/player-setup-inspector.js?v=0.7.0-shading-r185-1"></script>
 <script src="js/editor/hud-inspector.js"></script>
-<script src="js/editor/environment-inspector.js"></script>
-<script src="js/editor/rendering-inspector.js"></script>
-<script src="js/editor/logic-elements-inspector.js"></script>
+<script src="js/editor/environment-inspector.js?v=0.7.0-clock-alignment-1"></script>
+<script src="js/editor/rendering-inspector.js?v=0.7.0-reflections-r185-1"></script>
+<script src="js/editor/logic-elements-inspector.js?v=0.7.0-split-rear-colors-1"></script>
 <script src="js/editor/inspector-controller.js"></script>
 <script src="js/editor/cinema-studio.js"></script>
-<script src="js/editor/viewport-layout.js"></script>
-<script src="js/editor/editor-runtime.js"></script>
+<script src="js/editor/viewport-layout.js?v=0.7.0-three-r185-1"></script>
+<script src="js/editor/editor-runtime.js?v=0.7.0-camera-helper-1"></script>
 <script src="js/editor/playable-export-level-picker.js"></script>
 <script src="js/editor/playable-export-assets.js"></script>
-<script src="js/editor/playable-export-zip.js"></script>
-<script src="js/editor/playable-export.js"></script>
-<script src="js/editor/editor.js"></script>
+<script src="js/editor/playable-export-zip.js?v=0.7.0-three-r185-1"></script>
+<script src="js/editor/playable-export.js?v=0.7.0-persistence-audit-1"></script>
+<script src="js/editor/editor.js?v=0.7.0-developer-debugger-2"></script>
 <script>
 const T = m => console.log('TEST: ' + m);
 const A = (cond, m) => console.log((cond ? 'TEST-PASS: ' : 'TEST-FAIL: ') + m);

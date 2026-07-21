@@ -286,8 +286,9 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
   const registry = GAME && GAME.pawns
     ? GAME.pawns
     : (window.LK_RUNTIME_VEHICLE_PAWNS && GAME ? window.LK_RUNTIME_VEHICLE_PAWNS.install(GAME) : null);
-  const soccerDefinition = graph && graph.soccerPawn;
-  const sourceDefinition = !soccerDefinition && graph && (graph.vehiclePawn || graph.playerPawnBlueprint) || null;
+  const characterDefinition = graph && graph.characterPawn;
+  const soccerDefinition = !characterDefinition && graph && graph.soccerPawn;
+  const sourceDefinition = !characterDefinition && !soccerDefinition && graph && (graph.vehiclePawn || graph.playerPawnBlueprint) || null;
   const variableValues = new Map((graph && Array.isArray(graph.variables) ? graph.variables : []).map(variable => [String(variable && variable.name || ''), variable && variable.value]));
   const definition = sourceDefinition ? Object.assign({}, sourceDefinition, {
     enabled:variableValues.has('PawnEnabled') ? variableValues.get('PawnEnabled') !== false : sourceDefinition.enabled,
@@ -341,7 +342,9 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
   };
   if(definition) applyGraphBindings(definition);
   let self = null;
-  if(registry && owner && soccerDefinition && window.LK_RUNTIME_SOCCER_PAWNS){
+  if(registry && owner && characterDefinition && window.LK_RUNTIME_CHARACTER_PAWNS){
+    self = window.LK_RUNTIME_CHARACTER_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(characterDefinition))), {input:inputService, graph, STORE});
+  } else if(registry && owner && soccerDefinition && window.LK_RUNTIME_SOCCER_PAWNS){
     self = window.LK_RUNTIME_SOCCER_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(soccerDefinition))), {input:inputService, graph, STORE});
   } else if(registry && owner && definition){
     self = registry.createLogic(owner, definition, {input:inputService, graph, STORE});
@@ -357,6 +360,7 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
     registry,
     self:() => self,
     get:resolve,
+    owner:ref => { const pawn = resolve(ref); return pawn && pawn.owner || null; },
     getByPlayerId:playerId => registry && registry.getByPlayerId(playerId),
     firstAvailablePlayerId:() => registry && registry.firstAvailablePlayerId ? registry.firstAvailablePlayerId() : null,
     possessFirstAvailable:ref => registry && registry.possessFirstAvailable ? registry.possessFirstAvailable(resolve(ref)) : null,

@@ -263,13 +263,29 @@
           <option value="raytracing">Ray lighting</option>
         </select>
       </div>
+      <div class="settingsRow" data-video-setting="exposure">
+        <div class="settingsMeta"><div class="settingsName">Exposure</div><output class="settingsVal" for="videoExposure">1.12×</output><div class="settingsDesc">Scene brightness before display output.</div></div>
+        <div class="settingsControl"><span>0.70</span><input id="videoExposure" type="range" min="0.7" max="1.6" step="0.01" value="1.12"><span>1.60</span></div>
+      </div>
       <div class="settingsRow" data-video-setting="shadows">
         <div class="settingsMeta"><div class="settingsName">Dynamic shadows</div><div class="settingsDesc">Quality-scaled realtime scene shadows.</div></div>
         <label class="settingsToggle"><input id="videoShadows" type="checkbox" checked><span>Enabled</span></label>
       </div>
+      <div class="settingsRow" data-video-setting="shadowQuality">
+        <div class="settingsMeta"><div class="settingsName">Shadow quality</div><div class="settingsDesc">Shadow-map resolution, independent from render resolution.</div></div>
+        <select id="videoShadowQuality" class="settingsSelect"><option value="auto" selected>Automatic</option><option value="low">Low · 512</option><option value="medium">Medium · 1024</option><option value="high">High · 2048</option><option value="ultra">Ultra · 4096</option></select>
+      </div>
       <div class="settingsRow" data-video-setting="reflections">
         <div class="settingsMeta"><div class="settingsName">Material reflections</div><div class="settingsDesc">Environment response for reflective materials.</div></div>
         <label class="settingsToggle"><input id="videoReflections" type="checkbox" checked><span>Enabled</span></label>
+      </div>
+      <div class="settingsRow" data-video-setting="reflectionQuality">
+        <div class="settingsMeta"><div class="settingsName">Reflection quality</div><div class="settingsDesc">SSR resolution and hit precision.</div></div>
+        <select id="videoReflectionQuality" class="settingsSelect"><option value="low">Low</option><option value="medium">Medium</option><option value="high" selected>High</option><option value="ultra">Ultra</option></select>
+      </div>
+      <div class="settingsRow" data-video-setting="reflectionDistance">
+        <div class="settingsMeta"><div class="settingsName">Reflection ray reach</div><output class="settingsVal" for="videoReflectionDistance">35 m</output><div class="settingsDesc">Maximum distance traced by screen-space reflection rays.</div></div>
+        <div class="settingsControl"><span>5 m</span><input id="videoReflectionDistance" type="range" min="5" max="120" step="1" value="35"><span>120 m</span></div>
       </div>
       <div class="settingsRow" data-video-setting="volumetricLighting">
         <div class="settingsMeta">
@@ -348,51 +364,39 @@
   })();
 </script>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="vendor/three-r185-compat.min.js?v=0.185.1-lk2"></script>
+<script src="vendor/cannon-0.6.2.min.js?v=0.6.2-lk1"></script>
 <script src="js/runtime/console-policy.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/FXAAShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/SimplexNoise.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSRShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSRPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
 <script src="js/runtime/assets.js"></script>
-<script src="js/runtime/music-library.js"></script>
-<script src="js/runtime/menu-music.js"></script>
-<script src="js/runtime/player-camera.js"></script>
-<script src="js/runtime/radio-hud.js"></script>
+<script src="js/runtime/music-library.js?v=0.7.0-music-order-1"></script>
+<script src="js/runtime/menu-music.js?v=0.7.0-music-order-1"></script>
+<script src="js/runtime/player-camera.js?v=0.7.0-camera-helper-1"></script>
+<script src="js/runtime/radio-hud.js?v=0.7.0-music-order-1"></script>
 <script src="js/runtime/audio.js"></script>
 <script src="js/runtime/engine-audio.js"></script>
-<script src="js/runtime/volumetric-clouds.js"></script>
-<script src="js/runtime/rain.js"></script>
-<script src="js/runtime/sky.js"></script>
-<script src="js/runtime/post.js"></script>
+<script src="js/runtime/volumetric-clouds.js?v=0.7.0-cinematic-optics-1"></script>
+<script src="js/runtime/rain.js?v=0.7.0-rain-ribbons-1"></script>
+<script src="js/runtime/sky.js?v=0.7.0-stable-flare-fallback-1"></script>
+<script src="js/runtime/cinematic-lens-flare.js?v=0.7.0-stable-flare-fallback-1"></script>
+<script src="js/runtime/post.js?v=0.7.0-stable-flare-fallback-1"></script>
 <script src="js/runtime/physics-world.js"></script>
 <script src="js/runtime/vehicle-visual-controller.js?v=0.6.7-menu-sequence-1"></script>
 <script src="js/runtime/vehicle-raycast-actuator.js?v=0.6.7-menu-sequence-1"></script>
 <script src="js/runtime/vehicle-steering-controller.js?v=0.6.7-menu-sequence-1"></script>
 <script src="js/runtime/vehicle-engine-controller.js?v=0.6.7-menu-sequence-1"></script>
 <script src="js/runtime/drive-tuning.js"></script>
-<script src="js/runtime/player-data-widgets.js"></script>
+<script src="js/runtime/player-data-widgets.js?v=0.7.0-three-r185-1"></script>
 <script src="js/runtime/game-hud.js"></script>
 <script src="js/runtime/track-catalog.js"></script>
 <script src="js/runtime/loading-flow.js"></script>
 <script src="js/runtime/runtime-loader.js"></script>
 <script src="js/runtime/model-assets.js"></script>
-<script src="js/runtime/player-model.js"></script>
-<script src="js/runtime/player-light-rig.js"></script>
+<script src="js/runtime/player-model.js?v=0.7.0-shading-r185-1"></script>
+<script src="js/runtime/player-light-rig.js?v=0.7.0-split-rear-colors-1"></script>
 <script src="js/runtime/world-state.js"></script>
-<script src="js/runtime/world-generation.js"></script>
+<script src="js/runtime/world-generation.js?v=0.7.0-three-r185-1"></script>
 <script src="js/runtime/session-flow.js"></script>
-<script src="js/runtime/settings-menu.js?v=0.6.9-menu-return-1"></script>
+<script src="js/runtime/settings-menu.js?v=0.7.0-reflections-r185-1"></script>
 <script src="js/runtime/game-flow.js?v=0.6.9-menu-return-1"></script>
 <script src="js/runtime/ui/window-manager.js"></script>
 <script src="js/runtime/input/input-actions.js"></script>
@@ -403,29 +407,34 @@
 <script src="js/runtime/input/touch-controls.js"></script>
 <script src="js/runtime/input/input-menu.js"></script>
 <script src="js/runtime/pawn-core.js"></script>
-<script src="js/lot-king.js?v=0.6.9-menu-return-1"></script>
+<script src="js/lot-king.js?v=0.7.0-developer-debugger-2"></script>
 <script src="js/runtime/vehicle-physics-backends.js"></script>
-<script src="js/runtime/vehicle-pawns.js?v=0.6.8-soccer-1"></script>
-<script src="js/runtime/character-movement.js?v=0.6.8-soccer-2"></script>
-<script src="js/runtime/soccer-locomotion.js?v=0.6.8-soccer-2"></script>
-<script src="js/runtime/soccer-pawns.js?v=0.6.8-soccer-2"></script>
-<script src="js/runtime/soccer-ball.js?v=0.6.8-soccer-1"></script>
+<script src="js/runtime/vehicle-pawns.js?v=0.7.0-developer-debugger-2"></script>
+<script src="js/runtime/character-movement.js?v=0.7.0-character-2"></script>
+<script src="js/runtime/character-pawn-base.js?v=0.7.0-character-2"></script>
+<script src="js/runtime/soccer-locomotion.js?v=0.7.0-character-2"></script>
+<script src="js/runtime/character-pawns.js?v=0.7.0-character-2"></script>
+<script src="js/runtime/soccer-pawns.js?v=0.7.0-character-2"></script>
+<script src="js/runtime/soccer-ball.js?v=0.7.0-three-r185-1"></script>
 <script src="js/runtime/penalty-flow.js?v=0.6.8-soccer-1"></script>
 <script src="js/runtime/soccer-stadium.js?v=0.6.8-soccer-1"></script>
+<script src="js/runtime/character-level-template.js?v=0.7.0-character-2"></script>
 <script src="js/plugins/plugin-api.js"></script>
 <script src="js/plugins/plugin-manager.js"></script>
 <script src="js/plugins/logic-element-plugin.js"></script>
-<script src="js/logic/logic-graph.js"></script>
+<script src="js/logic/logic-graph.js?v=0.7.0-shading-r185-1"></script>
 <script src="js/logic/logic-exporter.js"></script>
-<script src="js/logic/logic-templates.js?v=0.6.8-soccer-1"></script>
+<script src="js/logic/logic-templates.js?v=0.7.0-neon-area-1"></script>
 <script src="js/logic/logic-templates-soccer.js?v=0.6.8-soccer-2"></script>
+<script src="js/logic/logic-templates-character.js?v=0.7.0-character-2"></script>
 <script src="js/logic/logic-registry.js"></script>
 <script src="js/logic/logic-validator.js"></script>
-<script src="js/logic/logic-services.js?v=0.6.8-soccer-1"></script>
+<script src="js/logic/logic-services.js?v=0.7.0-character-2"></script>
 <script src="js/logic/logic-runtime.js"></script>
-<script src="js/logic/logic-nodes-mvp.js?v=0.6.8-soccer-1"></script>
+<script src="js/logic/logic-nodes-mvp.js?v=0.7.0-character-2"></script>
 <script src="js/logic/logic-nodes-soccer.js?v=0.6.8-soccer-2"></script>
-<script src="js/engine/scene-store.js?v=0.6.8-game-launch-1"></script>
+<script src="js/logic/logic-nodes-character.js?v=0.7.0-character-1"></script>
+<script src="js/engine/scene-store.js?v=0.7.0-port-independent-assets-2"></script>
 <script src="js/runtime/logic-elements-runner.js?v=0.6.8-soccer-1"></script>
   <script>
   (function(){

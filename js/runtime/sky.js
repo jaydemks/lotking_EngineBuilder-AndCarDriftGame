@@ -19,6 +19,8 @@ function createSky(deps){
 
   let DAY_LEN = 900;
   let t = 0.10;
+  let CYCLE_ENABLED = true;
+  let lastScheduleMinute = -1;
 
   const N = 900, sp = new Float32Array(N * 3);
   for(let i = 0; i < N; i++){
@@ -32,6 +34,7 @@ function createSky(deps){
   starGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
   const starMat = new THREE.PointsMaterial({color:0xcfe0ff, size:1.7, transparent:true, opacity:0, fog:false, sizeAttenuation:false});
   const stars = new THREE.Points(starGeo, starMat);
+  stars.frustumCulled = false;
   stars.renderOrder = -2;
   scene.add(stars);
 
@@ -47,10 +50,11 @@ function createSky(deps){
       g.fillStyle=gr; g.beginPath(); g.arc(x,y,r,0,7); g.fill();
       g.strokeStyle='rgba(225,228,238,.35)'; g.lineWidth=1.5; g.beginPath(); g.arc(x,y,r*.95,Math.PI*1.1,Math.PI*1.9); g.stroke();
     }
-    const tx=new THREE.CanvasTexture(c); tx.encoding=THREE.sRGBEncoding; return tx;
+    const tx=new THREE.CanvasTexture(c); tx.colorSpace=THREE.SRGBColorSpace; return tx;
   }
   const moon = new THREE.Mesh(new THREE.SphereGeometry(11, 24, 18),
     new THREE.MeshBasicMaterial({map:moonTexture(), fog:false, transparent:true, opacity:0}));
+  moon.frustumCulled = false;
   moon.renderOrder = -1; scene.add(moon);
 
   function glowTexture(inner, outer){
@@ -62,11 +66,12 @@ function createSky(deps){
     return new THREE.CanvasTexture(c);
   }
   const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexture('rgba(255,252,235,1)','rgba(255,206,110,.75)'), fog:false, transparent:true, depthWrite:false}));
+  sunSprite.frustumCulled = false;
   sunSprite.scale.set(70,70,1); sunSprite.renderOrder=-1; scene.add(sunSprite);
 
   function cloudTexture(){
     const c=document.createElement('canvas'); c.width=128; c.height=128;
-    const g=c.getContext('2d');
+    const g=c.getContext('2d',{willReadFrequently:true});
     const gr=g.createRadialGradient(64,70,6,64,70,58);
     gr.addColorStop(0,'rgba(255,255,255,.95)'); gr.addColorStop(.55,'rgba(255,255,255,.45)'); gr.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=gr; g.beginPath(); g.ellipse(64,70,58,40,0,0,7); g.fill();
@@ -181,7 +186,7 @@ function createSky(deps){
     if(PROC_ENV.env) PROC_ENV.env.dispose();
     if(PROC_ENV.tex) PROC_ENV.tex.dispose();
     PROC_ENV.tex = new THREE.CanvasTexture(c);
-    PROC_ENV.tex.encoding = THREE.sRGBEncoding;
+    PROC_ENV.tex.colorSpace = THREE.SRGBColorSpace;
     PROC_ENV.tex.mapping = THREE.EquirectangularReflectionMapping;
     PROC_ENV.env = PROC_ENV.pmrem.fromEquirectangular(PROC_ENV.tex).texture;
     return true;
@@ -239,7 +244,7 @@ function createSky(deps){
   }
 
   // ---------- sun bloom: alone luminoso attorno al disco solare ----------
-  const SUN_BLOOM_DEFAULTS = {enabled:true, intensity:1, size:1};
+  const SUN_BLOOM_DEFAULTS = {enabled:true, intensity:1.3, size:1, radius:.14, threshold:.52};
   const SUN_BLOOM = Object.assign({}, SUN_BLOOM_DEFAULTS);
 
   // ---------- lens flare parametrico ----------
@@ -248,7 +253,11 @@ function createSky(deps){
   // Un ghost a parametro t sta sul segmento sole → centro schermo:
   // pos camera-space = (sx*(1-t), sy*(1-t), sz), con t>1 oltre il centro.
   const clampf = (v, a, b) => Math.min(b, Math.max(a, v));
-  const FLARE_DEFAULTS = {enabled:true, intensity:.85, size:1, ghosts:5, spacing:.9, chroma:.7, halo:.45, haloSize:1, streak:.5};
+  const FLARE_DEFAULTS = {
+    mode:'classic', enabled:true, intensity:.72, size:.9, ghosts:6, spacing:.92, chroma:.5,
+    halo:.38, haloSize:1, streak:.32, starburst:.28, ghostOpacity:.72,
+    anamorphic:false, occlusion:true,
+  };
   const FLARE = Object.assign({}, FLARE_DEFAULTS);
   const FLARE_MAX_GHOSTS = 8;
   const FLARE_PALETTE = [0xffb066, 0x7fd0ff, 0xff8fb0, 0xa8ffd8, 0xffe6a0, 0x9fa8ff, 0xffc8e8, 0xc8f0ff];
@@ -261,7 +270,7 @@ function createSky(deps){
     gr.addColorStop(hard ? .22 : .45, 'rgba(255,255,255,.4)');
     gr.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=gr; g.fillRect(0,0,128,128);
-    return new THREE.CanvasTexture(c);
+    const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx;
   }
   function flareRingTex(){
     const c=document.createElement('canvas'); c.width=c.height=256;
@@ -272,7 +281,7 @@ function createSky(deps){
     gr.addColorStop(.86,'rgba(255,255,255,.55)');
     gr.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle=gr; g.fillRect(0,0,256,256);
-    return new THREE.CanvasTexture(c);
+    const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx;
   }
   function flareStreakTex(){
     const c=document.createElement('canvas'); c.width=256; c.height=64;
@@ -286,7 +295,27 @@ function createSky(deps){
     gv.addColorStop(0,'rgba(0,0,0,1)'); gv.addColorStop(.5,'rgba(0,0,0,0)'); gv.addColorStop(1,'rgba(0,0,0,1)');
     g.globalCompositeOperation='destination-out';
     g.fillStyle=gv; g.fillRect(0,0,256,64);
-    return new THREE.CanvasTexture(c);
+    const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx;
+  }
+  function flareStarburstTex(){
+    const c=document.createElement('canvas'); c.width=c.height=256;
+    const g=c.getContext('2d');
+    g.translate(128,128); g.globalCompositeOperation='lighter';
+    for(let i=0;i<16;i++){
+      const angle=i*Math.PI/8;
+      const length=i%4===0 ? 124 : (i%2===0 ? 82 : 48);
+      const width=i%4===0 ? 2.2 : .8;
+      const gradient=g.createLinearGradient(0,0,length,0);
+      gradient.addColorStop(0,'rgba(255,250,225,.8)');
+      gradient.addColorStop(.2,'rgba(255,225,180,.35)');
+      gradient.addColorStop(1,'rgba(255,210,160,0)');
+      g.save(); g.rotate(angle); g.fillStyle=gradient;
+      g.beginPath(); g.moveTo(0,-width); g.lineTo(length,0); g.lineTo(0,width); g.closePath(); g.fill(); g.restore();
+    }
+    const core=g.createRadialGradient(0,0,0,0,0,42);
+    core.addColorStop(0,'rgba(255,255,245,.75)'); core.addColorStop(1,'rgba(255,220,170,0)');
+    g.fillStyle=core; g.fillRect(-44,-44,88,88);
+    const tx=new THREE.CanvasTexture(c); tx.colorSpace=THREE.SRGBColorSpace; return tx;
   }
   function flareSprite(map, colorHex){
     const s = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -301,10 +330,11 @@ function createSky(deps){
   flare.glow = flareSprite(flareDiscTex(true), 0xffe7b0);
   flare.glow.renderOrder = 990;               // primo del gruppo: fa da "probe" per il layout
   flare.streak = flareSprite(flareStreakTex(), 0xffe0c0);
+  flare.starburst = flareSprite(flareStarburstTex(), 0xffe8c8);
   flare.halo = flareSprite(flareRingTex(), 0xbfd8ff);
   const ghostTex = flareDiscTex(false);
   for(let i = 0; i < FLARE_MAX_GHOSTS; i++) flare.ghosts.push(flareSprite(ghostTex));
-  flare.group.add(flare.glow, flare.streak, flare.halo);
+  flare.group.add(flare.glow, flare.starburst, flare.streak, flare.halo);
   for(const g of flare.ghosts) flare.group.add(g);
   scene.add(flare.group);
 
@@ -316,14 +346,114 @@ function createSky(deps){
   }
   applyFlareColors();
 
-  const _fv = new THREE.Vector3(), _fn = new THREE.Vector3();
+  const _fv = new THREE.Vector3(), _fn = new THREE.Vector3(), _fo = new THREE.Vector3(), _fd = new THREE.Vector3(), _fs = new THREE.Vector3();
+  const flareRaycaster = new THREE.Raycaster();
+  const flareOcclusion = new WeakMap();
+  function celestialDistance(camera, preferred){
+    const near = Math.max(.01, Number(camera && camera.near) || .1);
+    const far = Math.max(near + 2, Number(camera && camera.far) || 500);
+    return Math.max(near * 4, Math.min(preferred, far * .78));
+  }
+  function sunPositionForCamera(camera, target, preferred){
+    camera.getWorldPosition(target);
+    return target.addScaledVector(sunV, celestialDistance(camera, preferred || 250));
+  }
+  function flareObjectIgnored(object){
+    if(!object || object === sunSprite || object === moon || object === stars || object === hdriGroup) return true;
+    for(let node=object; node; node=node.parent){
+      if(node.visible === false || node === flare.group || node === hdriGroup) return true;
+      if(node.userData && (
+        node.userData.editorHelper || node.userData.helperOnly || node.userData.editorOnly ||
+        node.userData.nonExportable || node.userData.editorCameraHelper ||
+        node.userData.editorCameraHelperPick || node.userData.editorLightHandle ||
+        node.userData.colliderPreview || node.userData.lkFlareIgnore
+      )) return true;
+    }
+    return false;
+  }
+  const flareAlphaPixels=new WeakMap();
+  function flareTextureAlpha(material,hit){
+    const map=material&&material.map;
+    const image=map&&map.image;
+    const uv=hit&&hit.uv;
+    if(!image||!uv||typeof image.getContext!=='function') return 1;
+    try {
+      const width=image.width||1,height=image.height||1;
+      const x=Math.max(0,Math.min(width-1,Math.floor(uv.x*width)));
+      const y=Math.max(0,Math.min(height-1,Math.floor((map.flipY===false?uv.y:1-uv.y)*height)));
+      let cached=flareAlphaPixels.get(image);
+      if(!cached||cached.width!==width||cached.height!==height){
+        const context=image.getContext('2d',{willReadFrequently:true});
+        cached={width,height,data:context.getImageData(0,0,width,height).data};
+        flareAlphaPixels.set(image,cached);
+      }
+      return cached.data[(y*width+x)*4+3]/255;
+    } catch(err){ return 1; }
+  }
+  function flareHitTransmission(hit,camera,direction){
+    const object=hit&&hit.object;
+    if(flareObjectIgnored(object)) return 1;
+    if(object&&object.userData&&typeof object.userData.lkFlareTransmission==='function'){
+      return clampf(Number(object.userData.lkFlareTransmission(hit,camera,direction))||0,0,1);
+    }
+    const all=object&&object.material?(Array.isArray(object.material)?object.material:[object.material]):[];
+    const material=all.length>1&&hit.face&&all[hit.face.materialIndex]?all[hit.face.materialIndex]:all[0];
+    if(!material||material.visible===false||material.depthTest===false||material.blending===THREE.AdditiveBlending) return 1;
+    const textureAlpha=flareTextureAlpha(material,hit);
+    if(material.alphaTest>0&&textureAlpha<material.alphaTest) return 1;
+    const coverage=clampf((material.opacity==null?1:Number(material.opacity)||0)*textureAlpha,0,1);
+    if(coverage<=.002) return 1;
+    const opticalTransmission=clampf(Number(material.transmission)||0,0,1);
+    if(opticalTransmission>0) return clampf(1-coverage*(1-opticalTransmission*.82),.05,1);
+    if(material.transparent===true||coverage<.999) return clampf(1-coverage*.88,.02,1);
+    return 0;
+  }
+  function flareSourceVisibility(camera){
+    if(!FLARE.occlusion) return 1;
+    let state=flareOcclusion.get(camera);
+    if(!state){ state={value:1,target:1,last:-Infinity}; flareOcclusion.set(camera,state); }
+    const now=performance.now();
+    if(now-state.last>70){
+      camera.getWorldPosition(_fo);
+      sunPositionForCamera(camera,_fs,250);
+      _fd.copy(_fs).sub(_fo);
+      const distance=_fd.length();
+      if(distance>1){
+        flareRaycaster.set(_fo,_fd.multiplyScalar(1/distance));
+        // Sprite.raycast in modern Three.js needs the active camera even when
+        // the ray direction is authored manually toward the sun.
+        flareRaycaster.camera=camera;
+        flareRaycaster.near=.1; flareRaycaster.far=Math.max(.1,distance-2);
+        const hits=flareRaycaster.intersectObjects(scene.children,true);
+        const sampled=new Set();
+        let atmosphereSampled=false;
+        let transmission=1;
+        for(const hit of hits){
+          if(!hit||sampled.has(hit.object)) continue;
+          sampled.add(hit.object);
+          if(hit.object&&hit.object.userData&&typeof hit.object.userData.lkFlareTransmission==='function') atmosphereSampled=true;
+          transmission*=flareHitTransmission(hit,camera,flareRaycaster.ray.direction);
+          if(transmission<=.01){ transmission=0; break; }
+        }
+        if(transmission>.01&&!atmosphereSampled&&VC&&typeof VC.sunTransmission==='function'){
+          transmission*=VC.sunTransmission(camera,flareRaycaster.ray.direction);
+        }
+        state.target=clampf(transmission,0,1);
+      }
+      state.last=now;
+    }
+    state.value += (state.target-state.value)*.22;
+    return state.value;
+  }
   function layoutFlare(camera){
     if(!camera || !camera.matrixWorldInverse) return;
-    _fv.copy(flare.sunPos).applyMatrix4(camera.matrixWorldInverse);
+    sunPositionForCamera(camera,_fs,250);
+    _fv.copy(_fs).applyMatrix4(camera.matrixWorldInverse);
     const behind = _fv.z > -1;
-    _fn.copy(flare.sunPos).project(camera);
+    _fn.copy(_fs).project(camera);
     const edge = behind ? 99 : Math.max(Math.abs(_fn.x), Math.abs(_fn.y));
-    const fade = clamp01(1.35 - edge * .85) * flare.vis * clampf(FLARE.intensity, 0, 2);
+    const centerResponse = 1 - clamp01(Math.hypot(_fn.x, _fn.y) * .22);
+    const fade = clamp01(1.2 - edge * .9) * centerResponse * flare.vis * clampf(FLARE.intensity, 0, 2) * flareSourceVisibility(camera);
     const dist = Math.max(1, _fv.length());
     const k = dist * .06 * clampf(FLARE.size, .1, 4);
     const place = (spr, t, sx, sy, op) => {
@@ -333,7 +463,8 @@ function createSky(deps){
       spr.updateMatrixWorld();
     };
     place(flare.glow, 0, k * 2.4, k * 2.4, fade * .7);
-    const stW = k * 9 * (.4 + clampf(FLARE.streak, 0, 1));
+    place(flare.starburst, 0, k * 5.2, k * 5.2, fade * FLARE.starburst * .72);
+    const stW = k * (FLARE.anamorphic ? 14 : 9) * (.4 + clampf(FLARE.streak, 0, 1));
     place(flare.streak, 0, stW, stW * .12, fade * FLARE.streak * .5);
     const haloS = k * (2.2 * clampf(FLARE.haloSize, .2, 3) + .6);
     place(flare.halo, 1, haloS, haloS, fade * FLARE.halo * .55);
@@ -342,17 +473,71 @@ function createSky(deps){
       const g = flare.ghosts[i];
       if(i >= n || fade <= 0){ g.material.opacity = 0; continue; }
       const t = clampf(FLARE.spacing, .1, 2) * (.45 + 1.55 * (i + 1) / (n + 1));
-      const gs = k * (.35 + ((i * 2.7 + .7) % 1) * .9);
-      place(g, t, gs, gs, fade * (.34 - .022 * i));
+      const gs = k * (.3 + ((i * 2.7 + .7) % 1) * .85);
+      const aspect = FLARE.anamorphic ? 1.45 : (i%3===0 ? 1.12 : 1);
+      place(g, t, gs*aspect, gs/aspect, fade * (.3 - .018 * i) * FLARE.ghostOpacity);
     }
   }
   flare.glow.onBeforeRender = (rnd, scn, camera) => layoutFlare(camera);
 
+  function cinematicFlareState(camera){
+    if(!camera || !camera.matrixWorldInverse) return {mode:FLARE.mode, visible:false};
+    sunPositionForCamera(camera,_fs,250);
+    _fv.copy(_fs).applyMatrix4(camera.matrixWorldInverse);
+    const behind=_fv.z>-1;
+    _fn.copy(_fs).project(camera);
+    const inside=!behind&&_fn.z>=-1&&_fn.z<=1&&Math.abs(_fn.x)<1.22&&Math.abs(_fn.y)<1.22;
+    const sourceTransmission=inside?flareSourceVisibility(camera):0;
+    // A real lens flare remains visible through haze and transmissive glass,
+    // but opaque depth must still suppress it completely. Keep this optical
+    // response separate from the literal sun-disc opacity.
+    const opticalVisibility=sourceTransmission<=.001?0:Math.pow(sourceTransmission,.55);
+    return {
+      mode:FLARE.mode,
+      visible:inside&&flare.vis>.01,
+      ndcX:_fn.x,
+      ndcY:_fn.y,
+      visibility:inside?flare.vis*opticalVisibility:0,
+      sourceTransmission,
+      color:sun.color.getHex(),
+      flare:Object.assign({},FLARE),
+      bloom:Object.assign({},SUN_BLOOM),
+    };
+  }
+
   const skyDay=new THREE.Color(0x86b4e2), skyDusk=new THREE.Color(0x53365a), skyNight=new THREE.Color(0x060a14);
   const sunDay=new THREE.Color(0xfff2dd), sunDusk=new THREE.Color(0xff8b4a), moonLight=new THREE.Color(0x9db4ff);
+  const hemiSkyDay=new THREE.Color(0xb8d8ff), hemiGroundDay=new THREE.Color(0x51483d);
+  const hemiSkyNight=new THREE.Color(0x2b4168), hemiGroundNight=new THREE.Color(0x15151b);
+  const LIGHTING_DEFAULTS={daySun:1.3, dayAmbient:.82, moonDirect:.16, moonIndirect:.18};
+  const LIGHTING=Object.assign({},LIGHTING_DEFAULTS);
   const bg = new THREE.Color(), cl = new THREE.Color();
   const sunV = new THREE.Vector3();
   const lightDir = new THREE.Vector3();
+
+  // Celestial visuals are directions, not level objects. Re-center them for
+  // every active camera and keep their apparent angular size constant even
+  // when that camera authors a short far plane.
+  sunSprite.onBeforeRender = (nextRenderer,nextScene,camera) => {
+    const distance=celestialDistance(camera,330);
+    camera.getWorldPosition(sunSprite.position);
+    sunSprite.position.addScaledVector(sunV,distance);
+    const base=Number(sunSprite.userData.lkBaseScale)||70;
+    sunSprite.scale.setScalar(base*distance/330);
+    sunSprite.material.opacity=(Number(sunSprite.userData.lkBaseOpacity)||0)*flareSourceVisibility(camera);
+    sunSprite.updateMatrixWorld();
+  };
+  moon.onBeforeRender = (nextRenderer,nextScene,camera) => {
+    const distance=celestialDistance(camera,340);
+    camera.getWorldPosition(moon.position);
+    moon.position.addScaledVector(sunV,-distance);
+    moon.scale.setScalar(distance/340);
+    moon.updateMatrixWorld();
+  };
+  stars.onBeforeRender = (nextRenderer,nextScene,camera) => {
+    camera.getWorldPosition(stars.position);
+    stars.updateMatrixWorld();
+  };
 
   // nuvole volumetriche (modulo opzionale, sostituisce le sprite clouds quando
   // attivo). Creazione lazy: se lo script arriva dopo, si aggancia comunque.
@@ -363,8 +548,52 @@ function createSky(deps){
   }
   ensureVC();
 
+  function normalizeHour(value, fallback){
+    const n = Number(value);
+    if(!Number.isFinite(n)) return fallback;
+    return ((n % 24) + 24) % 24;
+  }
+  // The solar curve starts at sunrise (cycle t=0), not at midnight.
+  // Public clock authoring therefore maps: 0 -> 06:00, .25 -> 12:00,
+  // .5 -> 18:00 and .75 -> 00:00. Saved skyTime remains normalized 0..1.
+  function cycleTimeToClockHour(value){
+    const cycle=((Number(value)||0)%1+1)%1;
+    return (cycle*24+6)%24;
+  }
+  function clockHourToCycleTime(value){
+    const hour=normalizeHour(value,6);
+    return ((hour-6)/24+1)%1;
+  }
+  function setCycleTime(value){
+    t=((Number(value)||0)%1+1)%1;
+    lastScheduleMinute=-1;
+    update(0);
+  }
+  function setClockHour(value){ setCycleTime(clockHourToCycleTime(value)); }
+  function scheduleIsOn(hour, onHour, offHour){
+    const on = normalizeHour(onHour, 18);
+    const off = normalizeHour(offHour, 7);
+    if(Math.abs(on - off) < .0001) return true;
+    return on > off ? (hour >= on || hour < off) : (hour >= on && hour < off);
+  }
+  function refreshLightSchedules(force){
+    const minute = Math.floor(t * 1440) % 1440;
+    if(!force && minute === lastScheduleMinute) return;
+    lastScheduleMinute = minute;
+    const hour = cycleTimeToClockHour(t);
+    scene.traverse(light => {
+      if(!light || !light.isLight || light === sun || light === hemi) return;
+      const schedule = light.userData && light.userData.dayNightSchedule;
+      if(!schedule) return;
+      if(light.userData.dayNightManualVisible == null) light.userData.dayNightManualVisible = light.visible !== false;
+      const on = schedule.enabled === true ? scheduleIsOn(hour, schedule.onHour, schedule.offHour) : true;
+      light.userData.dayNightScheduleActive = on;
+      light.visible = light.userData.dayNightManualVisible !== false && on;
+    });
+  }
+
   function update(dt){
-    t = (t + dt/DAY_LEN) % 1;
+    if(CYCLE_ENABLED) t = (t + dt/DAY_LEN) % 1;
     const th = t*Math.PI*2;
     sunV.set(Math.cos(th), Math.sin(th), 0.35).normalize();
     const dayF   = clamp01(sunV.y*2.2);
@@ -385,22 +614,30 @@ function createSky(deps){
 
     if(sunV.y > -0.04){
       sun.position.copy(sunV).multiplyScalar(130);
-      sun.intensity = 0.15 + 0.8*dayF;
+      sun.intensity = LIGHTING.moonDirect + (LIGHTING.daySun-LIGHTING.moonDirect)*dayF;
       sun.color.copy(sunDusk).lerp(sunDay, dayF);
     } else {
       sun.position.set(-sunV.x, -sunV.y, -sunV.z).multiplyScalar(130);
-      sun.intensity = 0.14;
+      sun.intensity = LIGHTING.moonDirect * nightF;
       sun.color.copy(moonLight);
     }
-    hemi.intensity = 0.14 + 0.5*dayF;
+    const twilightAmbient = Math.max(LIGHTING.moonIndirect, LIGHTING.dayAmbient * .3) * duskF;
+    hemi.intensity = LIGHTING.dayAmbient * dayF + LIGHTING.moonIndirect * nightF + twilightAmbient;
+    hemi.color.copy(hemiSkyNight).lerp(hemiSkyDay, dayF);
+    hemi.groundColor.copy(hemiGroundNight).lerp(hemiGroundDay, dayF);
 
     sunSprite.position.copy(sunV).multiplyScalar(330);
-    sunSprite.visible = SUN_BLOOM.enabled;
-    sunSprite.material.opacity = clamp01(sunV.y*4 + .15) * (0.85 + duskF*.3) * clampf(SUN_BLOOM.intensity, 0, 2);
-    sunSprite.scale.setScalar((70 + duskF*45) * clampf(SUN_BLOOM.size, .2, 3));
+    // The cinematic post effect follows the heavier Volumetric Lighting option.
+    // With it disabled, keep the cheaper classic sun flare visible.
+    const cinematicMode=FLARE.mode==='cinematic'&&!!window.LK_RUNTIME_CINEMATIC_LENS_FLARE&&document.body.classList.contains('lk-volumetric-lighting');
+    sunSprite.visible = SUN_BLOOM.enabled&&!cinematicMode;
+    sunSprite.userData.lkBaseOpacity=clamp01(sunV.y*4+.15)*(0.85+duskF*.3)*clampf(SUN_BLOOM.intensity,0,3);
+    sunSprite.material.opacity=sunSprite.userData.lkBaseOpacity;
+    sunSprite.userData.lkBaseScale=(70+duskF*45)*clampf(SUN_BLOOM.size,.2,3);
+    sunSprite.scale.setScalar(sunSprite.userData.lkBaseScale);
     flare.sunPos.copy(sunV).multiplyScalar(250);
     flare.vis = clamp01(sunV.y*3 + .2);
-    flare.group.visible = FLARE.enabled && flare.vis > 0.01 && FLARE.intensity > 0.01;
+    flare.group.visible = !cinematicMode&&FLARE.enabled&&flare.vis>0.01&&FLARE.intensity>0.01;
     moon.position.set(-sunV.x, -sunV.y, -sunV.z).multiplyScalar(340);
     moon.material.opacity = clamp01(-sunV.y*5);
     moon.rotation.y += dt*.01;
@@ -410,6 +647,7 @@ function createSky(deps){
     lampMat.emissiveIntensity = 0.5 + nightF*2.4;
     pl1.intensity = 0.15 + nightF*0.95;
     pl2.intensity = 0.1  + nightF*0.6;
+    refreshLightSchedules(false);
 
     const volCloudsOn = VC && VC.isEnabled();
     cl.set(0xffffff).lerp(sunDusk, duskF*.7);
@@ -433,9 +671,14 @@ function createSky(deps){
 
   return {update,
     getTime: () => t,
-    setTime: v => { t = ((v % 1) + 1) % 1; update(0); },
+    setTime: setCycleTime,
+    getClockHour: () => cycleTimeToClockHour(t),
+    setClockHour,
+    getCycleEnabled: () => CYCLE_ENABLED,
+    setCycleEnabled: v => { CYCLE_ENABLED = v !== false; update(0); },
     getDayLength: () => DAY_LEN,
     setDayLength: v => { DAY_LEN = Math.max(10, v); },
+    refreshLightSchedules: () => refreshLightSchedules(true),
     hdri: {
       state: HDRI,
       setEnabled: () => { HDRI.enabled = false; update(0); },
@@ -462,6 +705,7 @@ function createSky(deps){
       get: () => Object.assign({}, FLARE),
       set: patch => {
         Object.assign(FLARE, patch || {});
+        FLARE.mode = FLARE.mode === 'cinematic' ? 'cinematic' : 'classic';
         FLARE.enabled = FLARE.enabled === true;
         FLARE.intensity = clampf(Number(FLARE.intensity) || 0, 0, 2);
         FLARE.size = clampf(Number(FLARE.size) || FLARE_DEFAULTS.size, .2, 3);
@@ -471,10 +715,15 @@ function createSky(deps){
         FLARE.halo = clampf(Number(FLARE.halo) || 0, 0, 1);
         FLARE.haloSize = clampf(Number(FLARE.haloSize) || FLARE_DEFAULTS.haloSize, .2, 3);
         FLARE.streak = clampf(Number(FLARE.streak) || 0, 0, 1);
+        FLARE.starburst = clampf(Number(FLARE.starburst) || 0, 0, 1);
+        FLARE.ghostOpacity = clampf(Number(FLARE.ghostOpacity) || 0, 0, 1);
+        FLARE.anamorphic = FLARE.anamorphic === true;
+        FLARE.occlusion = FLARE.occlusion !== false;
         applyFlareColors();
         update(0);
       },
       defaults: () => Object.assign({}, FLARE_DEFAULTS),
+      postState: camera => cinematicFlareState(camera),
       // compat con le vecchie chiavi di persistenza (flareEnabled/Opacity/Size)
       setEnabled: v => { FLARE.enabled = !!v; update(0); },
       getEnabled: () => FLARE.enabled,
@@ -488,11 +737,31 @@ function createSky(deps){
       set: patch => {
         Object.assign(SUN_BLOOM, patch || {});
         SUN_BLOOM.enabled = SUN_BLOOM.enabled === true;
-        SUN_BLOOM.intensity = clampf(Number(SUN_BLOOM.intensity) || 0, 0, 2);
+        SUN_BLOOM.intensity = clampf(Number(SUN_BLOOM.intensity) || 0, 0, 3);
         SUN_BLOOM.size = clampf(Number(SUN_BLOOM.size) || SUN_BLOOM_DEFAULTS.size, .2, 3);
+        SUN_BLOOM.radius = clampf(Number(SUN_BLOOM.radius) || SUN_BLOOM_DEFAULTS.radius, .02, 1);
+        SUN_BLOOM.threshold = Number.isFinite(Number(SUN_BLOOM.threshold)) ? clampf(Number(SUN_BLOOM.threshold), 0, 1) : SUN_BLOOM_DEFAULTS.threshold;
         update(0);
       },
       defaults: () => Object.assign({}, SUN_BLOOM_DEFAULTS),
+    },
+    lighting: {
+      get: () => Object.assign({}, LIGHTING),
+      set: patch => {
+        patch = Object.assign({}, patch || {});
+        // Load projects saved during the legacy nightSun/nightAmbient period.
+        if(patch.moonDirect == null && patch.nightSun != null) patch.moonDirect = patch.nightSun;
+        if(patch.moonIndirect == null && patch.nightAmbient != null) patch.moonIndirect = patch.nightAmbient;
+        delete patch.nightSun;
+        delete patch.nightAmbient;
+        Object.assign(LIGHTING, patch);
+        LIGHTING.daySun=clampf(Number(LIGHTING.daySun)||0,0,3);
+        LIGHTING.dayAmbient=clampf(Number(LIGHTING.dayAmbient)||0,0,2);
+        LIGHTING.moonDirect=clampf(Number(LIGHTING.moonDirect)||0,0,1);
+        LIGHTING.moonIndirect=clampf(Number(LIGHTING.moonIndirect)||0,0,1);
+        update(0);
+      },
+      defaults: () => Object.assign({}, LIGHTING_DEFAULTS),
     },
     volClouds: {
       available: () => !!ensureVC(),

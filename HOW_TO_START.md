@@ -10,48 +10,50 @@ From the repository root, run:
 avvio.bat
 ```
 
-This starts the local server on port `5600` and opens the editor:
+This starts the local server on port `5700` and opens the landing menu:
 
 ```text
-http://localhost:5600/engine_editor.html
+http://localhost:5700/
 ```
 
-Use this when you want the normal local editor workflow.
+The Engine Editor is loaded only after you press **ENGINE EDITOR**. To bypass the landing menu intentionally, run `set PAGE=engine_editor.html` before `avvio.bat`.
 
-## Manual Static Server
+## Manual Local Server
 
-You can also start a simple server yourself:
+You can also start the same project-aware local server yourself:
 
 ```bash
-python3 -m http.server 5600
+python3 serve_local.py 5700 --bind 127.0.0.1
 ```
 
 Then open one of these:
 
-- `http://localhost:5600/`
-- `http://localhost:5600/engine_editor.html`
-- `http://localhost:5600/gameplay.html`
+- `http://localhost:5700/`
+- `http://localhost:5700/engine_editor.html`
+- `http://localhost:5700/gameplay.html`
 
 ## Browser Storage Note
 
-Projects, imported assets and IndexedDB blobs are tied to the exact browser origin.
+Browser `localStorage` and IndexedDB are technically tied to the exact origin, but they are now caches rather than the authoritative local project.
 
 These are different storage buckets:
 
-- `http://localhost:5600`
-- `http://127.0.0.1:5600`
+- `http://localhost:5700`
+- `http://127.0.0.1:5700`
 - `http://localhost:8000`
-- `http://192.168.x.x:5600`
+- `http://192.168.x.x:5700`
 
-If a project seems missing, first check that you opened the same host and port you used when saving it.
+`avvio.bat` and `serve_local.py` keep the complete project in `.lotking-local/active-project.lkep.json`. When another localhost port is selected, the editor restores every level and migrates embedded assets into that origin's IndexedDB automatically. The previous disk snapshot is also retained before each replacement.
 
-To move a project between origins or devices, use the editor's project export/import tools.
+While **Dev → Performance Debugger** is open, the same local server updates `.lotking-local/developer-performance-latest.md` about every five seconds. It is a concise, generated report of frame timing, renderer/scene load, particles, recent diagnostics and the heaviest authored elements. Use **Export log** in the overlay for the complete JSON report. Both local bridge files are ignored by Git.
+
+If you use a generic static server instead of `serve_local.py`, both disk bridges are unavailable: project storage falls back to the origin-specific browser cache and the debugger shows `AUTO LOG · LOCAL ONLY`. Manual project export/import and the debugger's JSON download continue to work.
 
 ## Project Workspace And Online Demo
 
 The Project Workspace button is an optional bridge. It does not replace the current local browser database workflow, but it can use a `.lkep.json` file as the portable project document.
 
-- On `localhost`, the editor keeps working as before with localStorage and IndexedDB. The Workspace panel opens automatically in the editor so you can choose the local browser database or open/sync an LKEP project file.
+- On `localhost`, Save writes the browser cache, the optional linked workspace and the local disk bridge. The Workspace panel can still open/sync a separately chosen LKEP project file.
 - The editor detects a hosted site versus localhost automatically. It then asks only which project to open: the author `DEMO` (authored for consumer high-end hardware) or a clean project. The hosted path asks the visitor to authorize a local project directory in Chrome/Edge; the workspace manifest and DEMO project are written there, while browser storage remains local to that visitor.
 - On first editor entry, this project choice is required and appears before world/assets/editor warm-up. It has no close button until a choice is completed. After the selection reload, the normal loading phase starts; later the workspace panel can be reopened and closed normally from the toolbar.
 - Hosted Editor never uploads project data or imported assets to the site's FTP/server. If writable folder access is unavailable, **Run locally / GitHub** shows the download, extraction and `avvio.bat` steps.
@@ -112,5 +114,5 @@ Typical workflows:
 For day-to-day work, start with:
 
 ```text
-http://localhost:5600/engine_editor.html
+http://localhost:5700/engine_editor.html
 ```

@@ -146,7 +146,7 @@ This is still experimental. The editor is already useful for building and testin
 
 There are many systems left to fix and many more to add, and this is not a photoreal renderer today. Even so, the current browser-only editor can already build levels, interactive scenes, cinematics and playable experiments without requiring a large toolchain. I hope the current state is already fun to explore and that people use it to make many different projects; visual fidelity, extensibility and workflow depth can grow step by step from here.
 
-The active `v0.6.9` milestone stabilizes the navigation lifecycle introduced around the expanded landing, gameplay and editor experience. Shared Pawn foundations, character movement and the editor-authored soccer penalty mode remain available, while the next practical focus includes reusable game objectives/rules, broader Logic Element coverage, browser hardening and export reliability.
+The active `v0.7.0` milestone focuses on release-wide editor stability: complete Save/LKEP/playable persistence, smoother viewport and authoring interactions, modern Three.js rendering, improved reflections and cinematic optics, richer Player Car/Vehicle Pawn controls, and an integrated Developer Debugger for performance, stutter, error and scene-resource analysis.
 
 The main focus areas after this milestone are:
 
@@ -195,25 +195,27 @@ From the repository root on Windows, the normal way I run it is:
 avvio.bat
 ```
 
-That starts the local static server on port `5600` and opens:
+That starts the local server on port `5700` and opens the landing menu:
 
 ```text
-http://localhost:5600/engine_editor.html
+http://localhost:5700/
 ```
 
-You can also start any static server yourself, for example:
+The editor is loaded only after selecting **ENGINE EDITOR**. `PAGE=engine_editor.html` remains available as an explicit direct-editor override.
+
+You can also start the project-aware local server yourself:
 
 ```bash
-python3 -m http.server 5600
+python3 serve_local.py 5700 --bind 127.0.0.1
 ```
 
 Then open:
 
-- `http://localhost:5600/`
-- `http://localhost:5600/gameplay.html`
-- `http://localhost:5600/engine_editor.html`
+- `http://localhost:5700/`
+- `http://localhost:5700/gameplay.html`
+- `http://localhost:5700/engine_editor.html`
 
-Try to keep using the same host and port while working. Browser storage is tied to the exact origin, so `localhost:5600`, `127.0.0.1:5600`, another port, or a LAN IP all have separate saved projects and IndexedDB assets.
+Browser storage is still origin-scoped internally, but `serve_local.py` keeps the complete authoritative project under `.lotking-local/` and restores all levels plus embedded assets when the local port changes. The Developer Debugger also refreshes `.lotking-local/developer-performance-latest.md`, a concise local diagnostic snapshot that can be inspected without exporting a file manually. A generic static server does not provide these disk bridges and falls back to the origin-specific browser cache; the debugger's complete JSON download remains available.
 
 Opening files directly with `file://` can partially work, but a local server is the supported path. Models, audio files and browser storage behave much better that way.
 

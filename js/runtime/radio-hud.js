@@ -492,6 +492,18 @@ function createRadioHud(deps){
     if(removed) popup('RADIO TRACK REMOVED', '#ff7d54');
     return removed;
   }
+  function moveTrack(index, direction){
+    const moved = library.moveAt(index, direction);
+    if(!moved) return null;
+    if(idx === moved.fromIndex) idx = moved.index;
+    else if(idx === moved.index) idx = moved.fromIndex;
+    return moved;
+  }
+  function renameTrack(index, title){
+    const updated = library.updateAt(index, {title});
+    if(updated && index === idx) el.title.textContent = updated.title;
+    return updated;
+  }
   function setVolume(v){ extVol = clamp(v, 0, 2); applyVolume(); }
   audio.addEventListener('ended', next);
 
@@ -630,7 +642,15 @@ function createRadioHud(deps){
     getTracks: options => library.list(options),
     addTracks,
     removeTrack,
-    restoreTracks: tracks => library.restoreTracks(tracks),
+    moveTrack,
+    renameTrack,
+    restoreTracks: async tracks => {
+      const wasPlaying = !audio.paused;
+      const restored = await library.restoreTracks(tracks);
+      idx = 0;
+      if(library.count()) load(0, wasPlaying);
+      return restored;
+    },
     getStoredTracks: () => library.storedTracks(),
     loadTrack: i => load(i, true),
     getTrackIndex: () => idx};

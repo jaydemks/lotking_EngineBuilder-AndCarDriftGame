@@ -390,8 +390,26 @@ function createLogicElementPreviewNode(THREERef, element){
     node.add(helper);
   } else if(type === 'light'){
     const group = new THREERef.Group();
-    const bulb = new THREERef.Mesh(new THREERef.SphereGeometry(.16, 16, 8), logicElementMaterial(THREERef, element, {basic:true, helper:true}));
-    const glow = new THREERef.PointLight(element && element.color || '#facc15', Math.max(0, Number(element && element.intensity) || .75), Math.max(0, Number(element && element.distance) || 4));
+    const lightKey = String(element && [element.lightKind, element.condition, element.id, element.name].filter(Boolean).join(' ') || '').toLowerCase();
+    const isNeonArea = /rectarea|rect-area|neon|underglow/.test(lightKey) && typeof THREERef.RectAreaLight === 'function';
+    const isFrontRear = /front|rear/.test(lightKey);
+    const areaWidth = Math.max(.04, Number(element && element.areaWidth) || (isFrontRear ? 1.9 : .08));
+    const areaHeight = Math.max(.04, Number(element && element.areaHeight) || (isFrontRear ? .08 : 2.7));
+    const bulb = new THREERef.Mesh(
+      isNeonArea ? new THREERef.BoxGeometry(areaWidth, .035, areaHeight) : new THREERef.SphereGeometry(.16, 16, 8),
+      logicElementMaterial(THREERef, element, {basic:true, helper:true})
+    );
+    const authoredIntensity = Math.max(0, Number(element && element.intensity) || .75);
+    const glow = isNeonArea
+      ? new THREERef.RectAreaLight(element && element.color || '#facc15', authoredIntensity * 8, areaWidth, areaHeight)
+      : new THREERef.PointLight(element && element.color || '#facc15', authoredIntensity, Math.max(0, Number(element && element.distance) || 4));
+    if(isNeonArea){
+      glow.rotation.x = Math.PI / 2;
+      glow.userData.vehicleNeonAreaLight = true;
+    }
+    if(element && element.cinematicLensFlare){
+      glow.userData.cinematicLensFlare = normalizeCinematicLightFlare(element.cinematicLensFlare);
+    }
     bulb.userData.logicElementRuntimeVisual = false;
     bulb.visible = element && element.dummyVisible === true;
     glow.userData.logicElementRuntimeVisual = true;
@@ -592,6 +610,11 @@ function hydrateLogicElementPreviewAsset(node, element, owner){
     if(pawn){
       if(pawn.meshEdits) applyMeshEdits(model, pawn.meshEdits);
       if(pawn.materials) applyMatProps(model, pawn.materials);
+    }
+    const vehiclePawn = owner && owner.userData && owner.userData.logicGraph && owner.userData.logicGraph.vehiclePawn;
+    const shading = vehiclePawn && vehiclePawn.modelShading || pawn && pawn.modelShading || 'original';
+    if(window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.applyModelShading){
+      window.LK_RUNTIME_PLAYER_MODEL.applyModelShading(model, shading, THREE);
     }
     node.add(model);
     configureLogicElementAnimation(node, model, element, owner);
@@ -817,11 +840,14 @@ function syncLogicElementSceneObject(object, graph, opts){
     parent.add(node);
   });
   syncLogicElementColliders(object, elements, nodes);
+  if(normalized.vehiclePawn && window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.applyModelShading){
+    window.LK_RUNTIME_PLAYER_MODEL.applyModelShading(object, normalized.vehiclePawn.modelShading || 'original', THREERef);
+  }
   object.userData.logicElementAssetReady = Promise.allSettled(assetLoads);
   return object;
 }
 function blank(){
-  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
+  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, characterGround:null, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
 }
 function sceneFromProject(data){
   if(!data) return null;
@@ -839,6 +865,48 @@ function projectFromScene(scene, meta){
     meta: Object.assign({trackId:'parking-lot', trackName:'Parking Lot'}, meta || {}),
     scene: scene || blank(),
   };
+}
+function persistenceCanonical(value){
+  if(Array.isArray(value)) return value.map(persistenceCanonical);
+  if(value && typeof value === 'object'){
+    const out = {};
+    Object.keys(value).sort().forEach(key => {
+      if(value[key] !== undefined) out[key] = persistenceCanonical(value[key]);
+    });
+    return out;
+  }
+  return value;
+}
+function persistenceDifferences(expected, actual, limit){
+  const differences = [];
+  const max = Math.max(1, Number(limit) || 32);
+  const walk = (left, right, path) => {
+    if(differences.length >= max) return;
+    if(left === right) return;
+    if(Number.isNaN(left) && Number.isNaN(right)) return;
+    const leftArray = Array.isArray(left), rightArray = Array.isArray(right);
+    if(leftArray || rightArray){
+      if(!leftArray || !rightArray || left.length !== right.length){ differences.push(path || '$'); return; }
+      for(let i = 0; i < left.length; i++) walk(left[i], right[i], (path || '$') + '[' + i + ']');
+      return;
+    }
+    const leftObject = left && typeof left === 'object';
+    const rightObject = right && typeof right === 'object';
+    if(leftObject || rightObject){
+      if(!leftObject || !rightObject){ differences.push(path || '$'); return; }
+      const keys = Array.from(new Set(Object.keys(left).concat(Object.keys(right)))).sort();
+      keys.forEach(key => walk(left[key], right[key], (path ? path + '.' : '$.') + key));
+      return;
+    }
+    differences.push(path || '$');
+  };
+  walk(persistenceCanonical(expected), persistenceCanonical(actual), '');
+  return differences;
+}
+function verifyPersistenceRoundTrip(expectedScene, storedOrProject){
+  const actualScene = sceneFromProject(storedOrProject) || storedOrProject;
+  const differences = persistenceDifferences(expectedScene, actualScene, 48);
+  return {ok:differences.length === 0, differences};
 }
 function parseProject(raw){
   const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -1077,10 +1145,32 @@ function installEmbeddedLogicElementAssets(scene){
 }
 function importProject(project){
   const parsed = parseProject(project);
+  // Establish the imported root as the active level before installing its
+  // embedded siblings. On a fresh browser origin, installing siblings first
+  // made ensureLibrary choose the newest sibling as active, so the following
+  // root save overwrote that level (typically SoccerTest).
+  const idx = ensureLibrary();
+  const meta = parsed.meta || {};
+  const rootName = meta.trackName || meta.levelName || 'Imported Level';
+  let rootId = normalizeLevelId(meta.trackId || meta.levelId);
+  if(!rootId) rootId = uniqueLevelId(idx, rootName);
+  let rootEntry = levelEntry(idx, rootId);
+  if(!rootEntry){
+    rootEntry = {id:rootId, name:rootName, levelRole:embeddedLevelRole(meta.levelRole), savedAt:parsed.savedAt || new Date().toISOString(), visible:meta.levelVisible === false ? false : true};
+    idx.levels.push(rootEntry);
+  } else {
+    rootEntry.name = rootName;
+    rootEntry.levelRole = embeddedLevelRole(meta.levelRole);
+    rootEntry.savedAt = parsed.savedAt || rootEntry.savedAt;
+    rootEntry.visible = meta.levelVisible === false ? false : true;
+  }
+  idx.activeId = rootId;
+  writeIndex(idx);
+  parsed.meta = Object.assign({}, meta, {trackId:rootId, trackName:rootName});
+  save(parsed.scene, parsed.meta);
   installEmbeddedProjectLevels(parsed);
   installMenuRoleSidecars(parsed);
   installEmbeddedLogicElementAssets(parsed.scene);
-  save(parsed.scene, parsed.meta);
   return parsed;
 }
 function getLevelLogicGraph(){
@@ -1136,6 +1226,28 @@ async function moveDataUrlToAssetDb(owner, prop, label, dbProp){
   owner[dbProp || 'dbKey'] = dbKey;
   if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = dbKey;
 }
+async function localizePortableObjectAssets(value, path, seen, depth){
+  if(!value || typeof value !== 'object' || (depth || 0) > 24) return;
+  seen = seen || new WeakSet();
+  if(seen.has(value)) return;
+  seen.add(value);
+  if(Array.isArray(value)){
+    for(let i = 0; i < value.length; i++){
+      await localizePortableObjectAssets(value[i], (path || 'asset') + '[' + i + ']', seen, (depth || 0) + 1);
+    }
+    return;
+  }
+  const label = value.name || value.fileName || value.id || path || 'asset';
+  if(isDataUrl(value.modelSrc)) await moveDataUrlToAssetDb(value, 'modelSrc', label, 'modelDbKey');
+  if(isDataUrl(value.src)) await moveDataUrlToAssetDb(value, 'src', label, 'dbKey');
+  if(isDataUrl(value.url)) await moveDataUrlToAssetDb(value, 'url', label, 'dbKey');
+  for(const key of Object.keys(value)){
+    const child = value[key];
+    if(child && typeof child === 'object'){
+      await localizePortableObjectAssets(child, (path || 'asset') + '.' + key, seen, (depth || 0) + 1);
+    }
+  }
+}
 async function localizePortableProjectAssets(project, depth){
   const scene = project && sceneFromProject(project);
   if(!scene) return project;
@@ -1168,6 +1280,11 @@ async function localizePortableProjectAssets(project, depth){
       }
     }
   }
+  // Imported project snapshots may contain asset references deeper inside
+  // logic blueprints (for example vehiclePawn.modelSrc). Localize every
+  // remaining data URL before writing the project to LocalStorage, otherwise
+  // a complete multi-level project can exceed the browser quota.
+  await localizePortableObjectAssets(scene, 'scene', new WeakSet(), 0);
   const embedded = (depth || 0) < 3 && Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : [];
   for(const entry of embedded){
     if(entry && entry.project) await localizePortableProjectAssets(entry.project, (depth || 0) + 1);
@@ -1865,6 +1982,7 @@ function collectPlayerBlueprint(GAME){
     exhaust: cloneData(GAME.player.exhaust || {}),
     skids: cloneData(GAME.player.skids || {}),
     collision: cloneData(GAME.player.collision || {}),
+    modelShading: GAME.player.getModelShading ? GAME.player.getModelShading() : (GAME.player.car && GAME.player.car.userData.modelShading || 'original'),
   };
   if(GAME.player.spawn){
     player.spawn = cloneData(GAME.player.spawn);
@@ -2057,6 +2175,7 @@ function playerTemplateFromLevelLibrary(GAME){
       exhaust: cloneData(GAME.player.exhaust || {}),
       skids: cloneData(GAME.player.skids || {}),
       collision: cloneData(GAME.player.collision || {}),
+      modelShading: GAME.player.getModelShading ? GAME.player.getModelShading() : 'original',
     };
     if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
   }
@@ -2213,8 +2332,9 @@ const LEVELS = {
   },
   // template "livello vuoto": via i mesh/effetti del parking lot (restano luci
   // globali e player), un piano semplice come terreno, pieno giorno fisso.
-  templateScene(GAME){
+  templateScene(GAME, templateId){
     const d = blank();
+    const characterTemplate = templateId === 'character-movement-playground';
     const seen = new Set();
     if(GAME && GAME.world && GAME.world.registry){
       for(const o of GAME.world.registry){
@@ -2222,7 +2342,7 @@ const LEVELS = {
         seen.add(o.userData.editorId);
         if(o.isLight || o.userData.light) continue;
         const type = o.userData.editorType || '';
-        if(type === 'player' || type.indexOf('player') === 0) continue;
+        if(!characterTemplate && (type === 'player' || type.indexOf('player') === 0)) continue;
         d.deleted.push(o.userData.editorId);
       }
     }
@@ -2240,6 +2360,9 @@ const LEVELS = {
     d.player = playerTemplateFromLevelLibrary(GAME);
     const radioHud = radioHudTemplateFromLevelLibrary(GAME);
     if(radioHud) d.ui.radioHud = radioHud;
+    if(characterTemplate && window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE){
+      return window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE.buildScene(d);
+    }
     return d;
   },
   // dal menu del gioco: prepara il lancio di un livello della libreria.
@@ -2534,8 +2657,47 @@ function applyBuiltinRuntimeProps(GAME, obj, props){
 }
 
 // ------------------------------------------------ light props
+// Since r155 Three.js always uses physically-correct punctual lights. Older Lot
+// King projects authored point/spot intensity as a small, unitless value, so
+// preserve their visual intent while storing every new value in candela.
+const LEGACY_PUNCTUAL_INTENSITY_TO_CANDELA = 400;
+function physicalLightIntensity(l, p, fallback){
+  const raw = Number(p && p.intensity);
+  if(!Number.isFinite(raw)) return fallback;
+  if((l.isPointLight || l.isSpotLight) && p.intensityUnit !== 'candela'){
+    return Math.max(0, raw) * LEGACY_PUNCTUAL_INTENSITY_TO_CANDELA;
+  }
+  return Math.max(0, raw);
+}
+function normalizeLightSchedule(value){
+  value = value || {};
+  const hour = (input, fallback) => {
+    const n = Number(input);
+    return Number.isFinite(n) ? ((n % 24) + 24) % 24 : fallback;
+  };
+  return {enabled:value.enabled === true, onHour:hour(value.onHour, 18), offHour:hour(value.offHour, 7)};
+}
+function normalizeCinematicLightFlare(value){
+  value = value && typeof value === 'object' ? value : {};
+  const clamp = (input,min,max,fallback) => {
+    const n=Number(input);
+    return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;
+  };
+  return {
+    enabled:value.enabled===true,
+    intensity:clamp(value.intensity,0,2,.65),
+    size:clamp(value.size,.2,3,.7),
+    bloomIntensity:clamp(value.bloomIntensity,0,3,.52),
+    occlusion:value.occlusion!==false,
+  };
+}
 function lightProps(l){
-  const p = {color: l.color ? l.color.getHex() : undefined, intensity: l.intensity, visible: l.visible};
+  const manualVisible = l.userData && l.userData.dayNightManualVisible;
+  const p = {color: l.color ? l.color.getHex() : undefined, intensity: l.intensity, visible:manualVisible == null ? l.visible : manualVisible};
+  p.editorDummyVisible = !(l.userData && l.userData.editorDummyVisible === false);
+  if(l.isPointLight || l.isSpotLight) p.intensityUnit = 'candela';
+  if(l.userData && l.userData.dayNightSchedule) p.dayNightSchedule = normalizeLightSchedule(l.userData.dayNightSchedule);
+  if(l.userData && l.userData.cinematicLensFlare) p.cinematicLensFlare = normalizeCinematicLightFlare(l.userData.cinematicLensFlare);
   if(l.groundColor) p.groundColor = l.groundColor.getHex();
   if(l.distance != null) p.distance = l.distance;
   if(l.decay != null) p.decay = l.decay;
@@ -2548,13 +2710,29 @@ function applyLightProps(l, p){
   if(!p) return;
   if(p.color != null && l.color) l.color.setHex(p.color);
   if(p.groundColor != null && l.groundColor) l.groundColor.setHex(p.groundColor);
-  if(p.intensity != null) l.intensity = p.intensity;
+  if(p.intensity != null) l.intensity = physicalLightIntensity(l, p, l.intensity);
   if(p.distance != null && l.distance != null) l.distance = p.distance;
   if(p.decay != null && l.decay != null) l.decay = p.decay;
   if(p.angle != null && l.angle != null) l.angle = p.angle;
   if(p.penumbra != null && l.penumbra != null) l.penumbra = p.penumbra;
   if(p.castShadow != null) l.castShadow = p.castShadow;
-  if(p.visible != null) l.visible = p.visible;
+  if(p.dayNightSchedule != null) l.userData.dayNightSchedule = normalizeLightSchedule(p.dayNightSchedule);
+  if(p.cinematicLensFlare != null) l.userData.cinematicLensFlare = normalizeCinematicLightFlare(p.cinematicLensFlare);
+  if(p.editorDummyVisible != null) l.userData.editorDummyVisible = p.editorDummyVisible !== false;
+  if(p.visible != null){
+    l.userData.dayNightManualVisible = p.visible !== false;
+    l.visible = p.visible !== false;
+  } else if(l.userData.dayNightManualVisible == null) {
+    l.userData.dayNightManualVisible = l.visible !== false;
+  }
+}
+function objectLight(obj){
+  if(!obj) return null;
+  if(obj.isLight) return obj;
+  if(obj.userData && obj.userData.light) return obj.userData.light;
+  let found = null;
+  if(obj.traverse) obj.traverse(node => { if(!found && node && node.isLight) found = node; });
+  return found;
 }
 
 // material override: global or per material slot (edited via editor)
@@ -2587,6 +2765,15 @@ function mergeStoredMatProps(current, patch){
   return next;
 }
 
+// Persist the authored material state immediately, even when the expensive
+// shader/material application is deferred to the next animation frame.
+function stageMatProps(obj, p){
+  if(!obj || !p) return null;
+  obj.userData = obj.userData || {};
+  obj.userData.matProps = mergeStoredMatProps(obj.userData.matProps, p);
+  return obj.userData.matProps;
+}
+
 function sanitizePlayerMatProps(props){
   const stored = normalizeStoredMatProps(props);
   const global = Object.assign({}, stored.global || {});
@@ -2612,7 +2799,7 @@ function applyMatProps(obj, p){
   if(!p) return;
   const loadTexture = (src, colorData) => {
     const tx = new THREE.TextureLoader().load(src);
-    if(colorData) tx.encoding = THREE.sRGBEncoding;
+    if(colorData) tx.colorSpace = THREE.SRGBColorSpace;
     tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
     return tx;
   };
@@ -2802,6 +2989,7 @@ const PRIM_DEFS = {
   cone:     () => new THREE.ConeGeometry(1, 2, 20),
   plane:    () => new THREE.PlaneGeometry(4, 4),
   torus:    () => new THREE.TorusGeometry(1.4, .4, 12, 28),
+  triangle: () => new THREE.CircleGeometry(1, 3),
   ramp:     () => {
     const shape = new THREE.Shape();
     shape.moveTo(0, 0); shape.lineTo(6, 0); shape.lineTo(6, 2.2); shape.closePath();
@@ -2813,17 +3001,31 @@ const PRIM_DEFS = {
 function createPrimitive(prim, props){
   props = props || {};
   const geo = (PRIM_DEFS[prim] || PRIM_DEFS.box)();
-  const mat = new THREE.MeshStandardMaterial({
-    color: props.color != null ? props.color : 0x8899aa,
-    roughness: props.roughness != null ? props.roughness : .7,
-    metalness: props.metalness != null ? props.metalness : .1,
-    side: prim === 'plane' ? THREE.DoubleSide : THREE.FrontSide,
-  });
+  const materialOptions = {color:props.color != null ? props.color : 0x8899aa, side:prim === 'plane' || prim === 'triangle' ? THREE.DoubleSide : THREE.FrontSide};
+  let mat;
+  if(props.materialModel === 'unlit') mat = new THREE.MeshBasicMaterial(materialOptions);
+  else if(props.materialModel === 'toon' && THREE.MeshToonMaterial) mat = new THREE.MeshToonMaterial(materialOptions);
+  else mat = new THREE.MeshStandardMaterial(Object.assign(materialOptions, {roughness:props.roughness != null ? props.roughness : .7, metalness:props.metalness != null ? props.metalness : .1}));
+  if(props.sketch && typeof document !== 'undefined'){
+    const spec = props.sketch === true ? {} : props.sketch;
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext('2d'), seed = Number(spec.seed) || 1;
+    let state = seed >>> 0;
+    const random = () => { state = (state * 1664525 + 1013904223) >>> 0; return state / 4294967296; };
+    ctx.fillStyle = spec.base || '#ffffff'; ctx.fillRect(0,0,256,256); ctx.lineCap = 'round';
+    for(let i=0;i<(Number(spec.strokes)||70);i++){
+      ctx.strokeStyle = random()<.5?'rgba(0,0,0,.055)':'rgba(255,255,255,.065)'; ctx.lineWidth=1.5+random()*2.5;
+      const x=random()*256,y=random()*256,length=18+random()*46,angle=Number(spec.angle)||-.65;
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+Math.cos(angle)*length,y+Math.sin(angle)*length);ctx.stroke();
+    }
+    const texture = new THREE.CanvasTexture(canvas); texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
+    const repeat=Array.isArray(spec.repeat)?spec.repeat:[1,1];texture.repeat.set(Number(repeat[0])||1,Number(repeat[1])||1);texture.colorSpace=THREE.SRGBColorSpace;mat.map=texture;
+  }
   const m = new THREE.Mesh(geo, mat);
   m.castShadow = m.receiveShadow = true;
   if(prim === 'plane') m.rotation.x = -Math.PI/2;
   const gp = new THREE.Group();
-  m.position.y = prim === 'plane' ? 0.01 : (prim === 'ramp' ? 0 : 1);
+  m.position.y = props.centered === true ? 0 : (prim === 'plane' ? 0.01 : (prim === 'ramp' ? 0 : 1));
   gp.add(m);
   if(prim === 'cone'){
     gp.userData.isCone = true;
@@ -2833,7 +3035,7 @@ function createPrimitive(prim, props){
 }
 
 // ------------------------------------------------ factories: text
-const TEXT_FONT_URL = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/fonts/helvetiker_regular.typeface.json';
+const TEXT_FONT_URL = 'vendor/helvetiker_regular.typeface.json';
 let _textFont = null;
 let _textFontPromise = null;
 
@@ -2934,7 +3136,7 @@ function buildTextPlane(gp, props){
   const canvas = gp.userData.textCanvas || document.createElement('canvas');
   drawTextCanvas(canvas, props);
   const tex = gp.userData.textTexture || new THREE.CanvasTexture(canvas);
-  tex.encoding = THREE.sRGBEncoding;
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, side:THREE.DoubleSide, depthWrite:false});
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(props.width, props.height), mat);
@@ -3330,7 +3532,7 @@ function placeholderTexture(){
   g.fillStyle = '#4be3a0'; g.fillRect(64, 0, 64, 64); g.fillRect(0, 64, 64, 64);
   g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0, 0, c.width, c.height);
   const tx = new THREE.CanvasTexture(c);
-  tx.encoding = THREE.sRGBEncoding;
+  tx.colorSpace = THREE.SRGBColorSpace;
   return tx;
 }
 
@@ -3339,7 +3541,7 @@ function applyTextureMapFromSource(gp, mat, props){
   gp.userData.textureLoadId = loadId;
   const isCurrentLoad = () => gp.userData.textureLoadId === loadId;
   function configure(tx){
-    tx.encoding = THREE.sRGBEncoding;
+    tx.colorSpace = THREE.SRGBColorSpace;
     tx.wrapS = tx.wrapT = THREE.ClampToEdgeWrapping;
     tx.anisotropy = 4;
     return tx;
@@ -3589,24 +3791,51 @@ function createLogicElement(props){
 }
 
 // ------------------------------------------------ factories: lights
+const _editorLightHandleGeometries = Object.create(null);
+let _editorLightHandleMaterial = null;
+function editorLightHandleGeometry(kind){
+  const key = kind === 'spot' ? 'spot' : 'point';
+  if(_editorLightHandleGeometries[key]) return _editorLightHandleGeometries[key];
+  const geometry = key === 'spot'
+    ? new THREE.ConeGeometry(.58, 1.15, 10, 1, true)
+    : new THREE.OctahedronGeometry(.62, 0);
+  if(key === 'spot') geometry.translate(0, -.42, 0);
+  _editorLightHandleGeometries[key] = geometry;
+  return geometry;
+}
+function editorLightHandleMaterial(){
+  if(!_editorLightHandleMaterial){
+    _editorLightHandleMaterial = new THREE.MeshBasicMaterial({
+      color:0xffd166, wireframe:true, transparent:true, opacity:.78,
+      depthTest:false, depthWrite:false, toneMapped:false,
+    });
+  }
+  return _editorLightHandleMaterial;
+}
 function createLight(kind, props){
   props = props || {};
   const color = props.color != null ? props.color : 0xffeecc;
-  const intensity = props.intensity != null ? props.intensity : 1;
+  const punctual = kind === 'spot' || kind === 'point';
+  const defaultIntensity = kind === 'spot' ? 600 : (kind === 'point' ? 300 : 1);
+  const intensity = punctual
+    ? (props.intensity != null
+      ? (props.intensityUnit === 'candela' ? Math.max(0, Number(props.intensity) || 0) : Math.max(0, Number(props.intensity) || 0) * LEGACY_PUNCTUAL_INTENSITY_TO_CANDELA)
+      : defaultIntensity)
+    : (props.intensity != null ? props.intensity : defaultIntensity);
+  const resolvedProps = punctual && props.intensity != null && props.intensityUnit !== 'candela'
+    ? Object.assign({}, props, {intensity, intensityUnit:'candela'})
+    : props;
   const gp = new THREE.Group();
   let l;
   const makeHandle = () => {
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xffd166,
-      wireframe: true,
-      transparent: true,
-      opacity: 0,
-      depthTest: false,
-    });
-    const handle = new THREE.Mesh(new THREE.SphereGeometry(.65, 16, 8), mat);
+    const handle = new THREE.Mesh(editorLightHandleGeometry(kind), editorLightHandleMaterial());
     handle.name = 'Editor Light Pick Handle';
     handle.userData.editorLightHandle = true;
+    handle.userData.lightPickHandle = true;
+    handle.userData.editorOnly = true;
     handle.userData.nonExportable = true;
+    handle.visible = false;
+    handle.frustumCulled = false;
     handle.renderOrder = 999;
     return handle;
   };
@@ -3614,7 +3843,8 @@ function createLight(kind, props){
     l = new THREE.SpotLight(color, intensity,
       props.distance != null ? props.distance : 40,
       props.angle != null ? props.angle : .5,
-      props.penumbra != null ? props.penumbra : .4, 1.2);
+      props.penumbra != null ? props.penumbra : .4,
+      props.decay != null ? props.decay : 2);
     const target = new THREE.Object3D(); target.position.set(0, -6, 0);
     gp.add(target); l.target = target;
     gp.position.y = 8;
@@ -3629,14 +3859,15 @@ function createLight(kind, props){
   } else if(kind === 'ambient'){
     l = new THREE.AmbientLight(color, intensity != null ? intensity : .4);
   } else { // point
-    l = new THREE.PointLight(color, intensity, props.distance != null ? props.distance : 35, 1.6);
+    l = new THREE.PointLight(color, intensity, props.distance != null ? props.distance : 35, props.decay != null ? props.decay : 2);
     gp.position.y = 6;
   }
-  applyLightProps(l, props);
+  applyLightProps(l, resolvedProps);
   gp.add(l);
   gp.add(makeHandle());
   gp.userData.lightKind = kind;
   gp.userData.light = l;
+  gp.userData.lightDummyVisible = l.userData.editorDummyVisible !== false;
   return gp;
 }
 
@@ -4093,11 +4324,12 @@ function extractEmbeddedLights(GAME, root, sourceEntry){
   const created = [];
   found.forEach((source, index) => {
     const kind = source.isSpotLight ? 'spot' : (source.isDirectionalLight ? 'directional' : 'point');
-    const fallbackIntensity = kind === 'spot' ? 1.8 : (kind === 'point' ? 1.4 : 1.1);
+    const fallbackIntensity = kind === 'spot' ? 600 : (kind === 'point' ? 300 : 1.1);
     const rawIntensity = Number(source.intensity);
     const props = {
       color:source.color ? source.color.getHex() : 0xfff1d0,
-      intensity:Number.isFinite(rawIntensity) && rawIntensity > 0 ? Math.max(.1, Math.min(8, rawIntensity)) : fallbackIntensity,
+      intensity:Number.isFinite(rawIntensity) && rawIntensity > 0 ? Math.max(.1, Math.min(100000, rawIntensity)) : fallbackIntensity,
+      intensityUnit:kind === 'spot' || kind === 'point' ? 'candela' : undefined,
       distance:source.distance > 0 ? Math.max(2, Math.min(100, source.distance)) : (kind === 'spot' ? 45 : 35),
       angle:source.isSpotLight && source.angle > 0 ? Math.max(.1, Math.min(1.2, source.angle)) : .55,
       penumbra:source.isSpotLight && Number.isFinite(source.penumbra) ? Math.max(0, Math.min(1, source.penumbra)) : .35,
@@ -4154,6 +4386,16 @@ function createFromEntry(entry, GAME){
     if(!src) return Promise.reject(new Error('sorgente clone non trovata: ' + entry.srcId));
     const c = src.clone(true);
     c.userData = {};
+    // A duplicate is an editable object of its own. Three's default clone
+    // shares geometries and materials, which made later Inspector edits leak
+    // back to the source (and vice versa).
+    c.traverse(node => {
+      if(!node || !node.isMesh) return;
+      if(node.userData && node.userData.editorLightHandle) return;
+      if(node.geometry && node.geometry.clone) node.geometry = node.geometry.clone();
+      if(Array.isArray(node.material)) node.material = node.material.map(material => material && material.clone ? material.clone() : material);
+      else if(node.material && node.material.clone) node.material = node.material.clone();
+    });
     return Promise.resolve(c);
   }
   const gp = createPrimitive(entry.prim, entry.props);
@@ -4161,7 +4403,7 @@ function createFromEntry(entry, GAME){
   return Promise.resolve(gp);
 }
 function entryType(entry, obj){
-  if(entry.kind === 'clone') return (obj && (obj.isLight || obj.userData && obj.userData.light)) ? 'light' : 'mesh';
+  if(entry.kind === 'clone') return objectLight(obj) ? 'light' : 'mesh';
   if(entry.kind === 'text') return 'text';
   if(entry.kind === 'texture') return 'texture';
   if(entry.kind === 'camera') return 'camera';
@@ -4185,6 +4427,16 @@ function registerAdded(GAME, obj, entry){
     obj.userData.assetName = entry.asset.name;
     obj.userData.assetSource = entry.asset.source;
   }
+  // clone entries can also contain lights (for example built-in light poles).
+  // Keep their live light state separately from mesh material properties so a
+  // save/reload never falls back to the source object's defaults.
+  if(entry.lightProps){
+    const liveLight = objectLight(obj);
+    if(liveLight){
+      applyLightProps(liveLight, entry.lightProps);
+      obj.userData.lightDummyVisible = liveLight.userData.editorDummyVisible !== false;
+    }
+  }
   const entryMass = entry && entry.physicsMass;
   const defaultMass = physicsMassFrom(entryMass);
   const defaultImpact = physicsImpactFrom(entry && entry.physicsImpact);
@@ -4206,12 +4458,15 @@ function registerAdded(GAME, obj, entry){
   let colliderOpt = null;
   const hasCollider = !!(entry && (entry.collide || wantPhysics));
   if(hasCollider){
-    const col = {x:0, z:0, hx:1, hz:1, mass: defaultMass, impact: defaultImpact, owner: obj};
-    col._boxList = GAME.world.colliders.box;
+    const colliderKind = colliderKindFrom(entry && entry.colliderKind);
+    const col = colliderKind === 'circle'
+      ? {x:0, z:0, r:1, mass:defaultMass, impact:defaultImpact, owner:obj}
+      : {x:0, z:0, hx:1, hz:1, mass:defaultMass, impact:defaultImpact, owner:obj, _boxList:GAME.world.colliders.box};
     col.enabled = true;
     col.physics = !!wantPhysics;
-    GAME.world.colliders.box.push(col);
-    colliderOpt = {kind:'box', ref:col};
+    if(colliderKind === 'circle') GAME.world.colliders.circle.push(col);
+    else GAME.world.colliders.box.push(col);
+    colliderOpt = {kind:colliderKind, ref:col};
   }
   obj.userData.physicsEnabled = !!wantPhysics;
   if(obj.userData.addedEntry){
@@ -4227,6 +4482,75 @@ function registerAdded(GAME, obj, entry){
   if(entry.kind === 'logicElement') syncLogicElementSceneObject(obj, obj.userData.logicGraph || entry.graph || entry.logic);
   if(hasCollider) syncCollider(obj);
   return obj;
+}
+
+// Build a serializable snapshot from the object as it exists right now in the
+// editor. Duplication must copy this state, not the possibly stale placement
+// recipe kept in userData.addedEntry.
+function snapshotAddedEntry(obj, baseEntry){
+  if(!obj) return cloneData(baseEntry || {});
+  const ud = obj.userData || {};
+  const entry = cloneData(baseEntry || ud.addedEntry || {});
+  entry.name = ud.editorName || entry.name || obj.name || 'Object';
+  entry.t = tOf(obj);
+
+  const colliderRef = ud.collider && ud.collider.ref;
+  entry.collide = !!(colliderRef && colliderRef.enabled !== false);
+  entry.physics = !!(ud.physicsEnabled || colliderRef && colliderRef.physics);
+  if(colliderRef){
+    entry.colliderKind = colliderKindFrom(ud.collider && ud.collider.kind);
+    entry.physicsMass = physicsMassFrom(colliderRef.mass != null ? colliderRef.mass : ud.physicsMass);
+    entry.physicsImpact = physicsImpactFrom(colliderRef.impact != null ? colliderRef.impact : ud.physicsImpact);
+  } else {
+    delete entry.colliderKind;
+    entry.physicsMass = physicsMassFrom(ud.physicsMass);
+    entry.physicsImpact = physicsImpactFrom(ud.physicsImpact);
+  }
+  if(ud.colliderShape) entry.colliderShape = cloneData(ud.colliderShape);
+  else delete entry.colliderShape;
+  if(ud.colliderDummyVisibility === 'show' || ud.colliderDummyVisibility === 'hide') entry.colliderDummyVisibility = ud.colliderDummyVisibility;
+  else delete entry.colliderDummyVisibility;
+  if(ud.colliderOnly) entry.colliderOnly = true;
+  if(ud.colliderOnly && ud.cinemaTrigger) entry.cinemaTrigger = cloneData(ud.cinemaTrigger);
+  if(ud.driveSurface != null) entry.driveSurface = !!ud.driveSurface;
+  if(ud.meshEdits) entry.meshEdits = normalizeMeshEdits(ud.meshEdits);
+  else delete entry.meshEdits;
+
+  const liveLight = objectLight(obj);
+  if(liveLight){
+    const props = lightProps(liveLight);
+    if(entry.kind === 'light') entry.props = props;
+    else entry.lightProps = props;
+  } else {
+    delete entry.lightProps;
+  }
+
+  if(entry.kind === 'effect') entry.params = cloneData(ud.effectParams || entry.params || {});
+  else if(entry.kind === 'text') entry.props = cloneData(ud.textProps || entry.props || {});
+  else if(entry.kind === 'texture') entry.props = cloneData(ud.textureProps || entry.props || {});
+  else if(entry.kind === 'camera') entry.props = cloneData(ud.cameraProps || entry.props || {});
+  else if(entry.kind === 'cinemaStudio') entry.props = normalizeCinemaStudioProps(cloneData(ud.cinemaProps || entry.props || {}));
+  else if(entry.kind === 'logicElement'){
+    entry.graph = normalizeLogicGraph(ud.logicGraph || entry.graph || entry.logic, entry.name, 'element');
+    entry.enabled = ud.logicEnabled !== false;
+    entry.runInEditorPreview = ud.logicRunInEditorPreview !== false;
+    entry.logicAssetId = ud.logicAssetId || null;
+    entry.logicLinked = !!(ud.logicLinked && entry.logicAssetId);
+    entry.variableOverrides = cloneData(ud.logicVariableOverrides || {});
+    if(entry.logicLinked){
+      const definition = logicElementAssetById(entry.logicAssetId) || entry.logicAsset;
+      if(definition) entry.logicAsset = cloneData(definition);
+    } else {
+      delete entry.logicAssetId;
+      delete entry.logicLinked;
+      delete entry.variableOverrides;
+      delete entry.logicAsset;
+    }
+  } else if(ud.matProps){
+    entry.props = cloneData(ud.matProps);
+  }
+  if(ud.assetKey) entry.asset = {key:ud.assetKey, name:ud.assetName, source:ud.assetSource};
+  return entry;
 }
 
 // ------------------------------------------------ effects hook (game + editor loops)
@@ -4249,6 +4573,7 @@ function applyEnvironment(GAME, env){
   if(!GAME || !GAME.systems || !GAME.systems.sky || !env) return;
   if(env.skyTime != null) GAME.systems.sky.setTime(env.skyTime);
   if(env.dayLength != null) GAME.systems.sky.setDayLength(env.dayLength);
+  if(GAME.systems.sky.setCycleEnabled) GAME.systems.sky.setCycleEnabled(env.dayNightCycleEnabled !== false);
   if(GAME.systems.sky.hdri) GAME.systems.sky.hdri.setEnabled(false);
   if(GAME.systems.sky.proceduralEnv){
     if(env.procEnvEnabled != null) GAME.systems.sky.proceduralEnv.setEnabled(env.procEnvEnabled);
@@ -4266,6 +4591,7 @@ function applyEnvironment(GAME, env){
       if(env.flareSize != null) GAME.systems.sky.flare.setSize(env.flareSize);
     }
   }
+  if(env.lighting && GAME.systems.sky.lighting) GAME.systems.sky.lighting.set(env.lighting);
   if(env.sunBloom && GAME.systems.sky.sunBloom) GAME.systems.sky.sunBloom.set(env.sunBloom);
   if(env.volClouds && GAME.systems.sky.volClouds) GAME.systems.sky.volClouds.set(env.volClouds);
   if(env.rain && GAME.systems.rain) GAME.systems.rain.set(env.rain);
@@ -4279,6 +4605,7 @@ function collectEnvironment(GAME){
   const env = {
     skyTime: GAME.systems.sky.getTime(),
     dayLength: GAME.systems.sky.getDayLength(),
+    dayNightCycleEnabled: GAME.systems.sky.getCycleEnabled ? GAME.systems.sky.getCycleEnabled() : true,
   };
   if(GAME.systems.sky.proceduralEnv){
     env.procEnvEnabled = GAME.systems.sky.proceduralEnv.getEnabled();
@@ -4293,6 +4620,7 @@ function collectEnvironment(GAME){
     env.flareOpacity = GAME.systems.sky.flare.getOpacity();
     env.flareSize = GAME.systems.sky.flare.getSize();
   }
+  if(GAME.systems.sky.lighting) env.lighting = GAME.systems.sky.lighting.get();
   if(GAME.systems.sky.sunBloom) env.sunBloom = GAME.systems.sky.sunBloom.get();
   if(GAME.systems.sky.volClouds && GAME.systems.sky.volClouds.get()) env.volClouds = GAME.systems.sky.volClouds.get();
   if(GAME.systems.rain) env.rain = GAME.systems.rain.get();
@@ -4309,6 +4637,7 @@ function apply(GAME, sceneOverride){
     return Promise.resolve(null);
   }
   GAME.state.sceneReady = false;
+  GAME.world.characterGround = cloneData(data.characterGround || null);
   const pending = [];
 
   // Vehicle light config can create extra built-in light anchors; do it before
@@ -4344,7 +4673,7 @@ function apply(GAME, sceneOverride){
   for(const id in data.props){
     const o = byId[id];
     if(!o) continue;
-    const light = o.isLight ? o : o.userData.light;
+    const light = objectLight(o);
     const props = Object.assign({}, data.props[id]);
     delete props.colliderShape;
     delete props.colliderDummyVisibility;
@@ -4394,6 +4723,7 @@ function apply(GAME, sceneOverride){
   }
   // player blueprint
   if(data.player){
+    if(GAME.player.setModelShading) GAME.player.setModelShading(data.player.modelShading || 'original');
     const playerTransform = data.player.transform || (data.transforms && data.transforms.player);
     if(playerTransform && playerTransform.r && GAME.player.setVisualBaseRotation) GAME.player.setVisualBaseRotation(playerTransform.r[0], playerTransform.r[2]);
     else if(GAME.player.setVisualBaseRotation) GAME.player.setVisualBaseRotation(0, 0);
@@ -4449,6 +4779,7 @@ function apply(GAME, sceneOverride){
             applyMeshEdits(s, data.player.meshEdits);
             GAME.player.car.userData.playerMeshEdits = normalizeMeshEdits(data.player.meshEdits);
           }
+          if(GAME.player.setModelShading) GAME.player.setModelShading(data.player.modelShading || 'original');
           if(playerTransform){
             applyT(GAME.player.car, playerTransform);
           }
@@ -4462,6 +4793,7 @@ function apply(GAME, sceneOverride){
       if(model){
         applyMeshEdits(model, data.player.meshEdits);
         GAME.player.car.userData.playerMeshEdits = normalizeMeshEdits(data.player.meshEdits);
+        if(GAME.player.setModelShading) GAME.player.setModelShading(data.player.modelShading || 'original');
       }
     }
     if(data.player.cam){
@@ -4530,7 +4862,7 @@ function collect(GAME){
     if(o.userData.builtin){
       liveBuiltin.add(id);
       d.transforms[id] = freezeRuntimeTransforms && old && old.transforms && old.transforms[id] ? cloneData(old.transforms[id]) : tOf(o);
-      const light = o.isLight ? o : null;
+      const light = objectLight(o);
       if(light) d.props[id] = lightProps(light);
       else if(o.userData.matProps) d.props[id] = Object.assign({}, o.userData.matProps);
       const colliderRef = o.userData.collider && o.userData.collider.ref ? o.userData.collider.ref : null;
@@ -4565,6 +4897,8 @@ function collect(GAME){
       const hasPhysics = !!(o.userData.physicsEnabled || isPhysics);
       e.physics = !!hasPhysics;
       e.collide = !!hasCollider;
+      if(colliderRef) e.colliderKind = colliderKindFrom(o.userData.collider && o.userData.collider.kind);
+      else delete e.colliderKind;
       if(o.userData.colliderOnly) e.colliderOnly = true;
       if(o.userData.colliderOnly && o.userData.cinemaTrigger) e.cinemaTrigger = cloneData(o.userData.cinemaTrigger);
       if(o.userData.driveSurface != null) e.driveSurface = !!o.userData.driveSurface;
@@ -4580,7 +4914,8 @@ function collect(GAME){
       }
       if(colliderRef && colliderRef.impact != null) e.physicsImpact = physicsImpactFrom(colliderRef.impact);
       else e.physicsImpact = physicsImpactFrom(o.userData.physicsImpact);
-	      if(e.kind === 'light' && o.userData.light) e.props = lightProps(o.userData.light);
+	      const liveAddedLight = objectLight(o);
+	      if(e.kind === 'light' && liveAddedLight) e.props = lightProps(liveAddedLight);
 	      else if(e.kind === 'effect') e.params = Object.assign({}, o.userData.effectParams);
 	      else if(e.kind === 'text') e.props = Object.assign({}, o.userData.textProps || e.props || {});
 	      else if(e.kind === 'texture') e.props = Object.assign({}, o.userData.textureProps || e.props || {});
@@ -4604,6 +4939,7 @@ function collect(GAME){
 	        }
 	      }
 	      else if(o.userData.matProps) e.props = Object.assign({}, o.userData.matProps);
+	      if(liveAddedLight && e.kind !== 'light') e.lightProps = lightProps(liveAddedLight);
       if(o.userData.assetKey) e.asset = Object.assign({}, e.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
       d.added.push(e);
     }
@@ -4620,14 +4956,17 @@ function collect(GAME){
     d.ui.musicLibraries = {radio:cloneData(radioTracks), menu:cloneData(menuTracks)};
   }
   d.player = collectPlayerBlueprint(GAME) || {};
+  d.characterGround = cloneData(old && old.characterGround || GAME && GAME.world && GAME.world.characterGround || null);
   d.logic = old && old.logic ? cloneData(old.logic) : {};
   d.logic.levelGraph = normalizeLogicGraph(d.logic.levelGraph, 'Level Logic', 'level');
   return d;
 }
 
 function nextId(){
-  const data = load();
-  _sessionCounter = Math.max(_sessionCounter, data ? (data.counter || 0) + 1 : 1);
+  // The timestamp already separates this editing session from persisted IDs.
+  // Parsing the entire saved scene from localStorage for every duplication was
+  // a synchronous long task on large projects.
+  _sessionCounter = Math.max(1, _sessionCounter);
   return 'a' + Date.now().toString(36) + '_' + (_sessionCounter++);
 }
 
@@ -4762,9 +5101,10 @@ window.LK_STORE = {
   soundSets: SOUND_SETS,
   isApplied: () => applied,
   appliedInfo: () => ({applied, mode: appliedMode, levelId: appliedLevelId}),
-  load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, exportProjectWithLevels, importProject, getLevelLogicGraph, setLevelLogicGraph,
+  load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, exportProjectWithLevels, importProject, localizePortableProjectAssets, getLevelLogicGraph, setLevelLogicGraph,
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
-  lightProps, applyLightProps, applyMatProps,
+  lightProps, applyLightProps, applyMatProps, stageMatProps, snapshotAddedEntry,
+  verifyPersistenceRoundTrip, persistenceDifferences,
 	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, ensureMenuBackgroundApplied, findMenuBackgroundLevel, collect, nextId,

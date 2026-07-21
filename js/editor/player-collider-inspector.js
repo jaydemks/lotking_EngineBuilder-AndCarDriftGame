@@ -23,7 +23,7 @@ function create(deps){
         if(state.dummyVisibility === 'show' || state.dummyVisibility === 'hide') owner.userData.colliderDummyVisibility = state.dummyVisibility;
         else delete owner.userData.colliderDummyVisibility;
       }
-      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
       if(deps.buildInspector) deps.buildInspector();
       deps.markDirty();
     };
@@ -34,13 +34,13 @@ function create(deps){
       if(JSON.stringify(oldState) === JSON.stringify(newState)) return;
       deps.pushHistory({label:tr('Player collider', 'Collisione player'), undo:() => apply(oldState), redo:() => apply(newState)});
     };
-    const set = patch => { player.setCollision(patch); Object.assign(collision, patch); if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers(); deps.markDirty(); };
+    const set = patch => { player.setCollision(patch); Object.assign(collision, patch); if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers(); deps.markDirty(); };
     const row = item => { item.root.addEventListener('lk-slider-edit-start', begin); item.root.addEventListener('lk-slider-edit-end', commit); return item.root; };
     section.body.appendChild(deps.el('<div class="lk-hint">' + tr('Collider dimensions and offsets belong only to this Pawn instance.', 'Dimensioni e offset del collider appartengono solo a questa istanza Pawn.') + '</div>'));
     if(owner && owner.userData){
       const visibility = deps.el('<div class="lk-row"><label>Dummy visibility</label><select><option value="auto">Auto</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>');
       const select = visibility.querySelector('select'); select.value = owner.userData.colliderDummyVisibility || 'auto';
-      select.addEventListener('change', () => { begin(); if(select.value === 'auto') delete owner.userData.colliderDummyVisibility; else owner.userData.colliderDummyVisibility = select.value; deps.markDirty(); commit(); });
+      select.addEventListener('change', () => { begin(); if(select.value === 'auto') delete owner.userData.colliderDummyVisibility; else owner.userData.colliderDummyVisibility = select.value; if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers(); deps.markDirty(); commit(); });
       section.body.appendChild(visibility);
     }
     [

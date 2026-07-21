@@ -373,9 +373,10 @@ Sound sets are assets stored by `LK_STORE.soundSets` and assigned per player blu
 
 Environment systems are split out of the old monolith:
 
-- `sky.js` owns day/night, stars, moon, procedural lighting, sun bloom, lens flare, sprite clouds, and the volumetric-clouds sub-API.
+- `sky.js` owns day/night, stars, moon, procedural lighting, persisted sun bloom/lens-flare state, the classic sprite flare, sprite clouds, and the volumetric-clouds sub-API.
+- `cinematic-lens-flare.js` owns the selectable realistic fullscreen optical flare and selective sun bloom/glow pass.
 - `volumetric-clouds.js` owns the raymarched cloud dome.
-- `rain.js` owns GPU rain lines and procedural rain audio.
+- `rain.js` owns instanced camera-facing GPU rain ribbons and procedural rain audio.
 - `post.js` owns gameplay-camera post-processing, depth of field, highlight bokeh, focus masking, visual grade, ray lighting, and smoke-aware screen-space volumetric lighting.
 - `settings-menu.js` owns the versioned project video schema, five scalable quality presets, the shared editor/game runtime video state, exposed player settings, and heavy-change feedback. Antialiasing is shared too: Off renders directly, FXAA uses the final lightweight post pass, and 2×/4× supersampling raise the internal pixel ratio with mobile/desktop safety caps. Legacy Normal/High values migrate to FXAA/2×. `post.js` also owns the browser-compatible ray-lighting pass selected by that state.
 - Quality profiles affect render scale, shadow size, reflection sample quality and sharpening only; scene exposure, color response and volumetric intensity remain project/camera properties. In Ray lighting mode `post.js` enables the Three.js SSR pass for visible metallic, sufficiently smooth meshes. SSR is screen-space—off-screen or occluded geometry still falls back to the scene environment map—and absence/failure of the optional pass retains the standard PBR renderer.
@@ -408,6 +409,8 @@ The site owner's template is still published as `demo/demo-project.lkep.json`. V
 ## Editor Performance Diagnostics
 
 `viewport-layout.js` exposes the viewport `FPS` and `Performance` buttons. The performance overlay reports renderer draw calls, triangle counts, geometry/texture counts, heap information where available, maximum frame time, frame spikes above 100 ms, long-task count, and maximum long-task duration.
+
+The separate `developer-debugger.js` module backs **Dev → Performance Debugger**. It owns a bounded frame-sample buffer, error/rejection/long-task capture, a throttled scene/resource audit and particle-system accounting. Resource rows retain only transient object references for editor selection/focus; exported reports serialize stable IDs and metrics rather than Three.js objects. A complete report is downloaded as JSON on demand. While the panel is open, a concise report is sent at a five-second cadence to the local-only `serve_local.py` bridge and atomically replaces `.lotking-local/developer-performance-latest.md`. Generic static and hosted servers fail this optional write quietly and keep manual JSON export available.
 
 All four viewport slots share the same view-type contract, and slot 0 remains available in Single View rather than being hardwired to Perspective. Perspective slots own independent cameras; orthographic slots own a fixed orientation plus independent target/span state for pan and zoom. Authored Camera and Timeline slots are clean, navigation-locked result previews. `viewportShowHelpers[slot]` controls editor-only helpers per normal view, while Camera/Timeline always suppress helpers regardless of the checkbox.
 

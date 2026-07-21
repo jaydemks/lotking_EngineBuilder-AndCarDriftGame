@@ -24,6 +24,12 @@ function create(deps){
     cam.arcadeDistance = cam.arcadeDistance == null ? 9 : cam.arcadeDistance;
     cam.arcadeHeight = cam.arcadeHeight == null ? 3.1 : cam.arcadeHeight;
     cam.arcadeLag = cam.arcadeLag == null ? 5.8 : cam.arcadeLag;
+    cam.freePitch = cam.freePitch == null ? .32 : cam.freePitch;
+    cam.freeYawOffset = cam.freeYawOffset == null ? 0 : cam.freeYawOffset;
+    cam.lookHeight = cam.lookHeight == null ? 1.1 : cam.lookHeight;
+    cam.lateralOffset = cam.lateralOffset == null ? 0 : cam.lateralOffset;
+    cam.helperRange = cam.helperRange == null ? 5 : cam.helperRange;
+    cam.helperSize = cam.helperSize == null ? .7 : cam.helperSize;
     cam.reverseFrontSpeed = cam.reverseFrontSpeed == null ? 7 : cam.reverseFrontSpeed;
     cam.cinematicDriftOrbit = cam.cinematicDriftOrbit == null ? .18 : cam.cinematicDriftOrbit;
     cam.cinematicDriftClose = cam.cinematicDriftClose == null ? 1.65 : cam.cinematicDriftClose;
@@ -79,6 +85,10 @@ function create(deps){
     sc.body.appendChild(sliderRow('Speed FOV gain', cam.fovSpeedGain, 0, .5, .01, v => setCam({fovSpeedGain:v})).root);
     sc.body.appendChild(sliderRow('Free zoom min', cam.minDist, 2, 12, .5, v => setCam({minDist:v})).root);
     sc.body.appendChild(sliderRow('Free zoom max', cam.maxDist, 8, 40, .5, v => setCam({maxDist:v})).root);
+    sc.body.appendChild(sliderRow('Free start pitch', cam.freePitch * 180 / Math.PI, 3, 68, 1, v => setCam({freePitch:v * Math.PI / 180}, true), v => Math.round(v) + '°').root);
+    sc.body.appendChild(sliderRow('Free orbit offset', cam.freeYawOffset, -180, 180, 1, v => setCam({freeYawOffset:v}, true), v => Math.round(v) + '°').root);
+    sc.body.appendChild(sliderRow('Look target height', cam.lookHeight, .2, 4, .05, v => setCam({lookHeight:v}), v => (+v).toFixed(2) + ' m').root);
+    sc.body.appendChild(sliderRow('Camera lateral offset', cam.lateralOffset, -5, 5, .05, v => setCam({lateralOffset:v}), v => (+v).toFixed(2) + ' m').root);
     sc.body.appendChild(sliderRow('Arcade distance', cam.arcadeDistance, 4, 18, .25, v => setCam({arcadeDistance:v}), v => (+v).toFixed(2) + ' m').root);
     sc.body.appendChild(sliderRow('Arcade height', cam.arcadeHeight, 1.2, 7, .1, v => setCam({arcadeHeight:v}), v => (+v).toFixed(1) + ' m').root);
     sc.body.appendChild(sliderRow('Arcade smoothness', cam.arcadeLag, 1.5, 12, .1, v => setCam({arcadeLag:v}), v => (+v).toFixed(1)).root);
@@ -90,6 +100,9 @@ function create(deps){
     sc.body.appendChild(sliderRow('View distance', cam.far, 100, 1500, 10, v => setCam({far:v})).root);
     sc.body.appendChild(sliderRow('Fog', cam.fogDensity, 0, .03, .0005, v => setCam({fogDensity:v}), v => (+v).toFixed(4)).root);
     sc.body.appendChild(sliderRow('Impact shake', cam.shake, 0, 2, .05, v => setCam({shake:v})).root);
+    sc.body.appendChild(sliderRow('Editor cone length', cam.helperRange, .5, 20, .25, v => setCam({helperRange:v}), v => (+v).toFixed(2) + ' m').root);
+    sc.body.appendChild(sliderRow('Editor camera dummy size', cam.helperSize, .2, 2.5, .05, v => setCam({helperSize:v}), v => (+v).toFixed(2) + '×').root);
+    sc.body.appendChild(el('<div class="lk-hint">The two editor helper controls change only the camera dummy and its view cone; they never affect the rendered gameplay view.</div>'));
     box.appendChild(sc.root);
 
     if(Array.isArray(player.cameraAnchors) && player.setActiveCameraAnchor){

@@ -22,6 +22,16 @@ function create(deps){
     return deps.registry ? (deps.registry() || []) : [];
   }
 
+  function disposeVisualHelper(helper){
+    if(!helper) return;
+    if(helper.parent) helper.parent.remove(helper);
+    helper.traverse && helper.traverse(node => {
+      if(node.geometry && node.geometry.dispose) node.geometry.dispose();
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+    });
+  }
+
   function clearColliderHelpers(){
     const geometries = new Set();
     const materials = new Set();
@@ -81,6 +91,7 @@ function create(deps){
       wire.matrix.copy(node.matrixWorld);
       wire.renderOrder = 998;
       wire.userData.colliderPreview = true;
+      wire.userData.colliderSourceMesh = node;
       group.add(wire);
     });
     if(!group.children.length){
@@ -88,23 +99,75 @@ function create(deps){
       return false;
     }
     group.userData.colliderPreview = true;
+    group.userData.colliderRef = ref;
+    group.userData.colliderOwner = owner;
     colliderHelpers.push(group);
     helperGroup.add(group);
     return true;
   }
 
   function colliderDummyVisibility(owner){
+    if(ED.showCollisionDummies !== true) return false;
     const mode = owner && owner.userData ? owner.userData.colliderDummyVisibility : null;
     if(mode === 'show') return true;
     if(mode === 'hide') return false;
-    return ED.showCollisionDummies !== false;
+    return ED.selected === owner;
   }
 
   function rebuildColliderHelpers(){
     clearColliderHelpers();
-    if(!ED.active || ED.playPreview || !helperGroup) return;
+    const previewActive = ED.playPreview || ED.simulatePreview;
+    if(!ED.active || !helperGroup || (previewActive && ED.forceCollisionDummiesInPreview !== true)) return;
     registry().forEach(o => {
       if(deps.syncCollider && o) deps.syncCollider(o);
+      const logicRefs = o && o.userData && Array.isArray(o.userData.logicElementColliderRefs) ? o.userData.logicElementColliderRefs : [];
+      logicRefs.forEach(logicRef => {
+        if(!logicRef || logicRef.enabled === false) return;
+        const cfg = logicRef.config || {};
+        const mode = cfg.dummyVisibility || (cfg.dummyVisible === true ? 'show' : (cfg.dummyVisible === false ? 'hide' : 'auto'));
+        if(ED.showCollisionDummies !== true || mode === 'hide' || (mode !== 'show' && ED.selected !== o)) return;
+        const mat = new THREE.MeshBasicMaterial({color:ED.selected === o ? 0x52b7ff : 0x4be3a0, wireframe:true, transparent:true, opacity:ED.selected === o ? .72 : .48, depthTest:false});
+        let helper;
+        if(logicRef.kind === 'circle'){
+          helper = new THREE.Mesh(new THREE.SphereGeometry(Math.max(.05, logicRef.r || .5), 24, 16), mat);
+        } else {
+          helper = new THREE.Mesh(new THREE.BoxGeometry(Math.max(.1, (logicRef.hx || .5) * 2), Math.max(.1, (logicRef.hy || .5) * 2), Math.max(.1, (logicRef.hz || .5) * 2)), mat);
+          helper.rotation.set(logicRef.rotX || 0, logicRef.rotY || logicRef.rot || 0, logicRef.rotZ || 0);
+        }
+        helper.position.set(logicRef.x || 0, logicRef.y || 0, logicRef.z || 0);
+        helper.renderOrder = 998;
+        helper.userData.colliderPreview = true;
+        helper.userData.logicElementColliderPreview = true;
+        helper.userData.colliderOwner = o;
+        helper.userData.colliderRef = logicRef;
+        colliderHelpers.push(helper);
+        helperGroup.add(helper);
+      });
+      const vehicleCollision = o && o.userData && o.userData.logicGraph && o.userData.logicGraph.vehiclePawn && o.userData.logicGraph.vehiclePawn.collision;
+      if(vehicleCollision && colliderDummyVisibility(o)){
+        const hx = vehicleCollision.hx == null ? .92 : vehicleCollision.hx;
+        const hy = vehicleCollision.hy == null ? .42 : vehicleCollision.hy;
+        const hz = vehicleCollision.hz == null ? 1.85 : vehicleCollision.hz;
+        const bodyY = vehicleCollision.bodyY == null ? .55 : vehicleCollision.bodyY;
+        const worldPosition = o.getWorldPosition ? o.getWorldPosition(new THREE.Vector3()) : o.position;
+        const worldRotation = o.getWorldQuaternion ? new THREE.Euler().setFromQuaternion(o.getWorldQuaternion(new THREE.Quaternion()), 'XYZ') : o.rotation;
+        const yaw = worldRotation ? worldRotation.y || 0 : 0;
+        const offsetX = vehicleCollision.offsetX || 0;
+        const offsetY = vehicleCollision.offsetY == null ? .45 : vehicleCollision.offsetY;
+        const offsetZ = vehicleCollision.offsetZ || 0;
+        const cos = Math.cos(yaw), sin = Math.sin(yaw);
+        const mat = new THREE.MeshBasicMaterial({color:0x52b7ff, wireframe:true, transparent:true, opacity:.68, depthTest:false});
+        const helper = new THREE.Mesh(new THREE.BoxGeometry(Math.max(.1, hx * 2), Math.max(.1, hy * 2), Math.max(.1, hz * 2)), mat);
+        helper.position.set(worldPosition.x + offsetX * cos + offsetZ * sin, worldPosition.y + bodyY + offsetY, worldPosition.z - offsetX * sin + offsetZ * cos);
+        helper.rotation.set(vehicleCollision.rotX || 0, yaw + (vehicleCollision.rotY || 0), vehicleCollision.rotZ || 0);
+        helper.renderOrder = 999;
+        helper.userData.colliderPreview = true;
+        helper.userData.logicVehicleColliderPreview = true;
+        helper.userData.colliderOwner = o;
+        helper.userData.colliderConfig = vehicleCollision;
+        colliderHelpers.push(helper);
+        helperGroup.add(helper);
+      }
       const col = o && o.userData && o.userData.collider;
       const ref = col && col.ref;
       if(!ref || ref.enabled === false) return;
@@ -157,13 +220,16 @@ function create(deps){
         helper.position.set(partRef.x || 0, partRef.y != null ? partRef.y : fallbackY, partRef.z || 0);
         helper.renderOrder = 998;
         helper.userData.colliderPreview = true;
+        helper.userData.colliderRef = partRef;
+        helper.userData.colliderKind = col.kind;
+        helper.userData.colliderOwner = o;
         colliderHelpers.push(helper);
         helperGroup.add(helper);
       });
     });
     const playerCar = GAME && GAME.player && GAME.player.car;
     const playerCollision = GAME && GAME.player && GAME.player.collision;
-    if(ED.selected === playerCar && playerCar && playerCollision && colliderDummyVisibility(playerCar)){
+    if(playerCar && playerCollision && colliderDummyVisibility(playerCar)){
       const hx = playerCollision.hx == null ? .92 : playerCollision.hx;
       const hy = playerCollision.hy == null ? .42 : playerCollision.hy;
       const hz = playerCollision.hz == null ? 1.85 : playerCollision.hz;
@@ -184,13 +250,15 @@ function create(deps){
       helper.rotation.set(playerCollision.rotX || 0, yaw + (playerCollision.rotY || 0), playerCollision.rotZ || 0);
       helper.renderOrder = 999;
       helper.userData.colliderPreview = true;
+      helper.userData.playerColliderPreview = true;
+      helper.userData.colliderOwner = playerCar;
       colliderHelpers.push(helper);
       helperGroup.add(helper);
     }
   }
 
   function clearReplaceDropHelper(){
-    if(replaceDropHelper && helperGroup) helperGroup.remove(replaceDropHelper);
+    disposeVisualHelper(replaceDropHelper);
     replaceDropHelper = null;
     deps.setViewportReplaceTarget(null);
   }
@@ -208,21 +276,23 @@ function create(deps){
   }
 
   function refreshSelectionHelpers(){
-    if(selBox && helperGroup) helperGroup.remove(selBox);
+    disposeVisualHelper(selBox);
     selBox = null;
-    multiSelBoxes.forEach(box => { if(box && helperGroup) helperGroup.remove(box); });
+    multiSelBoxes.forEach(disposeVisualHelper);
     multiSelBoxes = [];
-    if(lightHelper && helperGroup) helperGroup.remove(lightHelper);
+    disposeVisualHelper(lightHelper);
     lightHelper = null;
     const multi = Array.isArray(ED.multiSelected) ? ED.multiSelected.filter(Boolean) : [];
     if(multi.length > 1){
       multi.forEach((obj, index) => {
         const box = new THREE.BoxHelper(obj, index === 0 ? 0xffd166 : 0x4be3a0);
+        box.userData.target = obj;
         multiSelBoxes.push(box);
         helperGroup.add(box);
       });
     } else if(ED.selected){
       selBox = new THREE.BoxHelper(ED.selected, 0xffd166);
+      selBox.userData.target = ED.selected;
       helperGroup.add(selBox);
       const l = ED.selected.isLight ? ED.selected : ED.selected.userData && ED.selected.userData.light;
       if(l){
@@ -234,6 +304,35 @@ function create(deps){
         } catch(err){}
       }
     }
+    refreshColliderHelperStyles();
+  }
+
+  function refreshColliderHelperStyles(){
+    colliderHelpers.forEach(helper => {
+      const data = helper && helper.userData || {};
+      if(data.playerColliderPreview){
+        if(helper.material){
+          helper.material.color.setHex(ED.playerColliderEdit ? 0x4be3a0 : 0x52b7ff);
+          helper.material.opacity = ED.playerColliderEdit ? .86 : .62;
+        }
+        return;
+      }
+      const ref = data.colliderRef;
+      const owner = data.colliderOwner;
+      if(!ref || !owner) return;
+      const selectedPart = ED.selected === owner && ED.colliderEdit && Number.isInteger(ED.colliderPartIndex) && ref.compoundPart && ref.partIndex === ED.colliderPartIndex;
+      const complex = isComplexMeshRef(ref);
+      const color = complex
+        ? (selectedPart || ED.selected === owner ? 0x52b7ff : 0xffd166)
+        : (selectedPart ? 0x52b7ff : (ref.physics ? 0x4be3a0 : (ref.partMode === 'solid' ? 0xff8a4b : 0xffd166)));
+      const opacity = complex ? (selectedPart || ED.selected === owner ? .72 : .4) : (selectedPart ? .88 : (ref.physics ? .56 : .42));
+      helper.traverse(node => {
+        if(node.material && node.material.color){
+          node.material.color.setHex(color);
+          node.material.opacity = opacity;
+        }
+      });
+    });
   }
 
   function ensureCameraRigHelper(){
@@ -247,12 +346,72 @@ function create(deps){
     return camRigHelper;
   }
 
+  function targetMatrixChanged(helper, target){
+    if(!helper || !target || !target.updateWorldMatrix) return true;
+    target.updateWorldMatrix(true, false);
+    const elements = target.matrixWorld.elements;
+    const before = helper.userData.lkTargetMatrix;
+    if(before && elements.every((value, index) => Math.abs(value - before[index]) < 1e-7)) return false;
+    helper.userData.lkTargetMatrix = elements.slice();
+    return true;
+  }
+
+  function updateColliderHelpers(){
+    colliderHelpers.forEach(helper => {
+      if(!helper) return;
+      if(helper.userData && helper.userData.playerColliderPreview){
+        const car = GAME && GAME.player && GAME.player.car;
+        const cfg = GAME && GAME.player && GAME.player.collision;
+        if(!car || !cfg) return;
+        const yaw = car.rotation ? car.rotation.y || 0 : 0;
+        const cos = Math.cos(yaw), sin = Math.sin(yaw);
+        const ox = cfg.offsetX || 0, oz = cfg.offsetZ || 0;
+        helper.position.set(car.position.x + ox * cos + oz * sin, (cfg.bodyY == null ? .55 : cfg.bodyY) + (cfg.offsetY == null ? .45 : cfg.offsetY), car.position.z - ox * sin + oz * cos);
+        helper.rotation.set(cfg.rotX || 0, yaw + (cfg.rotY || 0), cfg.rotZ || 0);
+        return;
+      }
+      if(helper.userData && helper.userData.logicVehicleColliderPreview){
+        const owner = helper.userData.colliderOwner;
+        const cfg = helper.userData.colliderConfig;
+        if(!owner || !cfg) return;
+        const worldPosition = owner.getWorldPosition ? owner.getWorldPosition(new THREE.Vector3()) : owner.position;
+        const worldRotation = owner.getWorldQuaternion ? new THREE.Euler().setFromQuaternion(owner.getWorldQuaternion(new THREE.Quaternion()), 'XYZ') : owner.rotation;
+        const yaw = worldRotation ? worldRotation.y || 0 : 0;
+        const cos = Math.cos(yaw), sin = Math.sin(yaw);
+        const ox = cfg.offsetX || 0, oz = cfg.offsetZ || 0;
+        helper.position.set(worldPosition.x + ox * cos + oz * sin, worldPosition.y + (cfg.bodyY == null ? .55 : cfg.bodyY) + (cfg.offsetY == null ? .45 : cfg.offsetY), worldPosition.z - ox * sin + oz * cos);
+        helper.rotation.set(cfg.rotX || 0, yaw + (cfg.rotY || 0), cfg.rotZ || 0);
+        return;
+      }
+      if(helper.isGroup){
+        helper.traverse(node => {
+          const source = node.userData && node.userData.colliderSourceMesh;
+          if(!source) return;
+          source.updateWorldMatrix(true, false);
+          node.matrix.copy(source.matrixWorld);
+        });
+        return;
+      }
+      const ref = helper.userData && helper.userData.colliderRef;
+      if(!ref) return;
+      helper.position.set(ref.x || 0, ref.y != null ? ref.y : 0, ref.z || 0);
+      helper.rotation.set(ref.rotX || 0, ref.rotY != null ? ref.rotY : (ref.rot || 0), ref.rotZ || 0);
+    });
+  }
+
   function updateSelectionAndDropHelpers(){
-    if(selBox) selBox.update();
-    multiSelBoxes.forEach(box => box && box.update && box.update());
-    if(replaceDropHelper) replaceDropHelper.update();
-    if(lightHelper && lightHelper.update) lightHelper.update();
-    rebuildColliderHelpers();
+    if(selBox && targetMatrixChanged(selBox, selBox.userData.target)) selBox.update();
+    multiSelBoxes.forEach(box => { if(box && box.update && targetMatrixChanged(box, box.userData.target)) box.update(); });
+    if(replaceDropHelper && targetMatrixChanged(replaceDropHelper, replaceDropHelper.userData.target)) replaceDropHelper.update();
+    if(lightHelper && lightHelper.update){
+      const light = ED.selected && (ED.selected.isLight ? ED.selected : ED.selected.userData && ED.selected.userData.light);
+      const lightSig = light ? [light.color && light.color.getHex(), light.intensity, light.distance, light.angle, light.penumbra].join(':') : '';
+      if(targetMatrixChanged(lightHelper, ED.selected) || lightHelper.userData.lkLightSig !== lightSig){
+        lightHelper.userData.lkLightSig = lightSig;
+        lightHelper.update();
+      }
+    }
+    updateColliderHelpers();
   }
 
   function updateCameraRigHelper(gameCam){

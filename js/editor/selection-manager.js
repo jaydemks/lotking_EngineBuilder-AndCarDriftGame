@@ -53,6 +53,15 @@ function create(deps){
     gizmo.detach();
   }
 
+  function syncOutlinerSelection(){
+    if(deps.syncOutlinerSelection) deps.syncOutlinerSelection();
+    else deps.refreshOutliner();
+  }
+  function rebuildPhysics(){
+    if(deps.requestPhysicsRebuild) deps.requestPhysicsRebuild();
+    else if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+  }
+
   function selectedObjects(){
     const multi = Array.isArray(ED.multiSelected) ? ED.multiSelected.filter(o => o && !isBlueprintPart(o)) : [];
     if(multi.length) return multi;
@@ -88,7 +97,8 @@ function create(deps){
     });
   }
 
-  function selectObject(o){
+  function selectObject(o, opts){
+    opts = opts || {};
     o = selectableObject(o);
     if(ED.selected === o && ED.special === null && !ED.colliderEdit && !ED.playerColliderEdit && !(ED.multiSelected && ED.multiSelected.length)) return;
     deps.clearHoverPickHelper();
@@ -103,8 +113,8 @@ function create(deps){
     syncSelectedGizmo(o);
     deps.refreshSelectionHelpers();
     deps.buildInspector();
-    deps.refreshOutliner();
-    revealSelectedInSceneOutliner();
+    syncOutlinerSelection();
+    if(opts.reveal !== false) revealSelectedInSceneOutliner();
   }
 
   function selectSpecial(kind){
@@ -123,7 +133,7 @@ function create(deps){
     }
     deps.refreshSelectionHelpers();
     deps.buildInspector();
-    deps.refreshOutliner();
+    syncOutlinerSelection();
   }
 
   function deselect(){
@@ -148,7 +158,7 @@ function create(deps){
     syncSelectedGizmo(o);
     deps.refreshSelectionHelpers();
     deps.buildInspector();
-    deps.refreshOutliner();
+    syncOutlinerSelection();
     deps.status('Collider edit: ' + (o.userData.editorName || 'object'));
   }
 
@@ -169,7 +179,7 @@ function create(deps){
     syncSelectedGizmo(o);
     deps.refreshSelectionHelpers();
     deps.buildInspector();
-    deps.refreshOutliner();
+    syncOutlinerSelection();
     deps.status('Collider part: ' + (parts[index].partName || ('Collider ' + (index + 1))));
   }
 
@@ -216,13 +226,13 @@ function create(deps){
     syncSelectedGizmo(ED.selected);
     deps.refreshSelectionHelpers();
     deps.buildInspector();
-    deps.refreshOutliner();
+    syncOutlinerSelection();
     deps.status(unique.length > 1 ? ('Selected ' + unique.length + ' objects') : 'Selected object');
   }
 
   function selectObjectWithModifiers(o, opts){
     opts = opts || {};
-    if(!o || isBlueprintPart(o)) return selectObject(o);
+    if(!o || isBlueprintPart(o)) return selectObject(o, {reveal:opts.reveal !== false});
     if(opts.range && selectObjectRange(o, opts.rangeObjects)) return;
     const list = selectedObjects();
     const toggle = !!opts.toggle;
@@ -235,7 +245,7 @@ function create(deps){
       if(!next.length) return deselect();
       return selectMultiObjects(next);
     }
-    return selectObject(o);
+    return selectObject(o, {reveal:opts.reveal !== false});
   }
 
   function selectSimilarObjects(o){
@@ -323,7 +333,7 @@ function create(deps){
         o.userData.addedEntry.physicsMass = o.userData.physicsMass;
         o.userData.addedEntry.physicsImpact = o.userData.physicsImpact;
       }
-      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      rebuildPhysics();
       STORE.syncCollider(o);
       deps.markDirty();
       deps.buildInspector();
@@ -348,7 +358,7 @@ function create(deps){
         o.userData.addedEntry.collide = false;
       }
       o.userData.physicsEnabled = false;
-      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      rebuildPhysics();
       deps.markDirty();
       deps.buildInspector();
       deps.refreshOutliner();
@@ -356,7 +366,7 @@ function create(deps){
       return;
     }
 
-    if(GAME.systems.physics) GAME.systems.physics.rebuild();
+    rebuildPhysics();
     deps.markDirty();
     deps.buildInspector();
     deps.refreshOutliner();
@@ -424,7 +434,7 @@ function create(deps){
       } else {
         createCollider(oldKind);
       }
-      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      rebuildPhysics();
       deps.markDirty();
       deps.buildInspector();
       deps.refreshOutliner();
@@ -442,7 +452,7 @@ function create(deps){
       if(o.userData.addedEntry) o.userData.addedEntry.physicsMass = o.userData.physicsMass;
       if(o.userData.addedEntry) o.userData.addedEntry.physicsImpact = o.userData.physicsImpact;
       if(o.userData.addedEntry) o.userData.addedEntry.collide = true;
-      if(GAME.systems.physics) GAME.systems.physics.rebuild();
+      rebuildPhysics();
       deps.markDirty();
       deps.buildInspector();
       deps.refreshOutliner();
@@ -452,7 +462,7 @@ function create(deps){
 
     o.userData.physicsEnabled = false;
     if(o.userData.addedEntry) o.userData.addedEntry.physics = false;
-    if(GAME.systems.physics) GAME.systems.physics.rebuild();
+    rebuildPhysics();
     deps.markDirty();
     deps.status('Physics state unchanged');
   }
@@ -522,16 +532,52 @@ function create(deps){
     }).then(ok => { if(ok) performDeleteEntities(list); });
   }
 
+  function cloneSafeUserData(value){
+    if(!value || typeof value !== 'object') return {};
+    const seen = new WeakSet();
+    try {
+      return JSON.parse(JSON.stringify(value, (key, item) => {
+        if(typeof item === 'function') return undefined;
+        // Runtime collider links point back to the Object3D and collider list.
+        // They must be rebuilt for the duplicate, never serialized by clone().
+        if(key === 'owner' || key === '_boxList' || item && item.isObject3D) return undefined;
+        if(item && typeof item === 'object'){
+          if(seen.has(item)) return undefined;
+          seen.add(item);
+        }
+        return item;
+      }));
+    } catch(err){ return {}; }
+  }
+
   function cleanClone(o){
-    const c = o.clone(true);
-    c.userData = {};
-    return c;
+    const savedUserData = [];
+    o.traverse(node => {
+      savedUserData.push([node, node.userData]);
+      node.userData = node === o ? {} : cloneSafeUserData(node.userData);
+    });
+    try {
+      const c = o.clone(true);
+      c.userData = {};
+      c.traverse(node => {
+        if(!node || !node.isMesh) return;
+        if(node.userData && node.userData.editorLightHandle) return;
+        if(node.geometry && node.geometry.clone) node.geometry = node.geometry.clone();
+        if(Array.isArray(node.material)) node.material = node.material.map(material => material && material.clone ? material.clone() : material);
+        else if(node.material && node.material.clone) node.material = node.material.clone();
+      });
+      return c;
+    } finally {
+      savedUserData.forEach(item => { item[0].userData = item[1]; });
+    }
   }
 
   function duplicateEntity(o, offset){
     if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     if(isBlueprintPart(o)) return;
     const id = STORE.nextId();
+    const sourceParent = o.parent && o.parent !== GAME.core.scene && o.parent.userData && o.parent.userData.editorId ? o.parent : null;
+    const sourceParentId = o.userData.linkParentId || sourceParent && sourceParent.userData.editorId || null;
     let obj, entry;
     const src = o.userData.addedEntry;
     if(o.userData.effectParams){
@@ -539,7 +585,7 @@ function create(deps){
       obj = STORE.createEmitter(params.kind, params);
       entry = {id, kind:'effect', effect: params.kind, params, name: o.userData.editorName + ' copy', collide: false};
     } else if(src){
-      entry = JSON.parse(JSON.stringify(src));
+      entry = STORE.snapshotAddedEntry ? STORE.snapshotAddedEntry(o, src) : JSON.parse(JSON.stringify(src));
       entry.id = id; entry.name = o.userData.editorName + ' copy';
       if(src.kind === 'cinemaStudio' && o.userData.cinemaProps){
         entry.props = JSON.parse(JSON.stringify(o.userData.cinemaProps));
@@ -551,7 +597,23 @@ function create(deps){
       obj = null;
     } else {
       entry = {id, kind:'clone', srcId: o.userData.editorId, name: o.userData.editorName + ' copy', collide: !!o.userData.collider};
-      obj = cleanClone(o);
+      if(STORE.snapshotAddedEntry) entry = STORE.snapshotAddedEntry(o, entry);
+      entry.id = id;
+      entry.name = o.userData.editorName + ' copy';
+      try { obj = cleanClone(o); }
+      catch(err){
+        deps.status(tr('Duplicate failed: ', 'Duplicazione fallita: ') + (err && err.message || err));
+        return;
+      }
+    }
+    const sourceCollider = o.userData.collider && o.userData.collider.ref;
+    if(sourceCollider){
+      entry.collide = sourceCollider.enabled !== false;
+      entry.colliderKind = o.userData.collider.kind === 'circle' ? 'circle' : 'box';
+      if(o.userData.colliderShape) entry.colliderShape = cloneSafeUserData(o.userData.colliderShape);
+      entry.physics = !!(o.userData.physicsEnabled || sourceCollider.physics);
+      entry.physicsMass = sourceCollider.mass != null ? sourceCollider.mass : o.userData.physicsMass;
+      entry.physicsImpact = sourceCollider.impact != null ? sourceCollider.impact : o.userData.physicsImpact;
     }
     if(o.userData.assetKey) entry.asset = {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource};
     const place = created => {
@@ -562,7 +624,14 @@ function create(deps){
       created.scale.copy(o.scale);
       entry.t = STORE.tOf(created);
       entry.t.name = entry.name;
+      if(sourceParentId) entry.t.parent = sourceParentId;
       STORE.registerAdded(GAME, created, entry);
+      if(sourceParent){
+        sourceParent.add(created);
+        created.userData.linkParentId = sourceParentId;
+        entry.t = STORE.tOf(created);
+        entry.t.name = entry.name;
+      }
       if(o.userData.matProps) STORE.applyMatProps(created, o.userData.matProps);
       deps.pushHistory({
         label: 'Duplicate ' + (o.userData.editorName || 'Entity'),
@@ -570,12 +639,29 @@ function create(deps){
         redo: () => { deps.restoreEntity(created); selectObject(created); },
       });
       deps.markDirty(); deps.refreshOutliner(); selectObject(created);
+      if(deps.setAssetLoading && entry && (entry.kind === 'glb' || entry.kind === 'logicElement')){
+        deps.setAssetLoading(true, entry.name, 100, tr('Duplicated', 'Duplicato'));
+        setTimeout(() => deps.setAssetLoading(false), 260);
+      }
     };
-    if(obj) place(obj);
-    else STORE.createFromEntry(entry, GAME).then(place).catch(err => {
-      const it = GAME && GAME.i18n && GAME.i18n.lang === 'it';
-      deps.status((it ? 'Duplicazione fallita: ' : 'Duplicate failed: ') + err.message);
-    });
+    if(obj){
+      try { place(obj); }
+      catch(err){
+        deps.status(tr('Duplicate failed: ', 'Duplicazione fallita: ') + (err && err.message || err));
+      }
+    }
+    else {
+      const heavy = entry.kind === 'glb' || entry.kind === 'logicElement';
+      if(heavy && deps.setAssetLoading) deps.setAssetLoading(true, entry.name, 12, tr('Duplicating object', 'Duplicazione oggetto'));
+      else if(entry.kind === 'light' && deps.requestWarmup) deps.requestWarmup(tr('Warm-up light...', 'Preparazione luce...'));
+      const create = () => STORE.createFromEntry(entry, GAME).then(place).catch(err => {
+        if(heavy && deps.setAssetLoading) deps.setAssetLoading(false);
+        const it = GAME && GAME.i18n && GAME.i18n.lang === 'it';
+        deps.status((it ? 'Duplicazione fallita: ' : 'Duplicate failed: ') + err.message);
+      });
+      if(heavy) requestAnimationFrame(() => requestAnimationFrame(create));
+      else create();
+    }
   }
 
   function focusSelected(){
@@ -659,7 +745,7 @@ function create(deps){
         partShape.rot = partShape.rotY;
         if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
         STORE.syncCollider(o);
-        if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+        rebuildPhysics();
         deps.markDirty();
         return;
       }
@@ -683,7 +769,7 @@ function create(deps){
       }
       if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
       STORE.syncCollider(o);
-      if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+      rebuildPhysics();
       deps.markDirty();
       return;
     }

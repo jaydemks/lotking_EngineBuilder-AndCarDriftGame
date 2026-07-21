@@ -80,6 +80,7 @@ function normalizeVehiclePawn(vehiclePawn, legacyBlueprint){
     enabled:source.enabled !== false,
     hidden:source.hidden === true,
     possessed:source.possessed !== false && playerId != null,
+    modelShading:source.modelShading === 'smooth' || source.modelShading === 'flat' ? source.modelShading : 'original',
     playerId,
     spawn:{
       x:Number(spawn.x) || 0, y:Number(spawn.y) || 0, z:Number(spawn.z) || 0,

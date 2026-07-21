@@ -59,6 +59,24 @@ function normalizePlayerId(value){
   return clamp(Number(value) | 0, 1, 4);
 }
 
+function normalizeTireSmokeConfig(source){
+  const input = source && typeof source === 'object' ? clone(source) : {};
+  const legacy = finite(input.smokeModelVersion, 0) < 3;
+  const threshold = legacy ? .35 : finite(input.smokeThreshold, .35);
+  return Object.assign({
+    enabled:true, smokeModelVersion:3, smokeEnabled:true, smokeAmount:.28,
+    smokeThreshold:.35, smokeMinHeat:.3, smokeHeatRate:.75, smokeCoolRate:.4,
+    smokeOnDrift:true, smokeOnBrake:true, smokeOnAcceleration:true,
+  }, input, {
+    smokeModelVersion:3,
+    smokeAmount:clamp(legacy ? .28 : finite(input.smokeAmount, .28), 0, 4),
+    smokeThreshold:clamp(threshold, 0, 1),
+    smokeMinHeat:clamp(legacy ? .3 : finite(input.smokeMinHeat, .3), 0, 1),
+    smokeHeatRate:Math.max(0, legacy ? .75 : finite(input.smokeHeatRate, .75)),
+    smokeCoolRate:Math.max(0, legacy ? .4 : finite(input.smokeCoolRate, .4)),
+  });
+}
+
 function normalizeConfig(source){
   const src = source && typeof source === 'object' ? clone(source) : {};
   const tuning = src.tuning || {};
@@ -73,6 +91,9 @@ function normalizeConfig(source){
     possessed:src.possessed !== false && playerId != null,
     editorOnly:src.editorOnly === true,
     runtimeOnly:src.runtimeOnly === true,
+    modelShading:window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.normalizeShadingMode
+      ? window.LK_RUNTIME_PLAYER_MODEL.normalizeShadingMode(src.modelShading)
+      : (src.modelShading === 'smooth' || src.modelShading === 'flat' ? src.modelShading : 'original'),
     physicsBackend:String(src.physicsBackend || 'auto'),
     playerId,
     spawn:{
@@ -91,7 +112,8 @@ function normalizeConfig(source){
       drag:Math.max(0, finite(tuning.drag, 1.8)),
     }),
     effects:Object.assign({exhaustEnabled:true, skidEnabled:true, neonEnabled:true, smokeIntensity:1, skidLife:12}, src.effects || {}),
-    camera:Object.assign({mode:'arcade', arcadeDistance:9, arcadeHeight:3.1, arcadeLag:5.8, fov:70}, src.camera || src.cam || {}),
+    skids:normalizeTireSmokeConfig(src.skids),
+    camera:Object.assign({mode:'arcade', arcadeDistance:9, arcadeHeight:3.1, arcadeLag:5.8, fov:70, freePitch:.32, freeYawOffset:0, lookHeight:1.1, lateralOffset:0, helperRange:5, helperSize:.7}, src.camera || src.cam || {}),
     engineAudio:Object.assign({enabled:true, volume:.28, pitch:1, setId:null}, src.engineAudio || {}),
     dataWidgets:src.dataWidgets ? clone(src.dataWidgets) : null,
   });
@@ -270,7 +292,7 @@ function createRegistry(GAME, options){
     pawn.services = services || {};
     pawn.control = null;
     pawn.backend = null;
-    pawn.effectsRuntime = {exhaust:[], skids:[], exhaustClock:0, skidClock:0, anchors:null};
+    pawn.effectsRuntime = {exhaust:[], skids:[], exhaustClock:0, skidClock:0, tireSmokeClock:0, tireHeat:0, anchors:null};
     pawn.widgetRuntime = null;
     pawn.audioRuntime = null;
     pawn.lightRigRuntime = null;
@@ -432,6 +454,7 @@ function createRegistry(GAME, options){
         else if(/brake|freno/.test(key)) condition = 'brake';
         else if(/turn_left|left_turn|freccia.*(left|sx)/.test(key)) condition = 'left';
         else if(/turn_right|right_turn|freccia.*(right|dx)/.test(key)) condition = 'right';
+        else if(/neon|underglow/.test(key)) condition = 'neon';
         else if(/headlight|front|night|faro/.test(key)) condition = 'night';
         const auxMatch = /^aux_light_(\d+)$/.exec(String(element.id || ''));
         return light ? {element, light, condition, auxIndex:auxMatch ? Number(auxMatch[1]) : null, baseIntensity:finite(element.intensity, light.intensity || .75), baseDistance:finite(light.distance, 0), baseAngle:finite(light.angle, .5)} : null;
@@ -534,6 +557,7 @@ function createRegistry(GAME, options){
       });
       const baseCollision = Object.assign({offsetY:.45}, this.driveSetupBase.collision || {});
       const chassisLift = clamp(finite(setup.chassisLift, 0), -.35, .9);
+      if(!this.config.collision || typeof this.config.collision !== 'object') this.config.collision = {};
       this.config.collision.offsetY = clamp(finite(baseCollision.offsetY, .45) + chassisLift, -2, 4);
       if(this.backend && this.backend.body && this.backend.body.shapeOffsets && this.backend.body.shapeOffsets[0]){
         this.backend.body.shapeOffsets[0].y = this.config.collision.offsetY;
@@ -585,7 +609,9 @@ function createRegistry(GAME, options){
       return target;
     };
     pawn.ensureNativeLightRig = function(){
-      if(this.lightRigRuntime || !window.LK_RUNTIME_PLAYER_LIGHT_RIG || !this.owner) return this.lightRigRuntime;
+      if(this.lightRigRuntime && this.lightRigRuntime.roots && this.lightRigRuntime.roots.some(root => root && root.parent === this.owner)) return this.lightRigRuntime;
+      if(this.lightRigRuntime) this.lightRigRuntime = null;
+      if(!window.LK_RUNTIME_PLAYER_LIGHT_RIG || !this.owner) return this.lightRigRuntime;
       const before = new Set(this.owner.children || []);
       const self = this;
       const rig = window.LK_RUNTIME_PLAYER_LIGHT_RIG.create({
@@ -603,7 +629,28 @@ function createRegistry(GAME, options){
       const roots = (this.owner.children || []).filter(child => !before.has(child));
       this.owner.traverse(node => { if(node.userData && node.userData.logicElementSceneType === 'light') node.visible = false; });
       this.lightRigRuntime = {rig, roots};
+      this.syncNativeLightRigAnchors();
       return this.lightRigRuntime;
+    };
+    pawn.syncNativeLightRigAnchors = function(){
+      const runtime = this.lightRigRuntime;
+      if(!runtime || !runtime.rig || !runtime.rig.syncAnchorTransforms || !this.owner) return;
+      const anchorMap = {
+        player_front_light_0:'headlight_left', player_front_light_1:'headlight_right',
+        player_rear_position_0:'brake_left', player_rear_position_1:'brake_right',
+        player_rear_brake_0:'brake_left', player_rear_brake_1:'brake_right',
+        player_rear_reverse_0:'reverse_left', player_rear_reverse_1:'reverse_right',
+        player_neon_left:'neon_left', player_neon_right:'neon_right',
+      };
+      const nodes = {};
+      this.owner.traverse(node => {
+        const id = node && node.userData && node.userData.logicElementSceneId;
+        if(id && !nodes[id]) nodes[id] = node;
+      });
+      runtime.rig.syncAnchorTransforms(id => {
+        const sceneId = anchorMap[id] || (String(id).indexOf('player_aux_light_') === 0 ? 'aux_light_' + String(id).split('_').pop() : id);
+        return nodes[sceneId] || null;
+      });
     };
     pawn.ensureModelWheelRig = function(){
       if(this.modelRigRuntime || !window.LK_RUNTIME_MODEL_ASSETS || !window.THREE || !this.owner) return this.modelRigRuntime;
@@ -614,6 +661,9 @@ function createRegistry(GAME, options){
       });
       if(!modelRoot || this.modelRigAttemptedRoot === modelRoot) return null;
       this.modelRigAttemptedRoot = modelRoot;
+      if(window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.applyModelShading){
+        window.LK_RUNTIME_PLAYER_MODEL.applyModelShading(modelRoot, this.config.modelShading, window.THREE);
+      }
       const assets = window.LK_RUNTIME_MODEL_ASSETS.create({THREERef:window.THREE, car:this.owner, isFileMode:false});
       const active = assets && assets.rig && assets.rig.build(modelRoot);
       this.owner.userData.vehicleModelRigDiagnostics = {root:modelRoot.name || modelRoot.type, active:!!active};
@@ -624,9 +674,11 @@ function createRegistry(GAME, options){
       const front = this.config.lights && this.config.lights.front || {};
       const sky = GAME && GAME.systems && GAME.systems.sky;
       const t = sky && sky.getTime ? sky.getTime() : .5;
-      const hour = (((Number(t) || 0) % 1) + 1) % 1 * 24;
-      const on = clamp(finite(front.autoOnHour, 18), 0, 24);
-      const off = clamp(finite(front.autoOffHour, 7), 0, 24);
+      const hour = sky && sky.getClockHour
+        ? sky.getClockHour()
+        : ((((Number(t) || 0) % 1) + 1) % 1 * 24 + 6) % 24;
+      const on = ((finite(front.autoOnHour, 18) % 24) + 24) % 24;
+      const off = ((finite(front.autoOffHour, 7) % 24) + 24) % 24;
       if(Math.abs(on - off) < .001) return true;
       return on > off ? (hour >= on || hour < off) : (hour >= on && hour < off);
     };
@@ -652,6 +704,7 @@ function createRegistry(GAME, options){
         else if(condition === 'brake') active = active && brake > .08 && !reversing;
         else if(condition === 'left') active = active && steer < -.18;
         else if(condition === 'right') active = active && steer > .18;
+        else if(condition === 'neon') active = active && (!config.neon || config.neon.enabled === true);
         const intensity = aux ? finite(aux.intensity, item.baseIntensity) : item.baseIntensity;
         const boost = condition === 'night' && highBeams ? 2.65 : 1;
         item.light.visible = active;
@@ -815,7 +868,7 @@ function createRegistry(GAME, options){
       if(!THREE || !this.owner || !this.owner.parent) return;
       const anchors = this.effectAnchors().exhaust;
       const shared = GAME && GAME.player && GAME.player.vehicleEffects;
-      const intensity = Math.max(.05, finite(this.config.exhaust && this.config.exhaust.intensity, finite(this.config.effects.smokeIntensity, 1)));
+      const intensity = Math.max(0, finite(this.config.exhaust && this.config.exhaust.intensity, finite(this.config.effects.smokeIntensity, 1)));
       const velocity = this.backend && this.backend.body && this.backend.body.velocity
         ? new THREE.Vector3(this.backend.body.velocity.x, this.backend.body.velocity.y, this.backend.body.velocity.z) : new THREE.Vector3();
       if(shared && shared.spawnExhaust){
@@ -838,6 +891,7 @@ function createRegistry(GAME, options){
         puff.scale.set(size,size,1);
         puff.renderOrder = fire ? 34 : 32;
         puff.userData.logicVehicleEffect = true;
+        puff.userData.particleSystem = 'logic-vehicle-exhaust';
         this.owner.parent.add(puff);
         this.effectsRuntime.exhaust.push({
           object:puff, fire:fire === true, life:fire ? .32 : 1.8, maxLife:fire ? .32 : 1.8, size,
@@ -845,7 +899,8 @@ function createRegistry(GAME, options){
         });
       });
     };
-    pawn.spawnSkids = function(){
+    pawn.spawnSkids = function(options){
+      const emit = Object.assign({marks:true, smoke:false}, options || {});
       const THREE = window.THREE;
       if(!THREE || !this.owner || !this.owner.parent) return;
       const skidCfg = this.config.skids || {};
@@ -867,9 +922,14 @@ function createRegistry(GAME, options){
         ? 2 * Math.atan2(this.backend.body.quaternion.y, this.backend.body.quaternion.w)
         : (this.owner.rotation ? this.owner.rotation.y : 0);
       if(shared && shared.spawnSkid){
-        contacts.forEach(point => shared.spawnSkid(point, heading, skidCfg, clamp(finite(this.state.lateralG,.5), .2, 1)));
+        contacts.forEach(point => {
+          const slip = clamp(finite(this.state.lateralG,.5), .2, 1);
+          if(emit.marks) shared.spawnSkid(point, heading, skidCfg, slip);
+          if(emit.smoke && shared.spawnTireSmoke) shared.spawnTireSmoke(point, slip, skidCfg);
+        });
         return;
       }
+      if(!emit.marks) return;
       contacts.forEach(point => {
         const opacity = clamp(finite(skidCfg.opacity, .55), 0, 1);
         const width = Math.max(.04, finite(skidCfg.width, .24));
@@ -890,20 +950,52 @@ function createRegistry(GAME, options){
       const exhaust = this.config.exhaust || {};
       const exhaustEnabled = effects.exhaustEnabled !== false && exhaust.enabled !== false;
       const smokeEnabled = exhaust.smoke !== false;
+      const exhaustIntensity = Math.max(0, finite(exhaust.intensity, finite(effects.smokeIntensity, 1)));
       const idleSmoke = exhaust.idleSmoke !== false && this.state.throttle <= finite(exhaust.smokeThrottle, .18);
-      const activeExhaust = exhaustEnabled && smokeEnabled && (idleSmoke || this.state.throttle > finite(exhaust.smokeThrottle, .18));
+      const activeExhaust = exhaustEnabled && smokeEnabled && exhaustIntensity > 0 && (idleSmoke || this.state.throttle > finite(exhaust.smokeThrottle, .18));
       runtime.exhaustClock += dt;
-      if(activeExhaust && runtime.exhaustClock >= (idleSmoke ? .42 : Math.max(.035, .13 / Math.max(.2, finite(effects.smokeIntensity, 1))))){
+      if(activeExhaust && runtime.exhaustClock >= (idleSmoke ? .42 : Math.max(.035, .13 / Math.max(.2, exhaustIntensity)))){
         runtime.exhaustClock = 0; this.spawnExhaust();
       }
-      const fireEnabled = exhaustEnabled && exhaust.fire !== false;
+      const fireEnabled = exhaustEnabled && exhaustIntensity > 0 && exhaust.fire !== false;
       const fireHot = this.state.rpm >= 6900 * clamp(finite(exhaust.fireRpm, .88), .2, 1.2);
       const firePulse = fireEnabled && this.state.throttle > .05 && (fireHot || (exhaust.shiftFire !== false && this.state.shiftPulse > 0) || (exhaust.limiterFire !== false && this.state.limiterPulse > 0));
       runtime.fireClock = finite(runtime.fireClock, 0) + dt;
       if(firePulse && runtime.fireClock >= .035){ runtime.fireClock = 0; this.spawnExhaust(true); }
-      const activeSkid = effects.skidEnabled !== false && (!this.config.skids || this.config.skids.enabled !== false) && Math.abs(this.state.speed) > 3 && (this.state.drift || this.state.oversteer || this.state.handbrake || this.state.lateralG > .32);
+      const skidCfg = this.config.skids || {};
+      const slipping = (Math.abs(this.state.speed) > 3 || this.state.burnout) && (this.state.drift || this.state.oversteer || this.state.handbrake || this.state.burnout || this.state.lateralG > .32);
+      const activeSkid = effects.skidEnabled !== false && skidCfg.enabled !== false && slipping;
       runtime.skidClock += dt;
-      if(activeSkid && runtime.skidClock >= .09){ runtime.skidClock = 0; this.spawnSkids(); }
+      if(activeSkid && runtime.skidClock >= .09){ runtime.skidClock = 0; this.spawnSkids({marks:true, smoke:false}); }
+      const smokeAmount = clamp(finite(skidCfg.smokeAmount, .28), 0, 4);
+      const smokeThreshold = clamp(finite(skidCfg.smokeThreshold, .35), 0, 1);
+      const smokeMinHeat = clamp(finite(skidCfg.smokeMinHeat, .3), 0, 1);
+      const smokeHeatRate = Math.max(0, finite(skidCfg.smokeHeatRate, .75));
+      const smokeCoolRate = Math.max(0, finite(skidCfg.smokeCoolRate, .4));
+      const slip = clamp(Math.max(
+        finite(this.state.lateralG, 0),
+        this.state.burnout ? .7 : 0,
+        this.state.drift || this.state.oversteer ? .5 : 0,
+        this.state.handbrake ? .45 : 0,
+        this.state.brake > .05 ? this.state.brake * .4 : 0,
+        this.state.throttle > .65 ? .25 : 0
+      ), 0, 1);
+      const smokeCause = (skidCfg.smokeOnDrift !== false && (this.state.drift || this.state.oversteer || this.state.handbrake)) ||
+        (skidCfg.smokeOnBrake !== false && this.state.brake > .05) ||
+        (skidCfg.smokeOnAcceleration !== false && (this.state.burnout || this.state.throttle > .65));
+      const smokeWork = smokeCause && slip > .15
+        ? clamp((slip - .15) / .85, 0, 1)
+        : 0;
+      const smokeSpeedFactor = this.state.burnout ? .9 : clamp(Math.abs(this.state.speedKmh) / 45, .15, 1);
+      runtime.tireHeat = clamp(finite(runtime.tireHeat, 0) + dt * (
+        smokeWork * smokeHeatRate * smokeSpeedFactor - smokeCoolRate * (1 - smokeWork * .65)
+      ), 0, 1);
+      const activeTireSmoke = skidCfg.smokeEnabled !== false && smokeAmount > 0 && slipping && smokeCause && slip >= smokeThreshold && runtime.tireHeat >= smokeMinHeat;
+      runtime.tireSmokeClock += dt;
+      if(activeTireSmoke && runtime.tireSmokeClock >= Math.max(.025, .09 / Math.max(.2, smokeAmount))){
+        runtime.tireSmokeClock = 0;
+        this.spawnSkids({marks:false, smoke:true});
+      }
       runtime.exhaust = runtime.exhaust.filter(item => {
         item.life -= dt;
         if(item.object){
@@ -928,7 +1020,14 @@ function createRegistry(GAME, options){
         return false;
       });
       const neonActive = effects.neonEnabled !== false;
-      this.effectAnchors().neon.forEach(anchor => anchor.traverse && anchor.traverse(child => { if(child.isLight){ child.visible = neonActive; child.intensity = neonActive ? .8 : 0; } }));
+      this.effectAnchors().neon.forEach(anchor => anchor.traverse && anchor.traverse(child => {
+        // The shared vehicle light rig owns its area-light intensity. Effects
+        // may still drive legacy/custom graph lights without overwriting it.
+        if(child.isLight && !(child.userData && child.userData.vehicleNeonAreaLight)){
+          child.visible = neonActive;
+          child.intensity = neonActive ? .8 : 0;
+        }
+      }));
     };
     pawn.disposeEffects = function(){
       this.effectsRuntime.exhaust.concat(this.effectsRuntime.skids).forEach(item => {
@@ -950,6 +1049,7 @@ function createRegistry(GAME, options){
     pawn.reset = function(){
       const spawn = this.config.spawn;
       this.state.speed = 0; this.state.speedKmh = 0; this.state.reverse = false; this.state.drift = false; this.state.oversteer = false; this.state.burnout = false; this.state.limiter = false;
+      this.effectsRuntime.tireHeat = 0;
       if(this.backend){
         const body = this.backend.body;
         body.position.set(spawn.x, spawn.y + this.backend.bodyY, spawn.z);
@@ -979,6 +1079,7 @@ function createRegistry(GAME, options){
       const handbrake = drive.handbrake === true;
       const nativeLights = this.ensureNativeLightRig();
       if(nativeLights && nativeLights.rig){
+        this.syncNativeLightRigAnchors();
         nativeLights.rig.setHighBeams(drive.highBeams === true);
         nativeLights.rig.update();
       }

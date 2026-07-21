@@ -30,6 +30,9 @@ function create(deps){
   const BROWSER_PROJECT_INDEX = 'lk.editor.projects.v1';
   const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
   const BROWSER_PROJECT_MARKER = 'lk.editor.browserProject.v1';
+  const LOCAL_BRIDGE_URL = '/__lotking/project-state';
+  const LOCAL_BRIDGE_MARKER = 'lk.localProjectBridge.v1';
+  const LOCAL_BRIDGE_DUPLICATE_FIX = 'lk.localProjectBridgeDuplicateFix.v1';
   const projectExportAssets = window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS && window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS.create({
     assetLibraryLoad: deps.assetLibraryLoad || function(){ return []; },
   });
@@ -45,6 +48,14 @@ function create(deps){
   function blockOnlineDemoAction(){
     status(tr('Online demo only. Run the project locally to import, save or edit assets.', 'Demo online: avvia il progetto in locale per importare, salvare o modificare asset.'));
     return true;
+  }
+
+  function requireExactPersistence(expectedScene, storedOrProject, stage){
+    if(!(STORE && STORE.verifyPersistenceRoundTrip)) return true;
+    const result = STORE.verifyPersistenceRoundTrip(expectedScene, storedOrProject);
+    if(result.ok) return true;
+    const paths = (result.differences || []).slice(0, 6).join(', ');
+    throw new Error((stage || 'Persistence') + ' changed or omitted authored values' + (paths ? ': ' + paths : ''));
   }
 
   function slugifyTrackName(name){
@@ -139,6 +150,63 @@ function create(deps){
     }).filter(Boolean);
     if(!levels.length) return current;
     return STORE.exportProjectWithLevels(sceneData, currentTrackMeta(), levels, LV.activeId && LV.activeId());
+  }
+
+  function createCompleteProjectSnapshot(sceneData){
+    return createProjectSnapshotWithLevels(sceneData, null);
+  }
+
+  function localBridgeEligible(){
+    return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  }
+
+  async function saveLocalBridgeProject(project){
+    if(!localBridgeEligible() || !project) return null;
+    const result = await preparePortableProject(project);
+    const response = await fetch(LOCAL_BRIDGE_URL, {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(result.project),
+    });
+    if(!response.ok) throw new Error('Local project bridge HTTP ' + response.status);
+    try { localStorage.setItem(LOCAL_BRIDGE_MARKER, result.project.savedAt || project.savedAt || 'saved'); } catch(err){}
+    return result;
+  }
+
+  async function restoreLocalBridgeProject(){
+    if(!localBridgeEligible()) return false;
+    let progressToken = null;
+    try {
+      const response = await fetch(LOCAL_BRIDGE_URL, {cache:'no-store'});
+      if(!response.ok) return false;
+      progressToken = beginStatusWork(tr('Restoring project', 'Ripristino progetto'), tr('Reading the complete project from disk', 'Lettura del progetto completo dal disco'), 'loading');
+      updateStatusWork(progressToken, 22, tr('Parsing levels', 'Analisi livelli'), 'loading');
+      const project = STORE.parseProject ? STORE.parseProject(await response.text()) : await response.json();
+      repairBridgeCreatedBrowserProjectDuplicate(project);
+      const stamp = String(project.savedAt || 'project');
+      const LV = levelsApi();
+      const localCount = LV && LV.list ? LV.list({includeHidden:true}).length : 0;
+      const bridgeCount = 1 + (Array.isArray(project.embeddedLevels) ? project.embeddedLevels.length : 0);
+      if(localStorage.getItem(LOCAL_BRIDGE_MARKER) === stamp && localCount >= bridgeCount){
+        finishStatusWork(progressToken, tr('Project already synchronized', 'Progetto già sincronizzato'), '', 'success');
+        return false;
+      }
+      updateStatusWork(progressToken, 48, tr('Migrating embedded assets', 'Migrazione asset incorporati'), 'loading');
+      if(STORE.localizePortableProjectAssets) await STORE.localizePortableProjectAssets(project);
+      updateStatusWork(progressToken, 82, tr('Installing all project levels', 'Installazione di tutti i livelli'), 'loading');
+      STORE.importProject(JSON.stringify(project));
+      localStorage.setItem(LOCAL_BRIDGE_MARKER, stamp);
+      finishStatusWork(progressToken, tr('Project restored from disk', 'Progetto ripristinato dal disco'), browserProjectName(project), 'success');
+      if(LV && LV.syncCatalog) LV.syncCatalog();
+      if(ED.levelsOpen) refreshLevelsOverlay();
+      window.dispatchEvent(new CustomEvent('lotking:local-project-restored', {detail:{project, levelCount:bridgeCount}}));
+      return true;
+    } catch(err){
+      if(progressToken) finishStatusWork(progressToken, tr('Project restore failed', 'Ripristino progetto fallito'), err && err.message || String(err || 'error'), 'error');
+      console.warn('LotKing local project restore failed', err);
+      status('⚠ ' + tr('Local project restore failed: ', 'Ripristino progetto locale fallito: ') + (err && err.message || err));
+      return false;
+    }
   }
 
   function isMenuLevelRole(role){
@@ -479,6 +547,39 @@ function create(deps){
     return record;
   }
 
+  function embeddedLevelIds(project){
+    return (Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : [])
+      .map(entry => String(entry && entry.id || ''))
+      .filter(Boolean)
+      .sort()
+      .join('|');
+  }
+
+  function repairBridgeCreatedBrowserProjectDuplicate(project){
+    try {
+      if(localStorage.getItem(LOCAL_BRIDGE_DUPLICATE_FIX) === '1') return false;
+      const idx = browserProjectIndex();
+      const bridgeId = slugifyTrackName(project && project.meta && project.meta.trackId || '');
+      const bridgeRecord = browserProjectRecord(idx, bridgeId);
+      const wantedName = slugifyTrackName(browserProjectName(project));
+      const sibling = (idx.projects || []).find(record => record && slugifyTrackName(record.id) !== bridgeId && slugifyTrackName(record.name) === wantedName);
+      const bridgeProject = bridgeRecord && readBrowserProject(bridgeRecord.id);
+      const generatedSnapshot = bridgeProject && embeddedLevelIds(bridgeProject) && embeddedLevelIds(bridgeProject) === embeddedLevelIds(project);
+      if(bridgeRecord && sibling && generatedSnapshot){
+        localStorage.removeItem(browserProjectKey(bridgeRecord.id));
+        idx.projects = idx.projects.filter(record => record && slugifyTrackName(record.id) !== bridgeId);
+        if(slugifyTrackName(idx.activeId) === bridgeId) idx.activeId = sibling.id;
+        writeBrowserProjectIndex(idx);
+        setBrowserMarker(sibling);
+      }
+      localStorage.setItem(LOCAL_BRIDGE_DUPLICATE_FIX, '1');
+      return !!(bridgeRecord && sibling && generatedSnapshot);
+    } catch(err){
+      console.warn('LotKing duplicate bridge project cleanup failed', err);
+      return false;
+    }
+  }
+
   function ensureBrowserProjectSeed(project){
     const idx = browserProjectIndex();
     if(idx.projects && idx.projects.length){
@@ -660,6 +761,16 @@ function create(deps){
       status('⚠ Save failed: local level library was not updated');
       return false;
     }
+    try {
+      requireExactPersistence(sceneData, STORE.load(), tr('Local save verification', 'Verifica salvataggio locale'));
+      requireExactPersistence(sceneData, createProjectSnapshot(sceneData), tr('Project snapshot verification', 'Verifica snapshot progetto'));
+    } catch(err){
+      ED.dirty = true;
+      $('#lkDirty').classList.add('show');
+      finishStatusWork(progressToken, tr('Save verification failed', 'Verifica salvataggio fallita'), err.message, 'error');
+      status('⚠ ' + err.message);
+      return false;
+    }
     updateStatusWork(progressToken, 85, tr('Syncing UI', 'Sincronizzazione UI'), 'loading');
     const LV = levelsApi();
     const activeId = LV && LV.activeId ? LV.activeId() : ED.trackId;
@@ -670,11 +781,12 @@ function create(deps){
     if(ED.levelsOpen) refreshLevelsOverlay();
     refreshAssetsPanel();
     finishStatusWork(progressToken, tr('Level saved', 'Livello salvato'), tr('Operation complete', 'Operazione completata'), 'success');
-    const project = createProjectSnapshot(sceneData);
+    const project = createCompleteProjectSnapshot(sceneData);
     try {
       writeBrowserProject(project);
       status('Project saved ✓');
       saveWorkspaceProjectCopy(project);
+      saveLocalBridgeProject(project).catch(err => status('⚠ Local disk backup failed: ' + (err && err.message ? err.message : err)));
     } catch(err) {
       saveProjectFileAsync(project, {allowPicker: !!opts.projectFile, allowDownloadFallback: !!opts.projectFile});
       if(!projectFileHandle) status('Track saved locally ✓');
@@ -699,6 +811,7 @@ function create(deps){
       }
       updateStatusWork(progressToken, 35, tr('Generating project', 'Generazione progetto'), 'loading');
       const project = createProjectSnapshotWithLevels(sceneData, exportLevels);
+      requireExactPersistence(sceneData, project, tr('LKEP snapshot verification', 'Verifica snapshot LKEP'));
       let picked;
       try {
         picked = (!isOnlineDemo() && canPickProjectFile()) ? pickProjectFile(project) : Promise.resolve(null);
@@ -1075,7 +1188,15 @@ function create(deps){
   if(openingEmptyWorkspace){
     setTimeout(() => createBrowserProject({empty:true, name:'New Project'}), 650);
   } else {
-    setTimeout(() => syncWorkspaceProjectCatalog({openActive:true}), 650);
+    // Disk recovery has priority over origin-scoped browser/workspace startup.
+    // Sequencing these operations prevents a slow asset migration from being
+    // overwritten by a second startup load while it is still in progress.
+    setTimeout(async () => {
+      const restored = await restoreLocalBridgeProject();
+      // Startup may refresh the catalog, but opening/switching a project is
+      // always an explicit user action from the Projects panel.
+      if(!restored) syncWorkspaceProjectCatalog({openActive:false});
+    }, 180);
   }
 
   return Object.freeze({

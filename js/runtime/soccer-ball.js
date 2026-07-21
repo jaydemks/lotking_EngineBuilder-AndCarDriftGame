@@ -41,7 +41,7 @@ function makeBallTexture(THREE){
     }
   }
   const texture = new THREE.CanvasTexture(canvas);
-  if(THREE.sRGBEncoding != null) texture.encoding = THREE.sRGBEncoding;
+  if(THREE.SRGBColorSpace != null) texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 

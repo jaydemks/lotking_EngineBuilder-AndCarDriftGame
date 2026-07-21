@@ -1,8 +1,8 @@
 /* =========================================================
-   LOT KING - Soccer locomotion blend controller
+   LOT KING - Shared Character locomotion blend controller
    Blendspace-lite over GLB clips: predicts the character
    velocity curve and cross-blends idle/walk/run/strafe clips,
-   with a one-shot action layer (shoot, pass, save, dive...).
+   with a one-shot action layer (interact, shoot, save, dive...).
    Inspired by Unreal-style motion blending, kept data-driven:
    missing clips degrade to the nearest available one.
    ========================================================= */
@@ -244,5 +244,6 @@ function createController(options){
   });
 }
 
-window.LK_RUNTIME_SOCCER_LOCOMOTION = Object.freeze({createController, findClip, LOCOMOTION_SLOTS});
+window.LK_RUNTIME_CHARACTER_LOCOMOTION = Object.freeze({createController, findClip, LOCOMOTION_SLOTS});
+window.LK_RUNTIME_SOCCER_LOCOMOTION = window.LK_RUNTIME_CHARACTER_LOCOMOTION;
 })();

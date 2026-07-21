@@ -26,6 +26,7 @@ function create(deps){
   let longTaskCount = 0;
   let longTaskMaxMs = 0;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
+  const transformControlsHelper = controls => controls && typeof controls.getHelper === 'function' ? controls.getHelper() : controls;
 
   if(typeof PerformanceObserver !== 'undefined'){
     try {
@@ -312,15 +313,16 @@ function create(deps){
     const helperGroup = deps.getHelperGroup && deps.getHelperGroup();
     const previousHelperVisible = helperGroup ? helperGroup.visible : null;
     const gizmo = deps.getGizmo && deps.getGizmo();
-    const previousGizmoVisible = gizmo ? gizmo.visible : null;
+    const gizmoHelper = transformControlsHelper(gizmo);
+    const previousGizmoVisible = gizmoHelper ? gizmoHelper.visible : null;
     const spec = ED.viewportSlots[slot] || 'perspective';
     const cleanCameraView = spec.indexOf('cam:') === 0 || spec.indexOf('timeline:') === 0;
     const showHelpers = !cleanCameraView && ED.viewportShowHelpers[slot] !== false;
     if(helperGroup) helperGroup.visible = showHelpers && previousHelperVisible !== false;
-    if(gizmo) gizmo.visible = showHelpers && (ED.viewportMode !== 'quad' || slot === (ED.activeViewportSlot || 0)) && previousGizmoVisible !== false;
+    if(gizmoHelper) gizmoHelper.visible = showHelpers && (ED.viewportMode !== 'quad' || slot === (ED.activeViewportSlot || 0)) && previousGizmoVisible !== false;
     if(!showHelpers){
       scene.traverse(n => {
-        if(!n.visible || n === helperGroup || n === gizmo) return;
+        if(!n.visible || n === helperGroup || n === gizmoHelper) return;
         const ud = n.userData || {};
         if(ud.helperOnly || ud.colliderPreview || ud.editorOnly || ud.nonExportable || ud.editorCameraHelper || ud.editorCameraHelperPick || ud.editorLightHandle){
           hidden.push(n);
@@ -367,7 +369,7 @@ function create(deps){
       scene.fog = previousFog;
       scene.overrideMaterial = previousOverride;
       if(helperGroup) helperGroup.visible = previousHelperVisible;
-      if(gizmo) gizmo.visible = previousGizmoVisible;
+      if(gizmoHelper) gizmoHelper.visible = previousGizmoVisible;
       hidden.forEach(n => { n.visible = true; });
     }
   }

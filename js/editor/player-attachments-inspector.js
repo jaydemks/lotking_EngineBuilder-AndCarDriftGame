@@ -96,7 +96,7 @@ function create(deps){
       };
       return labels[(src && src.wheel) || ''] || (tr('Source ', 'Sorgente ') + (idx + 1));
     };
-    const ss = section('SKID MARKS', false);
+    const ss = section(tr('TIRE EFFECTS', 'EFFETTI GOMME'), false);
     let replaySk = false;
     const restoreSk = value => { replaySk=true; player.setSkids(JSON.parse(JSON.stringify(value))); Object.keys(sk).forEach(key=>delete sk[key]); Object.assign(sk,JSON.parse(JSON.stringify(value))); markDirty(); replaySk=false; };
     const updSk = patch => { const before=JSON.parse(JSON.stringify(sk)); player.setSkids(patch); markDirty(); const after=JSON.parse(JSON.stringify(sk)); if(!replaySk&&JSON.stringify(before)!==JSON.stringify(after)) pushHistory({label:'Vehicle Pawn skids',undo:()=>restoreSk(before),redo:()=>restoreSk(after)}); };
@@ -118,7 +118,7 @@ function create(deps){
         if(ED.tool === 'select') setTool('translate');
       }
     };
-    ss.body.appendChild(el('<div class="lk-hint">Skid mark sources attached to the vehicle. Move and scale each dummy to align tire marks with the car.</div>'));
+    ss.body.appendChild(el('<div class="lk-hint">' + tr('Controls tire smoke and skid marks separately. The smoke threshold is the minimum wheel slip required before smoke can appear.', 'Controlla separatamente fumo gomme e segni. La soglia fumo indica lo slittamento minimo necessario prima che il fumo possa comparire.') + '</div>'));
     ss.body.appendChild(btnRow([
       {label:tr('+ Skid source', '+ Sorgente sgommata'), action:addSkid},
       {label:tr('Rear L', 'Post L'), action:() => selectSkid('player_skid_0')},
@@ -128,6 +128,15 @@ function create(deps){
     ]));
     ss.body.appendChild(checkRow(tr('Skids enabled', 'Sgommate attive'), sk.enabled !== false, v => updSk({enabled:v})).root);
     ss.body.appendChild(checkRow(tr('Show skid dummies', 'Mostra dummy sgommate'), sk.dummyVisible !== false, v => updSk({dummyVisible:v})).root);
+    ss.body.appendChild(checkRow(tr('Tire smoke enabled', 'Fumo gomme attivo'), sk.smokeEnabled !== false, v => updSk({smokeEnabled:v})).root);
+    ss.body.appendChild(sliderRow(tr('Smoke amount', 'Quantita fumo'), sk.smokeAmount == null ? .28 : sk.smokeAmount, 0, 2, .02, v => updSk({smokeAmount:v,smokeModelVersion:3}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(sliderRow(tr('Smoke slip threshold', 'Soglia slittamento fumo'), sk.smokeThreshold == null ? .35 : sk.smokeThreshold, 0, 1, .01, v => updSk({smokeThreshold:v,smokeModelVersion:3}), v => Math.round(v * 100) + '%').root);
+    ss.body.appendChild(sliderRow(tr('Minimum tire heat', 'Temperatura minima gomme'), sk.smokeMinHeat == null ? .3 : sk.smokeMinHeat, 0, 1, .01, v => updSk({smokeMinHeat:v,smokeModelVersion:3}), v => Math.round(v * 100) + '%').root);
+    ss.body.appendChild(sliderRow(tr('Tire heating rate', 'Velocita riscaldamento gomme'), sk.smokeHeatRate == null ? .75 : sk.smokeHeatRate, 0, 3, .05, v => updSk({smokeHeatRate:v,smokeModelVersion:3}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(sliderRow(tr('Tire cooling rate', 'Velocita raffreddamento gomme'), sk.smokeCoolRate == null ? .4 : sk.smokeCoolRate, 0, 2, .05, v => updSk({smokeCoolRate:v,smokeModelVersion:3}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(checkRow(tr('Smoke while drifting', 'Fumo durante il drift'), sk.smokeOnDrift !== false, v => updSk({smokeOnDrift:v})).root);
+    ss.body.appendChild(checkRow(tr('Smoke while braking', 'Fumo in frenata'), sk.smokeOnBrake !== false, v => updSk({smokeOnBrake:v})).root);
+    ss.body.appendChild(checkRow(tr('Smoke on wheelspin / burnout', 'Fumo in sgommata / burnout'), sk.smokeOnAcceleration !== false, v => updSk({smokeOnAcceleration:v})).root);
     ss.body.appendChild(sliderRow(tr('Base width', 'Larghezza base'), sk.width == null ? .24 : sk.width, .04, 1.2, .01, v => updSk({width:v}), v => (+v).toFixed(2)).root);
     ss.body.appendChild(sliderRow(tr('Base length', 'Lunghezza base'), sk.length == null ? .7 : sk.length, .08, 3.0, .01, v => updSk({length:v}), v => (+v).toFixed(2)).root);
     ss.body.appendChild(sliderRow(tr('Opacity', 'Opacita'), sk.opacity == null ? .55 : sk.opacity, .05, 1, .01, v => updSk({opacity:v}), v => Math.round(v * 100) + '%').root);

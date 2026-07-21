@@ -33,7 +33,7 @@ function create(deps){
     const c = document.createElement('canvas');
     c.width = 512; c.height = 160;
     const tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     return {canvas:c, ctx:c.getContext('2d'), texture:tex};
   }

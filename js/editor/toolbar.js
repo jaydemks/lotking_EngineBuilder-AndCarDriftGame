@@ -166,9 +166,14 @@ function create(deps){
   const vpOptionsMenu = $('#lkViewportOptionsMenu');
   const vpOptionsWrap = vpOptions && vpOptions.closest ? vpOptions.closest('.lk-viewport-options') : null;
   const vpCollisionDummies = $('#lkShowCollisionDummies');
+  const vpForceCollisionDummies = $('#lkForceCollisionDummiesInPreview');
   function syncViewportOptions(){
-    if(vpCollisionDummies) vpCollisionDummies.checked = ED.showCollisionDummies !== false;
-    if(vpOptions) vpOptions.classList.toggle('on', ED.showCollisionDummies !== false);
+    if(vpCollisionDummies) vpCollisionDummies.checked = ED.showCollisionDummies === true;
+    if(vpForceCollisionDummies){
+      vpForceCollisionDummies.checked = ED.forceCollisionDummiesInPreview === true;
+      vpForceCollisionDummies.disabled = ED.showCollisionDummies !== true;
+    }
+    if(vpOptions) vpOptions.classList.toggle('on', ED.showCollisionDummies === true);
   }
   if(vpOptions && vpOptionsWrap) vpOptions.addEventListener('click', e => {
     e.stopPropagation();
@@ -181,7 +186,14 @@ function create(deps){
   if(vpCollisionDummies) vpCollisionDummies.addEventListener('change', () => {
     ED.showCollisionDummies = !!vpCollisionDummies.checked;
     syncViewportOptions();
-    if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+    if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
+    window.dispatchEvent(new CustomEvent('lotking:collisiondummieschange'));
+  });
+  if(vpForceCollisionDummies) vpForceCollisionDummies.addEventListener('change', () => {
+    ED.forceCollisionDummiesInPreview = !!vpForceCollisionDummies.checked;
+    syncViewportOptions();
+    if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
+    window.dispatchEvent(new CustomEvent('lotking:collisiondummieschange'));
   });
   syncViewportOptions();
   const vpFps = $('#lkViewportFps');
@@ -194,6 +206,20 @@ function create(deps){
     ED.showPerf = !ED.showPerf;
     vpPerf.classList.toggle('on', ED.showPerf);
   });
+  const devToolsToggle=$('#lkDevToolsToggle');
+  const devToolsMenu=$('#lkDevToolsMenu');
+  const devToolsWrap=devToolsToggle&&devToolsToggle.closest('.lk-dev-tools');
+  const openPerformanceDebugger=$('#lkOpenPerformanceDebugger');
+  if(devToolsToggle&&devToolsWrap) devToolsToggle.addEventListener('click',event=>{
+    event.stopPropagation();
+    devToolsWrap.classList.toggle('open');
+  });
+  if(devToolsMenu) devToolsMenu.addEventListener('click',event=>event.stopPropagation());
+  if(openPerformanceDebugger) openPerformanceDebugger.addEventListener('click',()=>{
+    if(deps.developerDebugger) deps.developerDebugger.open();
+    if(devToolsWrap) devToolsWrap.classList.remove('open');
+  });
+  document.addEventListener('click',()=>{ if(devToolsWrap) devToolsWrap.classList.remove('open'); });
   const pipMin = $('#lkPipMinimize');
   if(pipMin) pipMin.addEventListener('click', e => {
     e.stopPropagation();

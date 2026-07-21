@@ -40,6 +40,7 @@ function create(deps){
   const requestDeleteEntity = deps.requestDeleteEntity;
   const replaceSelectedGlb = deps.replaceSelectedGlb;
   const requestWarmup = deps.requestWarmup || function(){};
+  const requestPhysicsRebuild = deps.requestPhysicsRebuild || function(){ if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild(); };
   const importTextureFile = deps.importTextureFile || function(){ return Promise.resolve(null); };
   const assetLibraryLoad = deps.assetLibraryLoad || function(){ return []; };
   const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return asset && asset.src ? Promise.resolve(asset.src) : Promise.reject(new Error('asset source missing')); };
@@ -226,10 +227,12 @@ function create(deps){
       let anyCast = false;
       o.traverse(n => { if(n.isMesh && n.castShadow) anyCast = true; });
       sd.body.appendChild(checkRow(tr('Cast shadows', 'Proietta ombre'), anyCast, v => {
-        o.traverse(n => { if(n.isMesh) n.castShadow = v; });
-        o.userData.matProps = Object.assign({}, o.userData.matProps, {castShadow: v});
         requestWarmup(v ? 'Warm-up shadows...' : 'Warm-up render...');
+        o.userData.matProps = Object.assign({}, o.userData.matProps, {castShadow: v});
         markDirty();
+        requestAnimationFrame(() => {
+          o.traverse(n => { if(n.isMesh) n.castShadow = v; });
+        });
       }).root);
     }
     box.appendChild(sd.root);
@@ -642,7 +645,6 @@ function create(deps){
         o.userData.physicsMass = m;
         if(o.userData.addedEntry) o.userData.addedEntry.physicsMass = m;
         if(c && c.ref) STORE.syncCollider(o);
-        if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
         markDirty();
       });
       const impactRow = sliderRow('Impact force', impactForce, 0, 1, .01, v => {
@@ -671,13 +673,17 @@ function create(deps){
         beginColliderHistory(o);
         o.userData.driveSurface = v;
         if(o.userData.addedEntry) o.userData.addedEntry.driveSurface = v;
-        if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+        requestPhysicsRebuild();
         markDirty();
         commitColliderHistory('Drive surface');
       }).root);
       const colliderSlider = row => {
         row.root.addEventListener('lk-slider-edit-start', () => beginColliderHistory(o));
-        row.root.addEventListener('lk-slider-edit-end', () => commitColliderHistory('Collider edit'));
+        row.root.addEventListener('lk-slider-edit-end', () => {
+          commitColliderHistory('Collider edit');
+          requestPhysicsRebuild();
+          if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
+        });
         return row.root;
       };
       sc.body.appendChild(colliderSlider(physicsMassRow));
@@ -733,7 +739,6 @@ function create(deps){
           o.userData.colliderShape = shape;
           if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
           STORE.syncCollider(o);
-          if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
           markDirty();
         };
         sc.body.appendChild(el('<div class="lk-hint">Collider dummy: edit the collision shape independently from the visible mesh.</div>'));
@@ -752,6 +757,7 @@ function create(deps){
         modeSelect.addEventListener('change', () => {
           beginColliderHistory(o);
           applyColliderShape({mode: modeSelect.value === 'complex' ? 'complex' : 'simple'});
+          requestPhysicsRebuild();
           commitColliderHistory('Collider mode');
           deps.rebuildColliderHelpers && deps.rebuildColliderHelpers();
           refreshOutliner();
@@ -770,8 +776,6 @@ function create(deps){
             o.userData.colliderShape = shape;
             if(o.userData.addedEntry) o.userData.addedEntry.colliderShape = Object.assign({}, shape);
             STORE.syncCollider(o);
-            if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
-            deps.rebuildColliderHelpers && deps.rebuildColliderHelpers();
             markDirty();
             refreshOutliner();
           };
@@ -782,6 +786,8 @@ function create(deps){
           partModeSelect.addEventListener('change', () => {
             beginColliderHistory(o);
             applyPartShape({mode: partModeSelect.value});
+            requestPhysicsRebuild();
+            deps.rebuildColliderHelpers && deps.rebuildColliderHelpers();
             commitColliderHistory('Collider part mode');
           });
           sc.body.appendChild(partModeRow);
@@ -824,21 +830,132 @@ function create(deps){
       box.appendChild(sc.root);
     }
 
-    const light = o.isLight ? o : o.userData.light;
+    let light = o.isLight ? o : o.userData.light;
+    if(!light && o.traverse) o.traverse(node => { if(!light && node && node.isLight) light = node; });
     if(light){
+      const playerLightId = String(o.userData && o.userData.editorId || '');
+      const playerFlarePair = playerLightId.indexOf('player_front_light_') === 0
+        ? 'front'
+        : (playerLightId.indexOf('player_rear_') === 0 ? 'rear' : null);
+      const playerFlareConfig = playerFlarePair && GAME.player && GAME.player.lights && GAME.player.lights[playerFlarePair];
+      const isVehicleRigLight = o.userData && o.userData.editorType === 'playerLight';
+      const isEnvironmentKey = GAME && GAME.core && GAME.core.lights && (light === GAME.core.lights.sun || light === GAME.core.lights.hemi);
       const sl = section(tr('LIGHT', 'LUCE'));
-      sl.body.appendChild(colorRow(tr('Color', 'Colore'), light.color ? light.color.getHex() : 0xffffff, v => { light.color.setHex(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
-      if(light.groundColor) sl.body.appendChild(colorRow(tr('Ground color', 'Colore terreno'), light.groundColor.getHex(), v => { light.groundColor.setHex(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
-      sl.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), light.intensity, 0, 6, .05, v => { light.intensity = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
-      if(light.distance != null && !light.isDirectionalLight && !light.isHemisphereLight && !light.isAmbientLight)
-        sl.body.appendChild(sliderRow(tr('Distance', 'Distanza'), light.distance, 0, 200, 1, v => { light.distance = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
-      if(light.isSpotLight){
-        sl.body.appendChild(sliderRow(tr('Angle°', 'Angolo°'), THREE.MathUtils.radToDeg(light.angle), 5, 89, 1, v => { light.angle = THREE.MathUtils.degToRad(v); requestWarmup('Warm-up light...'); markDirty(); }).root);
-        sl.body.appendChild(sliderRow(tr('Penumbra', 'Penombra'), light.penumbra, 0, 1, .01, v => { light.penumbra = v; requestWarmup('Warm-up light...'); markDirty(); }).root);
+      if(isVehicleRigLight || isEnvironmentKey){
+        sl.body.appendChild(el('<div class="lk-hint">' + (isVehicleRigLight
+          ? tr('This is a generated Player Car rig component. Physical light, timing and dummy settings are edited and saved from Player Car Logic; transient runtime values are intentionally not exposed here.', 'Questo e un componente generato dal rig Player Car. Luce fisica, orari e dummy si modificano e salvano da Player Car Logic; i valori runtime temporanei non vengono esposti qui.')
+          : tr('This light is generated by the Environment system. Edit its persistent sun, moon and ambient parameters from Environment; transient calculated light values are intentionally not exposed here.', 'Questa luce e generata dal sistema Environment. Modifica i parametri persistenti di sole, luna e ambiente da Environment; i valori luminosi calcolati temporanei non vengono esposti qui.')) + '</div>'));
+      } else {
+        sl.body.appendChild(colorRow(tr('Color', 'Colore'), light.color ? light.color.getHex() : 0xffffff, v => { light.color.setHex(v); markDirty(); }).root);
+        if(light.groundColor) sl.body.appendChild(colorRow(tr('Ground color', 'Colore terreno'), light.groundColor.getHex(), v => { light.groundColor.setHex(v); markDirty(); }).root);
+        if((light.isPointLight || light.isSpotLight) && Number.isFinite(light.power)){
+          sl.body.appendChild(sliderRow(tr('Luminous power (lm)', 'Potenza luminosa (lm)'), light.power, 0, 50000, 50, v => { light.power = v; markDirty(); }, v => Math.round(v) + ' lm').root);
+        } else {
+          sl.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), light.intensity, 0, 6, .05, v => { light.intensity = v; markDirty(); }).root);
+        }
+        if(light.distance != null && !light.isDirectionalLight && !light.isHemisphereLight && !light.isAmbientLight)
+          sl.body.appendChild(sliderRow(tr('Distance', 'Distanza'), light.distance, 0, 200, 1, v => { light.distance = v; markDirty(); }).root);
+        if(light.isSpotLight){
+          sl.body.appendChild(sliderRow(tr('Angle°', 'Angolo°'), THREE.MathUtils.radToDeg(light.angle), 5, 89, 1, v => { light.angle = THREE.MathUtils.degToRad(v); markDirty(); }).root);
+          sl.body.appendChild(sliderRow(tr('Penumbra', 'Penombra'), light.penumbra, 0, 1, .01, v => { light.penumbra = v; markDirty(); }).root);
+        }
+        if(light.isPointLight || light.isSpotLight){
+          sl.body.appendChild(sliderRow(tr('Decay', 'Decadimento'), light.decay, 0, 4, .05, v => { light.decay = v; markDirty(); }, v => (+v).toFixed(2)).root);
+          sl.body.appendChild(el('<div class="lk-hint">' + tr('Punctual lights use r185 photometric units. Power is in lumens; decay 2 is the physically correct inverse-square falloff.', 'Le luci puntiformi usano le unita fotometriche r185. La potenza e in lumen; decadimento 2 e la caduta fisica secondo l\'inverso del quadrato.') + '</div>'));
+        }
+        if(!light.isAmbientLight && !light.isHemisphereLight)
+          sl.body.appendChild(checkRow(tr('Cast shadows', 'Proietta ombre'), light.castShadow, v => {
+            requestWarmup(v ? 'Warm-up shadows...' : 'Warm-up light...');
+            light.castShadow = v;
+            markDirty();
+          }).root);
       }
-      if(!light.isAmbientLight && !light.isHemisphereLight)
-        sl.body.appendChild(checkRow(tr('Cast shadows', 'Proietta ombre'), light.castShadow, v => { light.castShadow = v; requestWarmup(v ? 'Warm-up shadows...' : 'Warm-up light...'); markDirty(); }).root);
+      if(!isEnvironmentKey && (!isVehicleRigLight || !!playerFlareConfig)){
+        const flare = playerFlareConfig
+          ? {
+            enabled:playerFlareConfig.flare === true,
+            intensity:playerFlareConfig.flareIntensity == null ? (playerFlarePair === 'front' ? .24 : .16) : playerFlareConfig.flareIntensity,
+            size:playerFlareConfig.flareSize == null ? (playerFlarePair === 'front' ? .42 : .34) : playerFlareConfig.flareSize,
+            bloomIntensity:playerFlareConfig.flareBloomIntensity == null ? (playerFlarePair === 'front' ? .19 : .12) : playerFlareConfig.flareBloomIntensity,
+            occlusion:playerFlareConfig.flareOcclusion !== false,
+          }
+          : Object.assign({enabled:false,intensity:.65,size:.7,bloomIntensity:.52,occlusion:true}, light.userData.cinematicLensFlare || {});
+        const updateFlare = patch => {
+          Object.assign(flare,patch||{});
+          if(playerFlareConfig && GAME.player && GAME.player.setLights){
+            const pairPatch = {};
+            if(Object.prototype.hasOwnProperty.call(patch, 'enabled')) pairPatch.flare = patch.enabled === true;
+            if(Object.prototype.hasOwnProperty.call(patch, 'intensity')) pairPatch.flareIntensity = patch.intensity;
+            if(Object.prototype.hasOwnProperty.call(patch, 'size')) pairPatch.flareSize = patch.size;
+            if(Object.prototype.hasOwnProperty.call(patch, 'bloomIntensity')) pairPatch.flareBloomIntensity = patch.bloomIntensity;
+            if(Object.prototype.hasOwnProperty.call(patch, 'occlusion')) pairPatch.flareOcclusion = patch.occlusion !== false;
+            Object.assign(playerFlareConfig, pairPatch);
+            GAME.player.setLights({[playerFlarePair]:pairPatch});
+          } else light.userData.cinematicLensFlare=Object.assign({},flare);
+          markDirty();
+        };
+        if(playerFlareConfig) sl.body.appendChild(el('<div class="lk-hint">' + tr('This dummy edits the complete vehicle light pair and is saved with Player Car Logic.', 'Questo dummy modifica l’intera coppia di luci del veicolo e viene salvato con Player Car Logic.') + '</div>'));
+        sl.body.appendChild(el('<div class="lk-hint"><b>' + tr('Cinematic lens flare', 'Lens flare cinematico') + '</b><br>' + tr('Uses the same realistic optical effect as the sun. It is rendered only while this light is active, in frame and visible.', 'Usa lo stesso effetto ottico realistico del sole. Viene renderizzato solo quando questa luce e attiva, inquadrata e visibile.') + '</div>'));
+        const intensityRow=sliderRow(tr('Flare intensity', 'Intensita flare'), flare.intensity, 0, 2, .05, v => updateFlare({intensity:v}));
+        const sizeRow=sliderRow(tr('Flare size', 'Dimensione flare'), flare.size, .2, 3, .05, v => updateFlare({size:v}));
+        const bloomRow=sliderRow(tr('Flare bloom/glow', 'Bloom/glow flare'), flare.bloomIntensity, 0, 3, .05, v => updateFlare({bloomIntensity:v}));
+        const occlusionRow=checkRow(tr('Occluded by meshes/glass/smoke', 'Occluso da mesh/vetri/fumo'), flare.occlusion!==false, v => updateFlare({occlusion:v}));
+        const setFlareRowsEnabled=enabled => {
+          [intensityRow.input,intensityRow.valueInput,sizeRow.input,sizeRow.valueInput,bloomRow.input,bloomRow.valueInput,occlusionRow.input].forEach(input=>{ if(input) input.disabled=!enabled; });
+        };
+        sl.body.appendChild(checkRow(tr('Realistic lens flare', 'Lens flare realistico'), flare.enabled===true, v => {
+          if(v){
+            requestWarmup(tr('Warm-up cinematic lens flare...', 'Preparazione lens flare cinematico...'));
+            updateFlare({enabled:true});
+          } else updateFlare({enabled:false});
+          setFlareRowsEnabled(v);
+        }).root);
+        sl.body.appendChild(intensityRow.root);
+        sl.body.appendChild(sizeRow.root);
+        sl.body.appendChild(bloomRow.root);
+        sl.body.appendChild(occlusionRow.root);
+        setFlareRowsEnabled(flare.enabled===true);
+      }
+      if(!isVehicleRigLight && !isEnvironmentKey) sl.body.appendChild(checkRow(tr('Show editor dummy', 'Mostra dummy editor'), light.userData.editorDummyVisible !== false, v => {
+        light.userData.editorDummyVisible = v;
+        o.userData.lightDummyVisible = v;
+        o.traverse(node => {
+          if(node.userData && node.userData.editorLightHandle) node.visible = v && ED.active && !ED.playPreview && !ED.simulatePreview;
+        });
+        markDirty();
+      }).root);
       box.appendChild(sl.root);
+
+      const sky = GAME && GAME.systems && GAME.systems.sky;
+      if(!isEnvironmentKey && !isVehicleRigLight){
+        const schedule = Object.assign({enabled:false, onHour:18, offHour:7}, light.userData.dayNightSchedule || {});
+        const automation = section(tr('TIME OF DAY AUTOMATION', 'AUTOMAZIONE TIME OF DAY'), true);
+        const refreshSchedule = patch => {
+          Object.assign(schedule, patch || {});
+          light.userData.dayNightSchedule = Object.assign({}, schedule);
+          if(light.userData.dayNightManualVisible == null) light.userData.dayNightManualVisible = light.visible !== false;
+          if(sky && sky.refreshLightSchedules) sky.refreshLightSchedules();
+          markDirty();
+        };
+        const clock = value => {
+          const total = Math.round(((Number(value) % 24) + 24) % 24 * 60) % 1440;
+          return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+        };
+        const onRow = sliderRow(tr('Turn on at', 'Accendi alle'), schedule.onHour, 0, 23.75, .25, v => refreshSchedule({onHour:v}), clock);
+        const offRow = sliderRow(tr('Turn off at', 'Spegni alle'), schedule.offHour, 0, 23.75, .25, v => refreshSchedule({offHour:v}), clock);
+        const setRowsEnabled = enabled => {
+          [onRow.input, onRow.valueInput, offRow.input, offRow.valueInput].forEach(input => { if(input) input.disabled = !enabled; });
+        };
+        automation.body.appendChild(checkRow(tr('Automatic with environment clock', 'Automatica con orologio ambiente'), schedule.enabled, v => {
+          refreshSchedule({enabled:v});
+          setRowsEnabled(v);
+        }).root);
+        automation.body.appendChild(onRow.root);
+        automation.body.appendChild(offRow.root);
+        setRowsEnabled(schedule.enabled);
+        automation.body.appendChild(el('<div class="lk-hint">' + tr('Uses the same 24-hour Environment clock as vehicle lights. 18:00–07:00 wraps across midnight; equal times keep the light on all day.', 'Usa lo stesso orologio a 24 ore dell’Environment e delle luci veicolo. 18:00–07:00 attraversa la mezzanotte; orari uguali mantengono la luce accesa tutto il giorno.') + '</div>'));
+        box.appendChild(automation.root);
+      }
     }
 
     buildMaterialEditor(box, o);

@@ -62,6 +62,7 @@ function createState(){
     viewportViewStates: {},
     viewportOrthoOffsets: {},
     showCollisionDummies: false,
+    forceCollisionDummiesInPreview: false,
     showFps: false,
     showPerf: false,
     gizmoPointerActive: false,
@@ -96,6 +97,10 @@ function createChrome(deps){
 
   const helperGroup = new THREE.Group();
   helperGroup.name = 'LK Editor Helpers';
+  helperGroup.userData.editorHelper = true;
+  helperGroup.userData.editorOnly = true;
+  helperGroup.userData.nonExportable = true;
+  helperGroup.userData.lkFlareIgnore = true;
   const grid = new THREE.GridHelper(240, 48, 0x4b5568, 0x273142);
   grid.material.transparent = true;
   grid.material.opacity = .48;

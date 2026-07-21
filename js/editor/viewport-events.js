@@ -13,9 +13,24 @@ function create(deps){
   let downX = 0;
   let downY = 0;
   let downBtn = -1;
+  let pointerInteractionActive = false;
+
+  function resetPointerInteraction(e){
+    if(deps.setNavigationActive) deps.setNavigationActive(false);
+    if(deps.isFlyActive && deps.isFlyActive()) deps.flyEnd(e);
+    if(deps.recoverPointerState) deps.recoverPointerState(e);
+    downBtn = -1;
+    pointerInteractionActive = false;
+  }
 
   function updateViewportHover(e){
     if(!ED.active || e.target !== canvas){
+      deps.clearHoverPickHelper();
+      return;
+    }
+    // Raycasting every object while the same pointer is rotating/panning the
+    // camera is wasted work and creates visible long frames on large scenes.
+    if(pointerInteractionActive || e.buttons !== 0 || deps.isFlyActive && deps.isFlyActive()){
       deps.clearHoverPickHelper();
       return;
     }
@@ -32,6 +47,7 @@ function create(deps){
     if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
     if(deps.setActiveViewportAt) deps.setActiveViewportAt(e.clientX, e.clientY);
     downX = e.clientX; downY = e.clientY; downBtn = e.button;
+    pointerInteractionActive = true;
     if(deps.setNavigationActive) deps.setNavigationActive(true);
     deps.clearHoverPickHelper();
     const navigationLocked = deps.isActiveViewportNavigationLocked && deps.isActiveViewportNavigationLocked();
@@ -53,13 +69,23 @@ function create(deps){
 
   addEventListener('pointermove', e => {
     if(ED.active && !ED.playPreview && !ED.levelsOpen && !ED.projectsOpen){
+      // Recover from a pointer-up that was lost while focus/capture changed.
+      const controlsPending = deps.hasPendingPointerState && deps.hasPendingPointerState();
+      if(e.buttons === 0 && document.pointerLockElement !== canvas &&
+        (pointerInteractionActive || controlsPending)) resetPointerInteraction(e);
       deps.flyMove(e);
       updateViewportHover(e);
     }
   });
 
   addEventListener('pointerup', e => {
+    pointerInteractionActive = false;
     if(deps.setNavigationActive) deps.setNavigationActive(false);
+    // Run after Three.js' document/canvas listeners, including paths below
+    // that intentionally return early (pointer released outside the canvas).
+    setTimeout(() => {
+      if(deps.hasPendingPointerState && deps.hasPendingPointerState()) deps.recoverPointerState(e);
+    }, 0);
     if(!ED.active || ED.playPreview || ED.levelsOpen || ED.projectsOpen) return;
     const dist = Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY);
     const wasFlying = deps.isFlyActive() && deps.flyMoved() > 6;
@@ -73,7 +99,13 @@ function create(deps){
         return;
       }
       const hit = deps.pickAt(e.clientX, e.clientY);
-      if(hit && deps.selectObjectWithModifiers){
+      if(hit && hit.collider){
+        if(hit.logicElementCollider || hit.logicVehicleCollider) deps.selectObject(hit.entity);
+        else if(hit.playerCollider && deps.selectPlayerCollider) deps.selectPlayerCollider();
+        else if(Number.isInteger(hit.colliderPartIndex) && deps.selectColliderPart) deps.selectColliderPart(hit.entity, hit.colliderPartIndex);
+        else if(deps.selectCollider) deps.selectCollider(hit.entity);
+        else deps.selectObject(hit.entity);
+      } else if(hit && deps.selectObjectWithModifiers){
         deps.selectObjectWithModifiers(hit.entity, {toggle:e.ctrlKey || e.metaKey, add:e.shiftKey});
       } else if(hit) deps.selectObject(hit.entity);
       else deps.deselect();
@@ -103,8 +135,22 @@ function create(deps){
       }
     }
   });
-  addEventListener('pointercancel', () => { if(deps.setNavigationActive) deps.setNavigationActive(false); });
-  addEventListener('blur', () => { if(deps.setNavigationActive) deps.setNavigationActive(false); });
+  addEventListener('pointercancel', resetPointerInteraction, true);
+  addEventListener('blur', resetPointerInteraction);
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden) resetPointerInteraction();
+  });
+  canvas.addEventListener('lostpointercapture', e => {
+    // A normal pointer-up releases capture at the canvas before OrbitControls'
+    // document listener has finished. Defer the check so that release is not
+    // mistaken for a cancelled click (which would suppress scene selection).
+    setTimeout(() => {
+      const controlsPending = deps.hasPendingPointerState && deps.hasPendingPointerState();
+      if(document.pointerLockElement !== canvas && (pointerInteractionActive || controlsPending)){
+        resetPointerInteraction(e);
+      }
+    }, 0);
+  });
 
   canvas.addEventListener('contextmenu', e => { if(ED.active && !ED.levelsOpen && !ED.projectsOpen) e.preventDefault(); });
   addEventListener('contextmenu', e => {

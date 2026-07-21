@@ -9,8 +9,9 @@ This audit covers every implementation currently exposed through the Vehicle Phy
 - Repository: `https://github.com/schteppe/cannon.js`
 - Primary author: Stefan Hedman and Cannon.js contributors
 - License: MIT
-- Delivery: cdnjs script referenced by `engine_editor.html` and `gameplay.html`
+- Delivery: pinned local `vendor/cannon-0.6.2.min.js`, referenced by `engine_editor.html`, `gameplay.html` and generated playable ZIPs.
 - Local modifications to Cannon.js: none; Lot King owns only the adapter, per-Pawn configuration and lifecycle integration in `vehicle-pawns.js`.
+- Rendering compatibility: the Three.js r185 migration does not replace or upgrade the physics backend; Cannon remains exactly `0.6.2` to avoid changing vehicle dynamics in the rendering release.
 
 ## Arcade Fallback
 

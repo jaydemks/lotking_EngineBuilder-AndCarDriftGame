@@ -170,6 +170,86 @@ function create(deps){
   dome.renderOrder = -0.5;           // dopo stelle(-2) e luna(-1), prima di fumo/particelle (0)
   dome.frustumCulled = false;
   dome.visible = P.enabled;
+  const flareOrigin = new THREE.Vector3();
+  const flareDirection = new THREE.Vector3();
+  const fract = value => value - Math.floor(value);
+  const mix = (a,b,t) => a+(b-a)*t;
+  const smoothstep = (a,b,value) => {
+    const delta=b-a;
+    const t=clamp((value-a)/(Math.abs(delta)<1e-6?(delta<0?-1e-6:1e-6):delta),0,1);
+    return t*t*(3-2*t);
+  };
+  function hash3(x,y,z){
+    x=fract(x*.3183099+.1)*17;
+    y=fract(y*.3183099+.1)*17;
+    z=fract(z*.3183099+.1)*17;
+    return fract(x*y*z*(x+y+z));
+  }
+  function noise3(x,y,z){
+    const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z);
+    let fx=fract(x),fy=fract(y),fz=fract(z);
+    fx=fx*fx*(3-2*fx);fy=fy*fy*(3-2*fy);fz=fz*fz*(3-2*fz);
+    const x00=mix(hash3(ix,iy,iz),hash3(ix+1,iy,iz),fx);
+    const x10=mix(hash3(ix,iy+1,iz),hash3(ix+1,iy+1,iz),fx);
+    const x01=mix(hash3(ix,iy,iz+1),hash3(ix+1,iy,iz+1),fx);
+    const x11=mix(hash3(ix,iy+1,iz+1),hash3(ix+1,iy+1,iz+1),fx);
+    return mix(mix(x00,x10,fy),mix(x01,x11,fy),fz);
+  }
+  function fbm3(x,y,z){
+    let value=0,amplitude=.52;
+    for(let i=0;i<4;i++){
+      value+=amplitude*noise3(x,y,z);
+      x=x*2.13+11.3;y=y*2.13+5.1;z=z*2.13+7.7;amplitude*=.5;
+    }
+    return value;
+  }
+  function fbmCheap(x,y,z){ return .62*noise3(x,y,z)+.38*noise3(x*2.13,y*2.13,z*2.13); }
+  function flareDensity(x,y,z,time){
+    const h=clamp((y-P.altitude)/Math.max(1,P.thickness),0,1);
+    const profile=smoothstep(0,.18,h)*smoothstep(1,.55,h);
+    if(profile<=0) return 0;
+    const scale=P.scale*.004;
+    const windX=Math.cos((P.windAngle||0)*Math.PI/180)*P.speed;
+    const windZ=Math.sin((P.windAngle||0)*Math.PI/180)*P.speed;
+    const qx=x*scale+windX*time*.012;
+    const qy=y*scale;
+    const qz=z*scale+windZ*time*.012;
+    const threshold=1-P.coverage;
+    let density=smoothstep(threshold,threshold+.3,fbm3(qx,qy,qz))*profile;
+    if(density<=.002) return 0;
+    const detail=fbmCheap(qx*3.3,qy*3.3+time*.02,qz*3.3);
+    density-=detail*P.detail*(1-density)*.55;
+    return clamp(density,0,1)*P.density;
+  }
+  function sunTransmission(camera,direction){
+    if(!camera||!P.enabled||P.opacity<=0||P.coverage<=.01) return 1;
+    camera.getWorldPosition(flareOrigin);
+    flareDirection.copy(direction).normalize();
+    const horizon=smoothstep(.015,.10,flareDirection.y);
+    if(horizon<=0) return 1;
+    let t0=(P.altitude-flareOrigin.y)/flareDirection.y;
+    let t1=(P.altitude+P.thickness-flareOrigin.y)/flareDirection.y;
+    if(t1<=0) return 1;
+    t0=Math.max(t0,0);
+    t1=Math.min(t1,t0+P.thickness*7/Math.max(flareDirection.y,.1));
+    const steps=Math.max(8,Math.min(28,Math.round(P.quality)||20));
+    const stepLength=(t1-t0)/steps;
+    const time=uniforms.uTime.value;
+    let transmission=1;
+    for(let i=0;i<steps&&transmission>.03;i++){
+      const distance=t0+(i+.5)*stepLength;
+      const density=flareDensity(
+        flareOrigin.x+flareDirection.x*distance,
+        flareOrigin.y+flareDirection.y*distance,
+        flareOrigin.z+flareDirection.z*distance,
+        time
+      );
+      if(density>.003) transmission*=Math.exp(-density*P.absorption*stepLength*.06);
+    }
+    const alpha=(1-transmission)*P.opacity*horizon;
+    return clamp(1-alpha,.02,1);
+  }
+  dome.userData.lkFlareTransmission=(hit,camera,direction) => sunTransmission(camera,direction);
   scene.add(dome);
 
   function normalizeParams(){
@@ -219,6 +299,7 @@ function create(deps){
       applyParams();
     },
     isEnabled: () => !!P.enabled && dome.visible,
+    sunTransmission,
     defaults: () => Object.assign({}, DEFAULTS),
     mesh: dome,
   };

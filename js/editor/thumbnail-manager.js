@@ -18,6 +18,7 @@ function create(deps){
   const assetWaiters = new Map();
   let assetBusy = false;
   let scheduled = false;
+  let nextSceneThumbAt = 0;
 
   function has(id){ return cache.has(id); }
   function get(id){ return cache.get(id); }
@@ -33,7 +34,7 @@ function create(deps){
     const s = size || 96;
     if(!renderer){
       renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, preserveDrawingBuffer:true});
-      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
       scene = new THREE.Scene();
       scene.add(new THREE.AmbientLight(0xffffff, .75));
       const dl = new THREE.DirectionalLight(0xffffff, .9); dl.position.set(3, 6, 4);
@@ -55,7 +56,7 @@ function create(deps){
     // A 96px thumbnail must not load a second full copy of a large map GLB.
     // Keep the normal asset icon instead; the placed scene object is still
     // rendered normally and can receive a lightweight shared-geometry thumb.
-    if(asset.kind === 'glb' && Number(asset.size) > 12 * 1024 * 1024){
+    if(asset.kind === 'glb'){
       cache.set(key, null);
       return;
     }
@@ -70,10 +71,28 @@ function create(deps){
     assetWaiters.set(key, [el]);
     assetQueue.push({key, asset, resolveUrl});
   }
-  function runQueue(){
+  function tooComplexForLiveThumbnail(o){
+    let meshes = 0;
+    let triangles = 0;
+    if(!o || !o.traverse) return true;
+    o.traverse(node => {
+      if(!node || !node.isMesh || !node.geometry) return;
+      meshes++;
+      const geometry = node.geometry;
+      const count = geometry.index && geometry.index.count || geometry.attributes && geometry.attributes.position && geometry.attributes.position.count || 0;
+      triangles += count / 3;
+    });
+    return meshes > 24 || triangles > 100000;
+  }
+  function runQueue(deadline){
     if(!active()) return;
     if(!canProcessHeavy()){
       setTimeout(processQueue, 120);
+      return;
+    }
+    if(deadline && deadline.timeRemaining && deadline.timeRemaining() < 10){
+      nextSceneThumbAt = performance.now() + 160;
+      setTimeout(processQueue, 170);
       return;
     }
     if(!queue.length){
@@ -84,21 +103,28 @@ function create(deps){
     const id = job.o.userData.editorId;
     queued.delete(id);
     if(!cache.has(id)){
-      try { cache.set(id, render(job.o)); }
+      try { cache.set(id, tooComplexForLiveThumbnail(job.o) ? null : render(job.o)); }
       catch(err){ cache.set(id, null); }
     }
     const url = cache.get(id);
     applyImage(job.el, url);
+    nextSceneThumbAt = performance.now() + 180;
     processAssetQueue();
   }
   function processQueue(){
     if(scheduled || !active()) return;
+    const wait = nextSceneThumbAt - performance.now();
+    if(wait > 0){
+      scheduled = true;
+      setTimeout(() => { scheduled = false; processQueue(); }, Math.ceil(wait));
+      return;
+    }
     scheduled = true;
-    const run = () => {
+    const run = deadline => {
       scheduled = false;
-      runQueue();
+      runQueue(deadline);
     };
-    if(window.requestIdleCallback) window.requestIdleCallback(run, {timeout:1200});
+    if(window.requestIdleCallback) window.requestIdleCallback(run);
     else setTimeout(run, 32);
   }
   function processAssetQueue(){
@@ -119,9 +145,16 @@ function create(deps){
   }
   function render(o){
     ensureRenderer(96);
-    const clone = o.clone(true);
+    const savedUserData = [];
+    o.traverse(node => {
+      savedUserData.push([node, node.userData]);
+      node.userData = {};
+    });
+    let clone;
+    try { clone = o.clone(true); }
+    finally { savedUserData.forEach(item => { item[0].userData = item[1]; }); }
     const strip = [];
-    clone.traverse(n => { if(n.isLight || n.isSprite) strip.push(n); });
+    clone.traverse(n => { if(n.isLight || n.isSprite || n.name === 'Editor Light Pick Handle' || n.userData && (n.userData.editorOnly || n.userData.nonExportable || n.userData.editorLightHandle)) strip.push(n); });
     for(const n of strip) if(n.parent) n.parent.remove(n);
     clone.position.set(0,0,0); clone.rotation.set(0,0,0);
     scene.add(clone);

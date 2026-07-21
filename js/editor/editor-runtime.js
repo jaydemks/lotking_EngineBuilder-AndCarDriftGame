@@ -25,7 +25,11 @@ function create(deps){
   const $ = deps.$;
   const overlay = document.getElementById('overlay');
   const levelSelect = document.getElementById('levelSelect');
+  function transformControlsHelper(controls){
+    return controls && typeof controls.getHelper === 'function' ? controls.getHelper() : controls;
+  }
   let previewWarmupTimer = 0;
+  let previewWarmupCompileTimer = 0;
   let previewWarmupSeq = 0;
   const cinemaTriggerState = new Map();
   const runtimeCamPos = new THREE.Vector3();
@@ -69,15 +73,15 @@ function create(deps){
       const post = GAME.systems && GAME.systems.post;
       const video = GAME.settings && GAME.settings.video;
       const enabled = post && post.ok && video && (video.rendererMode === 'raytracing' || video.volumetricLighting || video.quality !== 'high' || video.antialiasing === 'fxaa');
-      if(!enabled) return false;
+      // One composer cannot efficiently serve four differently sized cameras:
+      // every setSize reallocates all SSR/DOF/bloom render targets. In quad view
+      // use the direct renderer; single view keeps the configured post effects.
+      if(!enabled || ED.viewportMode === 'quad') return false;
       try {
-        post.composer.setSize(rect.w, rect.h);
-        post.render(camera, {videoOnly:true});
+        post.render(camera, {videoOnly:true, width:rect.w, height:rect.h, interactive:!!ED.viewportNavigating});
         return true;
       } catch(err){
         return false;
-      } finally {
-        try { post.composer.setSize(innerWidth, innerHeight); } catch(err){}
       }
     },
   });
@@ -107,11 +111,23 @@ function create(deps){
     previewWarmupTimer = setTimeout(() => {
       if(seq === previewWarmupSeq) box.classList.remove('on');
     }, maxMs);
-    if(renderer && renderer.compileAsync && scene && gameCam){
-      Promise.resolve(renderer.compileAsync(scene, gameCam)).then(finish, finish);
-    } else {
+    // Coalesce rapid structural edits and let the overlay paint before shader
+    // compilation starts. Slider values do not call this path anymore.
+    clearTimeout(previewWarmupCompileTimer);
+    if(opts.compile === false){
       requestAnimationFrame(() => requestAnimationFrame(finish));
+      return;
     }
+    previewWarmupCompileTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        if(seq !== previewWarmupSeq) return;
+        if(renderer && renderer.compileAsync && scene && gameCam){
+          Promise.resolve(renderer.compileAsync(scene, gameCam)).then(finish, finish);
+        } else {
+          requestAnimationFrame(finish);
+        }
+      });
+    }, opts.delayMs == null ? 70 : opts.delayMs);
   }
 
   function showPreviewWarmup(){
@@ -121,14 +137,12 @@ function create(deps){
   function setEditorLightHandlesVisible(visible){
     if(!GAME.world || !GAME.world.registry) return;
     GAME.world.registry.forEach(o => {
-      if(!o || !(o.userData && o.userData.light) || !o.traverse) return;
+      if(!o || !o.traverse) return;
+      const dummyEnabled = !(o.userData && o.userData.lightDummyVisible === false) &&
+        !(o.userData && o.userData.light && o.userData.light.userData && o.userData.light.userData.editorDummyVisible === false);
       o.traverse(n => {
         if(!(n.userData && n.userData.editorLightHandle)) return;
-        n.visible = true;
-        if(n.material){
-          n.material.opacity = visible ? .42 : 0;
-          n.material.needsUpdate = true;
-        }
+        n.visible = !!visible && dummyEnabled;
       });
     });
   }
@@ -167,15 +181,21 @@ function create(deps){
 
     scene.add(helperGroup);
     helperGroup.add(grid, axes, gizmoProxy, colliderProxy);
+    if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
     const rigHelper = deps.ensureCameraRigHelper();
     let camHelper = deps.getCamHelper();
     if(!camHelper){
       camHelper = new THREE.CameraHelper(camProxy);
+      camHelper.userData.editorHelper = true;
+      camHelper.userData.editorOnly = true;
+      camHelper.userData.nonExportable = true;
+      camHelper.userData.lkFlareIgnore = true;
       camHelper.visible = ED.camHelperOn;
       deps.setCamHelper(camHelper);
     }
     helperGroup.add(camHelper, rigHelper, camRigLine);
-    scene.add(deps.getGizmo());
+    const gizmoHelper = transformControlsHelper(deps.getGizmo());
+    if(gizmoHelper) scene.add(gizmoHelper);
     $('#lkSpace').textContent = deps.spaceLabel();
     deps.updateEditorAxesConvention();
     const orbit = deps.getOrbit();
@@ -212,6 +232,8 @@ function create(deps){
     ED.playPreview = !!on && mode === 'play';
     ED.simulatePreview = !!on && mode === 'simulate';
     ED.playPreviewMode = on ? mode : 'play';
+    if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
+    setEditorLightHandlesVisible(!on);
     if(!on) GAME.state.cinemaInputLocked = false;
     if(ED.playPreview) deps.clearHoverPickHelper();
     if(ED.playPreview && viewportLayout) viewportLayout.updateOverlays(null);
@@ -231,7 +253,8 @@ function create(deps){
     }
     if(ED.playPreview) $('#lkPipFrame').classList.remove('on');
     const gizmo = deps.getGizmo();
-    if(gizmo) gizmo.visible = !ED.playPreview;
+    const helper = transformControlsHelper(gizmo);
+    if(helper) helper.visible = !ED.playPreview;
     const orbit = deps.getOrbit();
     if(orbit) orbit.enabled = deps.shouldEnableOrbit ? deps.shouldEnableOrbit() : (ED.active && !ED.playPreview);
   }
@@ -273,7 +296,8 @@ function create(deps){
       orbit.target.copy(GAME.player.car.position).setY(1);
     }
     const gizmo = deps.getGizmo();
-    if(gizmo) gizmo.visible = true;
+    const helper = transformControlsHelper(gizmo);
+    if(helper) helper.visible = true;
     deps.status(previewModeLabel(stoppedMode) + ' stopped');
   }
 
@@ -310,7 +334,8 @@ function create(deps){
       deps.setGizmoUsingZUpProxy(false);
       gizmo.detach();
     }
-    scene.remove(gizmo);
+    const gizmoHelper = transformControlsHelper(gizmo);
+    if(gizmoHelper) scene.remove(gizmoHelper);
     helperGroup.remove(grid, axes, gizmoProxy, colliderProxy);
     const camHelper = deps.getCamHelper();
     if(camHelper) helperGroup.remove(camHelper);
@@ -388,25 +413,38 @@ function create(deps){
       if(active) runtimeShot = {cameraId:active.userData.editorId};
     }
     if(viewportLayout) viewportLayout.updateOverlays(null);
-    helperGroup.visible = false;
+    const forcedCollisionDummies = ED.forceCollisionDummiesInPreview === true && ED.showCollisionDummies === true;
+    const helperVisibility = [];
+    if(forcedCollisionDummies){
+      helperGroup.visible = true;
+      helperGroup.children.forEach(child => {
+        helperVisibility.push([child, child.visible]);
+        if(!(child.userData && child.userData.colliderPreview)) child.visible = false;
+      });
+    } else helperGroup.visible = false;
     const gizmo = deps.getGizmo();
-    if(gizmo) gizmo.visible = false;
+    const gizmoHelper = transformControlsHelper(gizmo);
+    if(gizmoHelper) gizmoHelper.visible = false;
     $('#lkPipFrame').classList.remove('on');
     const viewRect = deps.editorViewportRect();
     const glRect = {x:viewRect.x, y:innerHeight - viewRect.y - viewRect.h, w:viewRect.w, h:viewRect.h};
     applyRuntimeCinemaCamera(runtimeShot, glRect);
-    if(GAME.actions.renderGameplayCameraRect) GAME.actions.renderGameplayCameraRect(glRect);
-    else {
-      renderer.setScissorTest(true);
-      renderer.setViewport(glRect.x, glRect.y, glRect.w, glRect.h);
-      renderer.setScissor(glRect.x, glRect.y, glRect.w, glRect.h);
-      renderer.render(scene, gameCam);
+    try {
+      if(GAME.actions.renderGameplayCameraRect) GAME.actions.renderGameplayCameraRect(glRect);
+      else {
+        renderer.setScissorTest(true);
+        renderer.setViewport(glRect.x, glRect.y, glRect.w, glRect.h);
+        renderer.setScissor(glRect.x, glRect.y, glRect.w, glRect.h);
+        renderer.render(scene, gameCam);
+      }
+    } finally {
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, innerWidth, innerHeight);
+      helperVisibility.forEach(pair => { pair[0].visible = pair[1]; });
+      helperGroup.visible = true;
     }
     if(viewportLayout) viewportLayout.updateStats(dt, viewRect);
-    helperGroup.visible = true;
-    if(gizmo) gizmo.visible = false;
+    if(gizmoHelper) gizmoHelper.visible = false;
   }
 
   function updateCameraHelpers(){
@@ -414,17 +452,21 @@ function create(deps){
     camProxy.quaternion.copy(gameCam.quaternion);
     camProxy.fov = gameCam.fov;
     camProxy.aspect = gameCam.aspect;
-    camProxy.far = Math.min(30, GAME.player.cameraCfg.far);
+    const helperRange = Math.max(.5, Math.min(20, Number(GAME.player.cameraCfg.helperRange) || 5));
+    const helperSize = Math.max(.2, Math.min(2.5, Number(GAME.player.cameraCfg.helperSize) || .7));
+    camProxy.far = Math.min(helperRange, GAME.player.cameraCfg.far);
     camProxy.updateProjectionMatrix();
     camProxy.updateMatrixWorld(true);
     const camHelper = deps.getCamHelper();
     if(camHelper && camHelper.visible) camHelper.update();
     deps.updateCameraRigHelper();
+    const rigHelper = deps.ensureCameraRigHelper();
+    if(rigHelper) rigHelper.scale.setScalar(helperSize);
     if(camRigLine){
       camRigLine.visible = ED.camHelperOn;
       const pts = camRigLine.geometry.attributes.position;
       pts.setXYZ(0, gameCam.position.x, gameCam.position.y, gameCam.position.z);
-      pts.setXYZ(1, GAME.player.car.position.x, GAME.player.car.position.y + 1.1, GAME.player.car.position.z);
+      pts.setXYZ(1, GAME.player.car.position.x, GAME.player.car.position.y + Math.max(.1, Number(GAME.player.cameraCfg.lookHeight) || 1.1), GAME.player.car.position.z);
       pts.needsUpdate = true;
     }
   }
@@ -497,7 +539,8 @@ function create(deps){
     if(ED.pipMinimized) return;
     helperGroup.visible = false;
     const gizmo = deps.getGizmo();
-    if(gizmo) gizmo.visible = false;
+    const gizmoHelper = transformControlsHelper(gizmo);
+    if(gizmoHelper) gizmoHelper.visible = false;
     const cameraHelperVisibility = sceneCameras().map(holder => {
       const helper = holder.children.find(child => child.userData && child.userData.editorCameraHelper);
       const visible = helper ? helper.visible : false;
@@ -509,33 +552,18 @@ function create(deps){
       renderer.setScissorTest(true);
       renderer.setViewport(x, glY, w, hgt);
       renderer.setScissor(x, glY, w, hgt);
-      const cc = GAME.player.cameraCfg;
-      const video = GAME.settings && GAME.settings.video;
-      const videoPost = video && (video.volumetricLighting || video.rendererMode === 'raytracing' || video.quality !== 'high' || video.antialiasing === 'fxaa');
       sourceCamera.aspect = w / Math.max(1, hgt);
       sourceCamera.updateProjectionMatrix();
-      const postOn = !isSceneCamera && ((cc.dof && cc.dof.enabled) || (cc.grade && cc.grade.enabled) || videoPost) && GAME.systems.post && GAME.systems.post.ok;
-      if(postOn){
-        try {
-          GAME.systems.post.composer.setSize(w, hgt);
-          GAME.systems.post.render();
-        } catch(err){
-          console.error('LotKing editor: post-processing PIP failed, falling back to direct render', err);
-          const it = GAME && GAME.i18n && GAME.i18n.lang === 'it';
-          deps.status((it ? '⚠ Post-processing PIP fallito (' : '⚠ Post-processing PIP failed (') + (err && err.message || err) + (it ? '): render diretto' : '): direct render'));
-          try { renderer.setRenderTarget(null); } catch(e){}
-          renderer.render(scene, gameCam);
-        } finally {
-          try { GAME.systems.post.composer.setSize(innerWidth, innerHeight); } catch(e){}
-        }
-      } else {
-        renderer.render(scene, sourceCamera);
-      }
+      // The shared composer cannot render the main viewport and a differently
+      // sized PIP without reallocating every post-process target twice per
+      // frame. The PIP is an editor framing aid, so keep it direct and let the
+      // main viewport remain fully post-processed and allocation-free.
+      renderer.render(scene, sourceCamera);
     } finally {
       renderer.setScissorTest(false);
       renderer.setViewport(0, 0, innerWidth, innerHeight);
       helperGroup.visible = true;
-      if(gizmo) gizmo.visible = true;
+      if(gizmoHelper) gizmoHelper.visible = true;
       cameraHelperVisibility.forEach(pair => { if(pair[0]) pair[0].visible = pair[1]; });
     }
   }
@@ -569,7 +597,8 @@ function create(deps){
     };
     if(helperGroup) hideNode(helperGroup);
     const gizmo = deps.getGizmo && deps.getGizmo();
-    if(gizmo) hideNode(gizmo);
+    const gizmoHelper = transformControlsHelper(gizmo);
+    if(gizmoHelper) hideNode(gizmoHelper);
     scene.traverse(node => {
       if(shouldHideForFinalPreview(node)) hideNode(node);
     });
@@ -804,19 +833,29 @@ function create(deps){
     if(fwd.lengthSq() < 1e-6) fwd.set(Math.sin(car.rotation.y), 0, Math.cos(car.rotation.y));
     fwd.normalize();
     const side = new THREE.Vector3(fwd.z, 0, -fwd.x).normalize();
-    const target = car.position.clone().add(new THREE.Vector3(0, 1.1, 0));
-    let height = mode === 'free' ? Math.max(2.3, dist * .34) : Math.max(1.2, cfg.arcadeHeight || 3.1);
-    let sideOffset = 0;
+    const target = car.position.clone().add(new THREE.Vector3(0, Math.max(.1, Number(cfg.lookHeight) || 1.1), 0));
+    const freePitch = Math.max(.05, Math.min(1.2, Number(cfg.freePitch) || .32));
+    let height = mode === 'free' ? Math.max(.2, Math.sin(freePitch) * dist) : Math.max(1.2, cfg.arcadeHeight || 3.1);
+    let sideOffset = Math.max(-8, Math.min(8, Number(cfg.lateralOffset) || 0));
     let close = 0;
     if(mode === 'cinematic'){
-      sideOffset = (cfg.cinematicDriftOrbit || 0) * dist * .7;
+      sideOffset += (cfg.cinematicDriftOrbit || 0) * dist * .7;
       close = cfg.cinematicDriftClose || 0;
       height += cfg.cinematicDriftHeight || 0;
     }
-    gameCam.position.copy(target)
-      .addScaledVector(fwd, -Math.max(2, dist - close))
-      .addScaledVector(side, sideOffset)
-      .add(new THREE.Vector3(0, height, 0));
+    if(mode === 'free'){
+      const yaw = THREE.MathUtils.degToRad(Number(cfg.freeYawOffset) || 0);
+      const horizontal = Math.cos(freePitch) * dist;
+      gameCam.position.copy(target)
+        .addScaledVector(fwd, -Math.cos(yaw) * horizontal)
+        .addScaledVector(side, Math.sin(yaw) * horizontal + sideOffset)
+        .add(new THREE.Vector3(0, height, 0));
+    } else {
+      gameCam.position.copy(target)
+        .addScaledVector(fwd, -Math.max(2, dist - close))
+        .addScaledVector(side, sideOffset)
+        .add(new THREE.Vector3(0, height, 0));
+    }
     gameCam.lookAt(target);
     gameCam.fov = cfg.fov || 62;
     gameCam.aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (innerWidth / innerHeight);

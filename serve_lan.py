@@ -11,6 +11,7 @@ the same Wi-Fi network.
 from __future__ import annotations
 
 import argparse
+import errno
 import os
 import socket
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -79,33 +80,62 @@ def windows_path_from_wsl(path: str) -> str | None:
     return None
 
 
+def create_server(bind: str, port: int, handler, strict_port: bool) -> tuple[ThreadingHTTPServer, int]:
+    if not 1 <= port <= 65535:
+        raise SystemExit(f"Invalid port: {port}. Choose a value between 1 and 65535.")
+
+    attempts = [port] if strict_port else range(port, min(port + 31, 65536))
+    last_error: OSError | None = None
+    for candidate in attempts:
+        try:
+            return ThreadingHTTPServer((bind, candidate), handler), candidate
+        except OSError as exc:
+            last_error = exc
+            # Windows 10013: reserved/blocked port. Windows 10048 and the
+            # POSIX equivalents mean that the port is already in use.
+            recoverable = exc.errno in {errno.EACCES, errno.EADDRINUSE, 10013, 10048}
+            if strict_port or not recoverable:
+                break
+
+    detail = str(last_error) if last_error else "unknown socket error"
+    hint = (
+        f"Cannot open {bind}:{port}: {detail}\n"
+        "The port may be occupied, reserved by Windows/Hyper-V, or blocked by security software.\n"
+        f"Try: py -3 serve_lan.py --port {min(port + 1, 65535)} --bind {bind}"
+    )
+    raise SystemExit(hint)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve Lot King on the local network.")
     parser.add_argument("--port", "-p", type=int, default=8000)
     parser.add_argument("--bind", "-b", default="0.0.0.0")
     parser.add_argument("--dir", "-d", default=os.getcwd())
+    parser.add_argument("--strict-port", action="store_true", help="Fail instead of trying the next available port.")
     args = parser.parse_args()
 
     root = os.path.abspath(args.dir)
     handler = lambda *a, **kw: QuietStaticHandler(*a, directory=root, **kw)
-    server = ThreadingHTTPServer((args.bind, args.port), handler)
+    server, active_port = create_server(args.bind, args.port, handler, args.strict_port)
 
     print("Lot King LAN server")
     print("Root:", root)
-    print("Bind:", f"{args.bind}:{args.port}")
+    if active_port != args.port:
+        print(f"Requested port {args.port} is unavailable; using {active_port} instead.")
+    print("Bind:", f"{args.bind}:{active_port}")
     print("")
     print("Open from this computer:")
-    print(f"  http://127.0.0.1:{args.port}/")
-    print(f"  http://127.0.0.1:{args.port}/gameplay.html")
-    print(f"  http://127.0.0.1:{args.port}/engine_editor.html")
+    print(f"  http://127.0.0.1:{active_port}/")
+    print(f"  http://127.0.0.1:{active_port}/gameplay.html")
+    print(f"  http://127.0.0.1:{active_port}/engine_editor.html")
     print("")
     ips = local_ips()
     if ips:
         print("Open from phone/tablet on the same Wi-Fi:")
         for ip in ips:
-            print(f"  http://{ip}:{args.port}/")
-            print(f"  http://{ip}:{args.port}/gameplay.html")
-            print(f"  http://{ip}:{args.port}/engine_editor.html")
+            print(f"  http://{ip}:{active_port}/")
+            print(f"  http://{ip}:{active_port}/gameplay.html")
+            print(f"  http://{ip}:{active_port}/engine_editor.html")
     else:
         print("No LAN IP detected. Check your Wi-Fi/network adapter.")
     print("")
@@ -120,11 +150,11 @@ def main() -> None:
             print(f"  Set-Location '{win_path}'")
         else:
             print("  serve_lan_windows.bat")
-        print(f"  py -3 serve_lan.py --port {args.port} --bind 0.0.0.0")
+        print(f"  py -3 serve_lan.py --port {active_port} --bind 0.0.0.0")
         print("")
     print("If the phone cannot connect, allow Python through the firewall")
     print("or run this from Windows PowerShell in the project folder:")
-    print(f"  py -3 serve_lan.py --port {args.port} --bind 0.0.0.0")
+    print(f"  py -3 serve_lan.py --port {active_port} --bind 0.0.0.0")
     print("")
     print("Press Ctrl+C to stop.")
 

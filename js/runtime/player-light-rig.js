@@ -9,9 +9,9 @@
 
 const DEFAULT_CONFIG = Object.freeze({
   front: {enabled:true, auto:true, autoOnHour:18, autoOffHour:7, count:2, color:0xfff0c8, intensity:1.55, distance:42, angle:.50, penumbra:.55,
-    glow:true, bloom:true, bloomIntensity:.55, flare:true, glowSize:.62, flareSize:.42},
-  rear: {enabled:true, color:0xff1f18, baseIntensity:.45, brakeIntensity:2.8, reverseColor:0xf3f4ff, reverseIntensity:2.2,
-    glow:true, bloom:true, bloomIntensity:.55, flare:true, glowSize:.55, flareSize:.34},
+    glow:true, bloom:true, bloomIntensity:.55, flare:true, flareIntensity:.24, flareBloomIntensity:.19, flareOcclusion:true, glowSize:.62, flareSize:.42},
+  rear: {enabled:true, color:0xc91410, brakeColor:0xff2418, baseIntensity:.45, brakeIntensity:2.8, reverseColor:0xf3f4ff, reverseIntensity:2.2,
+    glow:true, bloom:true, bloomIntensity:.55, flare:true, flareIntensity:.16, flareBloomIntensity:.12, flareOcclusion:true, glowSize:.55, flareSize:.34},
   neon: {enabled:false, dummyVisible:true, layout:'all', colorA:0x19f7ff, colorB:0xff3df2, intensity:1.25, spill:2.8, shadows:false, animation:'pulse', speed:1.0},
   aux: [
     {enabled:false, condition:'always', color:0xffd166, intensity:1.0, glow:true, flare:false, size:.42},
@@ -19,6 +19,11 @@ const DEFAULT_CONFIG = Object.freeze({
   ],
   dummies: {visible:false},
 });
+// Vehicle authoring keeps its compact legacy 0-6 scale; Three r185 expects
+// spot intensity in candela, so convert only at the renderer boundary.
+const PUNCTUAL_INTENSITY_TO_CANDELA = 400;
+// RectAreaLight uses luminance rather than the compact 0-4 authoring scale.
+const NEON_INTENSITY_TO_LUMINANCE = 8;
 
 function cloneConfig(){
   return {
@@ -42,9 +47,24 @@ function create(opts){
   const isEditorActive = opts.isEditorActive || (() => false);
   const config = cloneConfig();
   const rig = {front:[], rear:{position:[], brake:[], reverse:[]}, aux:[], neon:[], glowTex:null};
+  const anchorMatrix = new THREE.Matrix4();
+  const inverseCarMatrix = new THREE.Matrix4();
   let highBeams = false;
   let headlight = null;
   let built = false;
+
+  function configureCinematicFlare(light, enabled, intensity, size, bloomIntensity, occlusion){
+    if(!light) return;
+    const flare = light.userData.cinematicLensFlare || (light.userData.cinematicLensFlare = {});
+    flare.enabled = enabled === true;
+    const authoredIntensity = Number(intensity);
+    const authoredSize = Number(size);
+    flare.intensity = Math.max(0, Math.min(2, Number.isFinite(authoredIntensity) ? authoredIntensity : .65));
+    flare.size = Math.max(.2, Math.min(3, Number.isFinite(authoredSize) ? authoredSize : .7));
+    const authoredBloom = Number(bloomIntensity);
+    flare.bloomIntensity = Math.max(0, Math.min(3, Number.isFinite(authoredBloom) ? authoredBloom : flare.intensity * .78));
+    flare.occlusion = occlusion !== false;
+  }
 
   function defaultAuxLightConfig(index){
     const presets = [
@@ -61,7 +81,9 @@ function create(opts){
   function isNightTime(){
     const sky = getSky();
     const t = sky && sky.getTime ? sky.getTime() : .5;
-    const hour = (((Number(t) || 0) % 1) + 1) % 1 * 24;
+    const hour = sky && sky.getClockHour
+      ? sky.getClockHour()
+      : ((((Number(t) || 0) % 1) + 1) % 1 * 24 + 6) % 24;
     const normalizeHour = (value, fallback) => {
       const n = Number(value);
       return Number.isFinite(n) ? Math.max(0, Math.min(24, n)) : fallback;
@@ -86,7 +108,7 @@ function create(opts){
     r.addColorStop(1,'rgba(255,255,255,0)');
     g.fillStyle = r; g.fillRect(0,0,128,128);
     const tx = new THREE.CanvasTexture(c);
-    tx.encoding = THREE.sRGBEncoding;
+    tx.colorSpace = THREE.SRGBColorSpace;
     return tx;
   }
 
@@ -115,6 +137,42 @@ function create(opts){
     return g;
   }
 
+  function pinEmitterToAnchor(item){
+    if(!item) return;
+    [item.light, item.point, item.glow, item.flare].forEach(node => {
+      if(node && node.position) node.position.set(0, 0, 0);
+    });
+  }
+
+  function syncDummyColor(anchor, color){
+    if(!anchor) return;
+    anchor.traverse(node => {
+      if(node.userData && node.userData.helperOnly && node.material && node.material.color) node.material.color.setHex(color);
+    });
+  }
+
+  function syncAnchorTransforms(resolveSource){
+    if(typeof resolveSource !== 'function' || !car) return;
+    const bindings = [];
+    rig.front.forEach((item, index) => bindings.push(['player_front_light_' + index, item]));
+    Object.keys(rig.rear).forEach(role => rig.rear[role].forEach((item, index) => bindings.push(['player_rear_' + role + '_' + index, item])));
+    rig.aux.forEach((item, index) => bindings.push(['player_aux_light_' + index, item]));
+    rig.neon.forEach(item => bindings.push(['player_neon_' + item.side, item]));
+    car.updateWorldMatrix(true, false);
+    inverseCarMatrix.copy(car.matrixWorld).invert();
+    bindings.forEach(binding => {
+      const source = resolveSource(binding[0]);
+      const item = binding[1];
+      const anchor = item && item.anchor;
+      if(!source || !anchor || source === anchor) return;
+      source.updateWorldMatrix(true, false);
+      anchorMatrix.multiplyMatrices(inverseCarMatrix, source.matrixWorld);
+      anchorMatrix.decompose(anchor.position, anchor.quaternion, anchor.scale);
+      anchor.updateMatrixWorld(true);
+      pinEmitterToAnchor(item);
+    });
+  }
+
   function createAuxLightRig(idx, cfg){
     const side = idx % 2 === 0 ? -1 : 1;
     const row = Math.floor(idx / 2);
@@ -124,7 +182,7 @@ function create(opts){
     const glow = makeLightSprite(cfg.color, cfg.size, .5);
     const flare = makeLightSprite(cfg.color, cfg.size, .65);
     anchor.add(point); anchor.add(glow); anchor.add(flare);
-    point.position.set(0,0,0); glow.position.set(0,0,0); flare.position.set(0,0,.04);
+    point.position.set(0,0,0); glow.position.set(0,0,0); flare.position.set(0,0,0);
     car.add(anchor);
     tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_aux_light_' + idx});
     rig.aux[idx] = {anchor, point, glow, flare};
@@ -144,11 +202,11 @@ function create(opts){
     for(const [idx, x] of [[0,-.58],[1,.58]]){
       const anchor = makeLightDummy(idx === 0 ? 'Front Headlight L' : 'Front Headlight R', 0xfff0c8);
       anchor.position.set(x, .78, 1.98);
-      const sp = new THREE.SpotLight(config.front.color, config.front.intensity, config.front.distance, config.front.angle, config.front.penumbra, 1.25);
+      const sp = new THREE.SpotLight(config.front.color, config.front.intensity * PUNCTUAL_INTENSITY_TO_CANDELA, config.front.distance, config.front.angle, config.front.penumbra, 2);
       const tg = new THREE.Object3D(); tg.position.set(x * -.35, -.12, 14);
       anchor.add(sp); anchor.add(tg); sp.target = tg;
-      const glow = makeLightSprite(config.front.color, config.front.glowSize, .7); glow.position.set(0,0,.08); anchor.add(glow);
-      const flare = makeLightSprite(config.front.color, config.front.flareSize, .95); flare.position.set(0,0,.12); anchor.add(flare);
+      const glow = makeLightSprite(config.front.color, config.front.glowSize, .7); glow.position.set(0,0,0); anchor.add(glow);
+      const flare = makeLightSprite(config.front.color, config.front.flareSize, .95); flare.position.set(0,0,0); anchor.add(flare);
       car.add(anchor);
       tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_front_light_' + idx});
       rig.front.push({anchor, light:sp, target:tg, glow, flare});
@@ -167,7 +225,7 @@ function create(opts){
         const glow = makeLightSprite(color, config.rear.glowSize, .55);
         const flare = makeLightSprite(color, config.rear.flareSize, .72);
         anchor.add(point); anchor.add(glow); anchor.add(flare);
-        point.position.set(0,0,-.08); glow.position.set(0,0,-.1); flare.position.set(0,0,-.12);
+        point.position.set(0,0,0); glow.position.set(0,0,0); flare.position.set(0,0,0);
         car.add(anchor);
         tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_rear_' + role + '_' + idx});
         rig.rear[role].push({anchor, point, glow, flare});
@@ -194,9 +252,14 @@ function create(opts){
       helper.renderOrder = 999;
       const mat = new THREE.MeshBasicMaterial({color:config.neon.colorA, transparent:true, opacity:.65, depthWrite:false, blending:THREE.AdditiveBlending});
       const strip = new THREE.Mesh(new THREE.BoxGeometry(sx,.035,sz), mat);
-      const glow = new THREE.PointLight(config.neon.colorA, 0, 6, 2);
-      glow.shadow.mapSize.set(256, 256);
-      glow.shadow.bias = -.003;
+      // A vehicle neon is a luminous strip, not a punctual/spot source. The
+      // area plane is local XY; rotate its +Z emission normal toward -Y so it
+      // lights the road beneath the car.
+      const glow = typeof THREE.RectAreaLight === 'function'
+        ? new THREE.RectAreaLight(config.neon.colorA, 0, sx, sz)
+        : new THREE.PointLight(config.neon.colorA, 0, 6, 2);
+      if(glow.isRectAreaLight) glow.rotation.x = Math.PI / 2;
+      glow.userData.vehicleNeonAreaLight = !!glow.isRectAreaLight;
       anchor.add(helper, strip, glow);
       car.add(anchor);
       tagEntity(anchor, anchor.userData.editorName, 'playerLight', {id:'player_neon_' + side});
@@ -216,19 +279,27 @@ function create(opts){
     const highBeamBoost = highBeams ? 1 : 0;
     for(let i=0;i<rig.front.length;i++){
       const item = rig.front[i], sp = item.light;
+      pinEmitterToAnchor(item);
+      syncDummyColor(item.anchor, f.color);
       sp.color.setHex(f.color);
       const frontActive = !!f.enabled && i < Math.max(1, Math.min(2, f.count)) && (highBeams || !f.auto || isNightTime());
-      sp.intensity = frontActive ? f.intensity * (1 + highBeamBoost * 1.65) : 0;
+      sp.intensity = frontActive ? f.intensity * PUNCTUAL_INTENSITY_TO_CANDELA * (1 + highBeamBoost * 1.65) : 0;
       sp.distance = f.distance * (1 + highBeamBoost * .55);
       sp.angle = Math.min(1.1, f.angle * (1 + highBeamBoost * .58));
       sp.penumbra = Math.min(1, f.penumbra + highBeamBoost * .18);
       sp.visible = true;
       item.glow.material.color.setHex(f.color);
       item.glow.material.opacity = frontActive && f.glow ? Math.min(1, (.42 + (f.bloom ? f.bloomIntensity * .45 : 0)) * (1 + highBeamBoost * .55)) : 0;
-      item.glow.scale.setScalar(f.glowSize * (1 + highBeamBoost * .35));
+      // High beams must never alter the authored marker/fixture footprint.
+      // Changing child sprite scale also changes the selected anchor bounds and
+      // made its editor dummy appear to move even though its origin was fixed.
+      item.glow.scale.setScalar(f.glowSize);
       item.flare.material.color.setHex(f.color);
-      item.flare.material.opacity = frontActive && f.flare ? Math.min(1, .88 * (1 + highBeamBoost * .25)) : 0;
-      item.flare.scale.setScalar(f.flareSize * (1 + highBeamBoost * .42));
+      item.flare.material.opacity = 0;
+      item.flare.scale.setScalar(f.flareSize);
+      // One authored value drives both members of the front pair. Headlight
+      // candela and high-beam boost no longer alter photographic flare power.
+      configureCinematicFlare(sp, !!f.flare, f.flareIntensity == null ? .24 : f.flareIntensity, f.flareSize * 1.55, f.flareBloomIntensity, f.flareOcclusion);
     }
   }
 
@@ -258,10 +329,19 @@ function create(opts){
         item.helper.visible = editorPreview && !!n.dummyVisible;
       }
       item.glow.color.setHex(c);
-      item.glow.intensity = k * n.intensity;
-      item.glow.distance = n.spill == null ? 2.8 : n.spill;
-      item.glow.decay = 2.8;
-      item.glow.castShadow = !!n.shadows;
+      if(item.glow.isRectAreaLight){
+        const coverage = Math.max(.4, Math.min(8, Number(n.spill) || 2.8));
+        const areaScale = .65 + coverage * .125; // 2.8 keeps the strip's real size.
+        item.glow.width = item.strip.geometry.parameters.width * areaScale;
+        item.glow.height = item.strip.geometry.parameters.depth * areaScale;
+        item.glow.intensity = k * n.intensity * NEON_INTENSITY_TO_LUMINANCE;
+      } else {
+        // Compatibility fallback for unusual Three builds without RectAreaLight.
+        item.glow.intensity = k * n.intensity;
+        item.glow.distance = n.spill == null ? 2.8 : n.spill;
+        item.glow.decay = 2.8;
+      }
+      item.glow.castShadow = false; // RectAreaLight does not support shadow maps.
       item.glow.visible = true;
     }
   }
@@ -273,20 +353,25 @@ function create(opts){
     const braking = !!(keys['s'] || keys['arrowdown'] || engine.brake === true || Number(engine.brake) > .08) && !engine.reverseActive && getSpeed() > 2;
     const reversing = !!engine.reverseActive;
     const r = config.rear;
-    const applyRear = (group, color, intensity) => {
+    const applyRear = (group, color, intensity, cinematicPair) => {
       for(const item of group){
+        pinEmitterToAnchor(item);
+        syncDummyColor(item.anchor, color);
         item.point.color.setHex(color); item.point.intensity = intensity; item.point.visible = true;
         item.glow.material.color.setHex(color);
         item.glow.material.opacity = r.enabled && r.glow ? Math.min(1, .16 + intensity * .14 + (r.bloom ? r.bloomIntensity * .42 : 0)) : 0;
         item.glow.scale.setScalar(r.glowSize);
         item.flare.material.color.setHex(color);
-        item.flare.material.opacity = r.enabled && r.flare ? Math.min(1, .22 + intensity * .2) : 0;
+        item.flare.material.opacity = 0;
         item.flare.scale.setScalar(r.flareSize);
+        configureCinematicFlare(item.point, !!r.flare && cinematicPair === true, r.flareIntensity == null ? .16 : r.flareIntensity, r.flareSize * 1.55, r.flareBloomIntensity, r.flareOcclusion);
       }
     };
-    applyRear(rig.rear.position, r.color, r.enabled ? r.baseIntensity : 0);
-    applyRear(rig.rear.brake, r.color, r.enabled && braking ? r.brakeIntensity : 0);
-    applyRear(rig.rear.reverse, r.reverseColor, r.enabled && reversing ? r.reverseIntensity : 0);
+    // Only the left/right position pair owns the rear optical flare. Brake and
+    // reverse sources retain their light/glow without stacking extra passes.
+    applyRear(rig.rear.position, r.color, r.enabled ? r.baseIntensity : 0, true);
+    applyRear(rig.rear.brake, r.brakeColor == null ? r.color : r.brakeColor, r.enabled && braking ? r.brakeIntensity : 0, false);
+    applyRear(rig.rear.reverse, r.reverseColor, r.enabled && reversing ? r.reverseIntensity : 0, false);
     const auxOn = condition => {
       if(condition === 'always') return true;
       if(condition === 'night') return isNightTime();
@@ -298,10 +383,13 @@ function create(opts){
     };
     for(let i=0;i<rig.aux.length;i++){
       const item = rig.aux[i], cfg = config.aux[i];
+      pinEmitterToAnchor(item);
+      syncDummyColor(item.anchor, cfg.color);
       const on = !!cfg.enabled && auxOn(cfg.condition);
       item.point.color.setHex(cfg.color); item.point.intensity = on ? cfg.intensity : 0; item.point.visible = true;
       item.glow.material.color.setHex(cfg.color); item.glow.material.opacity = on && cfg.glow ? Math.min(1, .2 + cfg.intensity * .22) : 0; item.glow.scale.setScalar(cfg.size);
-      item.flare.material.color.setHex(cfg.color); item.flare.material.opacity = on && cfg.flare ? Math.min(1, .35 + cfg.intensity * .18) : 0; item.flare.scale.setScalar(cfg.size);
+      item.flare.material.color.setHex(cfg.color); item.flare.material.opacity = 0; item.flare.scale.setScalar(cfg.size);
+      configureCinematicFlare(item.point, !!cfg.flare, .4 + cfg.intensity * .2, cfg.size * 1.45);
     }
     updateNeon();
   }
@@ -311,9 +399,17 @@ function create(opts){
     if(patch.front) Object.assign(config.front, patch.front);
     const onHour = Number(config.front.autoOnHour);
     const offHour = Number(config.front.autoOffHour);
-    config.front.autoOnHour = Number.isFinite(onHour) ? Math.max(0, Math.min(24, onHour)) : 18;
-    config.front.autoOffHour = Number.isFinite(offHour) ? Math.max(0, Math.min(24, offHour)) : 7;
+    const frontFlareIntensity = Number(config.front.flareIntensity);
+    const frontFlareBloomIntensity = Number(config.front.flareBloomIntensity);
+    config.front.autoOnHour = Number.isFinite(onHour) ? ((onHour % 24) + 24) % 24 : 18;
+    config.front.autoOffHour = Number.isFinite(offHour) ? ((offHour % 24) + 24) % 24 : 7;
+    config.front.flareIntensity = Number.isFinite(frontFlareIntensity) ? Math.max(0, Math.min(2, frontFlareIntensity)) : .24;
+    config.front.flareBloomIntensity = Number.isFinite(frontFlareBloomIntensity) ? Math.max(0, Math.min(3, frontFlareBloomIntensity)) : config.front.flareIntensity * .78;
     if(patch.rear) Object.assign(config.rear, patch.rear);
+    const rearFlareIntensity = Number(config.rear.flareIntensity);
+    const rearFlareBloomIntensity = Number(config.rear.flareBloomIntensity);
+    config.rear.flareIntensity = Number.isFinite(rearFlareIntensity) ? Math.max(0, Math.min(2, rearFlareIntensity)) : .16;
+    config.rear.flareBloomIntensity = Number.isFinite(rearFlareBloomIntensity) ? Math.max(0, Math.min(3, rearFlareBloomIntensity)) : config.rear.flareIntensity * .78;
     if(patch.neon) Object.assign(config.neon, patch.neon);
     if(patch.aux) patch.aux.forEach((v, i) => {
       if(!v) return;
@@ -387,6 +483,7 @@ function create(opts){
     duplicateAux,
     moveAux,
     setHighBeams,
+    syncAnchorTransforms,
     syncTimeOfDay,
     headlight: () => headlight,
   };

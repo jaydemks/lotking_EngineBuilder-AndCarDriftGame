@@ -50,6 +50,7 @@ test.beforeEach(async ({page}) => {
   await installLightweightFrames(page);
   await page.goto('/index.html', {waitUntil:'domcontentloaded'});
   await expect(page.locator('#overlay')).not.toHaveClass(/menu-preloading/);
+  await expect(page.locator('.landing-version')).toHaveText('v0.7.0');
 });
 
 test('returning from embedded gameplay restores a fresh landing menu', async ({page}) => {

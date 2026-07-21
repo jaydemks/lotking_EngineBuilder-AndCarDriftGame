@@ -14,17 +14,10 @@ function create(deps){
   const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
   const VENDOR_LIBS = [
-    {remote: 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', local: 'vendor/three.min.js'},
-    {remote: 'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js', local: 'vendor/cannon.min.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js', local: 'vendor/GLTFLoader.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js', local: 'vendor/SkeletonUtils.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Lensflare.js', local: 'vendor/Lensflare.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js', local: 'vendor/EffectComposer.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js', local: 'vendor/RenderPass.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js', local: 'vendor/CopyShader.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js', local: 'vendor/ShaderPass.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js', local: 'vendor/BokehShader.js'},
-    {remote: 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js', local: 'vendor/BokehPass.js'},
+    {source:'vendor/three-r185-compat.min.js', local:'vendor/three-r185-compat.min.js'},
+    {source:'vendor/helvetiker_regular.typeface.json', local:'vendor/helvetiker_regular.typeface.json'},
+    {source:'vendor/cannon-0.6.2.min.js', local:'vendor/cannon-0.6.2.min.js'},
+    {source:'vendor/THIRD_PARTY_LICENSES.md', local:'vendor/THIRD_PARTY_LICENSES.md'},
   ];
   const RUNTIME_TEMPLATE = 'gameplay.html';
   const STATIC_FILES = [
@@ -41,6 +34,8 @@ function create(deps){
     'musics/03 - Num0 - Look into the mirror.mp3',
     'musics/menu/Num0  JustWait.mp3',
     'media/soundhud.png',
+    'media/lensflare/lensDirtTexture.jpg',
+    'media/lensflare/LICENSE-CC0.txt',
     'media/hdri/README.md',
     'media/sfx/engine/BAC_Mono_onmid.wav',
     'media/sfx/engine/BAC_Mono_onlow.wav',
@@ -66,10 +61,10 @@ function create(deps){
     if(window.JSZip) return Promise.resolve(window.JSZip);
     if(ensureJsZipForExport._pending) return ensureJsZipForExport._pending;
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+    script.src = 'vendor/jszip-3.10.1.min.js?v=3.10.1-lk1';
     const p = new Promise((resolve, reject) => {
       script.onload = () => window.JSZip ? resolve(window.JSZip) : reject(new Error(tr('JSZip unavailable after loading', 'JSZip non disponibile dopo il caricamento')));
-      script.onerror = () => reject(new Error(tr('Unable to load JSZip from CDN', 'Impossibile caricare JSZip dal CDN')));
+      script.onerror = () => reject(new Error(tr('Unable to load local JSZip', 'Impossibile caricare JSZip locale')));
     });
     document.head.appendChild(script);
     ensureJsZipForExport._pending = p;
@@ -146,6 +141,7 @@ function create(deps){
   function rewriteRuntimeHtmlForZip(html){
     let out = html;
     VENDOR_LIBS.forEach(item => {
+      if(!item.remote) return;
       const quoted1 = `src="${item.remote}"`;
       const quoted2 = `src='${item.remote}'`;
       const href1 = `href="${item.remote}"`;
@@ -288,7 +284,7 @@ function create(deps){
       setProgress(done(), 'Copiamento risorse runtime (' + doneCount + '/' + (totalToPack - 1) + ')');
     }));
     VENDOR_LIBS.forEach(lib => packTasks.push(async () => {
-      await addFileToZip(zip, lib.remote, lib.local, warnings, true);
+      await addFileToZip(zip, lib.source || lib.remote, lib.local, warnings, true);
       setProgress(done(), 'Copiamento vendor (' + doneCount + '/' + (totalToPack - 1) + ')');
     }));
     referencedAssets.forEach(asset => packTasks.push(async () => {

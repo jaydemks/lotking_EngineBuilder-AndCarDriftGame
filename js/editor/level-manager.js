@@ -104,6 +104,17 @@ function create(deps){
       okText:tr('Continue', 'Continua'),
     });
     if(!levelRole) return;
+    const levelTemplate = await promptEditorAction({
+      title:tr('Level template', 'Template livello'),
+      message:tr('Choose a starting point for this level:', 'Scegli una base di partenza per questo livello:'),
+      value:'character-movement-playground',
+      options:[
+        {value:'character-movement-playground', label:tr('Sketch Street - Character Movement', 'Sketch Street - Movimento personaggio')},
+        {value:'empty', label:tr('Empty Level', 'Livello vuoto')},
+      ],
+      okText:tr('Continue', 'Continua'),
+    });
+    if(!levelTemplate) return;
     if(ED.dirty){
       const ok = await confirmEditorAction({
         title:'Create new level?',
@@ -113,7 +124,7 @@ function create(deps){
       });
       if(!ok) return;
     }
-    const id = LV.create(next.trim(), LV.templateScene(GAME), {levelRole});
+    const id = LV.create(next.trim(), LV.templateScene(GAME, levelTemplate), {levelRole, levelTemplate});
     if(!id){ status(tr('⚠ Level creation failed', '⚠ Creazione livello fallita')); return; }
     LV.setActive(id);
     reopenEditorAndReload(tr('New level created', 'Nuovo livello creato'), next.trim());
@@ -227,7 +238,10 @@ function create(deps){
     if(!box) return;
     box.innerHTML = '';
     const LV = levelsApi();
-    const list = LV ? LV.list() : [];
+    // The editor is the authoritative project view: levels hidden from normal
+    // gameplay/menu pickers must still remain visible and editable here.
+    // LEVELS.list also repairs orphaned lotking.level.* records before return.
+    const list = LV ? LV.list({includeHidden:true}) : [];
     if(!list.length){
       box.appendChild(el('<div class="lk-empty">' + tr('No saved levels.<br>Save the current level or create a new one.', 'Nessun livello salvato.<br>Salva il livello corrente o creane uno nuovo.') + '</div>'));
       return;
@@ -238,6 +252,7 @@ function create(deps){
       const nm = el('<div class="lk-level-name"></div>');
       nm.textContent = l.name;
       if(l.active) nm.appendChild(el('<span class="lk-level-badge">' + tr('ACTIVE', 'ATTIVO') + '</span>'));
+      if(l.visible === false) nm.appendChild(el('<span class="lk-level-badge">' + tr('INTERNAL', 'INTERNO') + '</span>'));
       const sub = el('<div class="lk-level-sub"></div>');
       const role = l.levelRole === 'editor-menu' ? 'EDITOR MENU' : (l.levelRole === 'game-menu' ? 'GAME MENU' : tr('GAMEPLAY', 'GIOCO'));
       sub.textContent = role + ' · ' + l.id + (l.savedAt ? tr(' · saved ', ' · salvato ') + new Date(l.savedAt).toLocaleString() : '');

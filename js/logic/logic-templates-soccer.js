@@ -39,20 +39,20 @@ const ROLE_OPTIONS = [
 // Mixamo clip each action expects; values are matched fuzzily against the
 // clips inside the assigned GLB.
 const ANIMATION_SLOTS = [
-  ['AnimIdle', 'idle', 'Idle', 'Idle Clip (standing)'],
-  ['AnimWalk', 'walk', 'Walking', 'Walk Clip (slow locomotion)'],
-  ['AnimRun', 'run', 'Running', 'Run Clip (fast locomotion)'],
-  ['AnimStrafeLeft', 'strafeLeft', 'Left Strafe', 'Strafe Left Clip (lateral)'],
-  ['AnimStrafeRight', 'strafeRight', 'Right Strafe', 'Strafe Right Clip (lateral)'],
-  ['AnimJump', 'jump', 'Jump', 'Jump Clip (salto)'],
-  ['AnimShoot', 'shoot', 'Soccer Strike', 'Shoot Clip (tiro in porta)'],
-  ['AnimPass', 'pass', 'Soccer Pass', 'Pass Clip (passaggio corto)'],
-  ['AnimCross', 'cross', 'Soccer Pass', 'Cross Clip (traversone)'],
-  ['AnimSave', 'save', 'Goalkeeper Catch', 'Save Clip (parata portiere)'],
-  ['AnimDiveLeft', 'diveLeft', 'Goalkeeper Dive Left', 'Dive Left Clip (tuffo sinistro)'],
-  ['AnimDiveRight', 'diveRight', 'Goalkeeper Dive Right', 'Dive Right Clip (tuffo destro)'],
-  ['AnimCelebrate', 'celebrate', 'Victory', 'Celebrate Clip (esultanza)'],
-  ['AnimDefeat', 'defeat', 'Defeated', 'Defeat Clip (delusione)'],
+  ['AnimIdle', 'idle', 'Idle', 'Idle Clip (standing)', 'Looping in-place idle; no root motion. Use a neutral football-ready pose.'],
+  ['AnimWalk', 'walk', 'Walking', 'Walk Clip (slow locomotion)', 'Looping forward walk, in-place and without root motion; runtime supplies translation.'],
+  ['AnimRun', 'run', 'Running', 'Run Clip (fast locomotion)', 'Looping forward run/jog, in-place and without root motion.'],
+  ['AnimStrafeLeft', 'strafeLeft', 'Left Strafe', 'Strafe Left Clip (lateral)', 'Optional looping left strafe, in-place and without root motion.'],
+  ['AnimStrafeRight', 'strafeRight', 'Right Strafe', 'Strafe Right Clip (lateral)', 'Optional looping right strafe, in-place and without root motion.'],
+  ['AnimJump', 'jump', 'Jump', 'Jump Clip (salto)', 'One-shot in-place jump; no root translation. Jump height and gravity are controlled by Movement.'],
+  ['AnimShoot', 'shoot', 'Soccer Strike', 'Shoot Clip (tiro in porta)', 'One-shot in-place kick. Keep the support foot near the origin; ball impulse is handled by Soccer Logic.'],
+  ['AnimPass', 'pass', 'Soccer Pass', 'Pass Clip (passaggio corto)', 'One-shot in-place short pass without root translation.'],
+  ['AnimCross', 'cross', 'Soccer Pass', 'Cross Clip (traversone)', 'One-shot in-place cross without root translation.'],
+  ['AnimSave', 'save', 'Goalkeeper Catch', 'Save Clip (parata portiere)', 'One-shot goalkeeper catch in-place; gameplay reach comes from Keeper settings.'],
+  ['AnimDiveLeft', 'diveLeft', 'Goalkeeper Dive Left', 'Dive Left Clip (tuffo sinistro)', 'One-shot in-place left dive. Do not bake root translation; Keeper Dive moves the Pawn.'],
+  ['AnimDiveRight', 'diveRight', 'Goalkeeper Dive Right', 'Dive Right Clip (tuffo destro)', 'One-shot in-place right dive. Do not bake root translation; Keeper Dive moves the Pawn.'],
+  ['AnimCelebrate', 'celebrate', 'Victory', 'Celebrate Clip (esultanza)', 'One-shot or short loop in-place celebration without root translation.'],
+  ['AnimDefeat', 'defeat', 'Defeated', 'Defeat Clip (delusione)', 'One-shot in-place defeat reaction without root translation.'],
 ];
 
 function playerSoccerTemplateGraph(){
@@ -90,9 +90,9 @@ function playerSoccerTemplateGraph(){
     {name:'CameraLag', type:'number', value:6.5, min:.1, max:30, step:.1, exposed:true, binding:'camera.lag', label:'Lag', category:'Camera'},
     {name:'CameraFov', type:'number', value:60, min:20, max:130, step:1, exposed:true, binding:'camera.fov', label:'FOV', category:'Camera'},
   ];
-  variables.push({name:'AnimationLibrary', type:'string', value:'', exposed:true, binding:'animationLibrary', ui:'model-asset', label:'Animation Library GLB (clips only)', category:'Animations (Mixamo clips)', description:'Optional GLB containing only animations (same Mixamo skeleton). Its clips add to the model GLB clips in every slot dropdown.'});
-  ANIMATION_SLOTS.forEach(([varName, slot, clip, label]) => {
-    variables.push({name:varName, type:'string', value:clip, exposed:true, binding:'animations.' + slot, label, category:'Animations (Mixamo clips)'});
+  variables.push({name:'AnimationLibrary', type:'string', value:'', exposed:true, binding:'animationLibrary', ui:'model-asset', label:'Animation Library GLB (clips only)', category:'Animations (Mixamo clips)', description:'Optional GLB containing only animations on the same skeleton/bone names as the character model. Export locomotion in-place with root motion disabled.'});
+  ANIMATION_SLOTS.forEach(([varName, slot, clip, label, description]) => {
+    variables.push({name:varName, type:'string', value:clip, exposed:true, binding:'animations.' + slot, label, category:'Animations (Mixamo clips)', description});
   });
 
   const g = graph('Template - Player Soccer Element', variables, [

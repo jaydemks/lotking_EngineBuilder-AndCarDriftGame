@@ -312,6 +312,8 @@ function create(deps){
     const STORE = deps.STORE;
     const classify = graph => {
       if(graph && graph.vehiclePawn) return {type:'vehicle', label:'Vehicle Logic', icon:'🚗'};
+      if(graph && graph.characterPawn) return {type:'character', label:'Character Logic', icon:'♟'};
+      if(graph && graph.soccerPawn) return {type:'character', label:'Soccer Character', icon:'⚽'};
       const components = graph && graph.logicScene && graph.logicScene.components || [];
       if(components.some(item => item && /anim/i.test(item.type || item.name || ''))) return {type:'animation', label:'Animation', icon:'▶'};
       if(components.some(item => item && /rig|skeleton|bone/i.test(item.type || item.name || ''))) return {type:'rig', label:'Rig', icon:'♙'};
@@ -440,6 +442,7 @@ function create(deps){
 
     const logicBlueprints = logicBlueprintItems(q);
     addGroup(box, 'LOGIC ELEMENTS · PLAYER CAR', logicBlueprints.filter(item => item.elementType === 'vehicle'));
+    addGroup(box, 'LOGIC ELEMENTS · CHARACTERS', logicBlueprints.filter(item => item.elementType === 'character'));
     addGroup(box, 'LOGIC ELEMENTS · GENERAL', logicBlueprints.filter(item => item.elementType === 'logic'));
     addGroup(box, 'ANIMATION ELEMENTS', logicBlueprints.filter(item => item.elementType === 'animation'));
     addGroup(box, 'RIG ELEMENTS', logicBlueprints.filter(item => item.elementType === 'rig'));

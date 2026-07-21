@@ -19,6 +19,7 @@ function create(deps){
   const removeEntity = deps.removeEntity || function(){};
   const restoreEntity = deps.restoreEntity || function(){};
   const selectObject = deps.selectObject || function(){};
+  const requestPhysicsRebuild = deps.requestPhysicsRebuild || function(){ if(deps.GAME.systems && deps.GAME.systems.physics) deps.GAME.systems.physics.rebuild(); };
   const liveSelection = deps.liveSelection || {};
   let extractionPending = false;
   const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
@@ -226,7 +227,7 @@ function create(deps){
         undo:() => { created.forEach(removeEntity); apply(object, before, valid.map(item => item.id)); },
         redo:() => { created.forEach(restoreEntity); apply(object, after, []); },
       });
-      if(deps.GAME.systems && deps.GAME.systems.physics) deps.GAME.systems.physics.rebuild();
+      requestPhysicsRebuild();
       markDirty();
       refreshOutliner();
       if(created[0]) selectObject(created[0]);
@@ -239,12 +240,21 @@ function create(deps){
   function build(box, object){
     if(!object || !object.userData || !['mesh','player'].includes(object.userData.editorType)) return;
     if(object.userData.editorType === 'mesh' && (!object.userData.addedEntry || object.userData.addedEntry.kind !== 'glb')) return;
+    const panel = section(tr('EDIT MESH / GLB PARTS', 'MODIFICA MESH / PARTI GLB'), false);
+    if(panel.root.classList.contains('closed')){
+      panel.body.appendChild(el('<div class="lk-hint">' + tr('Open this section to inspect GLB mesh nodes.', 'Apri questa sezione per analizzare i nodi mesh del GLB.') + '</div>'));
+      const header = panel.root.querySelector('.lk-sec-h');
+      if(header) header.addEventListener('click', () => requestAnimationFrame(buildInspector), {once:true});
+      box.appendChild(panel.root);
+      return;
+    }
     const entries = meshEntries(object);
     if(!entries.length) return;
+    const currentEdits = editsOf(object);
+    const deletedIds = new Set(currentEdits.deleted || []);
     const selectedSet = new Set(selectedIds(object));
     const selected = entries.filter(item => selectedSet.has(item.id));
     const live = !!(liveSelection.isActive && liveSelection.isActive(object));
-    const panel = section(tr('EDIT MESH / GLB PARTS', 'MODIFICA MESH / PARTI GLB'), false);
     panel.body.appendChild(el('<div class="lk-hint">' + tr(
       'Select one or more GLB mesh nodes. Detach keeps parts inside the source GLB; Extract creates independent scene objects with their own editable collision. Decomposition can first split by materials or connected geometry.',
       'Seleziona uno o più nodi mesh del GLB. Scollega mantiene le parti nel GLB sorgente; Estrai crea oggetti scena indipendenti con collisione modificabile. Prima puoi scomporre per materiali o geometria connessa.'
@@ -259,7 +269,7 @@ function create(deps){
       button.type = 'button';
       button.className = 'lk-mesh-edit-item';
       button.classList.toggle('selected', selectedSet.has(item.id));
-      button.classList.toggle('deleted', editsOf(object).deleted.includes(item.id));
+      button.classList.toggle('deleted', deletedIds.has(item.id));
       button.textContent = (item.joined ? '⇄ ' : (item.generated ? '↳ ' : '')) + item.name + (item.skinned ? ' · skinned' : (item.morph ? ' · morph' : ''));
       button.title = item.id;
       button.addEventListener('click', event => {

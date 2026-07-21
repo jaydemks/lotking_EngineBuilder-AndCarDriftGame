@@ -62,14 +62,34 @@ function create(GAME, options){
     return true;
   }
 
+  function worldGround(position, fallback){
+    const world = GAME && GAME.world;
+    if(world && typeof world.characterGroundHeight === 'function') return finite(world.characterGroundHeight(position.x, position.z), fallback);
+    const profile = world && world.characterGround;
+    if(!profile || profile.type !== 'slope-z') return fallback;
+    const start = finite(profile.slopeStart, -2), crest = finite(profile.crestZ, -30), slope = finite(profile.slope, .26);
+    return position.z < start ? Math.min((start - position.z) * slope, (start - crest) * slope) : finite(profile.baseY, fallback);
+  }
+
   // Push the character out of the arcade world colliders (walls, pillars,
   // goal posts...) the same lists the car physics resolves against.
-  function resolveColliders(position){
+  function belongsToOwner(collider, owner){
+    if(!collider || !owner) return false;
+    if(collider.logicElementOwner === owner || collider.owner === owner) return true;
+    let node = collider.owner || null;
+    while(node){
+      if(node === owner) return true;
+      node = node.parent || null;
+    }
+    return false;
+  }
+  function resolveColliders(position, owner){
     const colliders = GAME && GAME.world && GAME.world.colliders;
     if(!colliders) return;
     const r = state.options.radius;
     (colliders.box || []).forEach(col => {
       if(!col || col.enabled === false) return;
+      if(belongsToOwner(col, owner)) return;
       if(col.hy != null && col.y != null && position.y > col.y + col.hy) return;
       const dx = position.x - col.x, dz = position.z - col.z;
       const px = col.hx + r - Math.abs(dx), pz = col.hz + r - Math.abs(dz);
@@ -79,6 +99,7 @@ function create(GAME, options){
     });
     (colliders.circle || []).forEach(col => {
       if(!col || col.enabled === false || col.physics === true) return;
+      if(belongsToOwner(col, owner)) return;
       const dx = position.x - col.x, dz = position.z - col.z;
       const min = (col.r || .5) + r;
       const d2 = dx * dx + dz * dz;
@@ -127,6 +148,14 @@ function create(GAME, options){
     if(owner && owner.position){
       owner.position.x += state.velocityX * h;
       owner.position.z += state.velocityZ * h;
+      const profile = GAME && GAME.world && GAME.world.characterGround;
+      if(profile){
+        if(profile.minX != null) owner.position.x = Math.max(Number(profile.minX), owner.position.x);
+        if(profile.maxX != null) owner.position.x = Math.min(Number(profile.maxX), owner.position.x);
+        if(profile.minZ != null) owner.position.z = Math.max(Number(profile.minZ), owner.position.z);
+        if(profile.maxZ != null) owner.position.z = Math.min(Number(profile.maxZ), owner.position.z);
+      }
+      state.groundY = worldGround(owner.position, state.groundY);
       owner.position.y += state.velocityY * h;
       if(owner.position.y <= state.groundY){
         owner.position.y = state.groundY;
@@ -136,7 +165,7 @@ function create(GAME, options){
       } else if(owner.position.y > state.groundY + .002){
         state.grounded = false;
       }
-      resolveColliders(owner.position);
+      resolveColliders(owner.position, owner);
     }
 
     const speed = Math.sqrt(state.velocityX * state.velocityX + state.velocityZ * state.velocityZ);

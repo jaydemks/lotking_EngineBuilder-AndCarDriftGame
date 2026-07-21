@@ -168,6 +168,22 @@ function create(deps){
       sm.body.appendChild(select);
     }
     sm.body.appendChild(btnRow([{label:'📦 Replace / import GLB...', action:player.openModelPicker || openPlayerModelPicker}]));
+    if(player.setModelShading || player.getModelShading){
+      const shading = player.getModelShading ? player.getModelShading() : (player.modelShading || 'original');
+      sm.body.appendChild(selectRow(tr('Surface shading', 'Ombreggiatura superficie'), shading, [
+        {value:'original', label:tr('Original normals', 'Normali originali')},
+        {value:'smooth', label:'Smooth'},
+        {value:'flat', label:'Flat'},
+      ], value => {
+        if(player.setModelShading) player.setModelShading(value);
+        else player.modelShading = value;
+        markDirty();
+      }).root);
+      sm.body.appendChild(el('<div class="lk-hint">' + tr(
+        'Smooth averages vertex normals across matching polygon positions; Flat keeps every polygon face visible. Geometry and polygon count are unchanged.',
+        'Smooth media le normali dei vertici sulle posizioni poligonali coincidenti; Flat mantiene visibile ogni faccia. Geometria e numero di poligoni non cambiano.'
+      ) + '</div>'));
+    }
     sm.body.appendChild(el('<div class="lk-hint">' + tr(
       'The model is rebuilt through the vehicle rig pipeline; wheel pivots, collision, cameras, lights and attachment anchors remain part of the Pawn.',
       'Il modello viene ricostruito tramite la pipeline rig del veicolo; pivot ruote, collisione, camere, luci e anchor degli attachment restano nel Pawn.'

@@ -352,12 +352,9 @@ function create(deps){
     advancedDrag.controlX = advancedDrag.virtualX;
     advancedDrag.controlY = advancedDrag.virtualY;
     setTransformModifierState(gizmo, p.event);
-    if(controlDom && controlDom.requestPointerLock && p.pointerType !== 'touch'){
-      try {
-        const result = controlDom.requestPointerLock();
-        if(result && result.catch) result.catch(() => {});
-      } catch(err){}
-    }
+    // TransformControls already owns pointer capture while dragging. Requesting
+    // pointer lock here can implicitly release that capture in Chromium, making
+    // the controls throw before their pointer-up cleanup runs.
   }
 
   function endAdvancedDrag(gizmo){
@@ -367,7 +364,7 @@ function create(deps){
     if(document.pointerLockElement === controlDom && document.exitPointerLock){
       try { document.exitPointerLock(); } catch(err){}
     }
-    applyGizmoSnap(gizmo);
+    if(gizmo) applyGizmoSnap(gizmo);
   }
 
   function handleLockedMove(e){
@@ -383,6 +380,68 @@ function create(deps){
   function handlePointerLockChange(){
     const locked = document.pointerLockElement === controlDom && advancedDrag.active;
     setVirtualCursorVisible(locked);
+  }
+
+  function installPointerCaptureGuard(){
+    if(!controlDom || controlDom.__lkPointerCaptureGuard) return;
+    const nativeSet = controlDom.setPointerCapture && controlDom.setPointerCapture.bind(controlDom);
+    const nativeRelease = controlDom.releasePointerCapture && controlDom.releasePointerCapture.bind(controlDom);
+    if(!nativeSet || !nativeRelease) return;
+    controlDom.__lkPointerCaptureGuard = true;
+    controlDom.setPointerCapture = pointerId => {
+      if(!controlDom.isConnected) return;
+      try { return nativeSet(pointerId); }
+      catch(err){
+        if(err && (err.name === 'InvalidStateError' || err.name === 'NotFoundError')) return;
+        throw err;
+      }
+    };
+    controlDom.releasePointerCapture = pointerId => {
+      try {
+        if(controlDom.hasPointerCapture && !controlDom.hasPointerCapture(pointerId)) return;
+        return nativeRelease(pointerId);
+      } catch(err){
+        if(err && (err.name === 'InvalidStateError' || err.name === 'NotFoundError')) return;
+        throw err;
+      }
+    };
+  }
+
+  function hasPendingPointerState(){
+    const gizmo = deps.getGizmo();
+    const orbit = deps.getOrbit();
+    return !!(advancedDrag.active || ED.gizmoPointerActive ||
+      (gizmo && gizmo.dragging) || (orbit && orbit._pointers && orbit._pointers.length));
+  }
+
+  function recoverPointerState(e){
+    const gizmo = deps.getGizmo();
+    const orbit = deps.getOrbit();
+    if(gizmo && (gizmo.dragging || advancedDrag.active || ED.gizmoPointerActive)){
+      try { gizmo.pointerUp({button:0}); } catch(err){}
+    }
+    endAdvancedDrag(gizmo);
+    ED.gizmoPointerActive = false;
+    deps.setGizmoPointerActive(false);
+    deps.setGizmoSuppressSceneClick(false);
+    if(gizmo){
+      if(controlDom && gizmo._onPointerMove) controlDom.removeEventListener('pointermove', gizmo._onPointerMove);
+      if(!gizmo.dragging) gizmo.axis = null;
+    }
+    if(orbit){
+      const ownerDocument = controlDom && controlDom.ownerDocument;
+      if(ownerDocument && orbit._onPointerMove) ownerDocument.removeEventListener('pointermove', orbit._onPointerMove);
+      if(ownerDocument && orbit._onPointerUp) ownerDocument.removeEventListener('pointerup', orbit._onPointerUp);
+      if(Array.isArray(orbit._pointers)) orbit._pointers.length = 0;
+      if(orbit._pointerPositions && typeof orbit._pointerPositions === 'object'){
+        Object.keys(orbit._pointerPositions).forEach(key => { delete orbit._pointerPositions[key]; });
+      }
+      orbit.state = -1;
+      orbit.enabled = shouldEnableOrbit();
+    }
+    if(e && e.pointerId != null && controlDom && controlDom.releasePointerCapture){
+      try { controlDom.releasePointerCapture(e.pointerId); } catch(err){}
+    }
   }
 
   function attachGizmoToSelection(){
@@ -424,6 +483,7 @@ function create(deps){
 
   function ensureControls(){
     if(!controlDom) return;
+    installPointerCaptureGuard();
     let orbit = deps.getOrbit();
     if(!orbit && THREE.OrbitControls){
       orbit = new THREE.OrbitControls(camE, controlDom);
@@ -449,6 +509,11 @@ function create(deps){
       applyGizmoSnap(gizmo);
       controlDom.addEventListener('pointerdown', e => {
         advancedDrag.lastPointerDown = {clientX:e.clientX, clientY:e.clientY, pointerType:e.pointerType, event:e};
+        // OrbitControls and TransformControls share this canvas. When a gizmo
+        // handle owns the left click, stop OrbitControls before its bubble
+        // listener also starts a gesture and captures the same pointer.
+        const activeOrbit = deps.getOrbit();
+        if(e.button === 0 && gizmo.axis && activeOrbit) activeOrbit.enabled = false;
       }, true);
       document.addEventListener('pointermove', handleLockedMove, true);
       document.addEventListener('mousemove', handleLockedMove, true);
@@ -538,6 +603,8 @@ function create(deps){
     applyMultiGizmoProxyToSelection,
     attachGizmoToSelection,
     ensureControls,
+    hasPendingPointerState,
+    recoverPointerState,
     setTool,
     updateFly,
   });

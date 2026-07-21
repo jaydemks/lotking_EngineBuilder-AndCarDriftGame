@@ -78,12 +78,19 @@
         <button id="lkViewportOptions" type="button" title="Viewport visibility options">☑</button>
         <div id="lkViewportOptionsMenu" class="lk-viewport-options-menu">
           <label><input id="lkShowCollisionDummies" type="checkbox"><span>Collision dummies</span></label>
+          <label><input id="lkForceCollisionDummiesInPreview" type="checkbox"><span>Force in Play / Simulate</span></label>
         </div>
       </div>
       <button id="lkViewportFps" type="button" title="Toggle FPS status">FPS</button>
       <button id="lkViewportPerf" type="button" title="Toggle performance debug">▤</button>
       <span class="lk-viewport-caption">VIEWPORT</span>
       <button id="lkViewportVideoSettings" type="button" title="Project Video settings shared by editor and game">⚙</button>
+      <div class="lk-dev-tools">
+        <button id="lkDevToolsToggle" type="button" title="Developer diagnostics and debugging tools">DEV ▾</button>
+        <div id="lkDevToolsMenu" class="lk-dev-tools-menu">
+          <button id="lkOpenPerformanceDebugger" type="button"><span>▥</span> Performance Debugger</button>
+        </div>
+      </div>
     </div>
   </div>
   <aside id="lkLeft">
@@ -170,6 +177,43 @@
     <div id="lkViewportSplitC" class="lk-view-split-center" data-split="xy" title="Resize all quad views"></div>
   </div>
   <div id="lkViewportStats"></div>
+  <section id="lkDeveloperDebugger" aria-hidden="true">
+    <header id="lkDeveloperDebuggerHeader">
+      <div><b>DEVELOPER DEBUGGER</b><small id="lkDbgMode">EDITOR</small><small id="lkDbgAutoLog" class="lk-dbg-auto-log" title="Automatic short report in .lotking-local/developer-performance-latest.md">AUTO LOG…</small></div>
+      <span id="lkDbgHealth" class="lk-dbg-health">MONITORING</span>
+      <button id="lkDbgExport" type="button" title="Download the complete performance and scene report as JSON">Export log</button>
+      <button id="lkDbgRefresh" type="button" title="Refresh scene analysis">↻</button>
+      <button id="lkDbgClear" type="button" title="Clear captured diagnostics">Clear</button>
+      <button id="lkDbgClose" type="button" title="Close debugger">×</button>
+    </header>
+    <div class="lk-dbg-scroll">
+      <div id="lkDbgSummary" class="lk-dbg-summary"></div>
+      <div class="lk-dbg-grid">
+        <article class="lk-dbg-card lk-dbg-chart-card">
+          <h3>REALTIME FRAME LOAD <span id="lkDbgFrameLabel"></span></h3>
+          <canvas id="lkDbgFrameChart"></canvas>
+          <div id="lkDbgSaturation" class="lk-dbg-saturation"></div>
+        </article>
+        <article class="lk-dbg-card">
+          <h3>HARDWARE / RENDERER</h3>
+          <div id="lkDbgHardware" class="lk-dbg-kv"></div>
+        </article>
+        <article class="lk-dbg-card lk-dbg-events-card">
+          <h3>ERRORS &amp; STUTTERS <span id="lkDbgEventCount"></span></h3>
+          <div id="lkDbgEvents" class="lk-dbg-events"></div>
+        </article>
+      </div>
+      <article class="lk-dbg-card lk-dbg-scene-card">
+        <h3>SCENE RESOURCE ANALYSIS <span id="lkDbgSceneTotal"></span></h3>
+        <div class="lk-dbg-table-wrap">
+          <table class="lk-dbg-table">
+            <thead><tr><th>Element</th><th>Type</th><th>Geometry</th><th>Textures</th><th>Render</th><th>Details</th></tr></thead>
+            <tbody id="lkDbgSceneRows"></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </section>
   <div id="lkCinemaTimeline">
     <div class="lk-cinema-timeline-head">
       <b>CINEMA STUDIO</b>

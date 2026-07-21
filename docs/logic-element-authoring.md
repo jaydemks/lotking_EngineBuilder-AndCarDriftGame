@@ -10,6 +10,7 @@ This is the short operational guide for extending the current Logic Element syst
 - `js/logic/logic-services.js` is the only bridge from nodes to engine systems.
 - `js/logic/logic-templates.js` contains built-in starter Logic Element templates shown in the Assets panel and exposes `LK_LOGIC_TEMPLATES.register(...)` for external template packs.
 - `js/logic/logic-nodes-soccer.js` and `js/logic/logic-templates-soccer.js` are the soccer game-mode pack (nodes + templates) and the reference for writing feature packs in their own files.
+- `js/logic/logic-nodes-character.js` and `js/logic/logic-templates-character.js` provide the generic on-foot Character Pawn base. See `docs/CHARACTER_MOVEMENT.md` for rig, clip and root-motion requirements.
 - `js/editor/logic-elements-inspector.js` owns authoring UI only.
 
 ## Adding A Node
@@ -28,6 +29,8 @@ Templates are local editable starters, not linked reusable assets. Placing a tem
 The Player Car template is a special Vehicle Pawn definition. Keep its persistent authoring data in `graph.vehiclePawn` (schema v2) and retain `graph.playerPawnBlueprint` only as the lossless migration/reference snapshot. Runtime speed, RPM, gear and temporary control state belong to the Pawn instance and must never be written back into the graph during Play Preview.
 
 The Player Soccer template follows the same contract with `graph.soccerPawn` (schema v1): role, movement, locomotion blending, keeper, animation slots, appearance and camera are persistent authoring data; runtime speed, current action and dive timers live on the Soccer Pawn instance only. Non-vehicle Pawn kinds route exposed-variable bindings through `pawn.applyBinding(path, value)` instead of the vehicle-specific runner dispatch.
+
+The Player Character template uses `graph.characterPawn` (schema v1). `normal`, `civil` and `police` are data presets over the shared character controller; project-specific subtypes should tune or extend a preset rather than duplicate locomotion. Movement clips must be looping and in-place with root motion disabled because runtime owns translation and collision.
 
 Reusable vehicle behavior should be authored as Functions/Subgraphs. The built-in template demonstrates this with `Apply Player Drive`; control and queries must use explicit `vehiclePawn` references through the Vehicle Pawn node category instead of reading or mutating `GAME.player`.
 
@@ -80,6 +83,7 @@ Current editor support:
 - `Template - Toggle Switch`: toggles an exposed boolean with E and swaps material color through a Branch.
 - `Template - Distance Beacon`: compares owner distance from world origin against an exposed radius and swaps material color.
 - `Template - Player Soccer Element` (soccer pack): Soccer Pawn starter with role selection up to goalkeeper, Mixamo animation clip slots per action, motion-blend movement and kit color live edit.
+- `Template - Player Character (Normal)` (character pack): generic on-foot starter with normal/civil/police presets, walk/run/sprint/jump/interact graph, camera and documented in-place animation slots.
 - `Template - Penalty Shootout Manager` (soccer pack): registers the goal line, spawns the ball on the penalty spot and runs the alternating penalty shootout with score events.
 
 Reusable Logic Element assets also store `definitionVersion` and a dependency manifest. Current dependency collection covers internal mesh assets plus texture/audio references used by graph nodes.

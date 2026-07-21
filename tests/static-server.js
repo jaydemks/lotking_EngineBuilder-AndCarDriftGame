@@ -22,6 +22,33 @@ const types = {
 
 http.createServer((request, response) => {
   const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
+  if(pathname === '/__lotking/developer-performance'){
+    const snapshotDir=path.join(root,'.lotking-local');
+    const snapshotFile=path.join(snapshotDir,'developer-performance-latest.md');
+    if(request.method === 'PUT'){
+      const chunks=[];
+      request.on('data',chunk=>chunks.push(chunk));
+      request.on('end',()=>{
+        try {
+          const report=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if(!report||report.schema!=='lotking.developer-performance.v1') throw new Error('unsupported report');
+          fs.mkdirSync(snapshotDir,{recursive:true});
+          fs.writeFileSync(snapshotFile,'# LOT KING Developer Performance Snapshot\n\nTest bridge snapshot: '+report.generatedAt+'\n','utf8');
+          response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({ok:true,file:'.lotking-local/developer-performance-latest.md'}));
+        } catch(error){ response.writeHead(400).end(error.message); }
+      });
+      return;
+    }
+    if(request.method === 'GET'){
+      fs.readFile(snapshotFile,(error,data)=>{
+        if(error) response.writeHead(404).end('No snapshot');
+        else response.writeHead(200,{'Content-Type':'text/markdown; charset=utf-8'}).end(data);
+      });
+      return;
+    }
+    response.writeHead(405).end('Method not allowed');
+    return;
+  }
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const file = path.resolve(root, relative);
   if(file !== root && !file.startsWith(root + path.sep)){

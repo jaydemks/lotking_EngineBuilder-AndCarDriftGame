@@ -15,10 +15,23 @@ const VIDEO_PRESETS = Object.freeze({
   superhigh: Object.freeze({label:'Super High',pixelRatio:1.35,shadowSize:2048, raySamples:6}),
   extreme:   Object.freeze({label:'Extreme',   pixelRatio:1.7, shadowSize:4096, raySamples:8}),
 });
-const VIDEO_SETTING_KEYS = Object.freeze(['quality','antialiasing','rendererMode','shadows','reflections','volumetricLighting']);
-const VIDEO_DEFAULTS = Object.freeze({
-  quality:'high', antialiasing:'ssaa2x', rendererMode:'webgl', shadows:true, reflections:true, volumetricLighting:false,
+const SHADOW_PRESETS = Object.freeze({
+  low:    Object.freeze({label:'Low',    mapSize:512,  radius:1}),
+  medium: Object.freeze({label:'Medium', mapSize:1024, radius:1.25}),
+  high:   Object.freeze({label:'High',   mapSize:2048, radius:1.75}),
+  ultra:  Object.freeze({label:'Ultra',  mapSize:4096, radius:2.25}),
 });
+const VIDEO_SETTING_KEYS = Object.freeze(['quality','antialiasing','rendererMode','exposure','shadows','shadowQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting']);
+const VIDEO_DEFAULTS = Object.freeze({
+  quality:'high', antialiasing:'ssaa2x', rendererMode:'webgl', exposure:1.12,
+  shadows:true, shadowQuality:'auto', shadowDistance:55, shadowBias:-0.00035, shadowNormalBias:0.035, shadowSoftness:1,
+  reflections:true, reflectionQuality:'high', reflectionDistance:35, volumetricLighting:false,
+});
+
+function clampNumber(value, fallback, min, max){
+  const number = Number(value);
+  return Math.max(min, Math.min(max, Number.isFinite(number) ? number : fallback));
+}
 
 function normalizeVideoValues(input){
   const src = input || {};
@@ -30,8 +43,16 @@ function normalizeVideoValues(input){
     quality: VIDEO_PRESETS[quality] ? quality : VIDEO_DEFAULTS.quality,
     antialiasing: ['off','fxaa','ssaa2x','ssaa4x'].includes(antialiasing) ? antialiasing : VIDEO_DEFAULTS.antialiasing,
     rendererMode: src.rendererMode === 'raytracing' ? 'raytracing' : 'webgl',
+    exposure: clampNumber(src.exposure, VIDEO_DEFAULTS.exposure, .7, 1.6),
     shadows: src.shadows !== false,
+    shadowQuality: ['auto','low','medium','high','ultra'].includes(src.shadowQuality) ? src.shadowQuality : VIDEO_DEFAULTS.shadowQuality,
+    shadowDistance: clampNumber(src.shadowDistance, VIDEO_DEFAULTS.shadowDistance, 15, 180),
+    shadowBias: clampNumber(src.shadowBias, VIDEO_DEFAULTS.shadowBias, -.01, .01),
+    shadowNormalBias: clampNumber(src.shadowNormalBias, VIDEO_DEFAULTS.shadowNormalBias, 0, .2),
+    shadowSoftness: clampNumber(src.shadowSoftness, VIDEO_DEFAULTS.shadowSoftness, 0, 2),
     reflections: src.reflections !== false,
+    reflectionQuality: ['low','medium','high','ultra'].includes(src.reflectionQuality) ? src.reflectionQuality : VIDEO_DEFAULTS.reflectionQuality,
+    reflectionDistance: clampNumber(src.reflectionDistance, VIDEO_DEFAULTS.reflectionDistance, 5, 120),
     volumetricLighting: !!src.volumetricLighting,
   };
 }
@@ -40,7 +61,7 @@ function normalizeVideoProject(input){
   const src = input || {};
   const exposed = {};
   VIDEO_SETTING_KEYS.forEach(key => { exposed[key] = !src.exposed || src.exposed[key] !== false; });
-  return {version:1, defaults:normalizeVideoValues(src.defaults || src), exposed};
+  return {version:3, defaults:normalizeVideoValues(src.defaults || src), exposed};
 }
 
 function createVideo(options){
@@ -83,15 +104,31 @@ function createVideo(options){
     renderer.setPixelRatio(Math.max(.5, Math.min(maxPixelRatio, dpr * preset.pixelRatio * aaRatio * rayRatio)));
     renderer.setSize(size.width, size.height);
     renderer.shadowMap.enabled = !!values.shadows;
-    renderer.shadowMap.type = values.quality === 'low' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     const primaryShadow = opts.scene && opts.scene.children && opts.scene.children.find(node => node && node.isDirectionalLight && node.castShadow && node.shadow);
     if(primaryShadow){
-      const shadowSize = (VIDEO_PRESETS[values.quality] || VIDEO_PRESETS.high).shadowSize;
+      const autoShadowQuality = values.quality === 'low' ? 'low' : (values.quality === 'medium' ? 'medium' : (values.quality === 'extreme' ? 'ultra' : 'high'));
+      const shadowProfile = SHADOW_PRESETS[values.shadowQuality === 'auto' ? autoShadowQuality : values.shadowQuality] || SHADOW_PRESETS.high;
+      const shadowSize = shadowProfile.mapSize;
       if(primaryShadow.shadow.mapSize.x !== shadowSize){
         primaryShadow.shadow.mapSize.set(shadowSize, shadowSize);
         if(primaryShadow.shadow.map && primaryShadow.shadow.map.dispose) primaryShadow.shadow.map.dispose();
         primaryShadow.shadow.map = null;
       }
+      const shadowCamera = primaryShadow.shadow.camera;
+      const shadowDistance = values.shadowDistance;
+      if(shadowCamera && shadowCamera.isOrthographicCamera){
+        shadowCamera.left = -shadowDistance;
+        shadowCamera.right = shadowDistance;
+        shadowCamera.top = shadowDistance;
+        shadowCamera.bottom = -shadowDistance;
+        shadowCamera.near = 1;
+        shadowCamera.far = Math.max(180, shadowDistance * 4);
+        shadowCamera.updateProjectionMatrix();
+      }
+      primaryShadow.shadow.bias = values.shadowBias;
+      primaryShadow.shadow.normalBias = values.shadowNormalBias;
+      primaryShadow.shadow.radius = shadowProfile.radius * values.shadowSoftness;
     }
     if(opts.scene && opts.scene.traverse){
       opts.scene.traverse(node => {
@@ -102,21 +139,17 @@ function createVideo(options){
           if(mat.userData.lkVideoBaseEnvMapIntensity == null) mat.userData.lkVideoBaseEnvMapIntensity = mat.envMapIntensity == null ? 1 : mat.envMapIntensity;
           if(mat.userData.lkVideoBaseRoughness == null && mat.roughness != null) mat.userData.lkVideoBaseRoughness = mat.roughness;
           if(mat.userData.lkVideoBaseMetalness == null && mat.metalness != null) mat.userData.lkVideoBaseMetalness = mat.metalness;
-          const ray = values.rendererMode === 'raytracing';
-          if(mat.envMapIntensity != null) mat.envMapIntensity = values.reflections ? mat.userData.lkVideoBaseEnvMapIntensity * (ray ? 1.85 : 1.08) : 0;
-          if(mat.roughness != null){
-            const baseRoughness = mat.userData.lkVideoBaseRoughness;
-            mat.roughness = values.reflections && ray ? Math.max(.16, baseRoughness * .58) : baseRoughness;
-          }
-          if(mat.metalness != null){
-            const baseMetalness = mat.userData.lkVideoBaseMetalness;
-            mat.metalness = values.reflections && ray ? Math.min(1, Math.max(baseMetalness, baseMetalness + .18)) : baseMetalness;
-          }
+          if(mat.envMapIntensity != null) mat.envMapIntensity = values.reflections ? mat.userData.lkVideoBaseEnvMapIntensity : 0;
+          // Video presets must never rewrite authored PBR properties. Making every
+          // surface smoother and more metallic caused bright pools on asphalt and
+          // made non-reflective ground enter the SSR pass.
+          if(mat.roughness != null) mat.roughness = mat.userData.lkVideoBaseRoughness;
+          if(mat.metalness != null) mat.metalness = mat.userData.lkVideoBaseMetalness;
           if(mat.needsUpdate != null) mat.needsUpdate = true;
         });
       });
     }
-    const videoExposure = values.rendererMode === 'raytracing' ? 1.07 : 1.05;
+    const videoExposure = values.exposure;
     renderer.userData = renderer.userData || {};
     renderer.userData.videoToneMappingExposure = videoExposure;
     renderer.toneMappingExposure = videoExposure;
@@ -163,13 +196,19 @@ function syncVideoControls(project, values){
   const config = normalizeVideoProject(project);
   const selectors = {
     quality:'#videoQuality', antialiasing:'#videoAA', rendererMode:'#videoRenderer',
-    shadows:'#videoShadows', reflections:'#videoReflections', volumetricLighting:'#videoVolumetricLighting',
+    exposure:'#videoExposure', shadows:'#videoShadows', shadowQuality:'#videoShadowQuality',
+    reflections:'#videoReflections', reflectionQuality:'#videoReflectionQuality', reflectionDistance:'#videoReflectionDistance',
+    volumetricLighting:'#videoVolumetricLighting',
   };
   Object.keys(selectors).forEach(key => {
     const input = document.querySelector(selectors[key]);
     if(input){
       if(input.type === 'checkbox') input.checked = !!values[key];
       else input.value = values[key];
+      if(input.type === 'range'){
+        const out = document.querySelector('output[for="' + input.id + '"]');
+        if(out) out.value = key === 'reflectionDistance' ? Math.round(values[key]) + ' m' : Number(values[key]).toFixed(2) + '×';
+      }
     }
     document.querySelectorAll('[data-video-setting="' + key + '"]').forEach(row => {
       row.dataset.videoExposed = config.exposed[key] === false ? 'false' : 'true';
@@ -226,8 +265,12 @@ function createMenu(options){
     const quality = document.getElementById('videoQuality');
     const aa = document.getElementById('videoAA');
     const rendererMode = document.getElementById('videoRenderer');
+    const exposure = document.getElementById('videoExposure');
     const shadows = document.getElementById('videoShadows');
+    const shadowQuality = document.getElementById('videoShadowQuality');
     const reflections = document.getElementById('videoReflections');
+    const reflectionQuality = document.getElementById('videoReflectionQuality');
+    const reflectionDistance = document.getElementById('videoReflectionDistance');
     const volumetricLighting = document.getElementById('videoVolumetricLighting');
     const editorHud = document.getElementById('videoEditorHud');
     if(!btn || !overlay || !close || !resume || !backMenu) return;
@@ -445,11 +488,51 @@ function createMenu(options){
         applyVideo({heavy:true, message:tr('Rebuilding scene shadows…', 'Ricostruzione ombre della scena…')});
       });
     }
+    if(shadowQuality){
+      shadowQuality.value = video && video.shadowQuality || 'auto';
+      shadowQuality.addEventListener('change', () => {
+        if(video) video.shadowQuality = ['auto','low','medium','high','ultra'].includes(shadowQuality.value) ? shadowQuality.value : 'auto';
+        applyVideo({heavy:true, message:tr('Rebuilding shadow maps…', 'Ricostruzione shadow map…')});
+      });
+    }
+    if(exposure){
+      const syncExposureOutput = () => {
+        const out = document.querySelector('output[for="videoExposure"]');
+        if(out) out.value = Number(exposure.value).toFixed(2) + '×';
+      };
+      exposure.value = video && video.exposure != null ? video.exposure : VIDEO_DEFAULTS.exposure;
+      syncExposureOutput();
+      exposure.addEventListener('input', () => {
+        if(video) video.exposure = clampNumber(exposure.value, VIDEO_DEFAULTS.exposure, .7, 1.6);
+        syncExposureOutput();
+        applyVideo();
+      });
+    }
     if(reflections){
       reflections.checked = video ? video.reflections !== false : true;
       reflections.addEventListener('change', () => {
         if(video) video.reflections = !!reflections.checked;
         applyVideo({heavy:true, message:tr('Updating material reflections…', 'Aggiornamento riflessi dei materiali…')});
+      });
+    }
+    if(reflectionQuality){
+      reflectionQuality.value = video && video.reflectionQuality || VIDEO_DEFAULTS.reflectionQuality;
+      reflectionQuality.addEventListener('change', () => {
+        if(video) video.reflectionQuality = ['low','medium','high','ultra'].includes(reflectionQuality.value) ? reflectionQuality.value : VIDEO_DEFAULTS.reflectionQuality;
+        applyVideo({heavy:true, message:tr('Rebuilding screen-space reflections…', 'Ricostruzione riflessi screen-space…')});
+      });
+    }
+    if(reflectionDistance){
+      const syncReflectionDistanceOutput = () => {
+        const out = document.querySelector('output[for="videoReflectionDistance"]');
+        if(out) out.value = Math.round(Number(reflectionDistance.value)) + ' m';
+      };
+      reflectionDistance.value = video && video.reflectionDistance != null ? video.reflectionDistance : VIDEO_DEFAULTS.reflectionDistance;
+      syncReflectionDistanceOutput();
+      reflectionDistance.addEventListener('input', () => {
+        if(video) video.reflectionDistance = clampNumber(reflectionDistance.value, VIDEO_DEFAULTS.reflectionDistance, 5, 120);
+        syncReflectionDistanceOutput();
+        applyVideo();
       });
     }
     if(volumetricLighting){
@@ -467,6 +550,7 @@ function createMenu(options){
     });
     overlay.addEventListener('click', e => { if(e.target === overlay) setOpen(false); });
     overlay.querySelectorAll('input[type="range"]').forEach(input => {
+      if(!input.dataset.audio) return;
       const out = overlay.querySelector('output[for="' + input.id + '"]');
       const update = () => {
         if(audio && input.dataset.audio) audio[input.dataset.audio] = Number(input.value) / 100;
@@ -492,7 +576,7 @@ function createMenu(options){
 }
 
 window.LK_RUNTIME_SETTINGS_MENU = Object.freeze({
-  createVideo, createMenu, presets:VIDEO_PRESETS, defaults:VIDEO_DEFAULTS,
+  createVideo, createMenu, presets:VIDEO_PRESETS, shadowPresets:SHADOW_PRESETS, defaults:VIDEO_DEFAULTS,
   normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, syncControls:syncVideoControls,
 });
 })();

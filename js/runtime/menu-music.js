@@ -147,6 +147,9 @@ function create(options){
     return removed;
   }
 
+  function moveTrack(index, direction){ return library.moveAt(index, direction); }
+  function renameTrack(index, title){ return library.updateAt(index, {title}); }
+
   return {
     audio,
     bindButton,
@@ -160,7 +163,13 @@ function create(options){
     loadTrack,
     addTracks,
     removeTrack,
-    restoreTracks: tracks => library.restoreTracks(tracks),
+    moveTrack,
+    renameTrack,
+    restoreTracks: async tracks => {
+      const restored = await library.restoreTracks(tracks);
+      if(library.count()) loadTrack(0, false);
+      return restored;
+    },
     getStoredTracks: () => library.storedTracks(),
     getTracks: options => library.list(options),
   };

@@ -81,6 +81,12 @@ function registerAll(registry){
   });
 
   registry.register({
+    type:'pawn.getOwner', title:'Get Pawn Owner', category:'Pawn', description:'Returns the scene Object3D owned by any Vehicle, Character or Soccer Pawn.',
+    inputs:[dataIn('pawn', 'vehiclePawn', null)], outputs:[dataOut('object', 'object3d')],
+    evaluate(api){ return api.services.pawns ? api.services.pawns.owner(api.getInput('pawn')) : null; },
+  });
+
+  registry.register({
     type:'pawn.getInput', title:'Get Pawn Input', category:'Vehicle Pawn', description:'Reads the possessed Pawn input. Unpossessed/None Pawns always return neutral controls.',
     inputs:[dataIn('pawn', 'vehiclePawn', null)],
     outputs:[dataOut('throttle', 'number'), dataOut('brake', 'number'), dataOut('steer', 'number'), dataOut('handbrake', 'boolean'), dataOut('device', 'string')],

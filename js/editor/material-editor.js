@@ -101,21 +101,36 @@ function create(deps){
       const slot = slots.find(item => item.key === target);
       if(slot) return slot.material;
     }
-    return getFirstMaterial(o);
+    return slots && slots[0] ? slots[0].material : getFirstMaterial(o);
   }
 
-  function applyMaterialPatch(o, patch){
+  function applyMaterialPatch(o, patch, warmed){
     const root = materialRoot(o);
     const slots = collectMaterialSlots(root);
     const targets = getActiveTargets(o, slots);
+    const current = getMaterialForTarget(o, slots, targets[0]);
+    const materialKindChanges = !!(patch && patch.materialKind && current && (
+      patch.materialKind === 'physical' ? !current.isMeshPhysicalMaterial : (current.isMeshPhysicalMaterial || !current.isMeshStandardMaterial)
+    ));
+    const transparencyChanges = !!(patch && patch.transparent != null && current && !!patch.transparent !== !!current.transparent);
+    const changesShader = !!(patch && (Object.prototype.hasOwnProperty.call(patch, 'castShadow') || transparencyChanges || materialKindChanges));
+    if(changesShader && !warmed){
+      const label = Object.prototype.hasOwnProperty.call(patch, 'castShadow')
+        ? (patch.castShadow ? tr('Warm-up shadows...', 'Preparazione ombre...') : tr('Warm-up render...', 'Preparazione rendering...'))
+        : tr('Warm-up material...', 'Preparazione materiale...');
+      requestWarmup(label);
+      if(targets.includes('all')) STORE.stageMatProps(root, Object.assign({allowGlobal:true}, patch));
+      else targets.forEach(target => STORE.stageMatProps(root, Object.assign({materialSlot:target}, patch)));
+      if(root !== o) o.userData.matProps = root.userData.matProps;
+      markDirty();
+      requestAnimationFrame(() => applyMaterialPatch(o, patch, true));
+      return;
+    }
     if(targets.includes('all')) STORE.applyMatProps(root, Object.assign({allowGlobal:true}, patch));
     else targets.forEach(target => STORE.applyMatProps(root, Object.assign({materialSlot:target}, patch)));
     if(root !== o) o.userData.matProps = root.userData.matProps;
     thumbCache.delete(o.userData.editorId);
-    if(patch && Object.prototype.hasOwnProperty.call(patch, 'castShadow')) requestWarmup(patch.castShadow ? tr('Warm-up shadows...', 'Preparazione ombre...') : tr('Warm-up render...', 'Preparazione rendering...'));
-    if(patch && (patch.transparent != null || patch.opacity != null || patch.depthWrite != null || patch.materialKind)) requestWarmup(tr('Warm-up material...', 'Preparazione materiale...'));
     markDirty();
-    refreshOutliner();
   }
 
   function textureAssets(){
@@ -176,11 +191,19 @@ function create(deps){
   }
 
   function build(box, o){
+    if(o.userData.editorType !== 'mesh' && o.userData.editorType !== 'player') return;
     const root = materialRoot(o);
+    const sm = section(tr('EDIT MATERIAL', 'MODIFICA MATERIALE'));
+    if(sm.root.classList.contains('closed')){
+      sm.body.appendChild(el('<div class="lk-hint">' + tr('Open this section to inspect material slots.', 'Apri questa sezione per analizzare gli slot materiale.') + '</div>'));
+      const header = sm.root.querySelector('.lk-sec-h');
+      if(header) header.addEventListener('click', () => requestAnimationFrame(buildInspector), {once:true});
+      box.appendChild(sm.root);
+      return;
+    }
     if(STORE.assignMeshEditIds && (o.userData.editorType === 'mesh' || o.userData.editorType === 'player')) STORE.assignMeshEditIds(root);
     const slots = collectMaterialSlots(root);
     if(!slots.length) return;
-    if(o.userData.editorType !== 'mesh' && o.userData.editorType !== 'player') return;
     const targets = getActiveTargets(o, slots);
     const target = targets.length > 1 ? '__multi__' : targets[0];
     o.userData.materialEditorSlots = targets.slice();
@@ -189,7 +212,6 @@ function create(deps){
     if(!mat) return;
     const activeSlot = targets[0] === 'all' ? slots[0] : slots.find(slot => slot.key === targets[0]);
 
-    const sm = section(tr('EDIT MATERIAL', 'MODIFICA MATERIALE'));
     sm.body.appendChild(el('<div class="lk-hint">' + tr(
       'Choose All materials or a single GLB material slot. Transparent glass usually needs Blend alpha and Depth write off.',
       'Scegli Tutti i materiali o un singolo slot materiale del GLB. Per vetri trasparenti di solito servono alpha Blend e Depth write off.'
@@ -209,7 +231,13 @@ function create(deps){
     }).root);
     const activeLabel = targets.length > 1 ? (targets.length + tr(' selected materials', ' materiali selezionati')) : (target === 'all' ? tr('All materials', 'Tutti i materiali') : (slots.find(slot => slot.key === target) || {}).label || target);
     const preview = materialPreview(mat, activeLabel);
-    const currentMaterial = () => getMaterialForTarget(o, collectMaterialSlots(materialRoot(o)), (o.userData.materialEditorSlots || [o.userData.materialEditorSlot])[0]);
+    const currentMaterial = () => {
+      const wanted = (o.userData.materialEditorSlots || [o.userData.materialEditorSlot])[0];
+      const slot = wanted === 'all' || !wanted ? slots[0] : slots.find(item => item.key === wanted) || slots[0];
+      if(!slot || !slot.mesh) return slot && slot.material;
+      const materials = Array.isArray(slot.mesh.material) ? slot.mesh.material : [slot.mesh.material];
+      return materials[slot.materialIndex] || materials[0] || slot.material;
+    };
     const patchMat = patch => {
       applyMaterialPatch(o, patch);
       if(preview.lkRefresh) preview.lkRefresh(currentMaterial());

@@ -18,6 +18,7 @@ function create(deps){
   const buildInspector = deps.buildInspector;
   const selectObject = deps.selectObject;
   const section = deps.section;
+  const selectRow = deps.selectRow;
   const sliderRow = deps.sliderRow;
   const checkRow = deps.checkRow;
   const btnRow = deps.btnRow;
@@ -30,9 +31,29 @@ function create(deps){
     const cam = GAME.player.cameraCfg;
 
     const ss = section('SKY / DAY-NIGHT');
-    ss.body.appendChild(sliderRow('Time of day', sky.getTime(), 0, 1, .005, v => { sky.setTime(v); if(GAME.player.updateLights) GAME.player.updateLights(); markDirty(); },
-      v => { const names = ['dawn','day','dusk','night']; return names[Math.floor(((+v)+.125)%1*4 % 4)] + ' (' + (+v).toFixed(2) + ')'; }).root);
-    ss.body.appendChild(sliderRow('Day length (s)', sky.getDayLength(), 30, 1200, 10, v => { sky.setDayLength(v); markDirty(); }).root);
+    if(sky.getCycleEnabled && sky.setCycleEnabled){
+      ss.body.appendChild(checkRow(tr('Day / night cycle', 'Ciclo giorno / notte'), sky.getCycleEnabled(), v => {
+        sky.setCycleEnabled(v);
+        if(GAME.player.updateLights) GAME.player.updateLights();
+        markDirty();
+        buildInspector();
+      }).root);
+    }
+    const clockHour = sky.getClockHour ? sky.getClockHour() : (sky.getTime()*24+6)%24;
+    const clockLabel = value => {
+      const total=Math.round((((Number(value)||0)%24)+24)%24*60)%1440;
+      const hour=Math.floor(total/60), minute=total%60;
+      const phase=hour>=5&&hour<8?tr('Dawn','Alba'):hour>=8&&hour<17?tr('Day','Giorno'):hour>=17&&hour<20?tr('Dusk','Tramonto'):tr('Night','Notte');
+      return String(hour).padStart(2,'0')+':'+String(minute).padStart(2,'0')+' · '+phase;
+    };
+    ss.body.appendChild(sliderRow(tr('Time of day (24 h)', 'Ora del giorno (24 h)'), clockHour, 0, 23.75, .25, v => {
+      if(sky.setClockHour) sky.setClockHour(v);
+      else sky.setTime((((v-6)/24)%1+1)%1);
+      if(GAME.player.updateLights) GAME.player.updateLights();
+      markDirty();
+    }, clockLabel).root);
+    if(!sky.getCycleEnabled || sky.getCycleEnabled()) ss.body.appendChild(sliderRow('Day length (s)', sky.getDayLength(), 30, 1200, 10, v => { sky.setDayLength(v); markDirty(); }).root);
+    ss.body.appendChild(el('<div class="lk-hint">' + tr('One shared 24-hour clock drives the sky and every scheduled light: 06:00 dawn, 12:00 noon, 18:00 sunset and 00:00 midnight. Disable the cycle to keep the selected time fixed.', 'Un unico orologio a 24 ore controlla cielo e luci programmate: 06:00 alba, 12:00 mezzogiorno, 18:00 tramonto e 00:00 mezzanotte. Disattiva il ciclo per mantenere fisso l\'orario selezionato.') + '</div>'));
     box.appendChild(ss.root);
 
     const sf = section('FOG / DISTANCE');
@@ -63,13 +84,28 @@ function create(deps){
     }
     box.appendChild(spe.root);
 
+    const sli = section(tr('DAY / NIGHT LIGHTING', 'ILLUMINAZIONE GIORNO / NOTTE'));
+    if(sky.lighting){
+      const lighting = sky.lighting.get();
+      const lset = patch => { sky.lighting.set(patch); markDirty(); };
+      sli.body.appendChild(sliderRow(tr('Day sun', 'Sole diurno'), lighting.daySun, 0, 3, .02, v => lset({daySun:v}), v => (+v).toFixed(2)).root);
+      sli.body.appendChild(sliderRow(tr('Day ambient fill', 'Riempimento ambiente giorno'), lighting.dayAmbient, 0, 2, .02, v => lset({dayAmbient:v}), v => (+v).toFixed(2)).root);
+      sli.body.appendChild(sliderRow(tr('Moon direct light', 'Luce lunare diretta'), lighting.moonDirect, 0, 1, .01, v => lset({moonDirect:v}), v => (+v).toFixed(2)).root);
+      sli.body.appendChild(sliderRow(tr('Moon indirect light', 'Luce lunare indiretta'), lighting.moonIndirect, 0, 1, .01, v => lset({moonIndirect:v}), v => (+v).toFixed(2)).root);
+      sli.body.appendChild(btnRow([{label:'↺ Default r185', action:() => { sky.lighting.set(sky.lighting.defaults()); markDirty(); buildInspector(); }}]));
+      sli.body.appendChild(el('<div class="lk-hint">' + tr('Moon direct light casts the night shadow; moon indirect light controls blue diffuse fill and follows moon visibility. Exposure is configured under Rendering / Video.', 'La luce lunare diretta proietta l\'ombra notturna; la luce lunare indiretta controlla il riempimento diffuso blu e segue la visibilita della luna. L\'esposizione si configura in Rendering / Video.') + '</div>'));
+    }
+    box.appendChild(sli.root);
+
     const ssb = section('SUN BLOOM');
     if(sky.sunBloom){
       const sb = sky.sunBloom.get();
       const sbset = patch => { sky.sunBloom.set(patch); markDirty(); };
       ssb.body.appendChild(checkRow(tr('Enabled', 'Attivo'), sb.enabled, v => sbset({enabled:v})).root);
-      ssb.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), sb.intensity, 0, 2, .01, v => sbset({intensity:v}), v => (+v).toFixed(2)).root);
+      ssb.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), sb.intensity, 0, 3, .01, v => sbset({intensity:v}), v => (+v).toFixed(2)).root);
       ssb.body.appendChild(sliderRow(tr('Size', 'Dimensione'), sb.size, .2, 3, .05, v => sbset({size:v}), v => (+v).toFixed(2)).root);
+      ssb.body.appendChild(sliderRow(tr('Bloom radius', 'Raggio bloom'), sb.radius == null ? .14 : sb.radius, .02, 1, .01, v => sbset({radius:v}), v => (+v).toFixed(2)).root);
+      ssb.body.appendChild(sliderRow(tr('Bloom threshold', 'Soglia bloom'), sb.threshold == null ? .52 : sb.threshold, 0, 1, .01, v => sbset({threshold:v}), v => Math.round(v*100) + '%').root);
       ssb.body.appendChild(el('<div class="lk-hint">' + tr('Bright halo around the sun disc. Independent from lens flare: this controls the glow; flare reflections are below.', 'Alone luminoso attorno al disco solare. Indipendente dal lens flare: qui regoli il bagliore, sotto i riflessi di lente.') + '</div>'));
     }
     box.appendChild(ssb.root);
@@ -79,6 +115,10 @@ function create(deps){
       const fl = sky.flare.get();
       const flset = patch => { sky.flare.set(patch); markDirty(); };
       sfl.body.appendChild(checkRow(tr('Enabled', 'Attivo'), fl.enabled, v => flset({enabled:v})).root);
+      sfl.body.appendChild(selectRow(tr('Flare type', 'Tipo di flare'), fl.mode || 'classic', [
+        {value:'classic', label:tr('Classic', 'Classico')},
+        {value:'cinematic', label:tr('Cinematic / realistic', 'Cinematografico / realistico')},
+      ], v => { flset({mode:v}); buildInspector(); }).root);
       sfl.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), fl.intensity, 0, 2, .01, v => flset({intensity:v}), v => (+v).toFixed(2)).root);
       sfl.body.appendChild(sliderRow(tr('Size', 'Dimensione'), fl.size, .2, 3, .05, v => flset({size:v}), v => (+v).toFixed(2)).root);
       sfl.body.appendChild(sliderRow(tr('Ghost count', 'Ghost (numero)'), fl.ghosts, 0, 8, 1, v => flset({ghosts:Math.round(v)}), v => String(Math.round(v))).root);
@@ -87,8 +127,12 @@ function create(deps){
       sfl.body.appendChild(sliderRow(tr('Halo', 'Alone (halo)'), fl.halo, 0, 1, .01, v => flset({halo:v}), v => Math.round(v*100) + '%').root);
       sfl.body.appendChild(sliderRow(tr('Halo size', 'Dimensione halo'), fl.haloSize, .2, 3, .05, v => flset({haloSize:v}), v => (+v).toFixed(2)).root);
       sfl.body.appendChild(sliderRow(tr('Horizontal streak', 'Streak orizzontale'), fl.streak, 0, 1, .01, v => flset({streak:v}), v => Math.round(v*100) + '%').root);
+      sfl.body.appendChild(sliderRow(tr('Starburst', 'Raggi diaframma'), fl.starburst, 0, 1, .01, v => flset({starburst:v}), v => Math.round(v*100) + '%').root);
+      sfl.body.appendChild(sliderRow(tr('Ghost opacity', 'Opacita ghost'), fl.ghostOpacity, 0, 1, .01, v => flset({ghostOpacity:v}), v => Math.round(v*100) + '%').root);
+      sfl.body.appendChild(checkRow(tr('Anamorphic lens', 'Lente anamorfica'), fl.anamorphic, v => flset({anamorphic:v})).root);
+      sfl.body.appendChild(checkRow(tr('Scene occlusion', 'Occlusione scena'), fl.occlusion, v => flset({occlusion:v})).root);
       sfl.body.appendChild(btnRow([{label:'↺ Default', action:() => { sky.flare.set(sky.flare.defaults()); markDirty(); buildInspector(); }}]));
-      sfl.body.appendChild(el('<div class="lk-hint">' + tr('Real lens reflections: ghost chain along the sun-to-screen-center axis, recalculated with the active camera. It disappears when the sun leaves the frame.', 'Riflessi di lente veri: catena di ghost lungo l\'asse sole -> centro schermo, ricalcolata con la camera attiva. Sparisce quando il sole esce dall\'inquadratura.') + '</div>'));
+      sfl.body.appendChild(el('<div class="lk-hint">' + tr('Camera-space optical response with aperture rays, chromatic ghosts and source occlusion. The whole flare fades when geometry covers the sun; anamorphic mode stretches the glare horizontally.', 'Risposta ottica in camera-space con raggi del diaframma, ghost cromatici e occlusione della sorgente. L\'intero flare sfuma quando la geometria copre il sole; la modalita anamorfica allunga il glare orizzontalmente.') + '</div>'));
     }
     box.appendChild(sfl.root);
 
@@ -124,6 +168,7 @@ function create(deps){
       srn.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), rp.intensity, 0, 1, .01, v => rset({intensity:v}), v => Math.round(v*100) + '%').root);
       srn.body.appendChild(sliderRow(tr('Fall speed', 'Velocita caduta'), rp.speed, 10, 160, 1, v => rset({speed:v}), v => Math.round(v) + ' m/s').root);
       srn.body.appendChild(sliderRow(tr('Drop length', 'Lunghezza gocce'), rp.length, .05, 3, .05, v => rset({length:v}), v => (+v).toFixed(2) + 'm').root);
+      srn.body.appendChild(sliderRow(tr('Drop thickness', 'Spessore gocce'), rp.width == null ? .035 : rp.width, .008, .12, .002, v => rset({width:v}), v => (+v).toFixed(3) + 'm').root);
       srn.body.appendChild(sliderRow(tr('Wind', 'Vento'), rp.wind, 0, 1.5, .01, v => rset({wind:v}), v => (+v).toFixed(2)).root);
       srn.body.appendChild(sliderRow(tr('Wind direction', 'Direzione vento'), rp.windAngle, 0, 360, 1, v => rset({windAngle:v}), v => Math.round(v) + '°').root);
       srn.body.appendChild(sliderRow(tr('Area radius', 'Area (raggio)'), rp.area, 20, 200, 5, v => rset({area:v}), v => Math.round(v) + 'm').root);

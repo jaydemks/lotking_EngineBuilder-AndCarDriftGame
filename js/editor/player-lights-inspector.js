@@ -27,15 +27,35 @@ function create(deps){
   function build(box, targetPlayer){
     const player = targetPlayer || deps.player || GAME.player;
     if(!player.lights || !player.setLights) return;
+    const nativePlayer = !targetPlayer || player === GAME.player;
     const sh = section(tr('VEHICLE LIGHTS', 'LUCI VEICOLO'), false);
     const lights = player.lights;
     let replaying = false;
     const snapshot = () => JSON.parse(JSON.stringify(lights));
-    const restore = value => { replaying=true; player.setLights(JSON.parse(JSON.stringify(value))); Object.keys(lights).forEach(key => delete lights[key]); Object.assign(lights, JSON.parse(JSON.stringify(value))); requestWarmup(tr('Warm-up lights...', 'Preparazione luci...')); markDirty(); replaying=false; };
+    const mergeLightsPatch = patch => {
+      Object.keys(patch || {}).forEach(key => {
+        const value = patch[key];
+        if(Array.isArray(value)){
+          lights[key] = Array.isArray(lights[key]) ? lights[key] : [];
+          value.forEach((item, index) => { if(item) lights[key][index] = Object.assign({}, lights[key][index] || {}, item); });
+        } else if(value && typeof value === 'object') lights[key] = Object.assign({}, lights[key] || {}, value);
+        else lights[key] = value;
+      });
+    };
+    const restore = value => { replaying=true; player.setLights(JSON.parse(JSON.stringify(value))); Object.keys(lights).forEach(key => delete lights[key]); Object.assign(lights, JSON.parse(JSON.stringify(value))); markDirty(); replaying=false; };
     const upd = patch => {
-      const before=snapshot(); player.setLights(patch); requestWarmup(tr('Warm-up lights...', 'Preparazione luci...')); markDirty(); const after=snapshot();
+      const before=snapshot(); mergeLightsPatch(patch); player.setLights(patch); markDirty(); const after=snapshot();
       if(!replaying && JSON.stringify(before)!==JSON.stringify(after)) pushHistory({label:'Vehicle Pawn lights',undo:() => restore(before),redo:() => restore(after)});
     };
+    if(nativePlayer){
+      const colors = section(tr('LIGHT COLORS', 'COLORI LUCI'), true);
+      colors.body.appendChild(el('<div class="lk-hint">' + tr('Each color is applied to both lights in the pair and is saved with the native player_car (Logic).', 'Ogni colore viene applicato a entrambe le luci della coppia e salvato nel player_car (Logic) nativo.') + '</div>'));
+      colors.body.appendChild(colorRow(tr('Headlight pair', 'Coppia fari anteriori'), lights.front.color, v => upd({front:{color:v}})).root);
+      colors.body.appendChild(colorRow(tr('Position light pair', 'Coppia luci di posizione'), lights.rear.color, v => upd({rear:{color:v}})).root);
+      colors.body.appendChild(colorRow(tr('Brake light pair', 'Coppia luci freno'), lights.rear.brakeColor == null ? lights.rear.color : lights.rear.brakeColor, v => upd({rear:{brakeColor:v}})).root);
+      colors.body.appendChild(colorRow(tr('Reverse pair', 'Coppia retromarcia'), lights.rear.reverseColor, v => upd({rear:{reverseColor:v}})).root);
+      box.appendChild(colors.root);
+    }
     const hourLabel = value => {
       const total = Math.round(Math.max(0, Math.min(24, Number(value) || 0)) * 60) % (24 * 60);
       return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
@@ -85,30 +105,37 @@ function create(deps){
     ]));
     sh.body.appendChild(checkRow(tr('Headlights', 'Fari anteriori'), lights.front.enabled, v => upd({front:{enabled:v}})).root);
     sh.body.appendChild(checkRow(tr('Auto day/night', 'Auto giorno/notte'), lights.front.auto, v => upd({front:{auto:v}})).root);
-    sh.body.appendChild(sliderRow(tr('Automatic switch-on time', 'Ora accensione automatica'), lights.front.autoOnHour == null ? 18 : lights.front.autoOnHour, 0, 24, .25, v => upd({front:{autoOnHour:v}}), hourLabel).root);
-    sh.body.appendChild(sliderRow(tr('Automatic switch-off time', 'Ora spegnimento automatico'), lights.front.autoOffHour == null ? 7 : lights.front.autoOffHour, 0, 24, .25, v => upd({front:{autoOffHour:v}}), hourLabel).root);
+    sh.body.appendChild(sliderRow(tr('Automatic switch-on time', 'Ora accensione automatica'), lights.front.autoOnHour == null ? 18 : lights.front.autoOnHour, 0, 23.75, .25, v => upd({front:{autoOnHour:v}}), hourLabel).root);
+    sh.body.appendChild(sliderRow(tr('Automatic switch-off time', 'Ora spegnimento automatico'), lights.front.autoOffHour == null ? 7 : lights.front.autoOffHour, 0, 23.75, .25, v => upd({front:{autoOffHour:v}}), hourLabel).root);
     sh.body.appendChild(el('<div class="lk-hint">' + tr('The schedule follows the authored day/night clock and also drives auxiliary lights set to Night. Equal times keep the automatic window active all day.', 'La programmazione segue l’orologio del ciclo giorno/notte e controlla anche le luci ausiliarie impostate su Notte. Orari uguali mantengono la finestra automatica attiva tutto il giorno.') + '</div>'));
     sh.body.appendChild(sliderRow(tr('Headlight count', 'Numero fari anteriori'), lights.front.count, 1, 2, 1, v => upd({front:{count:Math.round(v)}})).root);
-    sh.body.appendChild(colorRow(tr('Headlight color', 'Colore fari'), lights.front.color, v => upd({front:{color:v}})).root);
+    if(!nativePlayer) sh.body.appendChild(colorRow(tr('Headlight color', 'Colore fari'), lights.front.color, v => upd({front:{color:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight intensity', 'Intensita fari'), lights.front.intensity, 0, 6, .05, v => upd({front:{intensity:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight distance', 'Distanza fari'), lights.front.distance, 5, 80, 1, v => upd({front:{distance:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight cone', 'Cono fari'), lights.front.angle, .15, 1.1, .01, v => upd({front:{angle:v}}), v => (+v).toFixed(2)).root);
     sh.body.appendChild(checkRow(tr('Headlight glow', 'Glow fari'), lights.front.glow, v => upd({front:{glow:v}})).root);
     sh.body.appendChild(checkRow(tr('Headlight bloom', 'Bloom fari'), lights.front.bloom, v => upd({front:{bloom:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight bloom intensity', 'Intensita bloom fari'), lights.front.bloomIntensity, 0, 1.5, .05, v => upd({front:{bloomIntensity:v}})).root);
-    sh.body.appendChild(checkRow(tr('Headlight lens flare', 'Lens flare fari'), lights.front.flare, v => upd({front:{flare:v}})).root);
+    sh.body.appendChild(checkRow(tr('Realistic headlight lens flare', 'Lens flare realistico fari'), lights.front.flare, v => upd({front:{flare:v}})).root);
+    sh.body.appendChild(sliderRow(tr('Front pair flare power', 'Potenza flare coppia anteriore'), lights.front.flareIntensity == null ? .24 : lights.front.flareIntensity, 0, 2, .01, v => upd({front:{flareIntensity:v}}), v => (+v).toFixed(2)).root);
+    sh.body.appendChild(sliderRow(tr('Front flare bloom/glow', 'Bloom/glow flare anteriore'), lights.front.flareBloomIntensity == null ? .19 : lights.front.flareBloomIntensity, 0, 3, .01, v => upd({front:{flareBloomIntensity:v}}), v => (+v).toFixed(2)).root);
+    sh.body.appendChild(checkRow(tr('Front flare occlusion', 'Occlusione flare anteriore'), lights.front.flareOcclusion !== false, v => upd({front:{flareOcclusion:v}})).root);
     sh.body.appendChild(sliderRow('Front glow scale', lights.front.glowSize, .1, 2.2, .05, v => upd({front:{glowSize:v}})).root);
     sh.body.appendChild(sliderRow('Front flare scale', lights.front.flareSize, .1, 2.2, .05, v => upd({front:{flareSize:v}})).root);
     sh.body.appendChild(checkRow(tr('Rear lights', 'Luci posteriori'), lights.rear.enabled, v => upd({rear:{enabled:v}})).root);
-    sh.body.appendChild(colorRow(tr('Position/brake color', 'Colore posizione/freno'), lights.rear.color, v => upd({rear:{color:v}})).root);
+    if(!nativePlayer) sh.body.appendChild(colorRow(tr('Position color', 'Colore posizione'), lights.rear.color, v => upd({rear:{color:v}})).root);
+    if(!nativePlayer) sh.body.appendChild(colorRow(tr('Brake color', 'Colore freno'), lights.rear.brakeColor == null ? lights.rear.color : lights.rear.brakeColor, v => upd({rear:{brakeColor:v}})).root);
     sh.body.appendChild(sliderRow(tr('Rear position', 'Posizione posteriore'), lights.rear.baseIntensity, 0, 2, .05, v => upd({rear:{baseIntensity:v}})).root);
     sh.body.appendChild(sliderRow(tr('Rear brake', 'Freno posteriore'), lights.rear.brakeIntensity, 0, 6, .05, v => upd({rear:{brakeIntensity:v}})).root);
-    sh.body.appendChild(colorRow(tr('Reverse color', 'Colore retromarcia'), lights.rear.reverseColor, v => upd({rear:{reverseColor:v}})).root);
+    if(!nativePlayer) sh.body.appendChild(colorRow(tr('Reverse color', 'Colore retromarcia'), lights.rear.reverseColor, v => upd({rear:{reverseColor:v}})).root);
     sh.body.appendChild(sliderRow(tr('Reverse', 'Retromarcia'), lights.rear.reverseIntensity, 0, 5, .05, v => upd({rear:{reverseIntensity:v}})).root);
     sh.body.appendChild(checkRow(tr('Rear glow', 'Glow posteriori'), lights.rear.glow, v => upd({rear:{glow:v}})).root);
     sh.body.appendChild(checkRow(tr('Rear bloom', 'Bloom posteriori'), lights.rear.bloom, v => upd({rear:{bloom:v}})).root);
     sh.body.appendChild(sliderRow(tr('Rear bloom intensity', 'Intensita bloom posteriori'), lights.rear.bloomIntensity, 0, 1.5, .05, v => upd({rear:{bloomIntensity:v}})).root);
-    sh.body.appendChild(checkRow(tr('Rear lens flare', 'Lens flare posteriori'), lights.rear.flare, v => upd({rear:{flare:v}})).root);
+    sh.body.appendChild(checkRow(tr('Realistic rear lens flare', 'Lens flare realistico posteriore'), lights.rear.flare, v => upd({rear:{flare:v}})).root);
+    sh.body.appendChild(sliderRow(tr('Rear pair flare power', 'Potenza flare coppia posteriore'), lights.rear.flareIntensity == null ? .16 : lights.rear.flareIntensity, 0, 2, .01, v => upd({rear:{flareIntensity:v}}), v => (+v).toFixed(2)).root);
+    sh.body.appendChild(sliderRow(tr('Rear flare bloom/glow', 'Bloom/glow flare posteriore'), lights.rear.flareBloomIntensity == null ? .12 : lights.rear.flareBloomIntensity, 0, 3, .01, v => upd({rear:{flareBloomIntensity:v}}), v => (+v).toFixed(2)).root);
+    sh.body.appendChild(checkRow(tr('Rear flare occlusion', 'Occlusione flare posteriore'), lights.rear.flareOcclusion !== false, v => upd({rear:{flareOcclusion:v}})).root);
     sh.body.appendChild(sliderRow('Rear glow scale', lights.rear.glowSize, .1, 2.2, .05, v => upd({rear:{glowSize:v}})).root);
     sh.body.appendChild(sliderRow('Rear flare scale', lights.rear.flareSize, .1, 2.2, .05, v => upd({rear:{flareSize:v}})).root);
     (lights.aux || []).forEach((aux, idx) => {
@@ -141,7 +168,7 @@ function create(deps){
     box.appendChild(sh.root);
 
     const sn = section(tr('UNDERGLOW NEON', 'NEON SOTTO-SCOCCA'), false);
-    sn.body.appendChild(el('<div class="lk-hint">Neon tuning presets linked to the vehicle. These sets can be exposed in the game later.</div>'));
+    sn.body.appendChild(el('<div class="lk-hint">Rectangular area lights follow the real neon-strip shape and illuminate the road below the vehicle.</div>'));
     sn.body.appendChild(btnRow([
       {label:'Neon L', action:() => selectVehicleLight('player_neon_left')},
       {label:'Neon R', action:() => selectVehicleLight('player_neon_right')},
@@ -159,8 +186,7 @@ function create(deps){
     sn.body.appendChild(colorRow(tr('Neon color A', 'Neon colore A'), lights.neon.colorA, v => upd({neon:{colorA:v}})).root);
     sn.body.appendChild(colorRow(tr('Neon color B', 'Neon colore B'), lights.neon.colorB, v => upd({neon:{colorB:v}})).root);
     sn.body.appendChild(sliderRow(tr('Neon intensity', 'Intensita neon'), lights.neon.intensity, 0, 4, .05, v => upd({neon:{intensity:v}})).root);
-    sn.body.appendChild(sliderRow(tr('Neon light spill', 'Spill luce neon'), lights.neon.spill == null ? 2.8 : lights.neon.spill, .4, 8, .1, v => upd({neon:{spill:v}}), v => (+v).toFixed(1) + 'm').root);
-    sn.body.appendChild(checkRow(tr('Neon shadows', 'Ombre neon'), !!lights.neon.shadows, v => upd({neon:{shadows:v}})).root);
+    sn.body.appendChild(sliderRow(tr('Rectangular coverage', 'Copertura rettangolare'), lights.neon.spill == null ? 2.8 : lights.neon.spill, .4, 8, .1, v => upd({neon:{spill:v}}), v => (+v).toFixed(1)).root);
     sn.body.appendChild(selectRow(tr('Neon animation', 'Animazione neon'), lights.neon.animation, [
       {value:'static', label:tr('Static', 'Statico')},
       {value:'pulse', label:'Pulse'},

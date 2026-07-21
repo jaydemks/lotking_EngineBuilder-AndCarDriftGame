@@ -37,6 +37,7 @@ function create(deps){
         STORE.applyMeshEdits(sceneRoot, bp.meshEdits);
         GAME.player.car.userData.playerMeshEdits = STORE.normalizeMeshEdits(bp.meshEdits);
       }
+      if(GAME.player.setModelShading) GAME.player.setModelShading(bp.modelShading || 'original');
     })).catch(err => status('Player model load failed: ' + err.message));
   }
   async function copyPlayerBlueprintAsset(){
@@ -121,7 +122,7 @@ function create(deps){
             neonEnabled:!(pawn.lights && pawn.lights.neon && pawn.lights.neon.enabled === false),
             exhaustEnabled:!(pawn.exhaust && pawn.exhaust.enabled === false),
             skidEnabled:!(pawn.skids && pawn.skids.enabled === false),
-            smokeIntensity:Number(pawn.exhaust && pawn.exhaust.intensity) || 1,
+            smokeIntensity:pawn.exhaust && pawn.exhaust.intensity != null ? Math.max(0, Number(pawn.exhaust.intensity) || 0) : 1,
             skidLife:Number(pawn.skids && pawn.skids.life) || 12,
           },
         }))
@@ -148,6 +149,7 @@ function create(deps){
     if(GAME.player.setEnabled) GAME.player.setEnabled(bp.enabled !== false);
     if(GAME.player.setHidden) GAME.player.setHidden(bp.hidden === true);
     if(GAME.player.setControllerIndex) GAME.player.setControllerIndex(Object.prototype.hasOwnProperty.call(bp, 'controllerIndex') ? bp.controllerIndex : 0);
+    if(GAME.player.setModelShading) GAME.player.setModelShading(bp.modelShading || 'original');
     if(bp.tuning && GAME.player.setTuning) GAME.player.setTuning(bp.tuning);
     if(bp.cam){
       if(GAME.player.setCameraConfig) GAME.player.setCameraConfig(bp.cam, true);

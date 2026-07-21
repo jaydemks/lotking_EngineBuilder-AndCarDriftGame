@@ -268,6 +268,14 @@ function create(deps){
     const viewportSpaceButton = root.querySelector('[data-viewport-space]');
     const viewportSnapButton = root.querySelector('[data-viewport-snap]');
     let viewport = null;
+    const onCollisionDummiesChange = () => {
+      if(!root.isConnected){
+        window.removeEventListener('lotking:collisiondummieschange', onCollisionDummiesChange);
+        return;
+      }
+      if(viewport) syncViewport3D();
+    };
+    window.addEventListener('lotking:collisiondummieschange', onCollisionDummiesChange);
     let spaceDown = false;
     const graphView = {x:80, y:60, zoom:1};
     canvasWrap.tabIndex = 0;
@@ -1367,8 +1375,11 @@ function create(deps){
     function ensureLogicScene(){
       if(!rootGraph.logicScene || typeof rootGraph.logicScene !== 'object') rootGraph.logicScene = {};
       const scene = rootGraph.logicScene;
-      if(!scene.root) scene.root = {};
-      scene.root = Object.assign({
+      if(!scene.root || typeof scene.root !== 'object') scene.root = {};
+      // Preserve root object identity. Inspector controls retain this reference,
+      // while viewport synchronization may normalize the scene every frame.
+      // Replacing it here would make an otherwise live control edit a stale copy.
+      const rootDefaults = {
         id:'root',
         name:'Root',
         type:'mesh',
@@ -1377,7 +1388,10 @@ function create(deps){
         rotation:[0,0,0],
         scale:[1,1,1],
         color:'#7dd3fc',
-      }, scene.root || {});
+      };
+      Object.keys(rootDefaults).forEach(key => {
+        if(!Object.prototype.hasOwnProperty.call(scene.root, key)) scene.root[key] = rootDefaults[key];
+      });
       scene.root.id = 'root';
       if(scene.root.type === 'mesh' && !scene.root.asset && !scene.root.primitive) scene.root.primitive = 'cube';
       if(scene.root.type === 'text'){
@@ -2401,9 +2415,11 @@ function create(deps){
         name.type = 'text';
         name.value = port.name || '';
         name.addEventListener('change', () => {
-          renameFunctionPort(subgraph, key, port, name.value);
+          const liveSubgraph = subgraphById(subgraph.id) || subgraph;
+          const livePort = ensureFunctionPorts(liveSubgraph, key).find(item => item.id === port.id) || port;
+          renameFunctionPort(liveSubgraph, key, livePort, name.value);
           persist();
-          renderSubgraphInspector(subgraph);
+          renderSubgraphInspector(liveSubgraph);
           renderNodes();
         });
         const type = document.createElement('select');
@@ -2415,24 +2431,29 @@ function create(deps){
         });
         type.value = port.type || 'any';
         type.addEventListener('change', () => {
-          port.type = type.value;
+          const liveSubgraph = subgraphById(subgraph.id) || subgraph;
+          const livePort = ensureFunctionPorts(liveSubgraph, key).find(item => item.id === port.id) || port;
+          livePort.type = type.value;
           persist();
         });
         const addNodeButton = document.createElement('button');
         addNodeButton.type = 'button';
         addNodeButton.textContent = key === 'inputs' ? 'Node' : 'Return';
         addNodeButton.addEventListener('click', () => {
-          setActiveGraph('subgraph:' + subgraph.id);
-          if(key === 'inputs') addNodeFromType('function.input', {name:port.name});
-          else addNodeFromType('function.return', {name:port.name});
+          const liveSubgraph = subgraphById(subgraph.id) || subgraph;
+          const livePort = ensureFunctionPorts(liveSubgraph, key).find(item => item.id === port.id) || port;
+          setActiveGraph('subgraph:' + liveSubgraph.id);
+          if(key === 'inputs') addNodeFromType('function.input', {name:livePort.name});
+          else addNodeFromType('function.return', {name:livePort.name});
         });
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.textContent = '×';
         remove.addEventListener('click', () => {
-          subgraph[key] = ensureFunctionPorts(subgraph, key).filter(item => item !== port);
+          const liveSubgraph = subgraphById(subgraph.id) || subgraph;
+          liveSubgraph[key] = ensureFunctionPorts(liveSubgraph, key).filter(item => item.id !== port.id);
           persist();
-          renderSubgraphInspector(subgraph);
+          renderSubgraphInspector(liveSubgraph);
         });
         row.append(name, type, addNodeButton, remove);
         wrap.appendChild(row);
@@ -2442,9 +2463,13 @@ function create(deps){
       add.className = 'lk-le-inspector-btn';
       add.textContent = key === 'inputs' ? 'Add input' : 'Add output';
       add.addEventListener('click', () => {
-        ensureFunctionPorts(subgraph, key).push({id:sceneId(key === 'inputs' ? 'input' : 'output'), name:uniqueFunctionPortName(subgraph, key), type:'any'});
+        const liveSubgraph = subgraphById(subgraph.id) || subgraph;
+        // uniqueFunctionPortName normalizes the collection, so resolve the
+        // writable array only after the name is known.
+        const portName = uniqueFunctionPortName(liveSubgraph, key);
+        ensureFunctionPorts(liveSubgraph, key).push({id:sceneId(key === 'inputs' ? 'input' : 'output'), name:portName, type:'any'});
         persist();
-        renderSubgraphInspector(subgraph);
+        renderSubgraphInspector(liveSubgraph);
       });
       wrap.appendChild(add);
       return wrap;
@@ -2656,6 +2681,41 @@ function create(deps){
         syncViewport3D();
       });
       inspector.appendChild(makeInspectorRow('Color', color));
+      if(element.type === 'light'){
+        const flare = Object.assign({enabled:false,intensity:.65,size:.7,bloomIntensity:.52,occlusion:true}, element.cinematicLensFlare || {});
+        const persistFlare = () => {
+          element.cinematicLensFlare = Object.assign({}, flare);
+          persist();
+          syncViewport3D();
+        };
+        const enabled = document.createElement('input');
+        enabled.type = 'checkbox'; enabled.checked = flare.enabled === true;
+        const makeFlareNumber = (key,min,max,step) => {
+          const input = document.createElement('input');
+          input.type = 'number'; input.min = min; input.max = max; input.step = step; input.value = flare[key];
+          input.addEventListener('change', () => {
+            const value = Number(input.value);
+            flare[key] = Math.max(min, Math.min(max, Number.isFinite(value) ? value : flare[key]));
+            input.value = flare[key];
+            persistFlare();
+          });
+          return input;
+        };
+        const flareIntensity = makeFlareNumber('intensity',0,2,.05);
+        const flareSize = makeFlareNumber('size',.2,3,.05);
+        const flareBloom = makeFlareNumber('bloomIntensity',0,3,.05);
+        const flareOcclusion = document.createElement('input');
+        flareOcclusion.type = 'checkbox'; flareOcclusion.checked = flare.occlusion !== false;
+        flareOcclusion.addEventListener('change', () => { flare.occlusion = flareOcclusion.checked; persistFlare(); });
+        const setFlareEnabled = value => [flareIntensity,flareSize,flareBloom,flareOcclusion].forEach(input => { input.disabled = !value; });
+        enabled.addEventListener('change', () => { flare.enabled = enabled.checked; setFlareEnabled(enabled.checked); persistFlare(); });
+        inspector.appendChild(makeInspectorRow('Realistic lens flare', enabled));
+        inspector.appendChild(makeInspectorRow('Flare intensity', flareIntensity));
+        inspector.appendChild(makeInspectorRow('Flare size', flareSize));
+        inspector.appendChild(makeInspectorRow('Flare bloom / glow', flareBloom));
+        inspector.appendChild(makeInspectorRow('Flare occlusion', flareOcclusion));
+        setFlareEnabled(enabled.checked);
+      }
       renderElementColliderInspector(element);
       const componentSection = document.createElement('div');
       componentSection.className = 'lk-le-inspector-sublist';
@@ -2692,6 +2752,14 @@ function create(deps){
       return element.collider;
     }
 
+    function colliderDummyMode(collider){
+      const mode = collider && collider.dummyVisibility;
+      if(mode === 'show' || mode === 'hide' || mode === 'auto') return mode;
+      if(collider && collider.dummyVisible === true) return 'show';
+      if(collider && collider.dummyVisible === false) return 'hide';
+      return 'auto';
+    }
+
     function ensureColliderComponent(element){
       const scene = logicScene();
       let component = scene.components.find(item => item && item.elementId === element.id && item.type === 'collider');
@@ -2721,16 +2789,22 @@ function create(deps){
         renderInspector();
       });
       sectionEl.appendChild(makeInspectorRow('Enabled', enabled));
-      const showDummy = document.createElement('input');
-      showDummy.type = 'checkbox';
-      showDummy.checked = collider.dummyVisible === true;
+      const showDummy = document.createElement('select');
+      [['auto','Automatic (selected)'], ['show','Always'], ['hide','Hidden']].forEach(def => {
+        const option = document.createElement('option');
+        option.value = def[0];
+        option.textContent = def[1];
+        showDummy.appendChild(option);
+      });
+      showDummy.value = colliderDummyMode(collider);
       showDummy.disabled = !collider.enabled;
       showDummy.addEventListener('change', () => {
-        collider.dummyVisible = showDummy.checked;
+        collider.dummyVisibility = showDummy.value;
+        delete collider.dummyVisible;
         persist();
         syncViewport3D();
       });
-      sectionEl.appendChild(makeInspectorRow('Show dummy', showDummy));
+      sectionEl.appendChild(makeInspectorRow('Dummy visibility', showDummy));
       const shape = document.createElement('select');
       [['box','Box'], ['sphere','Sphere']].forEach(def => {
         const option = document.createElement('option');
@@ -3220,7 +3294,8 @@ function create(deps){
       if(!viewport || !viewport.THREE.TransformControls) return;
       const gizmo = new viewport.THREE.TransformControls(viewport.camera, viewport.renderer.domElement);
       viewport.gizmo = gizmo;
-      viewport.scene.add(gizmo);
+      viewport.gizmoHelper = typeof gizmo.getHelper === 'function' ? gizmo.getHelper() : gizmo;
+      viewport.scene.add(viewport.gizmoHelper);
       applyViewportGizmoSettings();
       gizmo.addEventListener('mouseDown', () => {
         viewport.gizmoDragging = true;
@@ -3639,6 +3714,7 @@ function create(deps){
         const group = new THREERef.Group();
         const bulb = new THREERef.Mesh(new THREERef.SphereGeometry(.16, 16, 8), viewportElementMaterial(element, {basic:true, helper:true}));
         const glow = new THREERef.PointLight(element && element.color || '#facc15', Math.max(0, Number(element && element.intensity) || .75), Math.max(0, Number(element && element.distance) || 4));
+        if(element && element.cinematicLensFlare) glow.userData.cinematicLensFlare = Object.assign({}, element.cinematicLensFlare);
         bulb.visible = element && element.dummyVisible === true;
         group.add(bulb, glow);
         node = group;
@@ -3753,7 +3829,12 @@ function create(deps){
       const old = node.children.find(child => child.userData && child.userData.logicElementColliderHelper);
       const collider = element && element.collider;
       const signature = collider && collider.enabled === true ? JSON.stringify(collider) : '';
-      if(old && node.userData.logicElementColliderSignature === signature) return;
+      const mode = colliderDummyMode(collider);
+      const visible = !!(ED && ED.showCollisionDummies === true) && (mode === 'show' || (mode === 'auto' && selectedSceneElementId() === element.id));
+      if(old && node.userData.logicElementColliderSignature === signature){
+        old.visible = visible;
+        return;
+      }
       if(old){
         node.remove(old);
         disposeViewportNode(old);
@@ -3782,7 +3863,7 @@ function create(deps){
       helper.userData.editorOnly = true;
       helper.userData.nonExportable = true;
       helper.userData.logicSceneElementId = element.id;
-      helper.visible = collider.dummyVisible === true;
+      helper.visible = visible;
       node.add(helper);
     }
 
@@ -3947,7 +4028,7 @@ function create(deps){
       viewport.mixers.clear();
       if(viewport.gizmo){
         viewport.gizmo.detach();
-        viewport.scene.remove(viewport.gizmo);
+        viewport.scene.remove(viewport.gizmoHelper || viewport.gizmo);
         if(viewport.gizmo.dispose) viewport.gizmo.dispose();
       }
       const viewportNodes = new Set(viewport.meshes.values());
@@ -5441,16 +5522,17 @@ function create(deps){
   }
 
   function buildSoccerPawnInspector(box, object, graph){
-    if(!graph || !graph.soccerPawn) return;
-    const sec = section(tr('SOCCER PAWN MODEL', 'MODELLO SOCCER PAWN'), false);
+    if(!graph || (!graph.soccerPawn && !graph.characterPawn)) return;
+    const genericCharacter = !!graph.characterPawn;
+    const sec = section(genericCharacter ? tr('CHARACTER PAWN MODEL', 'MODELLO CHARACTER PAWN') : tr('SOCCER PAWN MODEL', 'MODELLO SOCCER PAWN'), false);
     const modelElement = ensureSoccerCharacterElement(graph);
     const current = modelElement.asset || null;
     const currentId = current && String(current.id || current.key || current.dbKey || current.src || '');
     const compatibleAssets = assetLibraryLoad().filter(soccerModelCompatible);
 
     sec.body.appendChild(el('<div class="lk-hint">' + tr(
-      'Assign the humanoid GLB used by this Soccer Pawn. Imports are saved in Assets and applied to this selected Logic Element; animation-only GLBs stay in the Animation Library field below.',
-      'Assegna il GLB umanoide usato da questo Soccer Pawn. Gli import vengono salvati in Assets e applicati a questo Logic Element selezionato; i GLB solo animazioni restano nel campo Animation Library sotto.'
+      genericCharacter ? 'Assign the rigged humanoid GLB used by this Character Pawn. Use in-place locomotion clips without root motion; animation-only GLBs stay in the Animation Library field below.' : 'Assign the humanoid GLB used by this Soccer Pawn. Imports are saved in Assets and applied to this selected Logic Element; animation-only GLBs stay in the Animation Library field below.',
+      genericCharacter ? 'Assegna il GLB umanoide riggato usato da questo Character Pawn. Usa clip di locomozione in-place senza root motion; i GLB solo animazioni restano nel campo Animation Library sotto.' : 'Assegna il GLB umanoide usato da questo Soccer Pawn. Gli import vengono salvati in Assets e applicati a questo Logic Element selezionato; i GLB solo animazioni restano nel campo Animation Library sotto.'
     ) + '</div>'));
 
     const currentLine = current
@@ -5481,7 +5563,7 @@ function create(deps){
       markSoccerModelAsset(asset);
       saveElementGraph(object, graph);
       refreshAssetsPanel();
-      status(tr('Soccer character GLB assigned: ', 'GLB personaggio Soccer assegnato: ') + target.asset.name);
+      status((genericCharacter ? tr('Character GLB assigned: ', 'GLB personaggio assegnato: ') : tr('Soccer character GLB assigned: ', 'GLB personaggio Soccer assegnato: ')) + target.asset.name);
       rebuildInspector();
     };
 
@@ -5598,7 +5680,7 @@ function create(deps){
     }
     box.appendChild(mg.root);
 
-    if(graph.playerPawnBlueprint || graph.vehiclePawn || graph.soccerPawn){
+    if(graph.playerPawnBlueprint || graph.vehiclePawn || graph.soccerPawn || graph.characterPawn){
       const runtimeSection = section(tr('RUNTIME DIAGNOSTICS', 'DIAGNOSTICA RUNTIME'), false);
       const output = el('<pre class="lk-hint" style="white-space:pre-wrap;user-select:text;max-height:260px;overflow:auto"></pre>');
       runtimeSection.body.appendChild(output);
@@ -5657,7 +5739,7 @@ function create(deps){
         : null;
       const nativeLightDefaults = GAME.player && GAME.player.lights
         ? JSON.parse(JSON.stringify(GAME.player.lights))
-        : {enabled:true, dummies:{visible:true}, front:{enabled:true,count:2,color:0xfff7cc,intensity:1,distance:30,angle:.55}, rear:{enabled:true,color:0xff2020,baseIntensity:.4,brakeIntensity:1.6,reverseColor:0xf3f4ff,reverseIntensity:1.4}, neon:{enabled:true,layout:'all',colorA:0x22d3ee,colorB:0xa855f7,intensity:.8,animation:'static',speed:1}, aux:[]};
+        : {enabled:true, dummies:{visible:true}, front:{enabled:true,count:2,color:0xfff7cc,intensity:1,distance:30,angle:.55}, rear:{enabled:true,color:0xc91410,brakeColor:0xff2418,baseIntensity:.4,brakeIntensity:1.6,reverseColor:0xf3f4ff,reverseIntensity:1.4}, neon:{enabled:true,layout:'all',colorA:0x22d3ee,colorB:0xa855f7,intensity:.8,animation:'static',speed:1}, aux:[]};
       graph.vehiclePawn.lights = mergePawnConfig(nativeLightDefaults, graph.vehiclePawn.lights || {});
       const pawnNumber = (label, target, key, min, max, step) => {
         const row = el('<div class="lk-row"></div>');
@@ -5849,9 +5931,40 @@ function create(deps){
           object.traverse(node => { if(!found && node.userData && node.userData.logicElementSceneId === sceneId) found = node; });
           return found;
         };
+        const lightColorCss = value => {
+          if(typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) return value;
+          const numeric = Number(value);
+          return '#' + ('000000' + ((Number.isFinite(numeric) ? numeric : 0xffffff) >>> 0).toString(16)).slice(-6);
+        };
+        const setSceneLightColor = (ids, value) => {
+          const wanted = new Set(ids);
+          [graph.logicScene.root].concat(graph.logicScene.elements || []).forEach(element => {
+            if(element && wanted.has(element.id)) element.color = lightColorCss(value);
+          });
+        };
+        const syncAuthoredLightColors = patch => {
+          const front = patch && patch.front;
+          const rear = patch && patch.rear;
+          const neon = patch && patch.neon;
+          if(front && Object.prototype.hasOwnProperty.call(front, 'color')) setSceneLightColor(['headlight_left','headlight_right'], front.color);
+          if(rear && Object.prototype.hasOwnProperty.call(rear, 'color')) setSceneLightColor(['brake_left','brake_right'], rear.color);
+          if(rear && Object.prototype.hasOwnProperty.call(rear, 'brakeColor')) setSceneLightColor(['brake_left','brake_right'], rear.brakeColor);
+          if(rear && Object.prototype.hasOwnProperty.call(rear, 'reverseColor')) setSceneLightColor(['reverse_left','reverse_right'], rear.reverseColor);
+          if(neon && Object.prototype.hasOwnProperty.call(neon, 'colorA')) setSceneLightColor(['neon_left','neon_front'], neon.colorA);
+          if(neon && Object.prototype.hasOwnProperty.call(neon, 'colorB')) setSceneLightColor(['neon_right','neon_rear'], neon.colorB);
+          if(Array.isArray(patch && patch.aux)) patch.aux.forEach((aux, index) => {
+            if(aux && Object.prototype.hasOwnProperty.call(aux, 'color')) setSceneLightColor(['aux_light_' + index], aux.color);
+          });
+        };
         const lightsTarget = {
           lights:graph.vehiclePawn.lights,
-          setLights(patch){ mergePawnConfig(graph.vehiclePawn.lights, patch || {}); saveElementGraph(object, graph); },
+          setLights(patch){
+            mergePawnConfig(graph.vehiclePawn.lights, patch || {});
+            syncAuthoredLightColors(patch || {});
+            const livePawn = liveVehiclePawn();
+            if(livePawn && livePawn.setLights) livePawn.setLights(patch || {});
+            saveElementGraph(object, graph);
+          },
           findAnchor:findLogicAnchor,
           addLight(preset){
             const index = graph.vehiclePawn.lights.aux.length;
@@ -5881,7 +5994,7 @@ function create(deps){
           catch(err){ return JSON.parse(JSON.stringify(fallback)); }
         };
         graph.vehiclePawn.exhaust = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.exhaust, {enabled:true,dummyVisible:true,smoke:true,idleSmoke:true,intensity:1,smokeThrottle:.12,fire:true,fireRpm:.82,shiftFire:true,limiterFire:true,sources:[]}), graph.vehiclePawn.exhaust || {});
-        graph.vehiclePawn.skids = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.skids, {enabled:true,dummyVisible:true,width:.24,length:.7,opacity:.55,life:12,sources:[]}), graph.vehiclePawn.skids || {});
+        graph.vehiclePawn.skids = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.skids, {enabled:true,dummyVisible:true,width:.24,length:.7,opacity:.55,life:12,smokeModelVersion:3,smokeEnabled:true,smokeAmount:.28,smokeThreshold:.35,smokeMinHeat:.3,smokeHeatRate:.75,smokeCoolRate:.4,smokeOnDrift:true,smokeOnBrake:true,smokeOnAcceleration:true,sources:[]}), graph.vehiclePawn.skids || {});
         graph.vehiclePawn.dataWidgets = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.dataWidgets, {visibleInEditor:true,items:[]}), graph.vehiclePawn.dataWidgets || {});
         const findAttachmentAnchor = id => {
           const value = String(id || '');
@@ -5902,7 +6015,7 @@ function create(deps){
           setExhaust(patch){
             mergePawnConfig(graph.vehiclePawn.exhaust, patch || {});
             graph.vehiclePawn.effects.exhaustEnabled = graph.vehiclePawn.exhaust.enabled !== false;
-            graph.vehiclePawn.effects.smokeIntensity = Number(graph.vehiclePawn.exhaust.intensity) || 1;
+            graph.vehiclePawn.effects.smokeIntensity = graph.vehiclePawn.exhaust.intensity != null ? Math.max(0, Number(graph.vehiclePawn.exhaust.intensity) || 0) : 1;
             saveElementGraph(object, graph);
           },
           addExhaust(preset){
@@ -6057,6 +6170,16 @@ function create(deps){
             saveElementGraph(object, graph);
           },
           getModel(){ const scene = graph.logicScene || {}; return [scene.root].concat(scene.elements || []).some(item => item && item.asset); },
+          getModelShading(){ return graph.vehiclePawn.modelShading || 'original'; },
+          setModelShading(value){
+            const api = window.LK_RUNTIME_PLAYER_MODEL;
+            graph.vehiclePawn.modelShading = api && api.normalizeShadingMode ? api.normalizeShadingMode(value) : (value === 'smooth' || value === 'flat' ? value : 'original');
+            if(api && api.applyModelShading) api.applyModelShading(object, graph.vehiclePawn.modelShading, THREERef);
+            const livePawn = liveVehiclePawn();
+            if(livePawn && livePawn.config) livePawn.config.modelShading = graph.vehiclePawn.modelShading;
+            saveElementGraph(object, graph);
+            return graph.vehiclePawn.modelShading;
+          },
           modelAssets(){ return assetLibraryLoad().filter(asset => asset && asset.kind === 'glb'); },
           replaceModelWithAsset:replaceLogicVehicleModel,
           openModelPicker:openLogicVehicleModelPicker,

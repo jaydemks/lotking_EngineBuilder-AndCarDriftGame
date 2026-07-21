@@ -71,9 +71,49 @@ function create(opts){
     return null;
   }
 
+  function colliderHelperHit(){
+    const group = helperGroup();
+    if(!group) return null;
+    const hits = ray.intersectObject(group, true);
+    for(const hit of hits){
+      let node = hit.object;
+      let preview = null;
+      let owner = null;
+      let ref = null;
+      let playerCollider = false;
+      let logicElementCollider = false;
+      let logicVehicleCollider = false;
+      while(node){
+        const data = node.userData || {};
+        if(data.colliderPreview) preview = preview || node;
+        if(data.colliderOwner) owner = owner || data.colliderOwner;
+        if(data.colliderRef) ref = ref || data.colliderRef;
+        if(data.playerColliderPreview) playerCollider = true;
+        if(data.logicElementColliderPreview) logicElementCollider = true;
+        if(data.logicVehicleColliderPreview) logicVehicleCollider = true;
+        if(node === group) break;
+        node = node.parent;
+      }
+      if(!preview || !owner || !isEntityWorldVisible(preview)) continue;
+      return {
+        entity:owner,
+        point:hit.point,
+        distance:hit.distance,
+        collider:true,
+        playerCollider,
+        logicElementCollider,
+        logicVehicleCollider,
+        colliderPartIndex:ref && ref.compoundPart && Number.isInteger(ref.partIndex) ? ref.partIndex : null,
+      };
+    }
+    return null;
+  }
+
   function pickAt(clientX, clientY, pickOpts){
     if(!pointerToNdc(clientX, clientY)) return null;
     ray.setFromCamera(ptr, camera(clientX, clientY));
+    const colliderHit = colliderHelperHit();
+    if(colliderHit) return colliderHit;
     const hits = ray.intersectObjects(registry(), true);
     const candidates = [];
     const seen = new Set();

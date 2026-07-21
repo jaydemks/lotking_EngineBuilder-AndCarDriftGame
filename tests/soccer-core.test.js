@@ -16,6 +16,8 @@ require('../js/runtime/vehicle-physics-backends.js');
 require('../js/runtime/vehicle-pawns.js');
 require('../js/runtime/character-movement.js');
 require('../js/runtime/soccer-locomotion.js');
+require('../js/runtime/character-pawn-base.js');
+require('../js/runtime/character-pawns.js');
 require('../js/runtime/soccer-pawns.js');
 require('../js/runtime/soccer-ball.js');
 require('../js/runtime/penalty-flow.js');

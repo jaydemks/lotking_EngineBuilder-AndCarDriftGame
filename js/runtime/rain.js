@@ -1,7 +1,7 @@
 /* =========================================================
    LOT KING - rain runtime module (environment weather)
-   Pioggia GPU: LineSegments con caduta calcolata interamente
-   nel vertex shader (wrap 3D attorno al target), quindi zero
+   Pioggia GPU: ribbon instanziati con caduta calcolata interamente
+   nel vertex shader (wrap 3D attorno al target), quindi minimo
    costo CPU per goccia. Parametri live per l'editor:
    intensita', velocita', vento, lunghezza, area, opacita'.
    ========================================================= */
@@ -16,6 +16,7 @@ const DEFAULTS = {
   intensity: .5,      // 0..1 → numero di gocce attive
   speed: 55,          // m/s di caduta
   length: .55,        // lunghezza della scia (m)
+  width: .035,        // spessore visibile della goccia (m)
   wind: .25,          // inclinazione laterale 0..1.5
   windAngle: 25,      // direzione del vento (gradi)
   area: 70,           // raggio della zona di pioggia attorno al target (m)
@@ -26,25 +27,36 @@ const DEFAULTS = {
 
 const VERT = `
 attribute vec3 aSeed;
-attribute float aTip;
-uniform float uFall, uArea, uHeight, uLen;
+uniform float uFall, uArea, uHeight, uLen, uWidth;
 uniform vec2 uWind;
 uniform vec3 uCenter;
 varying float vFade;
+varying float vSide;
 float wrap(float s, float c){
   return c + (s * 2.0 - 1.0) * uArea;
 }
 void main(){
-  float y = mod(aSeed.y * uHeight * 7.0 - uFall, uHeight);
+  float y = mod(aSeed.y * uHeight * 7.0 - uFall * (.84 + aSeed.z * .32), uHeight);
   vec3 dir = normalize(vec3(uWind.x, -1.0, uWind.y));
   vec3 p = vec3(
     wrap(aSeed.x, uCenter.x) + dir.x * y,
     uCenter.y + y,
     wrap(aSeed.z, uCenter.z) + dir.z * y
   );
-  p += dir * (uLen * aTip);
-  vFade = 1.0 - aTip * .75;                       // coda piu' tenue della testa
-  vFade *= smoothstep(0.0, 2.5, y);               // sfuma vicino a terra
+  float tip = position.y;
+  float cameraDistance = length(cameraPosition - p);
+  vec3 side = cross(dir, normalize(cameraPosition - p));
+  if(length(side) < .001) side = vec3(1.0, 0.0, 0.0);
+  else side = normalize(side);
+  float distanceWidth = clamp(cameraDistance / 16.0, 1.0, 3.0);
+  p -= dir * (uLen * (.72 + aSeed.x * .56) * tip);
+  p += side * (uWidth * .5 * distanceWidth * position.x);
+  float radial = length(p.xz - uCenter.xz) / max(uArea, 1.0);
+  vFade = mix(1.0, .3, tip);                       // coda piu' tenue della testa
+  vFade *= smoothstep(0.0, 2.5, y);                // sfuma vicino a terra
+  vFade *= 1.0 - smoothstep(.72, 1.12, radial);    // bordo del volume invisibile
+  vFade *= smoothstep(.15, 1.2, cameraDistance);   // niente tagli sulla camera
+  vSide = position.x;
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }`;
 
@@ -52,8 +64,12 @@ const FRAG = `
 uniform vec3 uColor;
 uniform float uOpacity;
 varying float vFade;
+varying float vSide;
 void main(){
-  gl_FragColor = vec4(uColor, uOpacity * vFade);
+  float edge = 1.0 - smoothstep(.45, 1.0, abs(vSide));
+  float alpha = uOpacity * vFade * edge;
+  if(alpha < .004) discard;
+  gl_FragColor = vec4(uColor, alpha);
 }`;
 
 function create(deps){
@@ -62,27 +78,26 @@ function create(deps){
   const P = Object.assign({}, DEFAULTS);
   let fall = 0;
 
-  const geo = new THREE.BufferGeometry();
-  const pos = new Float32Array(MAX_DROPS * 2 * 3);   // dummy, la posizione vera e' nello shader
-  const seed = new Float32Array(MAX_DROPS * 2 * 3);
-  const tip = new Float32Array(MAX_DROPS * 2);
+  const geo = new THREE.InstancedBufferGeometry();
+  // Due triangoli per goccia. position.x e' il lato del ribbon e position.y
+  // distingue testa/coda; la posizione nel mondo viene costruita nello shader.
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    -1,0,0,  1,0,0,  1,1,0,
+    -1,0,0,  1,1,0, -1,1,0,
+  ]), 3));
+  const seed = new Float32Array(MAX_DROPS * 3);
   for(let i = 0; i < MAX_DROPS; i++){
     const sx = Math.random(), sy = Math.random(), sz = Math.random();
-    for(const k of [0, 1]){
-      const v = i * 2 + k;
-      seed[v * 3] = sx; seed[v * 3 + 1] = sy; seed[v * 3 + 2] = sz;
-      tip[v] = k;
-    }
+    seed[i * 3] = sx; seed[i * 3 + 1] = sy; seed[i * 3 + 2] = sz;
   }
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 3));
-  geo.setAttribute('aTip', new THREE.BufferAttribute(tip, 1));
+  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 3));
 
   const uniforms = {
     uFall:    {value: 0},
     uArea:    {value: P.area},
     uHeight:  {value: P.height},
     uLen:     {value: P.length},
+    uWidth:   {value: P.width},
     uWind:    {value: new THREE.Vector2(0, 0)},
     uCenter:  {value: new THREE.Vector3()},
     uColor:   {value: new THREE.Color(0xbdd2e8)},
@@ -94,19 +109,23 @@ function create(deps){
     uniforms,
     transparent: true,
     depthWrite: false,
+    depthTest: true,
     fog: false,
+    side: THREE.DoubleSide,
   });
-  const lines = new THREE.LineSegments(geo, mat);
-  lines.frustumCulled = false;
-  lines.renderOrder = 54;
-  lines.visible = P.enabled;
-  lines.onBeforeRender = (rnd, scn, camera) => {
+  const rainMesh = new THREE.Mesh(geo, mat);
+  rainMesh.name = 'LK_GPU_Rain';
+  rainMesh.userData.lkSkipSsrOverride = true;
+  rainMesh.frustumCulled = false;
+  rainMesh.renderOrder = 54;
+  rainMesh.visible = P.enabled;
+  rainMesh.onBeforeRender = (rnd, scn, camera) => {
     if(!camera || !camera.getWorldPosition) return;
     camera.getWorldPosition(_cameraPosition);
     uniforms.uCenter.value.x = _cameraPosition.x;
     uniforms.uCenter.value.z = _cameraPosition.z;
   };
-  scene.add(lines);
+  scene.add(rainMesh);
   const _cameraPosition = new THREE.Vector3();
 
   function normalizeParams(){
@@ -114,6 +133,7 @@ function create(deps){
     P.intensity = clamp(Number(P.intensity) || 0, 0, 1);
     P.speed = clamp(Number(P.speed) || DEFAULTS.speed, 5, 200);
     P.length = clamp(Number(P.length) || DEFAULTS.length, .05, 3);
+    P.width = clamp(Number(P.width) || DEFAULTS.width, .008, .12);
     P.wind = clamp(Number(P.wind) || 0, 0, 1.5);
     P.windAngle = ((Number(P.windAngle) || 0) % 360 + 360) % 360;
     P.area = clamp(Number(P.area) || DEFAULTS.area, 20, 200);
@@ -127,12 +147,13 @@ function create(deps){
     uniforms.uArea.value = clamp(P.area, 20, 200);
     uniforms.uHeight.value = clamp(P.height, 10, 120);
     uniforms.uLen.value = clamp(P.length, .05, 3);
+    uniforms.uWidth.value = clamp(P.width, .008, .12);
     uniforms.uOpacity.value = clamp(P.opacity, 0, 1);
     const a = (P.windAngle || 0) * Math.PI / 180;
     uniforms.uWind.value.set(Math.cos(a), Math.sin(a)).multiplyScalar(clamp(P.wind, 0, 1.5));
     const drops = Math.round(clamp(P.intensity, 0, 1) * MAX_DROPS);
-    geo.setDrawRange(0, drops * 2);
-    lines.visible = !!P.enabled && drops > 0 && P.opacity > 0;
+    geo.instanceCount = drops;
+    rainMesh.visible = !!P.enabled && drops > 0 && P.opacity > 0;
     updateSound();
   }
 
@@ -172,7 +193,7 @@ function create(deps){
     return true;
   }
   function updateSound(){
-    const on = !!P.enabled && lines.visible;
+    const on = !!P.enabled && rainMesh.visible;
     const target = (on ? 1 : 0) * clamp(P.sound == null ? .6 : P.sound, 0, 1) * (.25 + .75 * clamp(P.intensity, 0, 1)) * .5;
     if(!SND.ready && (target <= 0 || !ensureSound())) return;
     if(Math.abs(target - SND.cur) < .003) return;
@@ -186,7 +207,7 @@ function create(deps){
   return {
     update(dt, target){
       updateSound();   // riprova finche' l'AudioContext non e' pronto (gesto utente)
-      if(!lines.visible) return;
+      if(!rainMesh.visible) return;
       fall += dt * clamp(P.speed, 5, 200);
       uniforms.uFall.value = fall;
       if(target) uniforms.uCenter.value.copy(target);
@@ -196,9 +217,9 @@ function create(deps){
       Object.assign(P, patch || {});
       applyParams();
     },
-    isEnabled: () => lines.visible,
+    isEnabled: () => rainMesh.visible,
     defaults: () => Object.assign({}, DEFAULTS),
-    mesh: lines,
+    mesh: rainMesh,
   };
 }
 

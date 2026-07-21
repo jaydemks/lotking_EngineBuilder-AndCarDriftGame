@@ -216,7 +216,7 @@ function create(deps){
       if(GAME.systems && GAME.systems.physics) GAME.systems.physics.syncPlayer();
       STORE.syncCollider(o);
       if(deps.markDirty) deps.markDirty();
-      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
     };
     const row = deps.el('<div class="lk-vec"><label>' + tr('Position', 'Posizione') + '</label></div>');
     const ins = [];
@@ -267,7 +267,7 @@ function create(deps){
     const setCollision = patch => {
       if(GAME.player.setCollision) GAME.player.setCollision(patch);
       Object.assign(collision, patch || {});
-      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
       if(deps.markDirty) deps.markDirty();
     };
     let playerColliderBefore = null;
@@ -282,7 +282,7 @@ function create(deps){
       Object.assign(collision, JSON.parse(JSON.stringify(snapshot.collision || {})));
       if(snapshot.dummyVisibility === 'show' || snapshot.dummyVisibility === 'hide') o.userData.colliderDummyVisibility = snapshot.dummyVisibility;
       else delete o.userData.colliderDummyVisibility;
-      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
       buildInspector();
       if(deps.markDirty) deps.markDirty();
     };
@@ -313,7 +313,7 @@ function create(deps){
       const mode = dummyVisibilitySelect.value === 'show' || dummyVisibilitySelect.value === 'hide' ? dummyVisibilitySelect.value : 'auto';
       if(mode === 'auto') delete o.userData.colliderDummyVisibility;
       else o.userData.colliderDummyVisibility = mode;
-      if(deps.updateSelectionAndDropHelpers) deps.updateSelectionAndDropHelpers();
+      if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
       if(deps.markDirty) deps.markDirty();
       commitPlayerColliderHistory();
     });

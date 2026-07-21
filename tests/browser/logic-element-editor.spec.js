@@ -1,6 +1,8 @@
 'use strict';
 
 const {test, expect} = require('@playwright/test');
+const fs = require('node:fs');
+const JSZip = require('jszip');
 
 async function closeStartupOverlays(page){
   await page.evaluate(() => {
@@ -15,7 +17,7 @@ async function closeStartupOverlays(page){
   });
 }
 
-async function canvasRenderSummary(canvas, testInfo, name){
+async function canvasRenderSummary(page, canvas, testInfo, name){
   const info = await canvas.evaluate(node => {
     const width = Math.max(1, node.width);
     const height = Math.max(1, node.height);
@@ -28,23 +30,55 @@ async function canvasRenderSummary(canvas, testInfo, name){
       rectHeight:rect.height,
     };
   });
-  const shot = await canvas.screenshot({path:testInfo.outputPath(name + '.png')});
+  // The runtime canvas is continuously animated, so Locator.screenshot can
+  // wait forever for DOM stability. Capture its current clip from the page.
+  const box = await canvas.boundingBox();
+  const shot = await page.screenshot({path:testInfo.outputPath(name + '.png'), clip:box, animations:'disabled'});
   return Object.assign(info, {screenshotBytes:shot.length});
 }
 
+async function openInspectorSection(page, name){
+  const section = page.locator('#lkInspector .lk-sec', {has:page.locator('.lk-sec-h', {hasText:new RegExp('^' + name + '$')})}).first();
+  await expect(section).toBeVisible();
+  if(await section.evaluate(node => node.classList.contains('closed'))) await section.locator('.lk-sec-h').click();
+  return section;
+}
+
 async function addLogicElement(page){
-  await page.locator('#lkAddMenu').click();
-  const logicMenu = page.locator('#lkCtx .lk-menu-item', {hasText:'Logic'}).first();
-  await expect(logicMenu).toBeVisible();
-  await logicMenu.hover();
-  await page.locator('#lkCtx .lk-submenu .lk-menu-item', {hasText:'Logic Element'}).click();
+  if(page.viewportSize() && page.viewportSize().width < 700){
+    await page.evaluate(() => {
+      document.querySelector('#lkAddMenu')?.click();
+      const item = Array.from(document.querySelectorAll('#lkCtx .lk-submenu .lk-menu-item'))
+        .find(node => node.textContent.includes('Logic Element'));
+      if(!item) throw new Error('Logic Element add action unavailable');
+      item.click();
+    });
+  } else {
+    await page.locator('#lkAddMenu').click();
+    const logicMenu = page.locator('#lkCtx .lk-menu-item', {hasText:'Logic'}).first();
+    await expect(logicMenu).toBeVisible();
+    await logicMenu.hover();
+    await page.locator('#lkCtx .lk-submenu .lk-menu-item', {hasText:'Logic Element'}).click();
+  }
   const item = page.locator('#lkOutliner .lk-item', {hasText:'Logic Element'}).last();
   await expect(item).toBeVisible();
-  await item.click();
+  await expect(item).toHaveClass(/\bsel\b/);
+  await openInspectorSection(page, 'LOGIC ELEMENT');
   await expect(page.getByRole('button', {name:/Open Logic Editor/i})).toBeVisible();
 }
 
 test.beforeEach(async ({page}) => {
+  // Authoring panels require a compact tablet/desktop workspace. Keep the
+  // mobile project's touch/UA emulation while giving the editor its minimum UI.
+  if(page.viewportSize() && page.viewportSize().width < 700){
+    await page.setViewportSize({width:1180, height:800});
+  }
+  page.on('pageerror', error => console.error('[browser pageerror]', error.message));
+  page.on('console', message => { if(message.type() === 'error') console.error('[browser console]', message.text()); });
+  // These editor interaction tests exercise procedural fallbacks and authoring
+  // state, not the bundled multi-megabyte demo models. Avoid repeated GLB
+  // download/parse work so timing reflects editor regressions, not I/O.
+  await page.route(/\/models\/(?:player|car1|car2|cone)\.glb(?:\?.*)?$/, route => route.fulfill({status:404, body:''}));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({mode:'browser', onlineEditor:true, workspaceReady:true}));
@@ -67,7 +101,7 @@ test('Logic Element Graph and Viewport remain usable', async ({page}, testInfo) 
   page.on('pageerror', error => pageErrors.push(error.message));
 
   const mainCanvas = page.locator('#c');
-  const mainCanvasInfo = await canvasRenderSummary(mainCanvas, testInfo, 'main-canvas');
+  const mainCanvasInfo = await canvasRenderSummary(page, mainCanvas, testInfo, 'main-canvas');
   expect(mainCanvasInfo.ok).toBe(true);
   expect(mainCanvasInfo.width).toBeGreaterThan(100);
   expect(mainCanvasInfo.height).toBeGreaterThan(100);
@@ -107,8 +141,10 @@ test('Logic Element Graph and Viewport remain usable', async ({page}, testInfo) 
   const internalCanvas = page.locator('.lk-le-viewport-mount canvas');
   await expect(internalCanvas).toBeVisible();
   await expect(page.locator('.lk-le-components-list')).toContainText('Root');
+  await page.locator('.lk-le-component.is-root').click();
+  await expect(page.locator('.lk-le-viewport-card')).toContainText('Selected:');
   await page.waitForTimeout(500);
-  const internalCanvasInfo = await canvasRenderSummary(internalCanvas, testInfo, 'logic-viewport-canvas');
+  const internalCanvasInfo = await canvasRenderSummary(page, internalCanvas, testInfo, 'logic-viewport-canvas');
   expect(internalCanvasInfo.ok).toBe(true);
   expect(internalCanvasInfo.width).toBeGreaterThan(100);
   expect(internalCanvasInfo.height).toBeGreaterThan(100);
@@ -141,10 +177,10 @@ test('Logic Graph Delete key does not delete the selected scene Logic Element', 
 
   const selectedAfter = await page.evaluate(() => {
     const selected = window.LOT_KING.editor.state.selected;
-    const sceneEntry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const sceneEntry = selected && selected.userData && selected.userData.addedEntry;
     return {
       selectedType:selected && selected.userData && selected.userData.editorType,
-      sceneLogicCount:window.LK_STORE.scene.added.filter(item => item && item.kind === 'logicElement').length,
+      sceneLogicCount:window.LOT_KING.world.registry.filter(item => item && item.userData && item.userData.editorType === 'logicElement').length,
       nodeCount:sceneEntry && sceneEntry.graph && sceneEntry.graph.nodes && sceneEntry.graph.nodes.length,
     };
   });
@@ -164,17 +200,27 @@ test('Logic Element scene sidebar, primitive root and text elements are authorab
   await page.locator('.lk-le-tabs [data-tab="viewport"]').click();
   await page.locator('.lk-le-component.is-root').click();
   const inspector = page.locator('.lk-le-inspector');
-  await inspector.locator('.lk-le-inspector-row', {hasText:'Type'}).locator('select').selectOption('mesh');
-  await inspector.locator('.lk-le-inspector-row', {hasText:'Mesh Type'}).locator('select').selectOption('primitive:sphere');
+  await inspector.getByRole('combobox', {name:'Type', exact:true}).selectOption('mesh');
+  await inspector.getByRole('combobox', {name:'Mesh Type', exact:true}).selectOption('primitive:sphere');
+  await expect(inspector.getByRole('combobox', {name:'Mesh Type', exact:true})).toHaveValue('primitive:sphere');
+  await expect.poll(() => page.evaluate(() => {
+    const selected = window.LOT_KING.editor.state.selected;
+    return selected && selected.userData && selected.userData.addedEntry && selected.userData.addedEntry.graph.logicScene.root.primitive;
+  })).toBe('sphere');
 
   await inspector.locator('.lk-le-inspector-btn', {hasText:'Add text'}).click();
   await expect(page.locator('.lk-le-component', {hasText:'Text 1'})).toBeVisible();
-  await inspector.locator('.lk-le-inspector-row', {hasText:'Text'}).locator('input').fill('Checkpoint');
-  await inspector.locator('.lk-le-inspector-row', {hasText:'Text'}).locator('input').blur();
-  await inspector.locator('.lk-le-inspector-row', {hasText:'Text Mode'}).locator('select').selectOption('billboard');
+  await expect.poll(() => page.evaluate(() => {
+    const selected = window.LOT_KING.editor.state.selected;
+    return selected && selected.userData && selected.userData.addedEntry && selected.userData.addedEntry.graph.logicScene.root.primitive;
+  })).toBe('sphere');
+  await inspector.getByRole('textbox', {name:'Text', exact:true}).fill('Checkpoint');
+  await inspector.getByRole('textbox', {name:'Text', exact:true}).blur();
+  await inspector.getByRole('combobox', {name:'Text Mode', exact:true}).selectOption('billboard');
 
   const state = await page.evaluate(() => {
-    const entry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
     const scene = entry && entry.graph && entry.graph.logicScene;
     const text = scene && scene.elements && scene.elements.find(item => item && item.type === 'text');
     return scene ? {
@@ -208,11 +254,18 @@ test('Logic Element Functions expose I/O metadata and create Call Subgraph nodes
   await page.locator('.lk-lg-subgraph', {hasText:'Function 1'}).click();
   await expect(page.locator('.lk-le-inspector-title')).toHaveText('Function');
   await page.locator('.lk-le-inspector-btn', {hasText:'Add input'}).click();
+  await expect.poll(() => page.evaluate(() => {
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
+    return entry && entry.graph && entry.graph.subgraphs && entry.graph.subgraphs[0] && entry.graph.subgraphs[0].inputs.length;
+  })).toBe(1);
+  await expect(page.locator('.lk-le-function-port')).toHaveCount(1);
   await page.locator('.lk-le-inspector-btn', {hasText:'Add output'}).click();
   await expect(page.locator('.lk-le-function-port')).toHaveCount(2);
 
   const functionState = await page.evaluate(() => {
-    const entry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
     const graph = entry && entry.graph;
     const subgraph = graph && graph.subgraphs && graph.subgraphs[0];
     return subgraph ? {
@@ -234,7 +287,8 @@ test('Logic Element Functions expose I/O metadata and create Call Subgraph nodes
   await expect(page.locator('.lk-lg-node', {hasText:'Function: Function 1'})).toBeVisible();
 
   const callState = await page.evaluate(() => {
-    const entry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
     const call = entry && entry.graph && entry.graph.nodes.find(node => node.type === 'flow.callSubgraph');
     return call ? {
       type:call.type,
@@ -282,20 +336,24 @@ test('Logic Element dependency inspector can relink and pick asset references', 
   await expect(page.locator('.lk-le-dependencies')).toContainText('E2E Panel Texture');
 
   await expect.poll(async () => page.evaluate(() => {
-    const entry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
     const node = entry && entry.graph && entry.graph.nodes.find(item => item.id === 'e2e_texture_node');
     return node && node.data && node.data.textureRef && node.data.textureRef.id;
   })).toBe('e2e-texture-asset');
 
-  await page.locator('.lk-lg-node', {hasText:'Play Sound'}).first().click();
-  const soundField = page.locator('.lk-le-asset-ref-field').first();
+  await page.locator('.lk-lg-node[data-id="e2e_sound_node"]').click();
+  const logicInspector = page.locator('.lk-logic-modal-panel .lk-le-inspector');
+  await expect(logicInspector.locator('.lk-le-inspector-title')).toHaveText('Play Sound');
+  const soundField = logicInspector.locator('.lk-le-asset-ref-field').first();
   await expect(soundField).toBeVisible();
   await expect(soundField.locator('select')).toContainText('E2E Beep Audio');
   await soundField.locator('select').selectOption('e2e-audio-asset');
   await expect(soundField.locator('input')).toHaveValue('E2E Beep Audio');
 
   await expect.poll(async () => page.evaluate(() => {
-    const entry = window.LK_STORE.scene.added.find(item => item && item.kind === 'logicElement');
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
     const node = entry && entry.graph && entry.graph.nodes.find(item => item.id === 'e2e_sound_node');
     return node && node.data && node.data.soundRef && node.data.soundRef.id;
   })).toBe('e2e-audio-asset');
@@ -318,6 +376,7 @@ test('Logic Element templates can be placed from Assets as editable local copies
   const item = page.locator('#lkOutliner .lk-item', {hasText:'Template - Rotating Cube'}).last();
   await expect(item).toBeVisible();
   await item.click();
+  await openInspectorSection(page, 'LOGIC ELEMENT');
   await expect(page.getByRole('button', {name:/Open Logic Editor/i})).toBeVisible();
   await page.getByRole('button', {name:/Open Logic Editor/i}).click();
 
@@ -331,12 +390,13 @@ test('Logic Element templates can be placed from Assets as editable local copies
   await page.locator('.lk-le-tabs [data-tab="viewport"]').click();
   await expect(page.locator('.lk-le-components-list')).toContainText('Default Mesh');
   await expect(page.locator('.lk-lg-vars-list')).toContainText('speedY');
+  await page.locator('.lk-logic-modal-head button[title="Close"]').click();
+  await expect(modal).not.toBeVisible();
 
   const selected = await page.evaluate(() => {
-    const store = window.LK_STORE;
     const editor = window.LOT_KING.editor;
-    const selectedId = editor && editor.state && editor.state.selected && editor.state.selected.userData && editor.state.selected.userData.editorId;
-    const entry = selectedId && store.scene.added.find(item => item.id === selectedId);
+    const object = editor && editor.state && editor.state.selected;
+    const entry = object && object.userData && object.userData.addedEntry;
     return entry ? {
       linked:entry.logicLinked === true,
       assetSource:entry.asset && entry.asset.source,
@@ -353,7 +413,7 @@ test('Logic Element templates can be placed from Assets as editable local copies
 
   const roundTrip = await page.evaluate(() => {
     const store = window.LK_STORE;
-    const project = store.exportProject(store.scene, {trackId:'logic-e2e', trackName:'Logic E2E'});
+    const project = store.exportProject(store.collect(window.LOT_KING), {trackId:'logic-e2e', trackName:'Logic E2E'});
     const text = JSON.stringify(project);
     const parsed = store.parseProject(text);
     const exportedEntry = parsed.scene.added.find(item => item && item.kind === 'logicElement' && item.name === 'Template - Rotating Cube');
@@ -368,7 +428,10 @@ test('Logic Element templates can be placed from Assets as editable local copies
       nodeCount:entry.graph && entry.graph.nodes && entry.graph.nodes.length,
       commentCount:entry.graph && entry.graph.comments && entry.graph.comments.length,
       hasLogicScene:!!(entry.graph && entry.graph.logicScene && Array.isArray(entry.graph.logicScene.elements)),
-      hasDefaultMesh:!!(entry.graph && entry.graph.logicScene && entry.graph.logicScene.elements && entry.graph.logicScene.elements.some(element => element && element.name === 'Default Mesh')),
+      hasDefaultMesh:!!(entry.graph && entry.graph.logicScene && (
+        entry.graph.logicScene.root && entry.graph.logicScene.root.name === 'Default Mesh' ||
+        entry.graph.logicScene.elements && entry.graph.logicScene.elements.some(element => element && element.name === 'Default Mesh')
+      )),
       assetId:entry.logicAssetId || null,
     } : null;
     return {
@@ -397,7 +460,11 @@ test('Logic Element templates can be placed from Assets as editable local copies
     window.LOT_KING.editor.state.playPreview = true;
     window.LOT_KING.editor.state.playPreviewMode = 'play';
   });
-  await expect(page.locator('#popup')).toContainText('Rotating Cube started', {timeout:10000});
+  await expect.poll(() => page.evaluate(() => {
+    const owner = window.LOT_KING.world.registry.find(object => object && object.userData && object.userData.addedEntry && object.userData.addedEntry.name === 'Template - Rotating Cube');
+    const mesh = owner && owner.getObjectByName && owner.getObjectByName('Default Mesh');
+    return !!(mesh && Math.abs(mesh.rotation.y) > .001);
+  })).toBe(true);
   await expect.poll(async () => page.evaluate(() => window.LOT_KING.editor.state.playPreview === true)).toBe(true);
   await page.locator('[data-app-menu="plugins"]').click();
   await page.locator('#lkCtx .lk-menu-item', {hasText:'Logic Profiler'}).first().click();
@@ -411,6 +478,33 @@ test('Logic Element templates can be placed from Assets as editable local copies
   });
   await expect(page.locator('#lkPlay')).toContainText('PREVIEW', {timeout:10000});
   await expect.poll(async () => page.evaluate(() => window.LOT_KING.editor.state.playPreview === false)).toBe(true);
+  expect(pageErrors).toEqual([]);
+});
+
+test('Normal Character template is available as an editable Pawn asset', async ({page}) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+
+  await page.evaluate(() => {
+    window.LOT_KING.editor.setLeftMode('assets');
+    window.LOT_KING.editor.refreshAssetsPanel();
+  });
+  const templateCard = page.locator('#lkAssetsPanel .lk-asset-item', {hasText:'Template - Player Character (Normal)'}).first();
+  await expect(templateCard).toBeVisible();
+  await expect(templateCard).toContainText('Character Logic');
+  await templateCard.locator('.lk-asset-actions button', {hasText:'+'}).click();
+
+  await expect.poll(() => page.evaluate(() => {
+    const selected = window.LOT_KING.editor.state.selected;
+    const entry = selected && selected.userData && selected.userData.addedEntry;
+    if(!entry) return null;
+    const animation = entry.graph.variables.find(variable => variable.binding === 'animations.walk');
+    return {
+      preset:entry.graph.characterPawn.preset,
+      hasMoveNode:entry.graph.nodes.some(node => node.type === 'character.setMoveInput'),
+      walkHelp:animation && animation.description || '',
+    };
+  })).toEqual({preset:'normal', hasMoveNode:true, walkHelp:expect.stringMatching(/in-place.*root motion/i)});
   expect(pageErrors).toEqual([]);
 });
 
@@ -530,9 +624,11 @@ test('linked Logic Element instances can reset overrides and become local', asyn
   const item = page.locator('#lkOutliner .lk-item', {hasText:'E2E Override Counter'}).last();
   await expect(item).toBeVisible();
   await item.click();
-  await expect(page.locator('.lk-sec', {hasText:'LOGIC ELEMENT'})).toContainText('Linked asset: E2E Override Counter');
+  const logicSection = await openInspectorSection(page, 'LOGIC ELEMENT');
+  await expect(logicSection).toContainText('Linked asset: E2E Override Counter');
+  const generalSection = await openInspectorSection(page, 'GENERAL');
 
-  const secondsInput = page.locator('.lk-sec', {hasText:'EXPOSED VARIABLES'}).locator('.lk-row', {hasText:'secondsAlive'}).locator('input');
+  const secondsInput = generalSection.locator('.lk-row', {hasText:'Seconds Alive'}).locator('input');
   await expect(secondsInput).toBeVisible();
   await secondsInput.fill('42');
   await secondsInput.blur();
@@ -554,6 +650,7 @@ test('linked Logic Element instances can reset overrides and become local', asyn
     };
   })).toEqual({overrides:0, value:0, linked:true});
 
+  await openInspectorSection(page, 'GENERAL');
   await secondsInput.fill('7');
   await secondsInput.blur();
   await page.getByRole('button', {name:/Make local/i}).click();
@@ -596,6 +693,10 @@ test('Vehicle Pawn persistence, IndexedDB assets, migration and playable bundle 
     graph.logicScene = {root:null,elements:[],components:[]};
     graph.logicScene.root = {id:'root',name:'Vehicle Root',type:'mesh',asset:{dbKey:blobKey,name:'Embedded Vehicle'},position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],linked:true};
     graph.vehiclePawn.wheels = [0,1,2,3].map(index => ({x:index%2?.9:-.9,y:.17,z:index<2?1.3:-1.3,front:index<2,driven:index>=2,visualId:'wheel-' + index}));
+    graph.vehiclePawn.lights = {
+      front:{flare:true,flareIntensity:.73,flareSize:.61,flareBloomIntensity:1.17,flareOcclusion:false},
+      rear:{flare:true,flareIntensity:.39,flareSize:.47,flareBloomIntensity:.84,flareOcclusion:true},
+    };
     const scene = store.blank();
     scene.added.push({id:'vehicle_e2e',kind:'logicElement',name:'Vehicle E2E',graph,enabled:true,runInEditorPreview:true,props:{roughness:.22,metalness:.8},meshEdits:{deleted:['body-old'],detached:[],transforms:{wheel_custom:{p:[1,0,0],r:[0,0,0],s:[1,1,1]}},properties:{},splits:{},joins:[]},asset:{key:'logic:e2e',name:'Vehicle E2E'},t:{p:[1,.15,2],r:[0,.2,0],s:[1,1,1],v:true}});
     store.save(scene, {trackId:'vehicle-persistence-e2e',trackName:'Vehicle Persistence E2E'});
@@ -610,6 +711,8 @@ test('Vehicle Pawn persistence, IndexedDB assets, migration and playable bundle 
       blobText,
       savedWheelCount:savedEntry.graph.vehiclePawn.wheels.length,
       savedSpawn:savedEntry.graph.vehiclePawn.spawn,
+      savedFrontFlare:savedEntry.graph.vehiclePawn.lights.front,
+      playableRearFlare:playableEntry.graph.vehiclePawn.lights.rear,
       migration:savedEntry.graph.vehiclePawn.migration,
       legacyRetained:!!savedEntry.graph.playerPawnBlueprint,
       bundleFormat:bundle.format,
@@ -623,6 +726,8 @@ test('Vehicle Pawn persistence, IndexedDB assets, migration and playable bundle 
   expect(result.blobText).toBe('vehicle-asset');
   expect(result.savedWheelCount).toBe(4);
   expect(result.savedSpawn).toEqual({x:4,y:0,z:9,heading:.5});
+  expect(result.savedFrontFlare).toMatchObject({flare:true,flareIntensity:.73,flareSize:.61,flareBloomIntensity:1.17,flareOcclusion:false});
+  expect(result.playableRearFlare).toMatchObject({flare:true,flareIntensity:.39,flareSize:.47,flareBloomIntensity:.84,flareOcclusion:true});
   expect(result.migration.legacyBlueprint).toBe(true);
   expect(result.legacyRetained).toBe(true);
   expect(result.bundleFormat).toBe('LKPKG');
@@ -633,7 +738,7 @@ test('Vehicle Pawn persistence, IndexedDB assets, migration and playable bundle 
   expect(result.meshTransform).toEqual([1,0,0]);
 });
 
-test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({page}) => {
+test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({page}, testInfo) => {
   test.setTimeout(240000);
   const runtime = await page.evaluate(async () => {
     const game = window.LOT_KING;
@@ -670,6 +775,17 @@ test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({pag
   const stream = await download.createReadStream();
   let bytes=0; for await(const chunk of stream) bytes+=chunk.length;
   expect(bytes).toBeGreaterThan(100000);
+  const zipPath = testInfo.outputPath('playable-r185.zip');
+  await download.saveAs(zipPath);
+  const zip = await JSZip.loadAsync(fs.readFileSync(zipPath));
+  expect(zip.file('vendor/three-r185-compat.min.js')).toBeTruthy();
+  expect(zip.file('vendor/cannon-0.6.2.min.js')).toBeTruthy();
+  expect(zip.file('vendor/helvetiker_regular.typeface.json')).toBeTruthy();
+  expect(zip.file('vendor/THIRD_PARTY_LICENSES.md')).toBeTruthy();
+  expect(zip.file('vendor/GLTFLoader.js')).toBeNull();
+  const runtimeHtml = await zip.file('gameplay.html').async('string');
+  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk2');
+  expect(runtimeHtml).not.toMatch(/three@0\.128\.0|three\.js\/r128|examples\/js\//);
 });
 
 test('Logic Player Car owns P1 without native overlap or manual Cinema takeover', async ({page}) => {

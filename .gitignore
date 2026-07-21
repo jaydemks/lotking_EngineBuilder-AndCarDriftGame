@@ -25,7 +25,13 @@ playable-exports/
 models/player.glb
 models_sources/
 
+# Temporary local concept references (never publish with the game).
+/ThreejsJapStreet/
+/JapStreet/
+
 # Local runtime data and temporary files
+__pycache__/
+*.py[cod]
 *.log
 *.tmp
 *.temp
@@ -47,3 +53,4 @@ ROADMAP_NODES_BLUEPRINT_JS_PART2.md
 
 # Sandbox fallback git directory used when .git is unavailable/read-only
 .git-local/
+.lotking-local/

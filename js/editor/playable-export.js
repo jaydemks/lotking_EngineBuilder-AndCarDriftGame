@@ -122,10 +122,17 @@ function create(deps){
         meta: Object.assign({}, sourceProject.meta || {}, exportMeta),
       });
   
-      const normalizedProject = await preparePlayableProject(normalizePlayableProject(
+      const normalizedBaseProject = normalizePlayableProject(
         normalizedSource,
         i === 0 ? (levelNameHint || null) : null
-      ));
+      );
+      if(STORE && STORE.verifyPersistenceRoundTrip){
+        const verification = STORE.verifyPersistenceRoundTrip(normalizedSource.scene, normalizedBaseProject);
+        if(!verification.ok){
+          throw new Error(tr('Playable export omitted authored values: ', 'L’export playable ha omesso valori: ') + verification.differences.slice(0, 6).join(', '));
+        }
+      }
+      const normalizedProject = await preparePlayableProject(normalizedBaseProject);
       const finalProject = normalizedProject.project;
       const meta = finalProject.meta || {};
       let levelId = sourceProject.__lkExportLevelId && String(sourceProject.__lkExportLevelId).trim()

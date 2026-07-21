@@ -35,9 +35,7 @@ function create(deps){
     if(!obj || !obj.traverse) return;
     obj.traverse(n => {
       if(!(n.userData && n.userData.editorLightHandle) || !n.material) return;
-      n.visible = true;
-      n.material.opacity = .42;
-      n.material.needsUpdate = true;
+      n.visible = obj.userData.lightDummyVisible !== false;
     });
   };
 

@@ -32,6 +32,15 @@ function create(deps){
     return ids;
   }
 
+  function isSelectedItem(o){
+    if(!o) return false;
+    if(selectedSceneObjects().includes(o)) return true;
+    if(o.__lkSpecialSelect === 'playerCollider') return !!ED.playerColliderEdit;
+    return !!(o.__lkSpecialSelect === 'colliderPart' && ED.colliderEdit && o.userData && ED.selected && ED.selected.userData &&
+      o.userData.linkParentId === ED.selected.userData.editorId &&
+      o.userData.editorId === ED.selected.userData.editorId + '_collider_part_' + ED.colliderPartIndex);
+  }
+
   function idsFromDrop(e){
     if(!e || !e.dataTransfer) return [];
     const raw = e.dataTransfer.getData('application/x-lotking-scene-objects');
@@ -93,13 +102,7 @@ function create(deps){
   function renderEntity(o, depth, hasChildren){
     const id = o.userData.editorId;
     const div = documentRef.createElement('div');
-    const isSyntheticSelection = o && (
-      (o.__lkSpecialSelect === 'playerCollider' && ED.playerColliderEdit) ||
-      (o.__lkSpecialSelect === 'colliderPart' && ED.colliderEdit && o.userData && ED.selected && ED.selected.userData &&
-        o.userData.linkParentId === ED.selected.userData.editorId &&
-        o.userData.editorId === ED.selected.userData.editorId + '_collider_part_' + ED.colliderPartIndex)
-    );
-    const selected = selectedSceneObjects().includes(o) || isSyntheticSelection;
+    const selected = isSelectedItem(o);
     div.className = 'lk-item' + (selected ? ' sel' : '') + (o.visible ? '' : ' hidden-e');
     div.dataset.id = id;
     div.draggable = o && o.__lkSkipControls ? false : true;
@@ -195,18 +198,19 @@ function create(deps){
           toggle: ev.ctrlKey || ev.metaKey,
           range: ev.shiftKey,
           rangeObjects: visibleSceneOrder,
+          reveal:false,
         });
       }
-      return deps.selectObject(o);
+      return deps.selectObject(o, {reveal:false});
     });
     div.addEventListener('dblclick', () => {
       if(typeof o.__lkSpecialActivate === 'function') return o.__lkSpecialActivate();
-      deps.selectObject(o); deps.focusSelected();
+      deps.selectObject(o, {reveal:false}); deps.focusSelected();
     });
     div.addEventListener('contextmenu', ev => {
       ev.preventDefault(); ev.stopPropagation();
       if(o && o.__lkSkipContext) return;
-      if(!selectedSceneObjects().includes(o) && !(o.userData && o.userData.editorType === 'cinemaStudio')) deps.selectObject(o);
+      if(!selectedSceneObjects().includes(o) && !(o.userData && o.userData.editorType === 'cinemaStudio')) deps.selectObject(o, {reveal:false});
       deps.openMenu(deps.objectMenuItems(o, true), ev.clientX, ev.clientY);
     });
     return div;
@@ -286,7 +290,7 @@ function create(deps){
   function refresh(){
     const box = $('#lkOutliner');
     if(!box) return;
-    box.innerHTML = '';
+    const fragment = documentRef.createDocumentFragment();
     const items = withSyntheticExtras(visibleEntities());
     visibleSceneOrder = items.filter(item => item && item.userData && !item.__lkSynthetic);
 
@@ -311,16 +315,17 @@ function create(deps){
       folders
         .filter(f => (f.parent || null) === (parent || null))
         .forEach(folder => {
-          box.appendChild(deps.makeFolderRow('scene', folder));
+          fragment.appendChild(deps.makeFolderRow('scene', folder));
           if(folder.open){
-            renderLinkedTree(box, byFolder[folder.id] || [], 0);
+            renderLinkedTree(fragment, byFolder[folder.id] || [], 0);
             renderFolderTree(folder.id);
           }
         });
     };
 
     renderFolderTree(null);
-    renderLinkedTree(box, byFolder[null] || [], 0);
+    renderLinkedTree(fragment, byFolder[null] || [], 0);
+    box.replaceChildren(fragment);
 
     box.ondragover = e => {
       const types = Array.from(e.dataTransfer.types || []);
@@ -345,8 +350,20 @@ function create(deps){
     deps.setStatusRight(items.length + ' oggetti');
   }
 
+  // Selection changes do not alter the scene tree. Updating a CSS class on the
+  // existing rows avoids rebuilding every row, listener and thumbnail whenever
+  // the user simply clicks another object.
+  function syncSelection(){
+    const box = $('#lkOutliner');
+    if(!box) return;
+    box.querySelectorAll('.lk-item[data-id]').forEach(row => {
+      row.classList.toggle('sel', isSelectedItem(sceneIndex.get(row.dataset.id)));
+    });
+  }
+
   return Object.freeze({
     refresh,
+    syncSelection,
     visibleEntities,
     getSceneDragId: () => sceneDragId,
   });

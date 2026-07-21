@@ -1,16 +1,26 @@
 {
   "name": "lot-king-engine",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
+    "build:three": "esbuild js/vendor/three-r185-compat.entry.js --bundle --format=iife --platform=browser --target=es2020 --minify --legal-comments=none --outfile=vendor/three-r185-compat.min.js",
+    "verify:three": "node scripts/verify-three-migration.js",
     "test:logic": "node tests/logic-core.test.js",
     "test:soccer": "node tests/soccer-core.test.js",
+    "test:character": "node tests/character-core.test.js",
     "test:video": "node tests/video-settings.test.js",
     "test:music": "node tests/music-library.test.js",
     "test:post": "node tests/post-processing.test.js",
     "test:browser": "playwright test",
-    "test": "npm run test:logic && npm run test:soccer && npm run test:video && npm run test:music && npm run test:post && npm run test:browser"
+    "test": "npm run verify:three && npm run test:logic && npm run test:soccer && npm run test:character && npm run test:video && npm run test:music && npm run test:post && npm run test:browser"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.61.1",
+    "esbuild": "0.28.1"
+  },
+  "dependencies": {
+    "cannon": "0.6.2",
+    "jszip": "3.10.1",
+    "three": "0.185.1"
   }
 }

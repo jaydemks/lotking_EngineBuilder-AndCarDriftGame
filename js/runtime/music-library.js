@@ -46,6 +46,16 @@ function normalizeTrack(track, source){
   };
 }
 
+function cleanDisplayText(value, fallback){
+  const text = String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
+  return text || fallback;
+}
+
+function finiteOrder(value, fallback){
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function storedTrackId(){
   return 'trk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
@@ -57,6 +67,7 @@ function storedTrackKey(file){
 
 function create(defaultTracks){
   const tracks = (defaultTracks || []).map(t => normalizeTrack(t, 'Default'));
+  tracks.forEach((track, index) => { track.order = index + 1; });
 
   function at(index){
     if(!tracks.length) return null;
@@ -92,14 +103,31 @@ function create(defaultTracks){
         console.warn('LotKing music: file audio non archiviato', file.name, err);
       }
     }
+    renumber();
     if(!added.length && lastError) throw lastError;
     return added;
   }
 
   async function restoreTracks(stored){
     const restored = [];
-    for(const item of Array.from(stored || [])){
-      if(!item || tracks.some(track => (item.id && track.id === item.id) || (item.dbKey && track.dbKey === item.dbKey))) continue;
+    const manifest = Array.from(stored || []);
+    const exactManifest = manifest.some(item => item && Number(item.libraryManifestVersion) >= 2);
+    const ordered = [];
+    for(const item of manifest){
+      if(!item) continue;
+      const existing = tracks.find(track =>
+        (item.id && track.id === item.id) ||
+        (item.dbKey && track.dbKey === item.dbKey) ||
+        (item.url && track.url === item.url) ||
+        (item.fileName && track.fileName === item.fileName)
+      );
+      if(existing){
+        existing.title = cleanDisplayText(item.title, existing.title);
+        existing.artist = cleanDisplayText(item.artist, existing.artist);
+        existing.order = finiteOrder(item.order, ordered.length + 1);
+        ordered.push(existing);
+        continue;
+      }
       let url = item.url || '';
       if(item.dbKey){
         if(!window.LK_ASSET_BLOBS || !window.LK_ASSET_BLOBS.getUrl) continue;
@@ -109,27 +137,33 @@ function create(defaultTracks){
       if(!url) continue;
       const track = normalizeTrack(Object.assign({}, item, {
         url,
-        uploaded:true,
+        uploaded:item.uploaded !== false,
         persisted:!!item.dbKey || /^data:/i.test(url),
       }), item.source || 'Project audio');
       tracks.push(track);
+      ordered.push(track);
       restored.push(track);
     }
+    if(exactManifest){
+      tracks.splice(0, tracks.length, ...ordered);
+    }
+    renumber();
     return restored;
   }
 
   function storedTracks(){
-    return tracks.filter(track => track.uploaded && (track.dbKey || /^data:/i.test(track.url || ''))).map(track => ({
+    return tracks.map(track => ({
+      libraryManifestVersion:2,
       id:track.id,
-      url:/^data:/i.test(track.url || '') ? track.url : null,
+      url:track.uploaded && !/^data:/i.test(track.url || '') ? null : track.url,
       dbKey:track.dbKey || null,
       title:track.title,
       artist:track.artist,
       order:track.order,
       fileName:track.fileName,
       source:track.source,
-      uploaded:true,
-      persisted:true,
+      uploaded:!!track.uploaded,
+      persisted:!!track.persisted,
     }));
   }
 
@@ -146,7 +180,31 @@ function create(defaultTracks){
         console.warn('LotKing music: traccia rimossa dalla lista ma non dal blob store', removed.fileName || removed.title || removed.dbKey, err);
       });
     }
+    renumber();
     return Object.assign({index:i}, removed);
+  }
+
+  function renumber(){
+    tracks.forEach((track, index) => { track.order = index + 1; });
+  }
+
+  function moveAt(index, direction){
+    const from = Math.max(0, Math.min(tracks.length - 1, Number(index) || 0));
+    const to = Math.max(0, Math.min(tracks.length - 1, from + (Number(direction) < 0 ? -1 : 1)));
+    if(!tracks.length || from === to) return null;
+    const track = tracks.splice(from, 1)[0];
+    tracks.splice(to, 0, track);
+    renumber();
+    return {track,fromIndex:from,index:to};
+  }
+
+  function updateAt(index, patch){
+    const i = Math.max(0, Math.min(tracks.length - 1, Number(index) || 0));
+    const track = tracks[i];
+    if(!track) return null;
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'title')) track.title = cleanDisplayText(patch.title, metaFromName(track.fileName || track.url).title);
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'artist')) track.artist = cleanDisplayText(patch.artist, 'USER');
+    return Object.assign({index:i}, track);
   }
 
   function list(options){
@@ -176,6 +234,8 @@ function create(defaultTracks){
     addFiles,
     restoreTracks,
     removeAt,
+    moveAt,
+    updateAt,
     storedTracks,
     list,
     count: () => tracks.length,

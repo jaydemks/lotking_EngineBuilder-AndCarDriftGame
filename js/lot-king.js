@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.6.9',
+  version: '0.7.0',
   assets: null,
   core: {},
   world: {},
@@ -139,6 +139,10 @@ const RUNTIME_DOM_I18N = [
   ['#videoShadows', 'row-desc', 'Quality-scaled realtime scene shadows.', 'Ombre realtime scalate in base alla qualita.'],
   ['#videoReflections', 'row-label', 'Material reflections', 'Riflessi materiali'],
   ['#videoReflections', 'row-desc', 'Environment response for reflective materials.', 'Risposta ambientale dei materiali riflettenti.'],
+  ['#videoReflectionQuality', 'row-label', 'Reflection quality', 'Qualita riflessi'],
+  ['#videoReflectionQuality', 'row-desc', 'SSR resolution and hit precision.', 'Risoluzione SSR e precisione degli impatti.'],
+  ['#videoReflectionDistance', 'row-label', 'Reflection ray reach', 'Portata raggi riflessi'],
+  ['#videoReflectionDistance', 'row-desc', 'Maximum distance traced by screen-space reflection rays.', 'Distanza massima percorsa dai raggi di riflessione screen-space.'],
   ['#videoVolumetricLighting', 'row-label', 'Volumetric lighting', 'Volumetric lighting'],
   ['#videoVolumetricLighting', 'row-desc', 'Enables screen-space light rays in the current renderer.', 'Abilita raggi luce screen-space nel renderer attuale.'],
   ['#videoEditorHud', 'row-label', 'Editor HUD', 'HUD editor'],
@@ -200,8 +204,8 @@ const renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreferenc
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
@@ -237,8 +241,11 @@ sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -90; sun.shadow.camera.right = 90;
 sun.shadow.camera.top = 90; sun.shadow.camera.bottom = -90;
 sun.shadow.camera.far = 250;
-sun.shadow.bias = -0.0006;
+sun.shadow.bias = -0.00035;
+sun.shadow.normalBias = 0.035;
+sun.shadow.radius = 1.75;
 scene.add(sun);
+applyVideoSettings();
 
 // ------------------------------------------------ world state / editable entity registry
 const WORLD_STATE = window.LK_RUNTIME_WORLD_STATE.create({lot:72, wallH:4, seed:1337});
@@ -335,6 +342,16 @@ const PLAYER_SKID_CFG = {
   length:.7,
   opacity:.55,
   life:14,
+  smokeModelVersion:3,
+  smokeEnabled:true,
+  smokeAmount:.28,
+  smokeThreshold:.35,
+  smokeMinHeat:.3,
+  smokeHeatRate:.75,
+  smokeCoolRate:.4,
+  smokeOnDrift:true,
+  smokeOnBrake:true,
+  smokeOnAcceleration:true,
   sources:[
     {enabled:true, wheel:'rearLeft', offset:[-.92,.03,-1.35], scale:[1,1,1]},
     {enabled:true, wheel:'rearRight', offset:[.92,.03,-1.35], scale:[1,1,1]},
@@ -538,6 +555,14 @@ function setPlayerSkidConfig(patch){
   });
   const rest = Object.assign({}, patch);
   delete rest.sources;
+  if(Number(rest.smokeModelVersion) < 3 && Array.isArray(patch.sources) && Object.prototype.hasOwnProperty.call(patch, 'enabled')){
+    rest.smokeModelVersion = 3;
+    rest.smokeAmount = .28;
+    rest.smokeThreshold = .35;
+    rest.smokeMinHeat = .3;
+    rest.smokeHeatRate = .75;
+    rest.smokeCoolRate = .4;
+  }
   Object.assign(PLAYER_SKID_CFG, rest);
   ensureSkidRigs();
   applyPlayerSkidConfig();
@@ -1861,7 +1886,7 @@ function onCrash(impact){
 // ------------------------------------------------ smoke particles
 function makeSmokeTexture(){
   const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d');
+  const g = c.getContext('2d', {willReadFrequently:true});
   const gr = g.createRadialGradient(32,32,2,32,32,30);
   gr.addColorStop(0,'rgba(230,230,235,.85)');
   gr.addColorStop(.5,'rgba(220,220,228,.35)');
@@ -1882,7 +1907,7 @@ function makeFlameTexture(){
   g.ellipse(48,58,28,39,0,0,Math.PI*2);
   g.fill();
   const tx = new THREE.CanvasTexture(c);
-  tx.encoding = THREE.sRGBEncoding;
+  tx.colorSpace = THREE.SRGBColorSpace;
   return tx;
 }
 const smokeTex = makeSmokeTexture();
@@ -1898,12 +1923,16 @@ const SMOKE_N = 140;
 const smokePool = [];
 for(let i=0;i<SMOKE_N;i++){
   const s = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, transparent:true, opacity:0, depthWrite:false, depthTest:true}));
+  s.userData.particleSystem = 'native-tire-smoke';
   s.renderOrder = TRANSPARENT_FX_RENDER_ORDER.smoke;
   s.visible = false; scene.add(s);
   smokePool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1});
 }
 let smokeIdx = 0;
-function spawnSmoke(pos, intensity){
+let tireSmokeHeat = 0;
+function spawnSmoke(pos, intensity, configOverride){
+  const smokeConfig = configOverride || PLAYER_SKID_CFG;
+  if(smokeConfig.smokeEnabled === false) return;
   const p = smokePool[smokeIdx++ % SMOKE_N];
   p.s.visible = true;
   p.s.position.copy(pos); p.s.position.y = .25;
@@ -1930,6 +1959,7 @@ for(let i=0;i<EXHAUST_N;i++){
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
     map:smokeTex, transparent:true, opacity:0, depthWrite:false, depthTest:true, blending:THREE.NormalBlending,
   }));
+  s.userData.particleSystem = 'native-exhaust';
   s.renderOrder = TRANSPARENT_FX_RENDER_ORDER.exhaustSmoke;
   s.visible = false; scene.add(s);
   exhaustPool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1, fire:false});
@@ -1978,7 +2008,7 @@ function updatePlayerExhaust(dt){
   }
   if(!active.length){ updateExhaustParticles(dt); return; }
   const throttle = ENGINE.throttle || 0;
-  const intensity = Math.max(.05, cfg.intensity || 1);
+  const intensity = Math.max(0, Number.isFinite(Number(cfg.intensity)) ? Number(cfg.intensity) : 1);
   const rpmHot = ENGINE.rpm01 >= (cfg.fireRpm == null ? .88 : cfg.fireRpm);
   const shiftFire = cfg.shiftFire && ENGINE.shiftPulse > 0;
   const limiterFire = cfg.limiterFire && ENGINE.limiterPulse > 0;
@@ -2009,7 +2039,7 @@ function testPlayerExhaust(targetAnchor){
   exhaustTestPulse = .55;
   const targets = targetAnchor ? [targetAnchor] : playerExhaustRig.sources.map(r => r && r.anchor).filter(Boolean);
   for(const anchor of targets){
-    spawnExhaustParticle(anchor, false, PLAYER_EXHAUST_CFG.intensity || 1);
+    spawnExhaustParticle(anchor, false, Math.max(0, Number.isFinite(Number(PLAYER_EXHAUST_CFG.intensity)) ? Number(PLAYER_EXHAUST_CFG.intensity) : 1));
   }
 }
 function updateExhaustParticles(dt){
@@ -2354,12 +2384,12 @@ function resetCameraState(preserveRuntimeMode){
   }
   dragging = false;
   camMode = 0;
-  camPitch = .32;
+  camPitch = clamp(Number(CAM_CFG.freePitch) || .32, .05, 1.2);
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist || CAM_CFG.arcadeDistance || 9));
-  camYaw = Math.atan2(-playerCameraForwardVector(camVisualForward).x, -camVisualForward.z);
+  camYaw = Math.atan2(-playerCameraForwardVector(camVisualForward).x, -camVisualForward.z) + THREE.MathUtils.degToRad(Number(CAM_CFG.freeYawOffset) || 0);
   camHeading = P.heading;
   camFocus.copy(P.pos);
-  camLook.set(P.pos.x, P.pos.y + 1.1, P.pos.z);
+  camLook.set(P.pos.x, P.pos.y + clamp(Number(CAM_CFG.lookHeight) || 1.1, .1, 6), P.pos.z);
   camSpeedForFov = speedKmh || 0;
   camDriftSide = 0;
   camReverseBlend = 0;
@@ -2463,6 +2493,12 @@ function applyCameraCfg(){
     cinematicDriftClose: CAM_CFG.cinematicDriftClose == null ? 1.65 : CAM_CFG.cinematicDriftClose,
     cinematicDriftHeight: CAM_CFG.cinematicDriftHeight == null ? .45 : CAM_CFG.cinematicDriftHeight,
     cinematicLag: CAM_CFG.cinematicLag == null ? 4.2 : CAM_CFG.cinematicLag,
+    freePitch: CAM_CFG.freePitch == null ? .32 : CAM_CFG.freePitch,
+    freeYawOffset: CAM_CFG.freeYawOffset == null ? 0 : CAM_CFG.freeYawOffset,
+    lookHeight: CAM_CFG.lookHeight == null ? 1.1 : CAM_CFG.lookHeight,
+    lateralOffset: CAM_CFG.lateralOffset == null ? 0 : CAM_CFG.lateralOffset,
+    helperRange: CAM_CFG.helperRange == null ? 5 : CAM_CFG.helperRange,
+    helperSize: CAM_CFG.helperSize == null ? .7 : CAM_CFG.helperSize,
   });
   CAM_CFG.grade = Object.assign({enabled:false, exposure:1, brightness:0, contrast:1, saturation:1, gamma:1}, CAM_CFG.grade || {});
   CAM_CFG.dof = Object.assign({enabled:false, focus:9, aperture:.025, maxblur:.04, autoFocus:true, focusRadius:.16, feather:.38, showFocus:false}, CAM_CFG.dof || {});
@@ -2872,7 +2908,14 @@ function updateLogicPawnCameraOverride(dt, pawnRef){
   driftAngle = lastCamDrifting ? Math.min(.82, Math.abs(P.steer) * .82) : 0;
   ENGINE.reverseActive = pawn.state && pawn.state.reverse === true;
   runtimeCameraInputPlayerId = pawn.playerId;
-  updateCamera(dt);
+  const nativeCameraConfig = Object.assign({}, CAM_CFG);
+  const pawnCameraConfig = pawn.config && pawn.config.camera || {};
+  Object.assign(CAM_CFG, pawnCameraConfig);
+  try { updateCamera(dt); }
+  finally {
+    Object.keys(CAM_CFG).forEach(key => { if(!Object.prototype.hasOwnProperty.call(nativeCameraConfig,key)) delete CAM_CFG[key]; });
+    Object.assign(CAM_CFG, nativeCameraConfig);
+  }
   runtimeCameraInputPlayerId = null;
   P.pos.copy(previous.position);
   P.heading = previous.heading;
@@ -2918,11 +2961,11 @@ function updateCamera(dt){
     if(userCamTimer <= 0){
       // ease yaw back behind the car
       const fwd = playerCameraForwardVector(camVisualForward);
-      const targetYaw = Math.atan2(-fwd.x, -fwd.z);
+      const targetYaw = Math.atan2(-fwd.x, -fwd.z) + THREE.MathUtils.degToRad(Number(CAM_CFG.freeYawOffset) || 0);
       camYaw += angleDelta(targetYaw, camYaw) * (snap ? 1 : dampAlpha(2.4, dt));
     }
   }
-  let look = new THREE.Vector3(camFocus.x, camFocus.y + 1.1, camFocus.z);
+  let look = new THREE.Vector3(camFocus.x, camFocus.y + clamp(Number(CAM_CFG.lookHeight) || 1.1, .1, 6), camFocus.z);
   let lag = 6;
   if(mode === 'arcade' || mode === 'cinematic'){
     const reversingForCamera = ENGINE.reverseActive && lastCamVF < -1.8;
@@ -2935,14 +2978,14 @@ function updateCamera(dt){
     let dist = Math.max(2, CAM_CFG.arcadeDistance);
     let height = CAM_CFG.arcadeHeight;
     lag = CAM_CFG.arcadeLag;
-    let sideOffset = 0;
+    let sideOffset = clamp(Number(CAM_CFG.lateralOffset) || 0, -8, 8);
 
     if(mode === 'cinematic'){
       const driftAmount = lastCamDrifting && speedKmh > 18 ? clamp(driftAngle / .82, 0, 1) : 0;
       const driftDir = Math.sign(lastCamVR || P.steer || 1);
       const driftTarget = driftDir * driftAmount;
       camDriftSide += (driftTarget - camDriftSide) * (snap ? 1 : dampAlpha(4.6, dt));
-      sideOffset = -camDriftSide * dist * clamp(CAM_CFG.cinematicDriftOrbit, 0, .22) * (1 - camReverseBlend * .65);
+      sideOffset += -camDriftSide * dist * clamp(CAM_CFG.cinematicDriftOrbit, 0, .22) * (1 - camReverseBlend * .65);
       camCinematicRoll += ((-camDriftSide * .045) - camCinematicRoll) * (snap ? 1 : dampAlpha(4.8, dt));
       dist -= Math.abs(camDriftSide) * CAM_CFG.cinematicDriftClose;
       height += Math.abs(camDriftSide) * CAM_CFG.cinematicDriftHeight;
@@ -2962,6 +3005,10 @@ function updateCamera(dt){
     const cy = Math.cos(camPitch), sy = Math.sin(camPitch);
     const off = new THREE.Vector3(Math.sin(camYaw)*cy, sy, Math.cos(camYaw)*cy).multiplyScalar(camDist);
     const want = camFocus.clone().add(off);
+    if(CAM_CFG.lateralOffset){
+      const fwd = playerCameraForwardVector(camVisualForward);
+      want.addScaledVector(camVisualSide.set(fwd.z,0,-fwd.x), clamp(Number(CAM_CFG.lateralOffset)||0,-8,8));
+    }
     want.y = Math.max(1.2, want.y);
     camPos.lerp(want, snap ? 1 : dampAlpha(6, dt));
   }
@@ -2975,6 +3022,7 @@ function updateCamera(dt){
   camSpeedForFov += ((speedKmh || 0) - camSpeedForFov) * (snap ? 1 : dampAlpha(7, dt));
   const targetFov = CAM_CFG.fov + Math.min(CAM_CFG.fovSpeedMax, camSpeedForFov * CAM_CFG.fovSpeedGain);
   camera.fov += (targetFov - camera.fov) * (snap ? 1 : dampAlpha(4, dt));
+  camera.far = Math.max(20, Number(CAM_CFG.far) || 500);
   camera.updateProjectionMatrix();
 }
 
@@ -2989,6 +3037,7 @@ const POST = window.LK_RUNTIME_POST.createPost({
   size: () => ({width: innerWidth, height: innerHeight}),
   focusTarget: () => (typeof player !== 'undefined' && player?.car ? player.car : car),
   volumetricTarget: () => sun,
+  lensFlareState: activeCamera => SKY.flare && SKY.flare.postState ? SKY.flare.postState(activeCamera) : null,
 });
 
 // ------------------------------------------------ sound (procedural WebAudio)
@@ -3283,6 +3332,7 @@ if(INPUT){
 }
 
 function resetCar(){
+  tireSmokeHeat = 0;
   P.pos.set(SPAWN.x, 0, SPAWN.z); P.heading = runtimeHeadingFromVisible(SPAWN.heading); P.vel.set(0,0,0);
   P.yawRate = 0; P.steer = 0;
   SURFACE.y = 0;
@@ -3381,6 +3431,8 @@ function createNoopMenuMusic(){
       if(removed) popup('MENU TRACK REMOVED', '#ff7d54');
       return removed;
     },
+    moveTrack: function(i, direction){ return library ? library.moveAt(i, direction) : null; },
+    renameTrack: function(i, title){ return library ? library.updateAt(i, {title:title}) : null; },
     restoreTracks: function(tracks){ return library ? library.restoreTracks(tracks) : Promise.resolve([]); },
     getStoredTracks: function(){ return library ? library.storedTracks() : []; },
     loadTrack: function(i){ index = Math.max(0, Number(i) || 0); },
@@ -3852,6 +3904,8 @@ Object.assign(GAME.player, {
   syncSpawnFromVisibleTransform: syncPlayerSpawnFromVisibleTransform,
   setModel: setPlayerModel,
   getModel: PLAYER_MODEL.getPlayerModel,
+  setModelShading: PLAYER_MODEL.setModelShading,
+  getModelShading: PLAYER_MODEL.getModelShading,
   headlight: PLAYER_LIGHT_RIG.headlight,
   lights: PLAYER_LIGHT_CFG,
   setLights: setPlayerLightConfig,
@@ -3888,6 +3942,10 @@ Object.assign(GAME.player, {
   testExhaust: testPlayerExhaust,
   vehicleEffects: Object.freeze({
     spawnExhaust(anchor, fire, intensity, velocity){ spawnExhaustParticle(anchor, fire === true, intensity, velocity); },
+    spawnTireSmoke(point, intensity, config){
+      if(!point) return;
+      spawnSmoke(new THREE.Vector3(point.x, point.y, point.z), intensity, config || {});
+    },
     spawnSkid(point, heading, config, strength){
       if(!point) return;
       spawnSkid(point.x, point.z, heading, 1, 1, strength, config || {}, point.y);
@@ -4044,6 +4102,26 @@ function stepGameplayFrame(dt, shouldRender){
     accelSlip ? Math.min(1, .28 + driveWheelMismatch * .56 + (ENGINE.rpm01 || 0) * .32 + accelForce * .2) : 0,
     burnoutSlip ? Math.min(1, .62 + (ENGINE.rpm01 || 0) * .3) : 0
   );
+  const tireSmokeAmount = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeAmount)) ? Number(PLAYER_SKID_CFG.smokeAmount) : .28, 0, 4);
+  const tireSmokeThreshold = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeThreshold)) ? Number(PLAYER_SKID_CFG.smokeThreshold) : .35, 0, 1);
+  const tireSmokeMinHeat = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeMinHeat)) ? Number(PLAYER_SKID_CFG.smokeMinHeat) : .3, 0, 1);
+  const tireSmokeHeatRate = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeHeatRate)) ? Number(PLAYER_SKID_CFG.smokeHeatRate) : .75);
+  const tireSmokeCoolRate = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeCoolRate)) ? Number(PLAYER_SKID_CFG.smokeCoolRate) : .4);
+  const tireSmokeCauseActive = (
+    (PLAYER_SKID_CFG.smokeOnDrift !== false && (lateralSlip || spinoutSlip > .42)) ||
+    (PLAYER_SKID_CFG.smokeOnBrake !== false && brakeSlip) ||
+    (PLAYER_SKID_CFG.smokeOnAcceleration !== false && (accelSlip || burnoutSlip))
+  );
+  const tireSmokeSlip = tireSmokeCauseActive ? Math.max(rearWheelSlip, frontWheelSlip) : 0;
+  const tireSmokeWork = tireSmokeSlip > .15
+    ? clamp((tireSmokeSlip - .15) / .85, 0, 1)
+    : 0;
+  const tireSmokeSpeedFactor = burnoutSlip ? .9 : clamp(speedKmh / 45, .15, 1);
+  tireSmokeHeat = clamp(tireSmokeHeat + sdt * (
+    tireSmokeWork * tireSmokeHeatRate * tireSmokeSpeedFactor -
+    tireSmokeCoolRate * (1 - tireSmokeWork * .65)
+  ), 0, 1);
+  const tireSmokeActive = PLAYER_SKID_CFG.smokeEnabled !== false && tireSmokeAmount > 0 && tireSmokeCauseActive && tireSmokeHeat >= tireSmokeMinHeat;
   if(lateralSlip || brakeSlip || accelSlip || burnoutSlip || spinoutSlip > .42){
     const activeSkids = playerSkidRig.sources
       .map((rig, i) => ({rig, cfg:PLAYER_SKID_CFG.sources[i]}))
@@ -4054,7 +4132,7 @@ function stepGameplayFrame(dt, shouldRender){
         const idx = item.rig.anchor.userData.skidIndex;
         const wheel = skidWheelKey(idx, item.cfg);
         const slipAmount = clamp(isFrontSkidWheel(wheel) ? frontWheelSlip : (isRearSkidWheel(wheel) ? rearWheelSlip : allWheelSlip), 0, 1);
-        if(slipAmount < .08) continue;
+        if(slipAmount < tireSmokeThreshold && slipAmount < .08) continue;
         const anchor = item.rig.anchor;
         const wp = new THREE.Vector3();
         anchor.getWorldPosition(wp);
@@ -4063,8 +4141,8 @@ function stepGameplayFrame(dt, shouldRender){
         const dir = new THREE.Vector3(0,0,1).applyQuaternion(q);
         const heading = Math.atan2(dir.x, dir.z);
         const density = clamp(.16 + slipAmount * .74 + speed01 * .12 + gSlip * .16, 0, 1);
-        if(Math.random() < density * .62) spawnSmoke(wp, slipAmount);
-        if(Math.random() < density) spawnSkid(wp.x, wp.z, heading, Math.abs(anchor.scale.x || 1), Math.abs(anchor.scale.z || 1), slipAmount);
+        if(tireSmokeActive && slipAmount >= tireSmokeThreshold && Math.random() < clamp(density * .62 * tireSmokeAmount, 0, 1)) spawnSmoke(wp, slipAmount, PLAYER_SKID_CFG);
+        if(slipAmount >= .08 && Math.random() < density) spawnSkid(wp.x, wp.z, heading, Math.abs(anchor.scale.x || 1), Math.abs(anchor.scale.z || 1), slipAmount);
       }
     } else if(!hasSkidRig) {
       const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
@@ -4077,11 +4155,11 @@ function stepGameplayFrame(dt, shouldRender){
       ];
       for(const src of fallback){
         const slipAmount = clamp(src.slip, 0, 1);
-        if(slipAmount < .08) continue;
+        if(slipAmount < tireSmokeThreshold && slipAmount < .08) continue;
         const wp = P.pos.clone().addScaledVector(fwd, src.z).addScaledVector(side, src.s*.92);
         const density = clamp(.16 + slipAmount * .74 + speed01 * .12 + gSlip * .16, 0, 1);
-        if(Math.random() < density * .62) spawnSmoke(wp, slipAmount);
-        if(Math.random() < density) spawnSkid(wp.x, wp.z, P.heading, 1, 1, slipAmount);
+        if(tireSmokeActive && slipAmount >= tireSmokeThreshold && Math.random() < clamp(density * .62 * tireSmokeAmount, 0, 1)) spawnSmoke(wp, slipAmount, PLAYER_SKID_CFG);
+        if(slipAmount >= .08 && Math.random() < density) spawnSkid(wp.x, wp.z, P.heading, 1, 1, slipAmount);
       }
     }
   }

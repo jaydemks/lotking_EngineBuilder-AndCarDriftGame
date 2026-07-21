@@ -33,6 +33,8 @@ This matrix tracks implementation-side verification for Logic Element Part 1. Us
 | Player Car template Vehicle Pawn nodes and Function validity | Focused Node validator run | Passing, zero warnings |
 | Function data consistency after state mutation | `tests/logic-core.test.js` multi-output Function case | Passing |
 | Complete Logic core regression suite | `tests/logic-core.test.js` | Passing |
+| Generic Character nodes, template, presets, Pawn movement/jump and self-collider exclusion | `tests/character-core.test.js` | Passing |
+| Soccer roles, Pawn movement, ball, goals, stadium and penalty flow | `tests/soccer-core.test.js` | Passing |
 | Pawn event/node catalog | `tests/logic-core.test.js` | Passing for drift, gear, reset and possession contracts |
 | Legacy Player snapshot → Vehicle Pawn v2 migration | `tests/logic-core.test.js` | Passing, lossless snapshot retained |
 | Graph Inspector dependency list | Graph Inspector shows collected dependency references and found/external/missing status | Automated browser spec present |
@@ -57,6 +59,7 @@ This matrix tracks implementation-side verification for Logic Element Part 1. Us
 | Warning UI from invalid node default | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Viewport tab canvas render | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Assets-panel template placement | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
+| Character template pack/runtime loading | `tests/browser/character-template.spec.js` | Automated and passing |
 | Save/reload linked asset round trip | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Export/import portable local Logic Element template | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Logic Profiler panel | Shows active runtime stats during Play Preview | Automated browser spec present |
@@ -89,6 +92,8 @@ This matrix tracks implementation-side verification for Logic Element Part 1. Us
 | `Template - Patrol Mover` | Moves and rotates `Default Mesh` from exposed speeds | Graph valid, local clone isolated |
 | `Template - Toggle Switch` | Toggles exposed boolean with E and swaps color | Graph valid, local clone isolated |
 | `Template - Distance Beacon` | Compares owner distance to exposed radius and swaps color | Graph valid, local clone isolated |
+| `Template - Player Character (Normal)` | Camera-relative on-foot movement with normal/civil/police presets and documented in-place animation slots | `tests/character-core.test.js` + browser pack load |
+| `Template - Player Soccer Element` | Shared Character movement plus football roles/actions up to goalkeeper | `tests/soccer-core.test.js` |
 
 ## Sign-Off Rule
 

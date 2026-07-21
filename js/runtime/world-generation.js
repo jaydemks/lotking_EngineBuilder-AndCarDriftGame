@@ -52,7 +52,7 @@ function create(deps){
     g.fillStyle = '#c9c9c0';
     for(let i=0;i<7;i++) g.fillRect(px(-8 + i*2.4), px(60), 24, 90);
     const tex = new THREE.CanvasTexture(c);
-    tex.encoding = THREE.sRGBEncoding;
+    tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
     return tex;
   }

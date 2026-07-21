@@ -23,6 +23,19 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 - `js/lot-king.js`
   Creates `window.LOT_KING`, owns the main runtime composition, initializes Three.js, creates module instances, applies projects/levels, wires the editor bridge, runs the frame loop, and keeps fallback behavior for critical paths. It also exposes the player bridge used by editor save/load: visible heading, runtime heading conversion, visual base rotation, and `syncSpawnFromVisibleTransform()`.
 
+## Rendering Runtime Dependency
+
+Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_AND_SHADOWS.md`. `settings-menu.js` owns project/player exposure and shadow profiles; `sky.js` owns the day/night light balance and occlusion-aware optical flare. Both configurations persist through `scene-store.js`.
+
+- `js/vendor/three-r185-compat.entry.js`
+  Single source for the browser rendering bundle. It imports the pinned `three@0.185.1` core and every required `examples/jsm` addon from the same package, checks `THREE.REVISION === "185"` and exposes the compatibility namespace used by the existing classic modules.
+
+- `vendor/three-r185-compat.min.js`
+  Generated local IIFE loaded by editor, gameplay and the standalone test editor. Rebuild it with `npm run build:three`; `npm run verify:three` rejects mixed revisions, old r128 URLs and removed color/shadow APIs.
+
+- `vendor/cannon-0.6.2.min.js`, `vendor/jszip-3.10.1.min.js`, `vendor/helvetiker_regular.typeface.json`
+  Pinned local supporting assets. Cannon preserves the existing physics behavior, JSZip keeps editor exports independent from a CDN, and the local font supports TextGeometry. Generated playable ZIPs include the runtime files plus `vendor/THIRD_PARTY_LICENSES.md`.
+
 ## Assets, Loading, and Session Flow
 
 - `js/runtime/assets.js`
@@ -71,13 +84,22 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## Soccer Game Mode
 
 - `js/runtime/soccer-pawns.js`
-  Humanoid `Soccer Pawn` (schema v1) built on Pawn Core and registered in the shared `LOT_KING.pawns` registry. Roles from striker to goalkeeper with per-role action/animation sets, heading-relative free-movement controller, role actions (shoot/pass/cross/tackle/save/dive), appearance live edit through material-name heuristics, camera possession and the generic `applyBinding` dispatch used by exposed template variables.
+  Thin Soccer specialization of the shared Character Pawn base. It owns only football roles, football actions and goalkeeper behavior; movement, collision, possession, camera and animation lifecycle stay in the base.
+
+- `js/runtime/character-pawn-base.js`
+  Shared humanoid Pawn implementation: lifecycle, registry/possession, input, ground movement, camera, animation library and motion blending, appearance and generic action playback. Generic Character and Soccer compose this module instead of inheriting from one another.
+
+- `js/runtime/character-pawns.js`
+  Thin generic Character specialization and data presets (`normal`, `civil`, `police`) over the shared Character Pawn base. It contains no Soccer dependency.
+
+- `js/runtime/character-level-template.js`
+  Native/editor-editable reconstruction of the supplied Sketch Street concept: exact sloped road profile, eight detailed houses, street furniture, vegetation, wires, sea backdrop, scooter, a preconfigured normal Character and a reusable talkable civil NPC.
 
 - `js/runtime/character-movement.js`
   Generic humanoid ground-movement controller (design adapted from three-player-controller, dependency-free): camera-relative or heading-relative input, walk/run/sprint smoothing, gravity + jump with air control, ground detection, pushback against the arcade collider lists and camera view presets (third / close / first-person lite). Consumed by the Soccer Pawn and reusable by future human-type Pawns.
 
 - `js/runtime/soccer-locomotion.js`
-  Blendspace-lite motion controller: velocity damping plus a short look-ahead prediction cross-blends idle/walk/run/strafe clip weights on the GLB animation mixer, scales stride playback with real speed and runs a one-shot action layer with completion callbacks. Mixamo clip names resolve fuzzily and missing clips degrade to the nearest available one.
+  Legacy filename for the shared Character locomotion module. It exports the generic `LK_RUNTIME_CHARACTER_LOCOMOTION` contract (and the older Soccer alias): velocity damping plus look-ahead cross-blends idle/walk/run/strafe, scales stride playback with real speed and runs one-shot actions. Missing clips degrade to the nearest available one.
 
 - `js/runtime/soccer-ball.js`
   Regulation ball with arcade flight physics (gravity, bounce, drag, Magnus curve), kick-toward-target API, goal-line detection against registered regulation goal frames (7.32 x 2.44), goalkeeper save checks and out/stopped detection. Balls register as non-possessable Pawn records so they step and dispose with the Play session. Emits `OnBallKicked` / `OnGoalScored` / `OnBallSaved` / `OnBallOut`.
@@ -90,6 +112,9 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 
 - `js/logic/logic-nodes-soccer.js` / `js/logic/logic-templates-soccer.js`
   Soccer Logic node pack (registered through `window.LK_LOGIC_NODE_PACKS`) and the soccer template pack (registered through `LK_LOGIC_TEMPLATES.register`): `Template - Player Soccer Element` and `Template - Penalty Shootout Manager`.
+
+- `js/logic/logic-nodes-character.js` / `js/logic/logic-templates-character.js`
+  Generic Character Pawn control/state nodes and `Template - Player Character (Normal)`, including preset selection and explicit in-place/no-root-motion guidance for every animation slot.
 
 - `js/logic/logic-graph.js`
   Pure graph JSON helpers. Creates and normalizes Level Logic and Logic Element graphs while preserving variables, nodes, edges, comments, reusable subgraphs/macros, and the internal Logic Element scene model. Also exposes the Logic Element definition version, dependency manifest collection, and reusable definition asset migration/normalization used by the store and exporter.
@@ -231,18 +256,27 @@ The gameplay runtime still composes through `js/lot-king.js`, but the project no
 ## Environment, Weather, and Post
 
 - `js/runtime/sky.js`
-  Day/night cycle, stars, moon, clouds, procedural environment lighting, global light modulation, sun bloom, lens flare, and volumetric-clouds integration.
+  Day/night cycle, stars, moon, clouds, procedural environment lighting, global light modulation, classic sun bloom/lens flare state, and volumetric-clouds integration.
+
+- `js/runtime/cinematic-lens-flare.js`
+  Optional fullscreen realistic sun flare for the shared post pipeline, with optical ghosts, chromatic dispersion, aperture rays, lens dirt and selective analytic sun bloom/glow.
 
 - `js/runtime/volumetric-clouds.js`
   Day/night-synchronized raymarched cloud layer with normalized editor-tunable coverage, density, noise scale, edge detail, wind, altitude, thickness, quality, absorption and opacity.
 
 - `js/runtime/rain.js`
-  Camera-aware GPU line rain with stable camera-relative distribution, level-relative vertical volume, normalized intensity/speed/length/wind/area/opacity controls and procedural SFX routing.
+  Camera-aware instanced GPU ribbon rain with stable camera-relative distribution, soft volume edges, distance-compensated thickness, level-relative vertical volume, normalized intensity/speed/length/width/wind/area/opacity controls and procedural SFX routing.
 
 - `js/runtime/post.js`
-  Shared camera-bindable post-processing: gameplay DOF/bokeh/grade plus a `videoOnly` editor path for color-neutral quality sharpening, selective Three.js SSR, compatibility indirect lighting and smoke-aware volumetric shafts.
+  Shared camera-bindable post-processing: gameplay DOF/bokeh/grade plus a `videoOnly` editor path for color-neutral quality sharpening, selective Three.js SSR, compatibility indirect lighting, volumetric shafts and the optional cinematic lens flare. Its final OutputPass owns r185 tone mapping and output color conversion before display-space FXAA.
 
 ## Persistence and Store
+
+- `js/editor/developer-debugger.js`
+  Bounded, low-overhead editor diagnostic overlay for frame timing, renderer/hardware limits, errors, promise rejections, long tasks, scene-resource cost and particle capacity/activity. Heavy scene audits are throttled and scheduled during idle time. Table rows select/reveal authored Scene entries; complete reports download as JSON and concise snapshots are posted to the local server bridge.
+
+- `serve_local.py`
+  Localhost-only static/project bridge used by `avvio.bat`. In addition to atomic LKEP project snapshots, it validates debugger summary payloads and atomically writes the generated `.lotking-local/developer-performance-latest.md` report. Neither write endpoint exists on generic static hosts.
 
 - `js/engine/scene-store.js`
   LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, reusable Logic Element definitions/instances, sound sets, and shared scene/entity factories. It loads `demo/demo-project.lkep.json` for the hosted chooser and an explicit DEMO start, then preserves the visitor's editable browser-local copy on later reloads; embedded `data:` model/texture assets are localized into IndexedDB.

@@ -19,18 +19,24 @@ function edge(id, fromNode, fromPin, toNode, toPin){
 
 function sceneRoot(color){
   return {
-    version:1,
-    selected:'root',
-    elements:[{
+    version:2,
+    root:{
       id:'root',
       name:'Default Mesh',
-      kind:'mesh',
-      parent:null,
-      mesh:'box',
+      type:'mesh',
+      primitive:'cube',
+      linked:true,
       color:color || '#7dd3fc',
-      t:{p:[0,0,0], r:[0,0,0], s:[1,1,1]},
-      components:{render:true, collider:{enabled:false, shape:'box', size:[1,1,1], radius:.5, offset:[0,0,0], static:true}},
-    }],
+      position:[0,0,0],
+      rotation:[0,0,0],
+      scale:[1,1,1],
+      collider:{enabled:false, shape:'box', size:[1,1,1], radius:.5, offset:[0,0,0], static:true},
+    },
+    elements:[],
+    components:[
+      {id:'root_transform', elementId:'root', name:'Transform', type:'transform', linked:true},
+      {id:'root_render', elementId:'root', name:'Render Mesh', type:'render', linked:true},
+    ],
   };
 }
 
@@ -85,7 +91,16 @@ function playerCarTemplateGraph(){
     {name:'NeonEnabled', type:'boolean', value:true, exposed:true, binding:'effects.neonEnabled', label:'Underglow Neon', category:'Lights'},
     {name:'ExhaustEnabled', type:'boolean', value:true, exposed:true, binding:'effects.exhaustEnabled', label:'Exhaust', category:'Effects'},
     {name:'SkidsEnabled', type:'boolean', value:true, exposed:true, binding:'effects.skidEnabled', label:'Skids', category:'Effects'},
-    {name:'SmokeIntensity', type:'number', value:1, min:0, max:5, step:.05, exposed:true, binding:'effects.smokeIntensity', label:'Smoke Intensity', category:'Effects'},
+    {name:'SmokeIntensity', type:'number', value:1, min:0, max:5, step:.05, exposed:true, binding:'effects.smokeIntensity', label:'Exhaust Smoke Intensity', category:'Effects'},
+    {name:'TireSmokeEnabled', type:'boolean', value:true, exposed:true, binding:'skids.smokeEnabled', label:'Tire Smoke', category:'Effects'},
+    {name:'TireSmokeAmount', type:'number', value:.28, min:0, max:2, step:.02, exposed:true, binding:'skids.smokeAmount', label:'Tire Smoke Amount', category:'Effects'},
+    {name:'TireSmokeThreshold', type:'number', value:.35, min:0, max:1, step:.01, exposed:true, binding:'skids.smokeThreshold', label:'Tire Smoke Slip Threshold', category:'Effects'},
+    {name:'TireSmokeMinHeat', type:'number', value:.3, min:0, max:1, step:.01, exposed:true, binding:'skids.smokeMinHeat', label:'Minimum Tire Heat', category:'Effects'},
+    {name:'TireSmokeHeatRate', type:'number', value:.75, min:0, max:3, step:.05, exposed:true, binding:'skids.smokeHeatRate', label:'Tire Heating Rate', category:'Effects'},
+    {name:'TireSmokeCoolRate', type:'number', value:.4, min:0, max:2, step:.05, exposed:true, binding:'skids.smokeCoolRate', label:'Tire Cooling Rate', category:'Effects'},
+    {name:'TireSmokeOnDrift', type:'boolean', value:true, exposed:true, binding:'skids.smokeOnDrift', label:'Smoke While Drifting', category:'Effects'},
+    {name:'TireSmokeOnBrake', type:'boolean', value:true, exposed:true, binding:'skids.smokeOnBrake', label:'Smoke While Braking', category:'Effects'},
+    {name:'TireSmokeOnAcceleration', type:'boolean', value:true, exposed:true, binding:'skids.smokeOnAcceleration', label:'Smoke On Wheelspin / Burnout', category:'Effects'},
     {name:'SkidLife', type:'number', value:12, min:1, max:60, step:.5, exposed:true, binding:'effects.skidLife', label:'Skid Lifetime', category:'Effects'},
     {name:'EngineAudioEnabled', type:'boolean', value:true, exposed:true, binding:'engineAudio.enabled', label:'Engine Audio', category:'Audio'},
     {name:'EngineVolume', type:'number', value:.28, min:0, max:1, step:.01, exposed:true, binding:'engineAudio.volume', label:'Engine Volume', category:'Audio'},
@@ -160,8 +175,8 @@ function playerCarTemplateGraph(){
       {id:'brake_right', name:'Brake Right', type:'light', condition:'brake', parentId:'root', linked:true, position:[.62,.68,-2.05], rotation:[0,0,0], scale:[1,1,1], color:'#ff2020', intensity:1.6},
       {id:'reverse_left', name:'Reverse Left', type:'light', condition:'reverse', parentId:'root', linked:true, position:[-.42,.62,-2.06], rotation:[0,0,0], scale:[1,1,1], color:'#f3f4ff', intensity:1.4},
       {id:'reverse_right', name:'Reverse Right', type:'light', condition:'reverse', parentId:'root', linked:true, position:[.42,.62,-2.06], rotation:[0,0,0], scale:[1,1,1], color:'#f3f4ff', intensity:1.4},
-      {id:'neon_left', name:'Underglow Neon Left', type:'light', condition:'neon', parentId:'root', linked:true, position:[-.7,.18,0], rotation:[0,0,0], scale:[1,1,1], color:'#22d3ee', intensity:.8, distance:3},
-      {id:'neon_right', name:'Underglow Neon Right', type:'light', condition:'neon', parentId:'root', linked:true, position:[.7,.18,0], rotation:[0,0,0], scale:[1,1,1], color:'#a855f7', intensity:.8, distance:3},
+      {id:'neon_left', name:'Underglow Neon Left', type:'light', lightKind:'rectArea', condition:'neon', parentId:'root', linked:true, position:[-.7,.18,0], rotation:[0,0,0], scale:[1,1,1], color:'#22d3ee', intensity:.8, areaWidth:.08, areaHeight:2.7},
+      {id:'neon_right', name:'Underglow Neon Right', type:'light', lightKind:'rectArea', condition:'neon', parentId:'root', linked:true, position:[.7,.18,0], rotation:[0,0,0], scale:[1,1,1], color:'#a855f7', intensity:.8, areaWidth:.08, areaHeight:2.7},
       {id:'exhaust_left', name:'Exhaust Left', type:'empty', parentId:'root', linked:true, dummyVisible:false, position:[-.42,.42,-2.22], rotation:[0,0,0], scale:[1,1,1], color:'#94a3b8'},
       {id:'exhaust_right', name:'Exhaust Right', type:'empty', parentId:'root', linked:true, dummyVisible:false, position:[.42,.42,-2.22], rotation:[0,0,0], scale:[1,1,1], color:'#94a3b8'},
       {id:'skid_rear_left', name:'Skid Rear Left', type:'empty', parentId:'root', linked:true, dummyVisible:false, position:[-.92,.03,-1.35], rotation:[0,0,0], scale:[1,1,1], color:'#334155'},
@@ -176,7 +191,7 @@ function playerCarTemplateGraph(){
       {id:'model_render', elementId:'vehicle_model', name:'Imported Model / Placeholder', type:'render', linked:true},
     ],
   };
-  g.vehiclePawn = {template:true, schemaVersion:2, id:'player-car-logic', playerId:1, enabled:true, hidden:false, possessed:true, proceduralFallback:'native-player-visual-v1', collision:{mass:1200}, suspension:{stiffness:32,restLength:.34,travel:.28,radius:.38,compression:4.4,relaxation:2.6,rollInfluence:.22}, camera:{mode:'arcade',distance:9,height:3.1,lag:5.8,fov:70}, lights:{enabled:true,front:{enabled:true},rear:{enabled:true},highBeamsEnabled:true}, effects:{neonEnabled:true,exhaustEnabled:true,skidEnabled:true,smokeIntensity:1,skidLife:12}, engineAudio:{enabled:true,volume:.28,pitch:1}, dataWidgets:{enabled:true}, driveSetup:{torque:3,horsepower:360,maxSpeed:4,oversteer:1,handbrake:2,steer:2,brake:0,grip:1,reverseDelay:.5,suspension:2,damping:4,travel:0,ride:0,roll:-4,chassisLift:0}, tuning:{horsepower:360,torque:3,maxSpeed:42.8,acceleration:11.252,brake:18,reverseSpeed:12,steer:2.2222,grip:.82836,frontGrip:.83499,rearGrip:.80185,drag:1.8}};
+  g.vehiclePawn = {template:true, schemaVersion:2, id:'player-car-logic', playerId:1, enabled:true, hidden:false, possessed:true, proceduralFallback:'native-player-visual-v1', modelShading:'original', collision:{mass:1200}, suspension:{stiffness:32,restLength:.34,travel:.28,radius:.38,compression:4.4,relaxation:2.6,rollInfluence:.22}, camera:{mode:'arcade',distance:9,height:3.1,lag:5.8,fov:70}, lights:{enabled:true,front:{enabled:true},rear:{enabled:true},highBeamsEnabled:true}, effects:{neonEnabled:true,exhaustEnabled:true,skidEnabled:true,smokeIntensity:1,skidLife:12}, skids:{enabled:true,smokeModelVersion:3,smokeEnabled:true,smokeAmount:.28,smokeThreshold:.35,smokeMinHeat:.3,smokeHeatRate:.75,smokeCoolRate:.4,smokeOnDrift:true,smokeOnBrake:true,smokeOnAcceleration:true}, engineAudio:{enabled:true,volume:.28,pitch:1}, dataWidgets:{enabled:true}, driveSetup:{torque:3,horsepower:360,maxSpeed:4,oversteer:1,handbrake:2,steer:2,brake:0,grip:1,reverseDelay:.5,suspension:2,damping:4,travel:0,ride:0,roll:-4,chassisLift:0}, tuning:{horsepower:360,torque:3,maxSpeed:42.8,acceleration:11.252,brake:18,reverseSpeed:12,steer:2.2222,grip:.82836,frontGrip:.83499,rearGrip:.80185,drag:1.8}};
   g.playerPawnBlueprint = {template:true, version:2, controllerIndex:0, playerId:1, enabled:true, hidden:false};
   return g;
 }

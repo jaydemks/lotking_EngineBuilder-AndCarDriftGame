@@ -22,6 +22,7 @@ function create(deps){
   const refreshAssetsPanel = deps.refreshAssetsPanel || function(){};
   const buildInspector = deps.buildInspector;
   const getGizmo = deps.getGizmo;
+  const requestPhysicsRebuild = deps.requestPhysicsRebuild || function(){ if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild(); };
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   const undoStack = [];
@@ -183,7 +184,7 @@ function create(deps){
     }
     if(!o.parent) scene.add(o);
     STORE.syncCollider(o);
-    if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+    requestPhysicsRebuild();
     deps.refreshSelectionHelpers();
     refreshOutliner();
     refreshAssetsPanel();
@@ -194,7 +195,7 @@ function create(deps){
     GAME.world.unregister(o);
     if(o.parent) o.parent.remove(o);
     if(ED.selected === o) selectObject(null);
-    if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+    requestPhysicsRebuild();
     deps.refreshSelectionHelpers();
     refreshOutliner();
     refreshAssetsPanel();
@@ -368,7 +369,7 @@ function create(deps){
       else delete o.userData.addedEntry.cinemaTrigger;
     }
     STORE.syncCollider(o);
-    if(GAME.systems && GAME.systems.physics) GAME.systems.physics.rebuild();
+    requestPhysicsRebuild();
     refreshSelectionHelpers();
     buildInspector();
     refreshOutliner();
