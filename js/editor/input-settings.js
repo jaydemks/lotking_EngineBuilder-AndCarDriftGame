@@ -149,7 +149,7 @@ function create(deps){
     open.disabled = !mapping;
     open.addEventListener('click', () => mapping && mapping.open());
     sec.appendChild(open);
-    sec.appendChild(el('div', 'lk-is-note', t('Visual key/button mapping per context (vehicle now).', 'Mappatura visiva tasti/pulsanti per contesto (veicolo per ora).')));
+    sec.appendChild(el('div', 'lk-is-note', t('Vehicle and Character use independent mapping contexts. The possessed Pawn selects the correct one automatically for each Player.', 'Veicolo e Personaggio usano contesti di mappatura indipendenti. Il Pawn posseduto seleziona automaticamente quello corretto per ogni Player.')));
     const reset = el('button', 'lk-is-reset', t('Reset to defaults', 'Ripristina predefiniti')); reset.type = 'button';
     reset.addEventListener('click', () => { ED.inputConfig = ACT.defaultConfig(); commit(); status(t('Controls reset to defaults', 'Controlli ripristinati')); });
     sec.appendChild(reset);

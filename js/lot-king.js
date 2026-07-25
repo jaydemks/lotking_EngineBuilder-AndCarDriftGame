@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.7.1',
+  version: '0.7.2',
   assets: null,
   core: {},
   world: {},
@@ -3402,12 +3402,12 @@ function readDriveInput(){
   if(runtimeCameraInputPlayerId != null && INPUT && INPUT.player){
     const cameraPlayer = Math.max(1, Math.min(4, Number(runtimeCameraInputPlayerId) || 1));
     if(INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(cameraPlayer - 1);
-    return INPUT.player(cameraPlayer - 1).drive();
+    return INPUT.player(cameraPlayer - 1).drive('vehicle');
   }
   if(!GAME.player || GAME.player.enabled === false || playerControllerIndex() < 0) return neutralPlayerDrive();
   if(isEditorSimulationPreview()) return neutralPlayerDrive();
   if(INPUT){
-    const drive = INPUT.player(playerControllerIndex()).drive();
+    const drive = INPUT.player(playerControllerIndex()).drive('vehicle');
     return drive;
   }
   // fallback if the input modules failed to load: legacy keyboard
@@ -3440,7 +3440,7 @@ function gamepadActions(){
   if(index < 0) return null;
   const p = INPUT.player(index);
   if(!p || p.deviceType() !== 'gamepad') return null;
-  return p.drive();
+  return p.drive('vehicle');
 }
 function gamepadEdge(state, key, previous){
   return !!(state && state[key] && !(previous || lastGamepadActions)[key]);
@@ -3454,7 +3454,7 @@ function handleGamepadActions(){
   }
   const controllerIndex = playerControllerIndex();
   const mappedPlayer = !runtimeCinemaState && !GAME.state.cinemaInputLocked && INPUT && INPUT.player && controllerIndex >= 0 ? INPUT.player(controllerIndex) : null;
-  const mappedState = mappedPlayer && mappedPlayer.drive ? mappedPlayer.drive() : null;
+  const mappedState = mappedPlayer && mappedPlayer.drive ? mappedPlayer.drive('vehicle') : null;
   const cameraModeHeld = !!(mappedPlayer && mappedPlayer.deviceType && mappedPlayer.deviceType() === 'gamepad' && mappedState && mappedState.cameraMode);
   if(!GAME.state.paused && cameraModeHeld && !lastCameraModeHeld) cycleGameplayCameraMode();
   lastCameraModeHeld = cameraModeHeld;
@@ -3486,7 +3486,7 @@ function handleGamepadActions(){
 function checkResetEdge(){
   if(!INPUT) return;
   const index = playerControllerIndex();
-  const held = index >= 0 && !isEditorSimulationPreview() && !!INPUT.player(index).drive().reset;
+  const held = index >= 0 && !isEditorSimulationPreview() && !!INPUT.player(index).drive('vehicle').reset;
   if(held && !lastResetHeld) resetCar();
   lastResetHeld = held;
 }

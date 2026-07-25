@@ -617,6 +617,7 @@ function create(deps){
   }
 
   function ensureBrowserProjectSeed(project){
+    if(isOnlineDemo()) return;
     const idx = browserProjectIndex();
     if(idx.projects && idx.projects.length){
       activeBrowserProjectId = idx.activeId || (getBrowserMarker() && getBrowserMarker().id) || null;
@@ -773,7 +774,10 @@ function create(deps){
   }
 
   function saveScene(opts){
-    if(isOnlineDemo()) return !blockOnlineDemoAction();
+    if(isOnlineDemo()){
+      requestOnlineDemoSave();
+      return false;
+    }
     opts = opts || {};
     const progressToken = beginStatusWork(tr('Saving level', 'Salvataggio livello'), tr('Checking current state', 'Verifica stato corrente'), 'loading');
     updateStatusWork(progressToken, 10, tr('Preparing data', 'Preparazione dati'), 'loading');
@@ -829,6 +833,54 @@ function create(deps){
       if(!projectFileHandle) status('Track saved locally ✓');
     }
     return true;
+  }
+
+  function requestOnlineDemoSave(){
+    const workspace = window.LK_PROJECT_WORKSPACE;
+    if(!workspace || !workspace.requestDemoSave){
+      blockOnlineDemoAction();
+      return Promise.resolve(false);
+    }
+    const active = document.activeElement;
+    if(active && active.matches && active.matches('input[type="number"]')){
+      active.dispatchEvent(new Event('input', {bubbles:true}));
+      active.dispatchEvent(new Event('change', {bubbles:true}));
+      if(active.blur) active.blur();
+    }
+    flushHudHistory();
+    const input = $('#lkTrackName');
+    if(input && input.value.trim()) ED.trackName = input.value.trim();
+    const sceneData = STORE.collect(GAME);
+    const project = createCompleteProjectSnapshot(sceneData);
+    try {
+      requireExactPersistence(sceneData, project, tr('Local project snapshot verification', 'Verifica snapshot progetto locale'));
+    } catch(err){
+      status('⚠ ' + err.message);
+      return Promise.resolve(false);
+    }
+    return workspace.requestDemoSave(
+      () => preparePortableProject(project).then(result => result.project),
+      {id:project.meta && project.meta.trackId, name:browserProjectName(project)}
+    ).then(result => {
+      if(!result) return false;
+      const savedProject = result.project || project;
+      const record = writeBrowserProject(savedProject, {
+        id:result.record && result.record.id,
+        name:result.record && result.record.name || browserProjectName(savedProject),
+      });
+      activeBrowserProjectId = record.id;
+      ED.trackId = record.id;
+      ED.dirty = false;
+      const dirty = $('#lkDirty');
+      if(dirty) dirty.classList.remove('show');
+      status(tr('Project saved to the selected local folder ✓', 'Progetto salvato nella cartella locale selezionata ✓'));
+      if(ED.projectsOpen) refreshProjectsOverlay();
+      return true;
+    }).catch(err => {
+      if(err && err.name === 'AbortError') return false;
+      status(tr('Local project save failed: ', 'Salvataggio progetto locale fallito: ') + (err && err.message ? err.message : err));
+      return false;
+    });
   }
 
   function exportProject(){
@@ -1271,6 +1323,9 @@ function create(deps){
     window.addEventListener('lot-king:workspace-state', event => {
       const detail = event.detail || {};
       if(detail.mode === 'folder') setTimeout(() => syncWorkspaceProjectCatalog({openActive:false}), 120);
+    });
+    window.addEventListener('lot-king:demo-save-request', () => {
+      if(isOnlineDemo()) requestOnlineDemoSave();
     });
   }
 

@@ -6,7 +6,7 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The active `v0.7.1` milestone focuses on Pawn authoring and release-wide editor stability: Pawn Studio, per-motion Character assets, source-preserving FBX import, Mixamo retargeting, isolated Logic Element testing, Save/LKEP/playable persistence, Three.js r185 rendering and performance debugging.
+The active `v0.7.2` milestone hardens the editor/runtime boundary established in v0.7.1: atomic first-load DEMO hydration, independent Character and Vehicle input contexts, reliable multi-player device reservation and a guided online-DEMO handoff to a writable local workspace. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
 
 Editor startup and every Play/Simulate session now include a visible, reversible runtime pre-benchmark. It prepares real project render/physics paths and measures sustained frames; devices remaining below 25 FPS receive a conservative Low video profile. This is a recommendation, not a lock: any explicit change in Video settings becomes the user's persistent override.
 
@@ -59,7 +59,7 @@ Useful URLs:
 
 See [HOW_TO_START.md](HOW_TO_START.md) for the full startup, LAN and troubleshooting guide.
 
-On hosted deployments, visitors can inspect, play and export the bundled demo without write access to the host. Authoring remains local-first. Chromium can optionally link a writable workspace folder; browsers without that API can use browser storage and normal file import/download flows.
+On hosted deployments, visitors can inspect and play the bundled author DEMO without write access to the host. DEMO Play Preview never attempts an editor save. Pressing Save opens a guided local-workspace handoff: Chromium users select a writable folder and the complete current project is copied there before normal authoring saves are enabled. Browsers without direct folder access can still export a portable LKEP file.
 
 ## Assets and FBX workflow
 

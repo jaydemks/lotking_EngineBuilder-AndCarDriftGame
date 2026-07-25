@@ -9,9 +9,9 @@ Music is included with the project and may be used for any purpose. If you enjoy
 
 ## Videos
 
-### Current v0.7.1 development preview
+### v0.7.1 development preview
 
-[▶ Watch the current v0.7.1 editor and gameplay preview](<docs/media/Lotkinged 071_LQ.MP4>)
+[▶ Watch the v0.7.1 editor and gameplay preview](<docs/media/Lotkinged 071_LQ.MP4>)
 
 ### Earlier v0.6.x preview
 
@@ -66,14 +66,15 @@ Opening the project through `file://` is not supported. Use the local server so 
 - [Technical README](README_TECHNICAL.md) — editor systems, architecture, storage, export and project structure.
 - [How to start](HOW_TO_START.md) — complete local and network startup guide.
 - [P2P sessions and coworking](docs/P2P_SESSIONS_AND_COWORKING.md) — connect two editors and test authority, transforms and reviewed snapshots.
-- [v0.7.1 release notes](RELEASE_NOTES_v0.7.1.md) — everything currently being added and fixed.
+- [v0.7.2 release notes](RELEASE_NOTES_v0.7.2.md) — current loading, input and online-workspace release.
+- [v0.7.1 release notes](docs/releases/v0.7.1.md) — Pawn Studio, soccer gameplay and cross-platform authoring.
 - [Documentation](docs/) — architecture, runtime modules, Pawn Studio, Logic Elements and Three.js maintenance.
 
 ## Project status
 
 Lot King has been public and versioned since the `v0.5.0-beta` Git-ready baseline. Every release since then has preserved a recoverable stage of the editor and runtime while the project continues moving toward a future stable beta.
 
-The `v0.7.0` milestone completed the main migration from the old Three.js r128 runtime to the pinned r185 generation, together with a large rendering and editor-stability pass. This `v0.7.1` cycle builds on that foundation with Pawn Studio, FBX/Mixamo authoring, soccer gameplay, LAN/P2P experiments, adaptive startup preparation and more cross-platform fixes.
+The `v0.7.0` milestone completed the main migration from the old Three.js r128 runtime to the pinned r185 generation. The `v0.7.1` cycle built Pawn Studio, FBX/Mixamo authoring, soccer gameplay, LAN/P2P experiments and broader cross-platform support. Version `v0.7.2` concentrates on deterministic first loading, independent Character/Vehicle input contexts and a safe local-workspace handoff for the hosted DEMO.
 
 Recent testing exposed important macOS, Safari and Apple WebGL differences that were not visible on the main Windows development setup. Startup, storage, DEMO loading and conservative rendering fallbacks have been improved, but browser, operating-system and GPU coverage remains an ongoing part of every release.
 

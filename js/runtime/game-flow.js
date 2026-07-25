@@ -66,6 +66,7 @@ function create(options){
 
   function unloadCurrentLevel(){
     session.clearLevel();
+    call('disarmFreeCamera');
     call('clearInput');
     setHudVisible(false);
     call('pauseRadio');
@@ -130,6 +131,10 @@ function create(options){
     gameState.playPreviewCursorVisible = false;
     document.body.classList.remove('lk-free-camera-cursor-hidden');
     document.body.classList.remove('lk-game-ui-cursor');
+    // Play may have acquired pointer lock from the toolbar's user gesture.
+    // Always release it before restoring editor controls; otherwise the
+    // invisible cursor remains pinned to Preview and blocks Simulate/UI clicks.
+    call('disarmFreeCamera');
     session.markStopped();
     call('stopLogicRuntime');
     call('setDragging', false);

@@ -26,6 +26,50 @@ test('published editor-menu background is ready on a cold first load', async ({p
   expect(frameState.registry).toBeGreaterThan(0);
 });
 
+test('published gameplay snapshot is complete on its first cold application', async ({page}) => {
+  test.setTimeout(120000);
+  await page.addInitScript(async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({
+      mode:'browser',
+      onlineEditor:true,
+      workspaceReady:true,
+      startupTemplate:'demo',
+    }));
+    sessionStorage.setItem('lk.autolaunch', 'online-demo');
+    await new Promise(resolve => {
+      const request = indexedDB.deleteDatabase('lotking-assets');
+      request.onsuccess = request.onerror = request.onblocked = () => resolve();
+      setTimeout(resolve, 1500);
+    });
+  });
+  await page.goto('/gameplay.html?cold-gameplay-regression=1', {waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => window.LOT_KING && window.LK_STORE && LK_STORE.ensureApplied, null, {timeout:30000});
+  const result = await page.evaluate(async () => {
+    const published = await fetch('demo/demo-project.lkep.json?cold-audit=1', {cache:'no-store'}).then(response => response.json());
+    let loadError = null;
+    try { await LK_STORE.ensureApplied(LOT_KING); }
+    catch(error){ loadError = String(error && error.message || error); }
+    const expected = (published.scene && published.scene.added || []).map(entry => String(entry.id));
+    const actual = new Set((LOT_KING.world.registry || [])
+      .filter(object => object && object.userData && object.userData.builtin !== true)
+      .map(object => String(object.userData.editorId)));
+    return {
+      sceneReady:LOT_KING.state.sceneReady,
+      applied:LK_STORE.appliedInfo(),
+      expected:expected.length,
+      missing:expected.filter(id => !actual.has(id)),
+      loadError,
+    };
+  });
+  expect(result).toMatchObject({loadError:null});
+  expect(result.sceneReady).toBe(true);
+  expect(result.applied).toMatchObject({applied:true, mode:'active', levelId:'online-demo'});
+  expect(result.expected).toBeGreaterThan(0);
+  expect(result.missing).toEqual([]);
+});
+
 test('editor toolbar keeps preview fixed and makes every project command reachable', async ({page}) => {
   await page.setViewportSize({width:640, height:760});
   await page.addInitScript(() => {

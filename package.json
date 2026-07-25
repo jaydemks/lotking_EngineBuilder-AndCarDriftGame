@@ -1,6 +1,6 @@
 {
   "name": "lot-king-engine",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "scripts": {
     "build:three": "esbuild js/vendor/three-r185-compat.entry.js --bundle --format=iife --platform=browser --target=es2020 --minify --legal-comments=none --outfile=vendor/three-r185-compat.min.js",
@@ -9,6 +9,7 @@
     "test:soccer": "node tests/soccer-core.test.js",
     "test:difficulty": "node tests/gameplay-difficulty.test.js",
     "test:character": "node tests/character-core.test.js",
+    "test:input": "node tests/input-contexts.test.js",
     "test:pawn-studio": "node tests/pawn-studio.test.js",
     "test:cloth": "node tests/cloth-system.test.js",
     "test:fbx": "node tests/fbx-plugin.test.js && node tests/asset-imports-fbx-source.test.js && node tests/playable-animation-assets.test.js",
@@ -19,7 +20,7 @@
     "test:rendering": "node tests/rendering-backend.test.js",
     "test:p2p": "node tests/p2p-logic.test.js && playwright test tests/browser/p2p-session.spec.js",
     "test:browser": "playwright test",
-    "test": "npm run verify:three && npm run test:logic && npm run test:soccer && npm run test:difficulty && npm run test:character && npm run test:pawn-studio && npm run test:cloth && npm run test:fbx && npm run test:video && npm run test:benchmark && npm run test:music && npm run test:post && npm run test:rendering && node tests/p2p-logic.test.js && npm run test:browser"
+    "test": "npm run verify:three && npm run test:logic && npm run test:soccer && npm run test:difficulty && npm run test:character && npm run test:input && npm run test:pawn-studio && npm run test:cloth && npm run test:fbx && npm run test:video && npm run test:benchmark && npm run test:music && npm run test:post && npm run test:rendering && node tests/p2p-logic.test.js && npm run test:browser"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

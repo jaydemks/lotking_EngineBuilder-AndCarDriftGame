@@ -115,9 +115,9 @@ Get-ChildItem .\js\editor\*.js | ForEach-Object {
 3. Se tutti i file stampano `OK`, ricarica completamente l'editor nel browser.
 4. Prova rapidamente le parti toccate dal refactor.
 
-## Prima del commit v0.7.1
+## Verifica della release v0.7.2
 
-La milestone corrente include Three.js r185, Logic Element, Pawn Studio, FBX e Character/Soccer. Eseguire questi controlli da PowerShell Windows, non da WSL:
+La milestone corrente include Three.js r185, Logic Element, Pawn Studio, FBX, Character/Soccer, caricamento DEMO atomico e contesti input indipendenti. La matrice seguente viene eseguita nell’ambiente Node.js Windows:
 
 ```powershell
 node .\tests\logic-core.test.js
@@ -125,6 +125,7 @@ node .\tests\character-core.test.js
 node .\tests\soccer-core.test.js
 node .\tests\pawn-studio.test.js
 node .\tests\asset-imports-batch-delete.test.js
+node .\tests\input-contexts.test.js
 npm run verify:three
 ```
 

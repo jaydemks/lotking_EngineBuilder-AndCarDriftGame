@@ -19,7 +19,7 @@
 (function(){
 'use strict';
 
-const CONFIG_VERSION = 3;
+const CONFIG_VERSION = 4;
 const DEVICE_TYPES = ['keyboard', 'gamepad', 'touch'];
 const SINGLE_INSTANCE = {touch: true};   // types that cannot be split
 
@@ -86,15 +86,49 @@ function defaultGamepadScheme(){
     cameraLookY:{type: 'axis', index: 3, scale: 1, deadzone: 0.16},
   };
 }
+function defaultCharacterKeyboardScheme(){
+  const scheme = defaultKeyboardScheme();
+  scheme.handbrake = ['ControlLeft', 'ControlRight'];
+  scheme.reset = ['Space'];
+  scheme.highBeams = ['KeyE', 'KeyF'];
+  scheme.radioToggle = [];
+  scheme.radioPlay = [];
+  scheme.radioNext = [];
+  scheme.radioPrev = [];
+  scheme.tuningMenu = [];
+  return scheme;
+}
+function defaultCharacterGamepadScheme(){
+  const scheme = defaultGamepadScheme();
+  // Left stick owns planar movement. Positive/negative halves of Axis 1 are
+  // resolved independently into forward/backward, while the right stick
+  // remains camera look. This is intentionally different from a vehicle's
+  // trigger throttle/brake layout.
+  scheme.steer = {type:'axis', index:0, scale:-1, deadzone:.18};
+  scheme.throttle = {type:'axis', index:1, scale:-1, deadzone:.18};
+  scheme.brake = {type:'axis', index:1, scale:1, deadzone:.18};
+  scheme.handbrake = {type:'button', index:1};
+  scheme.sprint = {type:'button', index:10};
+  scheme.reset = {type:'button', index:0};
+  scheme.highBeams = {type:'button', index:2};
+  scheme.radioToggle = null;
+  scheme.radioPlay = null;
+  scheme.radioNext = null;
+  scheme.radioPrev = null;
+  scheme.tuningMenu = null;
+  return scheme;
+}
 function defaultContext(id){
   const labels = {
     vehicle: {en: 'Vehicle', it: 'Veicolo'},
+    character: {en: 'Character', it: 'Personaggio'},
   };
+  const character = id === 'character';
   return {
     label: labels[id] || {en: id, it: id},
     schemes: {
-      keyboard: defaultKeyboardScheme(),
-      gamepad: defaultGamepadScheme(),
+      keyboard: character ? defaultCharacterKeyboardScheme() : defaultKeyboardScheme(),
+      gamepad: character ? defaultCharacterGamepadScheme() : defaultGamepadScheme(),
       touch: {},   // touch layout is fixed in the on-screen UI
     },
   };
@@ -106,7 +140,10 @@ function defaultConfig(){
     touchMode: 'auto',    // 'auto' (show on phone / portrait) · 'on' (always) · 'off' (never)
     autoAssign: true,     // Player 1 auto-follows the last device actually used
     activeContext: 'vehicle',
-    contexts: {vehicle: defaultContext('vehicle')},
+    contexts: {
+      vehicle: defaultContext('vehicle'),
+      character: defaultContext('character'),
+    },
     // numbered device instances; keyboard is the base for everyone
     devices: [
       {id: 'keyboard-1', type: 'keyboard', slot: 1},
@@ -174,15 +211,16 @@ function normalizeConfig(raw){
       cfg.contexts[id] = {
         label: rc.label && rc.label.en ? rc.label : dc.label,
         schemes: {
-          keyboard: normalizeScheme('keyboard', rc.schemes && rc.schemes.keyboard, defaultKeyboardScheme()),
-          gamepad: normalizeScheme('gamepad', rc.schemes && rc.schemes.gamepad, defaultGamepadScheme()),
+          keyboard: normalizeScheme('keyboard', rc.schemes && rc.schemes.keyboard, dc.schemes.keyboard),
+          gamepad: normalizeScheme('gamepad', rc.schemes && rc.schemes.gamepad, dc.schemes.gamepad),
           touch: {},
         },
       };
     }
   }
+  if(!cfg.contexts.vehicle) cfg.contexts.vehicle = defaultContext('vehicle');
+  if(!cfg.contexts.character) cfg.contexts.character = defaultContext('character');
   if(!cfg.contexts[cfg.activeContext]) cfg.activeContext = Object.keys(cfg.contexts)[0] || 'vehicle';
-  if(!cfg.contexts.vehicle && !Object.keys(cfg.contexts).length) cfg.contexts.vehicle = defaultContext('vehicle');
 
   // device instances
   if(Array.isArray(raw.devices) && raw.devices.length){

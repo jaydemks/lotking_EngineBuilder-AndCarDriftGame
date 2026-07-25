@@ -20,7 +20,6 @@ const DEMO_PROJECT_URL = 'demo/demo-project.lkep.json';
 const GUIDE_URL = 'HOW_TO_START.md';
 const GITHUB_URL = 'https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame';
 const DEMO_BLOCKED_SELECTOR = [
-  '#lkSave',
   '#lkSaveAsTrack',
   '#lkNewTrack',
   '#lkResetScene',
@@ -44,6 +43,8 @@ let badge = null;
 let topbarRetry = null;
 let autoOpenChecked = false;
 let demoGuardsInstalled = false;
+let demoSaveOverlay = null;
+let demoSaveResolve = null;
 function workspaceLang(){
   if(window.LOT_KING && LOT_KING.i18n) return LOT_KING.i18n.lang === 'it' ? 'it' : 'en';
   try { return JSON.parse(localStorage.getItem('lotking.editorPrefs.v1') || '{}').lang === 'it' ? 'it' : 'en'; }
@@ -75,7 +76,9 @@ function canUseFilePicker(){
 
 function isOnlineDemoMode(){
   const state = loadState();
-  return !isLocalOrigin() && (state.onlineEditor !== true || state.workspaceReady !== true);
+  if(state.mode === 'demo') return true;
+  if(isLocalOrigin()) return false;
+  return state.workspaceReady !== true;
 }
 
 function isEditorPage(){
@@ -149,7 +152,11 @@ function getStoredHandle(key){
 
 function putHandle(handle){
   cachedHandle = handle;
-  return putStoredHandle(HANDLE_KEY, handle);
+  // A writable handle is immediately useful for the current session even if
+  // a browser refuses to structured-clone it into IndexedDB. In that case the
+  // user may need to re-authorize the folder after reopening the page, but the
+  // requested save must not be discarded.
+  return putStoredHandle(HANDLE_KEY, handle).catch(() => handle);
 }
 
 function getHandle(){
@@ -162,7 +169,7 @@ function getHandle(){
 
 function putProjectFileHandle(handle){
   cachedFileHandle = handle;
-  return putStoredHandle(FILE_HANDLE_KEY, handle);
+  return putStoredHandle(FILE_HANDLE_KEY, handle).catch(() => handle);
 }
 
 function getProjectFileHandle(){
@@ -319,7 +326,10 @@ async function upsertWorkspaceProject(dir, project, opts){
   const name = opts.name || workspaceProjectName(payload);
   let id = slugifyWorkspaceName(opts.id || (payload.meta && payload.meta.trackId) || name);
   let record = (catalog.projects || []).find(item => item && slugifyWorkspaceName(item.id) === id);
-  if(!record && opts.newProject) id = uniqueWorkspaceProjectId(catalog, id);
+  if(opts.newProject){
+    id = uniqueWorkspaceProjectId(catalog, id);
+    record = null;
+  }
   if(!record) record = {id};
   const now = new Date().toISOString();
   const projectCopy = JSON.parse(JSON.stringify(payload));
@@ -441,6 +451,45 @@ async function connectFolder(options){
   return handle;
 }
 
+async function promoteDemoToFolder(projectFactory, opts){
+  opts = opts || {};
+  if(!isOnlineDemoMode()) throw new Error(tr('The editor is not running in online DEMO mode.', 'L’editor non è in modalità DEMO online.'));
+  if(!canUseDirectoryPicker()) throw new Error(tr(
+    'Direct folder saving requires Chrome or Edge on HTTPS. This browser can still export a portable LKEP file.',
+    'Il salvataggio diretto su cartella richiede Chrome o Edge su HTTPS. Questo browser può comunque esportare un file LKEP portabile.'
+  ));
+
+  // The picker must be requested before awaiting project serialization, while
+  // the Save click still owns a browser user gesture.
+  const handle = await window.showDirectoryPicker({mode:'readwrite'});
+  await putHandle(handle);
+  const project = typeof projectFactory === 'function' ? await projectFactory() : await projectFactory;
+  if(!project) throw new Error(tr('The current DEMO project could not be prepared.', 'Impossibile preparare il progetto DEMO corrente.'));
+  const dir = await workspaceDir(handle);
+  const saved = await upsertWorkspaceProject(dir, project, {
+    id:opts.id || (project.meta && project.meta.trackId) || 'author-demo-copy',
+    name:opts.name || workspaceProjectName(project, tr('Author DEMO copy', 'Copia DEMO autore')),
+    newProject:true,
+  });
+  await writeWorkspaceManifest(dir, {
+    template:'demo-copy',
+    activeId:saved.record.id,
+    activeProject:saved.record.file,
+  });
+  saveState({
+    mode:'folder',
+    onlineEditor:true,
+    workspaceReady:true,
+    startupTemplate:null,
+    folderName:handle.name || 'Project folder',
+    projectFile:PROJECT_DIR + '/' + saved.record.file,
+    lastProjectId:saved.record.id,
+    lastProjectName:saved.record.name,
+    lastSavedAt:new Date().toISOString(),
+  });
+  return {handle, record:saved.record, project:saved.project};
+}
+
 async function connectProjectFile(){
   if(window.isSecureContext&&typeof window.showOpenFilePicker==='function'){
     const handles = await window.showOpenFilePicker({multiple:false,types:[{description:'Lot King Editor Project',accept:{'application/json':['.json', '.lkep']}}]});
@@ -542,6 +591,8 @@ async function readWorkspaceProjects(){
 
 function setBrowserMode(patch){
   saveState(Object.assign({mode:'browser', onlineEditor:true, workspaceReady:true, folderName:null, projectFile:null},patch||{}));
+  document.body.classList.remove('lk-online-demo');
+  releaseDemoDisabledControls();
   requestPersistentBrowserStorage();
   showToast(tr('Using this browser local database. Nothing is uploaded.', 'Uso del database locale del browser. Nessun dato viene caricato.'));
 }
@@ -550,7 +601,7 @@ async function chooseEditorProject(template){
   const selectedTemplate = template === 'empty' ? 'empty' : 'demo';
   if(!isLocalOrigin()){
     if(selectedTemplate === 'demo'){
-      saveState({mode:'browser', onlineEditor:true, workspaceReady:true, startupTemplate:'demo', folderName:null, fileName:null, projectFile:null});
+      saveState({mode:'demo', onlineEditor:false, workspaceReady:true, startupTemplate:'demo', folderName:null, fileName:null, projectFile:null});
       showToast(tr('Opening author DEMO project...', 'Apertura progetto DEMO dell’autore...'));
       location.reload();
       return;
@@ -567,6 +618,22 @@ function consumeStartupTemplate(expected){
   const template = state.startupTemplate || null;
   if(template && (!expected || template === expected)) saveState({startupTemplate:null});
   return template;
+}
+
+function markDemoSession(){
+  if(isLocalOrigin()) return loadState();
+  const state = loadState();
+  if(state.mode === 'demo') return state;
+  const next = saveState({
+    mode:'demo',
+    onlineEditor:false,
+    workspaceReady:true,
+    folderName:null,
+    fileName:null,
+    projectFile:null,
+  });
+  installOnlineDemoGuards();
+  return next;
 }
 
 function resetChoice(){
@@ -841,7 +908,86 @@ function syncWorkspaceButtons(){
 }
 
 function blockedDemoMessage(){
-  showToast(tr('Online demo only. Run the project locally to import, save or edit assets.', 'Solo demo online. Avvia il progetto in locale per importare, salvare o modificare asset.'));
+  showToast(tr('Online DEMO: Play is available, but saving requires a local project folder.', 'DEMO online: puoi usare Play, ma per salvare serve una cartella di progetto locale.'));
+}
+
+function closeDemoSaveOverlay(result){
+  const resolve = demoSaveResolve;
+  demoSaveResolve = null;
+  if(!demoSaveOverlay) return;
+  demoSaveOverlay.classList.remove('open');
+  demoSaveOverlay.remove();
+  demoSaveOverlay = null;
+  if(resolve) resolve(result || null);
+}
+
+function requestDemoSave(projectFactory, opts){
+  if(!isOnlineDemoMode()) return Promise.resolve(null);
+  if(demoSaveOverlay) closeDemoSaveOverlay();
+  demoSaveOverlay = el('div', 'lk-workspace-overlay lk-demo-save-overlay open');
+  demoSaveOverlay.id = 'lkDemoSaveOverlay';
+  demoSaveOverlay.innerHTML = [
+    '<div class="lk-workspace-panel" role="dialog" aria-modal="true" aria-labelledby="lkDemoSaveTitle">',
+      '<div class="lk-workspace-head"><div>',
+        '<div class="lk-workspace-kicker">' + tr('ONLINE DEMO', 'DEMO ONLINE') + '</div>',
+        '<h2 id="lkDemoSaveTitle">' + tr('Save your project', 'Salva il progetto') + '</h2>',
+      '</div></div>',
+      '<div class="lk-workspace-status">' + tr(
+        'The author DEMO is hosted in read-only mode. You can play it freely, but the website cannot overwrite the online project. Select a folder on this PC to save the current state and reopen it later.',
+        'Il DEMO dell’autore è online in sola lettura. Puoi giocarlo liberamente, ma il sito non può sovrascrivere il progetto online. Seleziona una cartella su questo PC per salvare lo stato corrente e riaprirlo in seguito.'
+      ) + '</div>',
+      '<div class="lk-workspace-grid">',
+        '<button id="lkDemoSelectFolder" class="lk-workspace-card primary" type="button">',
+          '<b>' + tr('Select folder on this PC', 'Seleziona cartella su PC') + '</b>',
+          '<span>' + tr('A portable workspace copy is created locally. Nothing is uploaded to the server.', 'Viene creata una copia workspace portabile in locale. Nulla viene caricato sul server.') + '</span>',
+        '</button>',
+      '</div>',
+      '<div id="lkDemoSaveStatus" class="lk-workspace-status"></div>',
+      '<div class="lk-workspace-actions"><button id="lkDemoSaveCancel" type="button">' + tr('Continue without saving', 'Continua senza salvare') + '</button></div>',
+    '</div>',
+  ].join('');
+  document.body.appendChild(demoSaveOverlay);
+  const folderButton = demoSaveOverlay.querySelector('#lkDemoSelectFolder');
+  const statusNode = demoSaveOverlay.querySelector('#lkDemoSaveStatus');
+  if(!canUseDirectoryPicker()){
+    folderButton.disabled = true;
+    folderButton.classList.add('disabled');
+    statusNode.textContent = tr(
+      'Folder access is not supported by this browser. Use Chrome or Edge on HTTPS, or use Export LKEP to download a portable copy.',
+      'Questo browser non supporta l’accesso diretto alle cartelle. Usa Chrome o Edge su HTTPS, oppure Esporta LKEP per scaricare una copia portabile.'
+    );
+  } else {
+    statusNode.textContent = tr('The current DEMO remains untouched until a folder is selected.', 'Il DEMO corrente resta invariato finché non selezioni una cartella.');
+  }
+  return new Promise(resolve => {
+    demoSaveResolve = resolve;
+    const cancel = () => {
+      closeDemoSaveOverlay();
+    };
+    demoSaveOverlay.querySelector('#lkDemoSaveCancel').addEventListener('click', cancel, {once:true});
+    demoSaveOverlay.addEventListener('pointerdown', event => {
+      if(event.target === demoSaveOverlay) cancel();
+    });
+    folderButton.addEventListener('click', () => {
+      folderButton.disabled = true;
+      statusNode.textContent = tr('Preparing and saving the local workspace…', 'Preparazione e salvataggio workspace locale…');
+      promoteDemoToFolder(projectFactory, opts).then(result => {
+        statusNode.textContent = tr('Project saved locally. Normal editor saving is now active.', 'Progetto salvato in locale. Il normale salvataggio dell’editor è ora attivo.');
+        document.body.classList.remove('lk-online-demo');
+        releaseDemoDisabledControls();
+        syncWorkspaceButtons();
+        updateBadge(loadState());
+        setTimeout(closeDemoSaveOverlay, 700);
+        demoSaveResolve = null;
+        resolve(result);
+      }).catch(err => {
+        folderButton.disabled = false;
+        const message = friendlyError(err, tr('Local save failed.', 'Salvataggio locale fallito.'));
+        statusNode.textContent = message;
+        showToast(message);
+      });
+    }, {once:false});
+  });
 }
 
 function isTextEditingTarget(target){
@@ -865,9 +1011,24 @@ function markDemoDisabledControls(){
   document.querySelectorAll(DEMO_BLOCKED_SELECTOR).forEach(node => {
     if(!node || node.closest && node.closest('#lkWorkspaceOverlay')) return;
     node.classList.add('lk-demo-locked');
-    if('disabled' in node) node.disabled = true;
+    if('disabled' in node && !node.disabled){
+      node.dataset.lkDemoDisabled = '1';
+      node.disabled = true;
+    }
     node.setAttribute('aria-disabled', 'true');
     if(!node.title) node.title = 'Disabled in online demo';
+  });
+}
+
+function releaseDemoDisabledControls(){
+  document.querySelectorAll('.lk-demo-locked').forEach(node => {
+    node.classList.remove('lk-demo-locked');
+    node.removeAttribute('aria-disabled');
+    if(node.dataset && node.dataset.lkDemoDisabled === '1'){
+      node.disabled = false;
+      delete node.dataset.lkDemoDisabled;
+    }
+    if(node.title === 'Disabled in online demo') node.removeAttribute('title');
   });
 }
 
@@ -893,8 +1054,14 @@ function installOnlineDemoGuards(){
     if(!isOnlineDemoMode()) return;
     const key = String(event.key || '').toLowerCase();
     const mod = event.ctrlKey || event.metaKey;
+    if(mod && key === 's'){
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.dispatchEvent(new CustomEvent('lot-king:demo-save-request'));
+      return;
+    }
     if(((key === 'delete' || key === 'backspace') && !isTextEditingTarget(event.target))
-      || (mod && (key === 's' || key === 'i' || key === 'd' || key === 'r'))
+      || (mod && (key === 'i' || key === 'd' || key === 'r'))
       || (mod && event.altKey && key === 'n')){
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -1002,10 +1169,13 @@ window.LK_PROJECT_WORKSPACE = Object.freeze({
   isFolderMode,
   isFileMode,
   isOnlineDemoMode,
+  markDemoSession,
   isEditorPage,
   requiresInitialChoice,
   connectProjectFile,
   connectFolder,
+  promoteDemoToFolder,
+  requestDemoSave,
   saveProject,
   loadProjectText,
   readWorkspaceProjects,

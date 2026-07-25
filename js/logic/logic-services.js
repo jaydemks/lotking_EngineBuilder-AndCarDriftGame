@@ -265,12 +265,12 @@ function createInputService(GAME){
   }
   return Object.freeze({
     isKeyPressed: key => state.keys.has(String(key || '').toLowerCase()),
-    playerDrive: playerId => {
+    playerDrive: (playerId, contextId) => {
       const id = Number(playerId);
       if(!Number.isFinite(id) || id < 1 || id > 4 || !GAME || !GAME.input || !GAME.input.player) return {steer:0, throttle:0, brake:0, handbrake:false, device:null};
       if(GAME.input.ensurePlayerSlot) GAME.input.ensurePlayerSlot(id - 1);
       const view = GAME.input.player(id - 1);
-      const drive = view && view.drive ? view.drive() : {};
+      const drive = view && view.drive ? view.drive(contextId) : {};
       return {
         steer:Number(drive.steer) || 0, throttle:Number(drive.throttle) || 0,
         brake:Number(drive.brake) || 0, handbrake:drive.handbrake === true,

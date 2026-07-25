@@ -289,7 +289,7 @@ function createRegistry(GAME, options){
       if(!this.possessed || this.playerId == null || !GAME || !GAME.input || !GAME.input.player) return neutralDrive();
       if(GAME.input.ensurePlayerSlot) GAME.input.ensurePlayerSlot(this.playerId - 1);
       const view = GAME.input.player(this.playerId - 1);
-      const drive = view && view.drive ? view.drive() : neutralDrive();
+      const drive = view && view.drive ? view.drive('vehicle') : neutralDrive();
       return Object.assign(neutralDrive(), drive || {}, {device:view && view.device ? view.device() : null});
     };
     pawn.start = function(){ this.started = true; return this; };
@@ -1122,7 +1122,7 @@ function createRegistry(GAME, options){
     };
     pawn.readPlayerDrive = function(){
       if(!this.possessed || this.playerId == null) return neutralDrive();
-      return this.services.input && this.services.input.playerDrive ? this.services.input.playerDrive(this.playerId) : neutralDrive();
+      return this.services.input && this.services.input.playerDrive ? this.services.input.playerDrive(this.playerId, 'vehicle') : neutralDrive();
     };
     pawn.readDrive = function(){
       if(!this.possessed || this.playerId == null) return neutralDrive();

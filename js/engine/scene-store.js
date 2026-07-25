@@ -151,6 +151,63 @@ function assetBlobUrl(key){
     return url;
   });
 }
+
+function collectPortableAssetDbKeys(value, keys, seen, depth){
+  if(!value || (depth || 0) > 32) return keys;
+  keys = keys || new Set();
+  seen = seen || new WeakSet();
+  if(typeof value === 'string'){
+    const text = value.trim();
+    if(text.length < 2097152 && text.charAt(0) === '{' && /"(?:dbKey|modelDbKey)"\s*:/.test(text)){
+      try { collectPortableAssetDbKeys(JSON.parse(text), keys, seen, (depth || 0) + 1); } catch(err){}
+    }
+    return keys;
+  }
+  if(typeof value !== 'object' || seen.has(value)) return keys;
+  seen.add(value);
+  if(typeof value.dbKey === 'string' && value.dbKey) keys.add(value.dbKey);
+  if(typeof value.modelDbKey === 'string' && value.modelDbKey) keys.add(value.modelDbKey);
+  if(Array.isArray(value)){
+    value.forEach(item => collectPortableAssetDbKeys(item, keys, seen, (depth || 0) + 1));
+  } else {
+    Object.keys(value).forEach(key => collectPortableAssetDbKeys(value[key], keys, seen, (depth || 0) + 1));
+  }
+  return keys;
+}
+
+function missingAssetBlobKeys(keys){
+  const list = Array.from(keys || []).filter(Boolean);
+  if(!list.length) return Promise.resolve([]);
+  return assetDbOpen().then(db => new Promise((resolve, reject) => {
+    const missing = [];
+    const tx = db.transaction(ASSET_DB_STORE, 'readonly');
+    const store = tx.objectStore(ASSET_DB_STORE);
+    list.forEach(key => {
+      const request = store.get(key);
+      request.onsuccess = () => { if(!request.result) missing.push(key); };
+    });
+    tx.oncomplete = () => { db.close(); resolve(missing); };
+    tx.onerror = () => { db.close(); reject(tx.error || new Error('Verifica asset DEMO fallita')); };
+    tx.onabort = () => { db.close(); reject(tx.error || new Error('Verifica asset DEMO interrotta')); };
+  }));
+}
+
+async function hydrateBundledProjectAssets(project, label){
+  let lastError = null;
+  for(let attempt = 1; attempt <= 3; attempt++){
+    try {
+      reportBundledDemoProgress({progress:61 + attempt, step:(label || 'demo') + ' asset hydration ' + attempt + '/3'});
+      await localizePortableProjectAssets(project);
+      const missing = await missingAssetBlobKeys(collectPortableAssetDbKeys(project));
+      if(missing.length) throw new Error('Asset DEMO non disponibili dopo idratazione: ' + missing.slice(0, 4).join(', ') + (missing.length > 4 ? ' +' + (missing.length - 4) : ''));
+      return project;
+    } catch(err){
+      lastError = err;
+      if(attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 120));
+    }
+  }
+  throw lastError || new Error('Idratazione asset DEMO fallita');
+}
 window.LK_ASSET_BLOBS = Object.freeze({put: assetBlobPut, getUrl: assetBlobUrl, remove: assetBlobRemove});
 
 // ------------------------------------------------ store I/O
@@ -1452,7 +1509,18 @@ async function localizePortableObjectAssets(value, path, seen, depth){
   seen.add(value);
   if(Array.isArray(value)){
     for(let i = 0; i < value.length; i++){
-      await localizePortableObjectAssets(value[i], (path || 'asset') + '[' + i + ']', seen, (depth || 0) + 1);
+      const childPath = (path || 'asset') + '[' + i + ']';
+      const child = value[i];
+      if(typeof child === 'string' && child.trim().charAt(0) === '{' && /"(?:src|url|modelSrc|dbKey|modelDbKey)"\s*:/.test(child)){
+        let parsed = null;
+        try { parsed = JSON.parse(child); } catch(err){}
+        if(parsed){
+          await localizePortableObjectAssets(parsed, childPath, seen, (depth || 0) + 1);
+          value[i] = JSON.stringify(parsed);
+        }
+      } else {
+        await localizePortableObjectAssets(child, childPath, seen, (depth || 0) + 1);
+      }
     }
     return;
   }
@@ -1462,7 +1530,14 @@ async function localizePortableObjectAssets(value, path, seen, depth){
   if(isDataUrl(value.url)) await moveDataUrlToAssetDb(value, 'url', label, 'dbKey');
   for(const key of Object.keys(value)){
     const child = value[key];
-    if(child && typeof child === 'object'){
+    if(typeof child === 'string' && child.trim().charAt(0) === '{' && /"(?:src|url|modelSrc|dbKey|modelDbKey)"\s*:/.test(child)){
+      let parsed = null;
+      try { parsed = JSON.parse(child); } catch(err){}
+      if(parsed){
+        await localizePortableObjectAssets(parsed, (path || 'asset') + '.' + key, seen, (depth || 0) + 1);
+        value[key] = JSON.stringify(parsed);
+      }
+    } else if(child && typeof child === 'object'){
       await localizePortableObjectAssets(child, (path || 'asset') + '.' + key, seen, (depth || 0) + 1);
     }
   }
@@ -1475,7 +1550,17 @@ async function localizePortableProjectAssets(project, depth){
     for(const entry of scene.added){
       if(!entry) continue;
       if(entry.kind === 'glb') await moveDataUrlToAssetDb(entry, 'src', entry.name || entry.id || 'glb', 'dbKey');
-      if(entry.kind === 'texture' && entry.props) await moveDataUrlToAssetDb(entry.props, 'src', entry.name || entry.id || 'texture', 'dbKey');
+      if(entry.kind === 'texture' && entry.props){
+        await moveDataUrlToAssetDb(entry.props, 'src', entry.name || entry.id || 'texture', 'dbKey');
+        // Older exports could retain an obsolete catalog dbKey in entry.asset
+        // while the actual decal payload lived in props.src. Keep authoring
+        // metadata aligned with the hydrated runtime reference so the atomic
+        // audit does not treat that dead alias as a second required blob.
+        if(entry.asset && entry.props.dbKey){
+          entry.asset.dbKey = entry.props.dbKey;
+          entry.asset.src = null;
+        }
+      }
       if(entry.kind === 'logicElement'){
         const logicScene = entry.graph && entry.graph.logicScene;
         const elements = logicScene ? [logicScene.root].concat(logicScene.elements || []) : [];
@@ -1772,11 +1857,11 @@ async function installBundledDemoProject(project){
   parsed.meta = Object.assign({}, meta, {trackId:id, trackName:name, onlineDemo:true});
   parsed.savedAt = savedAt;
   if(!bundledDemoProjectCache) bundledDemoProjectCache = parsed;
-  try {
-    await localizePortableProjectAssets(parsed);
-  } catch(err){
-    console.warn('LotKing demo: asset portabili non localizzati, uso fallback in memoria', err);
-  }
+  // Never install a half-hydrated snapshot. A previous best-effort catch let
+  // the first visit apply whichever assets happened to reach IndexedDB; the
+  // refresh then looked correct only because that partial visit had warmed the
+  // database. Hydration is now verified and retried before catalog mutation.
+  await hydrateBundledProjectAssets(parsed, 'gameplay');
   // A hosted/static playable is a published snapshot: levels left in this
   // origin by an older FTP upload must not leak into the current catalog.
   resetPublishedDemoLibrary();
@@ -1828,6 +1913,9 @@ function ensureBundledDemoProject(){
       project.savedAt = savedAt;
       bundledDemoProjectCache = project;
       reportBundledDemoProgress({progress:60, step:'demo project ready in memory', url});
+      if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.markDemoSession){
+        LK_PROJECT_WORKSPACE.markDemoSession();
+      }
       if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.consumeStartupTemplate){
         LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
       }
@@ -1840,18 +1928,13 @@ function ensureBundledDemoProject(){
         // a later refresh appears to work only because another editor/runtime
         // frame happened to populate the asset database in the meantime.
         reportBundledDemoProgress({progress:61, step:'preparing role menu assets', url});
-        try {
-          await localizeBundledMenuRoleAssets(project);
-          reportBundledDemoProgress({progress:64, step:'role menu assets ready', url});
-        } catch(err){
-          console.warn('LotKing menu: asset portabili non localizzati, uso riferimenti originali', err);
-        }
+        // Deduplicated payloads may live in another level. Hydrate the complete
+        // snapshot before applying the selected menu role so a cold profile is
+        // as complete as a refresh.
+        await hydrateBundledProjectAssets(project, 'role menu');
+        reportBundledDemoProgress({progress:64, step:'role menu assets ready', url});
       } else {
-        try {
-          await installBundledDemoProject(cloneData(project));
-        } catch(err){
-          console.warn('LotKing demo: bundled LKEP storage install failed', err);
-        }
+        await installBundledDemoProject(cloneData(project));
       }
       const scene = sceneFromProject(project);
       if(scene){
@@ -1863,7 +1946,9 @@ function ensureBundledDemoProject(){
     })
     .catch(err => {
       console.warn('LotKing demo: bundled LKEP not loaded', err);
-      return null;
+      // Fail closed. Falling through to the procedural parking lot made a
+      // broken/cold DEMO look like a valid but obsolete level.
+      throw err;
     });
   return bundledDemoReady;
 }
@@ -2690,7 +2775,7 @@ const LEVELS = {
     const idx = ensureLibrary();
     id = normalizeLevelId(id);
     if(!levelEntry(idx, id)) return 'ready';       // track built-in, nulla da fare
-    if(applied && appliedMode === 'menu-background' && normalizeLevelId(appliedLevelId) !== id){
+    if(applied && (appliedMode === 'menu-background' || appliedMode === 'menu-background-pending') && normalizeLevelId(appliedLevelId) !== id){
       LEVELS.setActive(id);
       try { sessionStorage.setItem('lk.autolaunch', id); } catch(err){}
       location.reload();
@@ -4749,7 +4834,7 @@ function cloneObject3DForRestore(source){
 }
 
 // ------------------------------------------------ create from a saved "added" entry
-function createFromEntry(entry, GAME){
+function createFromEntry(entry, GAME, restoreSources){
   if(entry.kind === 'camera') return Promise.resolve(createSceneCamera(entry.props));
   if(entry.kind === 'cinemaStudio') return Promise.resolve(createCinemaStudio(entry.props));
   if(entry.kind === 'logicElement'){
@@ -4773,7 +4858,22 @@ function createFromEntry(entry, GAME){
   if(entry.kind === 'texture') return Promise.resolve(createTexture(entry.textureKind || (entry.props && entry.props.mode) || 'decal', entry.props));
   if(entry.kind === 'glb') return loadGlbEntry(entry);
   if(entry.kind === 'clone'){
-    const src = GAME && GAME.world.registry.find(o => o.userData.editorId === entry.srcId);
+    let src = GAME && GAME.world.registry.find(o => o.userData.editorId === entry.srcId)
+      || restoreSources && restoreSources[entry.srcId];
+    if(!src && restoreSources){
+      // Builtin IDs from very old snapshots can shift when the procedural
+      // default world gains a new object. Clone recipes still carry the stable
+      // human source name ("Light Pole 5 copy"), so migrate by exact base name
+      // instead of silently dropping the clone.
+      const sourceName = String(entry.srcName || entry.name || '')
+        .replace(/\s+(?:copy|copia)(?:\s+\d+)?$/i, '').trim().toLowerCase();
+      if(sourceName){
+        src = Object.values(restoreSources).find(object => {
+          const name = object && object.userData && object.userData.editorName || object && object.name || '';
+          return String(name).trim().toLowerCase() === sourceName;
+        }) || null;
+      }
+    }
     if(!src) return Promise.reject(new Error('sorgente clone non trovata: ' + entry.srcId));
     const c = cloneObject3DForRestore(src);
     c.userData = {};
@@ -5063,7 +5163,9 @@ function collectEnvironment(GAME){
   return env;
 }
 
-function apply(GAME, sceneOverride){
+function apply(GAME, sceneOverride, options){
+  options = options || {};
+  const strict = options.strict === true;
   builtinIds = GAME.world.registry.filter(o => o.userData.builtin).map(o => o.userData.editorId);
   ensureEffectHook(GAME);
   const data = sceneOverride || load();
@@ -5202,7 +5304,7 @@ function apply(GAME, sceneOverride){
     // Start inside a Promise so synchronous factory failures are isolated to
     // the offending entry instead of rejecting the whole editor bootstrap.
     const p = Promise.resolve()
-      .then(() => createFromEntry(entry, GAME))
+      .then(() => createFromEntry(entry, GAME, byId))
       .then(obj => {
 	        registerAdded(GAME, obj, entry);
 	        applyParentLink(obj, GAME);
@@ -5210,7 +5312,10 @@ function apply(GAME, sceneOverride){
 	        else if(entry.props && entry.kind === 'camera') updateSceneCameraObject(obj, entry.props);
 	        else if(entry.props && entry.kind !== 'light' && entry.kind !== 'cinemaStudio' && entry.kind !== 'driftTrack') applyMatProps(obj, entry.props);
 	      })
-      .catch(err => console.warn('LotKing store: oggetto "' + entry.name + '" non ricaricato', err));
+      .catch(err => {
+        console.warn('LotKing store: oggetto "' + entry.name + '" non ricaricato', err);
+        if(strict) throw err;
+      });
     pending.push(p);
   }
   applyEnvironment(GAME, data.env);
@@ -5316,7 +5421,10 @@ function apply(GAME, sceneOverride){
           else if(data.player.spawn && GAME.player.setVisibleHeading) GAME.player.setVisibleHeading(data.player.spawn.heading || 0);
           if(data.player.materials) applyPlayerMaterialProps(GAME, data.player.materials);
         }))
-        .catch(err => console.warn('LotKing store: modello player non ricaricato', err));
+        .catch(err => {
+          console.warn('LotKing store: modello player non ricaricato', err);
+          if(strict) throw err;
+        });
       pending.push(p);
     } else if(data.player.meshEdits && GAME.player.getModel){
       const model = GAME.player.getModel();
@@ -5356,7 +5464,13 @@ function apply(GAME, sceneOverride){
     }
     if(data.player.materials) applyPlayerMaterialProps(GAME, data.player.materials);
   }
-  return Promise.allSettled(pending).then(() => {
+  return Promise.allSettled(pending).then(results => {
+    const failed = results.filter(result => result.status === 'rejected');
+    if(strict && failed.length){
+      GAME.state.sceneReady = false;
+      const first = failed[0].reason;
+      throw new Error('Caricamento scena atomico fallito (' + failed.length + ' risorse): ' + String(first && first.message || first || 'errore'));
+    }
     for(const o of GAME.world.registry) syncCollider(o);
     if(GAME.systems.physics) GAME.systems.physics.rebuild();
     GAME.state.sceneReady = true;
@@ -5522,7 +5636,7 @@ function ensureApplied(GAME){
   ready = ensureBundledDemoProject().then(bundledProject => {
     appliedLevelId = normalizeLevelId(ensureLibrary().activeId);
     const bundledScene=bundledProject&&sceneFromProject(bundledProject);
-    return apply(GAME || window.LOT_KING,bundledScene||undefined);
+    return apply(GAME || window.LOT_KING,bundledScene||undefined,{strict:!!bundledProject});
   });
   window.LK_STORE.ready = ready;
   return ready;
@@ -5593,14 +5707,24 @@ function findBundledMenuBackgroundLevel(preferredRoles){
 }
 function ensureMenuBackgroundApplied(GAME, preferredRoles){
   if(applied) return ready;
+  // Reserve the one scene-application lane before the asynchronous DEMO fetch.
+  // Previously `applied` changed only after the fetch, allowing a fast Play
+  // request to start the gameplay apply in parallel with the menu apply.
+  applied = true;
+  appliedMode = 'menu-background-pending';
+  appliedLevelId = null;
   ready = ensureBundledDemoProject().then(() => {
     const menuLevel = findMenuBackgroundLevel(preferredRoles);
     if(!menuLevel){
+      applied = false;
+      appliedMode = null;
       reportBundledDemoProgress({progress:62, step:'no ROLE menu level found'});
       return null;
     }
     const scene = sceneFromProject(menuLevel.project);
     if(!scene){
+      applied = false;
+      appliedMode = null;
       reportBundledDemoProgress({progress:62, step:'ROLE menu project has no scene'});
       return null;
     }
@@ -5608,7 +5732,7 @@ function ensureMenuBackgroundApplied(GAME, preferredRoles){
     appliedMode = 'menu-background';
     appliedLevelId = menuLevel.id;
     reportBundledDemoProgress({progress:66, step:'applying role menu level', level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
-    return apply(GAME || window.LOT_KING, scene)
+    return apply(GAME || window.LOT_KING, scene, {strict:true})
       .then(data => {
         reportBundledDemoProgress({progress:84, step:'role menu level applied', level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
         return {data, menuLevel};

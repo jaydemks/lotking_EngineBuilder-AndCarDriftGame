@@ -164,7 +164,7 @@ function create(GAME,owner,config,services,options){
   pawn.readPlayerDrive=function(){
     if(!this.possessed||this.playerId==null||!GAME||!GAME.input||!GAME.input.player) return neutralMove();
     if(GAME.input.ensurePlayerSlot) GAME.input.ensurePlayerSlot(this.playerId-1);
-    const view=GAME.input.player(this.playerId-1),drive=view&&view.drive?view.drive():null;
+    const view=GAME.input.player(this.playerId-1),drive=view&&view.drive?view.drive('character'):null;
     if(!drive) return neutralMove();
     return {x:clamp(finite(drive.steer,0),-1,1),z:clamp(finite(drive.throttle,0)-finite(drive.brake,0),-1,1),sprint:drive.sprint===true,jump:drive.reset===true,action:drive.highBeams===true,lookX:clamp(finite(drive.cameraLookX,0),-1,1),lookY:clamp(finite(drive.cameraLookY,0),-1,1),device:view&&view.device?view.device():null};
   };

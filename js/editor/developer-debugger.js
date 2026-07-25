@@ -401,7 +401,7 @@ function create(deps){
     computeFrames();
     const rs=rendererStats(),gpu=gpuDetails(),memory=performance.memory;
     return {
-      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.1',mode:reportMode(),
+      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.2',mode:reportMode(),
       project:projectContext(),
       performance:{fps,frameAverageMs:frameAverage,frameP95Ms:frameP95,worstRecentFrameMs:maxFrame,stutterCount,sampleCount:samples.length,frameSamplesMs:samples.slice()},
       renderer:Object.assign({},rs,{pixelRatio:renderer.getPixelRatio?renderer.getPixelRatio():devicePixelRatio||1,width:renderer.domElement.width,height:renderer.domElement.height}),

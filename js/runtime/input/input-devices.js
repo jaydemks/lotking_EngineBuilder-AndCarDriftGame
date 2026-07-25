@@ -40,10 +40,14 @@ function createKeyboardSource(){
 }
 
 // --- gamepad: one source object, snapshot refreshed each frame via poll() ---
-function createGamepadSource(index){
-  let pad = null;
+function createGamepadSource(index, initialPad){
+  let pad = initialPad || null;
 
-  function poll(){
+  function poll(snapshot){
+    if(snapshot){
+      pad = snapshot;
+      return true;
+    }
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     pad = pads && pads[index] ? pads[index] : null;
     return !!pad;

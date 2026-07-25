@@ -24,6 +24,7 @@ function create(deps){
   const keyboard = DEV.createKeyboardSource();
   const touch = DEV.createTouchSource();
   const gamepads = new Map();            // pad index -> gamepad source
+  const missingGamepadFrames = new Map();
   const listeners = new Set();
 
   let projectConfig = ACT.defaultConfig();
@@ -35,6 +36,7 @@ function create(deps){
   let portrait = false;                   // is the rendered game frame portrait
   let touchHardwareSeen = false;          // set by the first real touch event on stricter mobile browsers
   let assignments = [];                  // player index -> device instance id
+  let playerContexts = [];               // last Pawn context requested per player
   const manualAssign = {};               // player index -> forced instance id
   let activeDeviceId = null;             // last device Player 1 actually used (auto-assign)
 
@@ -125,13 +127,23 @@ function create(deps){
   function syncGamepads(){
     let changed = false;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    for(let i = 0; i < pads.length; i++){
+    const maxIndex = Math.max(pads.length, gamepads.size ? Math.max(...gamepads.keys()) + 1 : 0);
+    for(let i = 0; i < maxIndex; i++){
       if(pads[i]){
-        if(!gamepads.has(i)){ gamepads.set(i, DEV.createGamepadSource(i)); changed = true; }
-        gamepads.get(i).poll();
+        if(!gamepads.has(i)){ gamepads.set(i, DEV.createGamepadSource(i, pads[i])); changed = true; }
+        gamepads.get(i).poll(pads[i]);
+        missingGamepadFrames.delete(i);
       } else if(gamepads.has(i)){
-        gamepads.delete(i);
-        changed = true;
+        // Some browsers fire gamepadconnected one or two frames before
+        // getGamepads() exposes the same pad. Keep the event snapshot briefly
+        // instead of flashing the configured device back to "not found".
+        const missing = (missingGamepadFrames.get(i) || 0) + 1;
+        missingGamepadFrames.set(i, missing);
+        if(missing > 120){
+          gamepads.delete(i);
+          missingGamepadFrames.delete(i);
+          changed = true;
+        }
       }
     }
     return changed;
@@ -164,10 +176,10 @@ function create(deps){
   }
 
   // is this device currently producing meaningful driving input?
-  function deviceActive(inst){
+  function deviceActiveInContext(inst, contextId){
     const src = sourceForInstance(inst);
     if(!inst || !src) return false;
-    const scheme = ACT.effectiveScheme(config, config.activeContext, inst.type, inst.id);
+    const scheme = ACT.effectiveScheme(config, contextId, inst.type, inst.id);
     let d;
     if(inst.type === 'keyboard') d = ACT.resolveKeyboard(scheme, src);
     else if(inst.type === 'gamepad') d = ACT.resolveGamepad(scheme, src);
@@ -178,8 +190,14 @@ function create(deps){
       d.cameraMode || d.lookBack || d.tuningMenu || d.mute || d.legend ||
       Math.abs(d.cameraLookX || 0) > 0.35 || Math.abs(d.cameraLookY || 0) > 0.35;
   }
+  function deviceActive(inst){
+    return Object.keys(config.contexts || {}).some(contextId => deviceActiveInContext(inst, contextId));
+  }
   function pinnedToOtherPlayer(deviceId){
-    for(const k in manualAssign) if(Number(k) !== 0 && manualAssign[k] === deviceId) return true;
+    for(let i = 1; i < playerCount(); i++){
+      const configured = manualAssign[i] || (config.players[i] && config.players[i].device);
+      if(configured === deviceId) return true;
+    }
     return false;
   }
 
@@ -205,13 +223,20 @@ function create(deps){
   }
 
   // ------------------------------------------------ drive read
-  function driveFor(playerIndex){
+  function contextForPlayer(playerIndex, requestedContext){
+    const requested = typeof requestedContext === 'string' && config.contexts[requestedContext] ? requestedContext : null;
+    if(requested) playerContexts[playerIndex] = requested;
+    const configured = config.players[playerIndex] && config.players[playerIndex].context;
+    return requested || playerContexts[playerIndex] || (config.contexts[configured] ? configured : null) || config.activeContext;
+  }
+  function driveFor(playerIndex, requestedContext){
     if(!enabled) return ACT.neutralDrive();
     let out = ACT.neutralDrive();
     const inst = ACT.deviceInstance(config, assignments[playerIndex]);
     const src = sourceForInstance(inst);
+    const contextId = contextForPlayer(playerIndex, requestedContext);
     if(inst && src){
-      const scheme = ACT.effectiveScheme(config, config.activeContext, inst.type, inst.id);
+      const scheme = ACT.effectiveScheme(config, contextId, inst.type, inst.id);
       if(inst.type === 'keyboard') out = ACT.resolveKeyboard(scheme, src);
       else if(inst.type === 'gamepad') out = ACT.resolveGamepad(scheme, src);
       else if(inst.type === 'touch') out = ACT.resolveTouch(src);
@@ -229,7 +254,9 @@ function create(deps){
     i = i | 0;
     if(!playerViews[i]) playerViews[i] = Object.freeze({
       index: i,
-      drive: () => driveFor(i),
+      drive: contextId => driveFor(i, contextId),
+      setContext: contextId => contextForPlayer(i, contextId),
+      context: () => contextForPlayer(i),
       device: () => assignments[i] || null,
       deviceType: () => { const inst = ACT.deviceInstance(config, assignments[i]); return inst ? inst.type : null; },
     });
@@ -244,6 +271,7 @@ function create(deps){
       saveOverride();
     }
     recompute();
+    playerContexts = playerContexts.map(contextId => config.contexts[contextId] ? contextId : null);
     recomputeTouch();
     update();
     emitChange();
@@ -368,6 +396,7 @@ function create(deps){
         deviceId: id,
         deviceLabel: id ? instLabel(id) : null,
         deviceType: (ACT.deviceInstance(config, id) || {}).type || null,
+        context: contextForPlayer(i),
       })),
       devices: config.devices.map(d => {
         const src = sourceForInstance(d);
@@ -386,8 +415,26 @@ function create(deps){
   function liveKeyboardDown(code){ return keyboard.isCodeDown(code); }
   function liveGamepad(slotIndex){ return connectedPads()[slotIndex || 0] || null; }
 
-  window.addEventListener('gamepadconnected', update);
-  window.addEventListener('gamepaddisconnected', update);
+  function onGamepadConnected(event){
+    const pad = event && event.gamepad;
+    if(pad && Number.isFinite(Number(pad.index))){
+      const index = Number(pad.index);
+      if(!gamepads.has(index)) gamepads.set(index, DEV.createGamepadSource(index, pad));
+      else gamepads.get(index).poll(pad);
+      missingGamepadFrames.delete(index);
+    }
+    update();
+  }
+  function onGamepadDisconnected(event){
+    const pad = event && event.gamepad;
+    if(pad && Number.isFinite(Number(pad.index))){
+      gamepads.delete(Number(pad.index));
+      missingGamepadFrames.delete(Number(pad.index));
+    }
+    update();
+  }
+  window.addEventListener('gamepadconnected', onGamepadConnected);
+  window.addEventListener('gamepaddisconnected', onGamepadDisconnected);
   window.addEventListener('resize', refreshTouchState);
   window.addEventListener('orientationchange', refreshTouchState);
   window.addEventListener('pointerdown', e => { if(e && e.pointerType === 'touch') markTouchHardwareSeen(); }, {passive:true});

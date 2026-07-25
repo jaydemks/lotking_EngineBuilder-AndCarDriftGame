@@ -241,13 +241,13 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 ## Input System
 
 - `js/runtime/input/input-actions.js`
-  Pure input schema and resolver. Owns config versioning, migration, normalization, default keyboard/gamepad schemes, input contexts, device instances, player mappings, effective schemes, conflict logic, and normalized drive-command resolution.
+  Pure input schema and resolver. Owns config versioning, migration, normalization, independent Vehicle/Character keyboard and gamepad schemes, input contexts, device instances, player mappings, effective schemes, conflict logic, and normalized drive-command resolution.
 
 - `js/runtime/input/input-devices.js`
   Physical input sources for keyboard, gamepad, and touch. Tracks key/button/axis state and presents a small source API to the input manager.
 
 - `js/runtime/input/input-manager.js`
-  Runtime input coordinator exposed as `GAME.input`. Merges project `meta.input` with local user overrides, detects connected gamepads, maps device instances to players, supports Player 1 auto-assign, persists remaps, computes touch visibility, and returns per-player drive commands.
+  Runtime input coordinator exposed as `GAME.input`. Merges project `meta.input` with local user overrides, detects connected gamepads (including the connection-event window before `getGamepads()` catches up), reserves configured multiplayer devices before Player 1 auto-assign, persists remaps, computes touch visibility, and returns per-player commands in the context requested by each possessed Pawn.
 
 - `js/runtime/input/touch-controls.js`
   On-screen mobile/portrait touch UI for steering, throttle, brake, and handbrake.
@@ -264,7 +264,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 ## Runtime UI Helpers
 
 - `js/runtime/project-workspace.js`
-  Editor-only workspace overlay and hosted-origin gate. It detects hosted versus local execution automatically, then offers Author DEMO or Clean Project. Hosted editing requires a user-authorized writable folder through the File System Access API; the portable DEMO/manifest and later saves remain in that folder plus origin-scoped browser storage. Unsupported browsers use the GitHub/local guide. No hosted project/FTP write endpoint is used.
+  Editor-only workspace overlay and hosted-origin gate. It detects hosted versus local execution automatically, then offers Author DEMO or Clean Project. Author DEMO is an explicit read-only session: Play remains available, while Save opens a guided handoff that copies the complete current project into a user-authorized writable folder before enabling normal persistence. Unsupported folder APIs keep portable LKEP export available. No hosted project/FTP write endpoint is used.
 
 - `js/runtime/ui/window-manager.js`
   Shared floating-window manager for runtime/editor overlays. Supports centered windows, drag, resize, persisted geometry, viewport clamping, magnetic snapping, z-ordering, and attaching to existing panels.
@@ -318,7 +318,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Localhost-only static/project bridge used by `avvio.bat`. In addition to atomic LKEP project snapshots, it validates debugger summary payloads and atomically writes the generated `.lotking-local/developer-performance-latest.md` report. Neither write endpoint exists on generic static hosts.
 
 - `js/engine/scene-store.js`
-  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, reusable Logic Element definitions/instances, sound sets, and shared scene/entity factories. It loads `demo/demo-project.lkep.json` for the hosted chooser and an explicit DEMO start, then preserves the visitor's editable browser-local copy on later reloads; embedded `data:` model/texture assets are localized into IndexedDB.
+  LKEP project save/load/import/export, scene application, active level/project persistence, local level library, asset blob storage through IndexedDB, player blueprints, reusable Logic Element definitions/instances, sound sets, and shared scene/entity factories. It loads `demo/demo-project.lkep.json` for an explicit hosted DEMO start and keeps that session marked as non-persistent until the visitor creates a local workspace copy; embedded `data:` model/texture assets are localized into IndexedDB.
 
 This file is runtime-adjacent rather than inside `js/runtime/`, but it is part of runtime boot because saved projects are applied before play and editor preview.
 

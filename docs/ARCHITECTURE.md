@@ -1,6 +1,6 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture through the active v0.7.1 work: the editor/runtime split, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
+This document describes the current project architecture through the active v0.7.2 work: the editor/runtime split, atomic hosted-DEMO loading, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
@@ -17,7 +17,7 @@ The project is still intentionally simple at the platform level: plain JavaScrip
 - `js/runtime/input/` contains the multi-device input stack introduced in v0.5.2: action schema, physical device sources, per-player assignment, in-game controls menu, visual mapping overlay, and touch controls.
 - `js/runtime/ui/` contains runtime/editor-shared UI utilities, currently the floating window manager used by the mapping overlay and movable editor settings panels.
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
-- `demo/demo-project.lkep.json` is the bundled online template. On hosted origins, `scene-store.js` loads it before a workspace choice and when DEMO is explicitly selected; later reloads preserve the visitor's editable browser-local copy instead of replacing it.
+- `demo/demo-project.lkep.json` is the bundled online template. On hosted origins, `scene-store.js` loads it when DEMO is explicitly selected and preserves an explicit read-only DEMO marker. Play does not save; the first Save request can promote the exact open snapshot into a user-selected local folder.
 - `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface. Direct editor pages and the lazy loader must keep the same module order.
 - `js/plugins/` contains the plugin host API, plugin manager and plugin descriptors. Logic Element is mandatory; the FBX importer and P2P Sessions & Coworking are default-enabled, user-toggleable reference plugins.
 - `js/editor/` contains the modular Engine Editor: core state, layout, application menu bar, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, viewport layout, Cinema Studio, playable export, Sound Designer, input settings, and preview/runtime handoff.
@@ -86,7 +86,7 @@ The store is responsible for:
 - localizing embedded portable `data:` assets into IndexedDB-backed blob keys when applying an online demo project;
 - reusable factories for primitives, lights, effects, GLB entries, and project entities.
 
-LKEP project metadata now includes `meta.input`. That field stores the project-owned input policy: allowed device families, touch mode, player defaults, input contexts, device instances, base bindings, and per-instance overrides. Runtime user remaps are stored separately as local player overrides and do not widen the project-owned allowed-device list. The player blueprint also persists `player.controllerIndex` (zero-based internally, shown as Player 1–4): the runtime Pawn reads that player's resolved command instead of being hardwired to Player 1. Missing slots and numbered gamepad instances are provisioned on demand, while the input manager still assigns connected browser gamepads by stable connected order.
+LKEP project metadata now includes `meta.input`. That field stores the project-owned input policy: allowed device families, touch mode, player defaults, input contexts, device instances, base bindings, and per-instance overrides. Runtime user remaps are stored separately as local player overrides and do not widen the project-owned allowed-device list. The player blueprint also persists `player.controllerIndex` (zero-based internally, shown as Player 1–4): the runtime Pawn reads that player's resolved command instead of being hardwired to Player 1. Missing slots and numbered gamepad instances are provisioned on demand, while the input manager still assigns connected browser gamepads by stable connected order. Project-configured Player 2–4 devices are reserved before Player 1 auto-detection, so using a controller cannot steal a gamepad explicitly assigned to another local Player.
 
 The built-in Player Car is now an opt-in compatibility Pawn and starts inactive. Its Scene-sidebar eye is a true activation control: inactive means absent from rendering, physics, input/possession, camera, audio, lights and effects, while its registry row and authoring data remain available for immediate reactivation. Historical `enabled + hidden` snapshots migrate to inactive rather than allowing an invisible native car to keep running. `js/runtime/vehicle-pawns.js` registers it as `native-player-car` without reserving a Player slot while inactive. Logic Element candidates keep their own configuration, state, transform, possession and Cannon `RaycastVehicle`; each owns its chassis, wheel infos, suspension and collision listener inside the shared physics world. An arcade fallback remains available while Cannon/world initialization is unavailable. The complete source blueprint remains in `graph.playerPawnBlueprint`, while the versioned authoring/runtime contract is stored in `graph.vehiclePawn` v2.
 
@@ -252,7 +252,7 @@ The v0.5.2 input stack separates driving actions from physical devices.
 
 Core ideas:
 
-- An input context is a named action set. `vehicle` is the current context; future pawn types can add contexts such as aircraft or character controls.
+- An input context is a named action set. `vehicle` and `character` are independent defaults: each possessed Pawn requests its own context per Player, allowing a keyboard Character and a gamepad Vehicle to run together without switching one global mapping. Vehicle keeps trigger throttle/brake and steering controls; Character uses left-stick planar movement, A/Space Jump, L3/Shift Sprint and its own action bindings. Future Pawn types can add contexts such as aircraft controls.
 - A device type is `keyboard`, `gamepad`, or `touch`.
 - A device instance is a numbered slot such as `keyboard-1`, `keyboard-2`, `gamepad-1`, `gamepad-2`, or `touch-1`.
 - A player slot maps to one device instance.
@@ -355,7 +355,7 @@ Every split part and every material group entering a join receives its own clone
 
 Play Preview uses the normal runtime pause/settings overlay. `Esc` opens/closes that menu, temporarily restores the mouse cursor when the menu was opened by keyboard/mouse, and returns focus to the canvas after closing so runtime shortcuts continue without requiring an extra click. Stopping preview remains separate through `F8` or `Shift+Esc`.
 
-Before a hosted workspace is authorized, editor Play Preview uses the bundled LKEP as read-only state. After folder consent, hosted Play Preview follows the normal local save path and mirrors the project to the authorized workspace; server files remain immutable.
+Before a hosted workspace is authorized, editor Play Preview uses the bundled LKEP as read-only state and deliberately bypasses editor persistence. Save presents a local-folder explanation and picker; only after the complete snapshot has been written successfully does the session become a normal folder workspace. Server files remain immutable throughout.
 
 `cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. It is browser-only and intentionally does not depend on external render/export tooling. Advanced curve editing, blend modes, more camera/lens parameters, and full track controls remain future work.
 
