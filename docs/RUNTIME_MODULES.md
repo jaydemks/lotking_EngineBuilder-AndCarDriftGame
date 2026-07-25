@@ -2,12 +2,21 @@
 
 This document maps the current runtime and runtime-adjacent modules. It is meant to stay version-neutral; release-specific details belong in `docs/releases/` and active `RELEASE_NOTES_v*.md` files.
 
+- `js/runtime/p2p-session.js`
+  Browser-only WebRTC DataChannel transport shared by editor preview and gameplay. It owns temporary offer/answer codes, peer lifecycle, DTLS session handoff, bounded chunk reassembly and outgoing backpressure for large messages.
+
+- `js/plugins/p2p-collaboration-plugin.js`
+  Default-enabled networking plugin and Session Studio. It adds peer presence, single-authority coworking transforms, explicit edit-control transfer and reviewed portable LKEP snapshot exchange.
+
+- `js/logic/logic-nodes-network.js`
+  Network Logic Element node pack: message receive/send, connection state, Session Studio and disconnect. Messages are bridged through the controlled `network` service rather than exposing raw peer connections to graphs.
+
 The gameplay runtime still composes through `js/lot-king.js`, but the project now has separate HTML entrypoints for landing/menu, gameplay, and editor. Most systems live in focused modules that register `window.LK_RUNTIME_*` factories. The editor also reuses some runtime modules, especially input, audio/HUD, and floating-window helpers.
 
 ## HTML Entrypoints
 
 - `index.html`
-  Landing/menu shell. Owns the main menu, landing music/mute control, project signature, and embedded gameplay frame transitions.
+  Landing/menu shell. Owns the main menu, loading-to-role-music transition, mute control, project signature, and embedded gameplay frame transitions.
 
 - `gameplay.html`
   Gameplay runtime page. Loads the runtime, HUD, settings, radio, audio, scene store, track catalog, and game flow without loading editor modules.
@@ -30,6 +39,12 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 - `js/vendor/three-r185-compat.entry.js`
   Single source for the browser rendering bundle. It imports the pinned `three@0.185.1` core and every required `examples/jsm` addon from the same package, checks `THREE.REVISION === "185"` and exposes the compatibility namespace used by the existing classic modules.
 
+- `js/runtime/rendering-backend.js`
+  Central GPU capability and renderer registry. It owns the Auto/WebGPU/WebGL preference, asynchronous adapter probing, effective-backend diagnostics, serialized r185-safe pipeline preparation, live renderer counters, session-only render-scale overrides and creation/telemetry of WebGL fallback and auxiliary editor renderers.
+
+- `js/runtime/cloth-system.js`
+  Renderer-independent Character garment component. It discovers separated skinned cloth meshes, evaluates vertex-color or painted pin masks, follows the animated skeleton, solves structural constraints, wind/gravity and bone-sphere collisions, and exposes a portable CPU backend shared by WebGL, Safari, Pawn Studio, Play Preview and export. The schema keeps the future Three.js WebGPU compute backend behind an explicit parity boundary.
+
 - `vendor/three-r185-compat.min.js`
   Generated local IIFE loaded by editor, gameplay and the standalone test editor. Rebuild it with `npm run build:three`; `npm run verify:three` rejects mixed revisions, old r128 URLs and removed color/shadow APIs.
 
@@ -45,19 +60,22 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Loading progress UI, weighted loading stages, menu busy state, load-failure UI, and final loading messages.
 
 - `js/runtime/runtime-loader.js`
-  Runtime asset loading, local model reports, saved-project apply step, and gameplay effect warmup.
+  Runtime asset loading, local model reports, saved-project apply step, gameplay effect warmup and orchestration of the visible pre-benchmark before editor/game session entry.
+
+- `js/runtime/pre-benchmark.js`
+  Reversible scene preparation presented behind a fully opaque progress surface before the editor and every Play/Simulate session. It exercises hidden renderables, existing light/color states, authored shadows, physics and registered system hooks; uploads authored GPU textures; warms controlled camera orientations; compiles the current Three.js scene through the renderer backend's serialized r185-safe queue; measures sustained rendered frames; and requests the conservative video profile below 25 FPS. All temporary scene and camera mutations are restored before control returns.
 
 - `js/runtime/session-flow.js`
   Gameplay/editor session state for launched tracks, editor preview, pending loads, selected project, and loaded-level flags.
 
 - `js/runtime/game-flow.js`
-  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, play-state orchestration, and cleanup of session-only camera overrides. Browser gameplay, Play Preview and playable exports use the same flow.
+  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, pre-benchmark gating, play-state orchestration, and cleanup of session-only camera overrides. Browser gameplay, Play Preview and playable exports use the same flow.
 
 - Runtime scene/cinema camera override
   `lot-king.js` applies the exclusive active Scene Camera for non-Pawn levels and evaluates Cinema Studio Movie Track camera cuts after the normal Player Camera update, ensuring the selected scene/timeline camera owns the final Player 1 render. Logic services dispatch the same start/stop contract to editor preview and standalone gameplay.
 
 - `js/engine/scene-store.js`
-  In addition to scene persistence and factories, owns versioned GLB `meshEdits`: stable mesh ids, deleted/detached parts, local transforms, persistent non-material node properties and deterministic material/connected-island decomposition reconstructed from source geometry at load time.
+  In addition to scene persistence and factories, owns versioned GLB `meshEdits`, fitted Logic Element asset loading and safe `SkeletonUtils` cloning. Runtime-only/circular `userData` is sanitized before Three.js clone/copy so collider references cannot break editor reconstruction.
 
 - `js/runtime/track-catalog.js`
   Available track list, current track state, level-select card rendering, and runtime track catalog updates from saved levels.
@@ -83,8 +101,11 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 
 ## Soccer Game Mode
 
+- `js/runtime/gameplay-difficulty.js`
+  Persistent project-agnostic Easy/Medium/Hard gameplay contract with domain-specific profiles. Soccer consumes it for goalkeeper reaction, prediction, reach, tracking and dive ability, plus enabled unpossessed field-player AI reaction, pace and shot error. Future game categories can reuse the generic opponent values without adding another incompatible menu setting.
+
 - `js/runtime/soccer-pawns.js`
-  Thin Soccer specialization of the shared Character Pawn base. It owns only football roles, football actions and goalkeeper behavior; movement, collision, possession, camera and animation lifecycle stay in the base.
+  Thin Soccer specialization of the shared Character Pawn base. It owns persistent pre-shot and charged mouse/right-stick aim, animation-synchronized foot contact, goal-local predictive goalkeeper behavior and the opt-in unpossessed field-opponent baseline; movement, possession, camera and animation lifecycle stay in the base.
 
 - `js/runtime/character-pawn-base.js`
   Shared humanoid Pawn implementation: lifecycle, registry/possession, input, ground movement, camera, animation library and motion blending, appearance and generic action playback. Generic Character and Soccer compose this module instead of inheriting from one another.
@@ -99,19 +120,31 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Generic humanoid ground-movement controller (design adapted from three-player-controller, dependency-free): camera-relative or heading-relative input, walk/run/sprint smoothing, gravity + jump with air control, ground detection, pushback against the arcade collider lists and camera view presets (third / close / first-person lite). Consumed by the Soccer Pawn and reusable by future human-type Pawns.
 
 - `js/runtime/soccer-locomotion.js`
-  Legacy filename for the shared Character locomotion module. It exports the generic `LK_RUNTIME_CHARACTER_LOCOMOTION` contract (and the older Soccer alias): velocity damping plus look-ahead cross-blends idle/walk/run/strafe, scales stride playback with real speed and runs one-shot actions. Missing clips degrade to the nearest available one.
+  Legacy filename for the shared Character locomotion module. It exports the generic `LK_RUNTIME_CHARACTER_LOCOMOTION` contract (and the older Soccer alias): velocity damping, metadata-driven Motion Set selection, weighted direction/speed blends, stride matching, one-shot actions and per-bone Edit Rig pose-layer blending. It canonicalizes Mixamo/Blender track names and uses r185 `SkeletonUtils.retargetClip()` for real source/target skeletons, including armature-span compensation for hip translation.
+
+- `js/runtime/character-animation-set.js`
+  Normalizes legacy slot maps and current `animationSet` entries, infers physical motion metadata and deterministically ranks candidates from state, local direction, speed, acceleration and priority. Selection returns normalized weights rather than random choices.
+
+- `js/runtime/character-placeholder-locomotion.js`
+  Procedural fallback locomotion controller sharing the same `bind/update/playAction/dispose/isBound/...` contract as `soccer-locomotion.js`. When no GLB with animations is bound yet, it drives the built-in placeholder body (torso/hips/legs/arms/head, matched by scene element id) with a speed- and gait-driven walk/run/idle cycle plus built-in Jump/Kick/Dive/Celebrate/Defeat/Interact gestures resolved through the same fuzzy clip-name matching as real clips. `character-pawn-base.js` upgrades to a GLB controller automatically as soon as one becomes available.
+
+- `js/runtime/mixamo-placeholder-clips.js`
+  Target-rig procedural clip generator for compatible humanoid/Mixamo Main Meshes. It derives quaternion tracks from each bone's rest pose for the complete Character/Soccer slot set, including goalkeeper-ready, catch and directional dive poses. It emits no position/scale tracks and is consumed by both Pawn Studio and the shared locomotion controller only when an authored take is unavailable.
 
 - `js/runtime/soccer-ball.js`
-  Regulation ball with arcade flight physics (gravity, bounce, drag, Magnus curve), kick-toward-target API, goal-line detection against registered regulation goal frames (7.32 x 2.44), goalkeeper save checks and out/stopped detection. Balls register as non-possessable Pawn records so they step and dispose with the Play session. Emits `OnBallKicked` / `OnGoalScored` / `OnBallSaved` / `OnBallOut`.
+  Regulation ball with arcade flight physics (gravity, bounce, drag, Magnus curve), soft non-welded match control, nearest-ball/timed-strike APIs, penalty-spot locking, goal-line detection against registered regulation goal frames (7.32 x 2.44), goalkeeper save checks and out/stopped detection. Balls register as non-possessable Pawn records so they step and dispose with the Play session. Emits `OnBallKicked` / `OnGoalScored` / `OnBallSaved` / `OnBallOut`.
 
 - `js/runtime/penalty-flow.js`
-  Penalty shootout referee state machine: alternating kicks, configurable kicks per team, sudden death, early mathematical decision, score/history tracking and `OnPenaltyKickReady` / `OnPenaltyPhaseChanged` / `OnPenaltyResult` / `OnShootoutFinished` events consumed from the shared Pawn event bus.
+  Penalty shootout referee state machine: alternating kicks, configurable kicks per team, sudden death, early mathematical decision, score/history tracking and `OnPenaltyKickReady` / `OnPenaltyPhaseChanged` / `OnPenaltyResult` / `OnShootoutFinished` events consumed from the shared Pawn event bus. Snapshots include the last outcome and result sequence used by the Soccer HUD.
 
 - `js/runtime/soccer-stadium.js`
-  Pure-data stadium level builder used by the editor `Add > Level > Soccer Stadium (Penalty)` action. Generates editable primitive/light descriptors for a regulation pitch with full markings, goals, stands with placeholder fans, entrances, flags and floodlights, plus `gameplayAnchors()` (penalty spots, goal centers/headings, kickoff).
+  Pure-data stadium level builder used by the editor `Add > Level > Soccer Stadium (Penalty)` action. Generates editable primitive/light descriptors for a regulation pitch with a single smooth penalty arc, conventional goal frame/open net, stands with placeholder fans, entrances, flags and floodlights, plus `gameplayAnchors()` (penalty spots, goal centers/headings, kickoff).
+
+- `js/runtime/penalty-shootout-level-template.js`
+  `New Level -> Penalty Shootout Stadium (Soccer)` level builder. Converts `soccer-stadium.js` output into normal editable `scene.added` entries, then places a possessed kicker, an unpossessed goalkeeper, an explicit penalty Ball, a Goal Frame sensor and a Penalty Shootout Manager. Matching stable IDs link the manager to the reusable ball/goal while the stadium meshes remain freely replaceable.
 
 - `js/logic/logic-nodes-soccer.js` / `js/logic/logic-templates-soccer.js`
-  Soccer Logic node pack (registered through `window.LK_LOGIC_NODE_PACKS`) and the soccer template pack (registered through `LK_LOGIC_TEMPLATES.register`): `Template - Player Soccer Element` and `Template - Penalty Shootout Manager`.
+  Soccer Logic node pack (registered through `window.LK_LOGIC_NODE_PACKS`) and template pack (registered through `LK_LOGIC_TEMPLATES.register`): `Template - Player Soccer Element`, `Template - Soccer Ball`, `Template - Soccer Goal Frame` and `Template - Penalty Shootout Manager`. Ball spawning carries explicit `match|penalty` and initial-lock state, and goal/manager composition uses stable author-facing IDs.
 
 - `js/logic/logic-nodes-character.js` / `js/logic/logic-templates-character.js`
   Generic Character Pawn control/state nodes and `Template - Player Character (Normal)`, including preset selection and explicit in-place/no-root-motion guidance for every animation slot.
@@ -168,13 +201,19 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 ## Plugin Host
 
 - `js/plugins/plugin-api.js`
-  Stable registration API passed to plugins. Supports commands, menu entries, scene types, asset types, inspector providers, runtime hooks, export hooks, and declared capabilities.
+  Stable registration API passed to plugins. Supports commands, menu entries, scene types, asset types, asset importers, authoring preview loaders, Pawn Studio adapters, inspector providers, runtime hooks, export hooks, and declared capabilities.
 
 - `js/plugins/plugin-manager.js`
-  Editor/runtime plugin registry. Tracks built-in and future external plugins, enabled state, commands and extension entries. Built-in plugins cannot be disabled from the current UI.
+  Editor/runtime plugin registry. Tracks built-in and external/reference plugins, persisted enabled state, commands and extension entries. Mandatory built-ins cannot be disabled; default-enabled non-built-ins such as the FBX importer can be toggled.
 
 - `js/plugins/logic-element-plugin.js`
   Built-in `Logic Element (Experimental)` plugin descriptor. Declares Logic Element capabilities and registers the scene object type, reusable asset type, inspector provider, runtime runner hook, export hook, and Level Logic command while the implementation remains in the existing Logic Element modules.
+
+- `js/plugins/fbx-import-plugin.js`
+  Default-enabled, user-toggleable reference plugin. Resolves multi-file/folder FBX texture dependencies, persists source provenance, previews FBX directly through `FBXLoader`, and compiles scenes, skeletons and animations to the linked binary GLB used by runtime and portable export.
+
+- `js/plugins/cloth-authoring-plugin.js`
+  Default-enabled, user-toggleable Cloth Studio plugin. It augments Character and Soccer Pawn Studio with garment discovery, per-piece masks, viewport painting, solver/wind controls, mesh diagnostics and automatic or explicit bone collider authoring.
 
 - `js/editor/editor-menu-bar.js`
   Software-style top application menu (`File`, `Edit`, `View`, `Tools`, `Plugins`), non-modal Plugin Manager panel, and Logic Profiler panel for active runtime stats, pause/resume/step breakpoint controls, filtered timeline samples, and filtered/total sample counts.
@@ -234,10 +273,10 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Gameplay HUD DOM helpers for popups, drift score, total score, speed, gear, and HUD visibility.
 
 - `js/runtime/radio-hud.js`
-  Soundhud/radio UI, TAB radio interactions, editor HUD handles, player radio volume, bass boost, imported radio tracks, and runtime/editor HUD layout state.
+  Soundhud/radio UI, TAB interactions, editor HUD handles, player radio volume, bass boost, imported tracks, and possessed-vehicle/specific-actor/global ownership gating.
 
 - `js/runtime/settings-menu.js`
-  Settings and pause-menu DOM bindings, audio sliders, video quality controls, editor/game menu mode handling, source-aware cursor behavior, gamepad menu navigation, and focus restoration after closing the menu. Keyboard/mouse-opened menus release pointer lock and show the UI cursor; gamepad/touch-opened menus keep cursor-hidden navigation semantics.
+  Settings and pause-menu DOM bindings, audio sliders, video quality controls, persistent gameplay difficulty selection, editor/game menu mode handling, source-aware cursor behavior, gamepad menu navigation, and focus restoration after closing the menu. Keyboard/mouse-opened menus release pointer lock and show the UI cursor; gamepad/touch-opened menus keep cursor-hidden navigation semantics.
 
 ## Audio and Music
 
@@ -251,7 +290,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Shared sortable music libraries, browser-session audio imports, metadata from filenames, and safe audio URL handling.
 
 - `js/runtime/menu-music.js`
-  Start-screen music playback, menu music button state, track switching, upload handling, and menu music state persistence.
+  Independent Loading, Editor Menu and Game Menu playback, menu music button state, ordered track switching, upload handling, legacy shared-library migration and persistence.
 
 ## Environment, Weather, and Post
 
@@ -297,8 +336,14 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
 - `js/editor/project-io.js`
   Editor project metadata, browser-based Projects overlay, active project save/load, import/export, active level/project round-trip, and persisted `meta.levelRole` (`gameplay`, `editor-menu`, `game-menu`). Owns editor-side `meta.input` serialization through the runtime input schema when available. Project export writes portable `.lkep.json` data. Hosted imports/saves stay blocked only before local-folder consent; afterward they use browser storage and the authorized workspace, never the hosting server.
 
+- `js/editor/asset-catalog.js`, `js/editor/asset-panel.js`, `js/editor/asset-imports.js`
+  Imported-asset selection, card rendering and lifecycle. Ctrl/Meta/Shift selection can span several assets; batch deletion deduplicates the logical records and removes their canonical blobs plus linked FBX source/sidecar records in one confirmation.
+
+- `js/editor/pawn-studio.js`
+  Shared schema-driven Pawn overlay for Character, Soccer, Vehicle and plugin adapters. Owns Main Mesh/reset/scale authoring, Motion Set batch intake, direct source preview, clip and rig diagnostics, r185 Timer/Mixer/Action lifecycle and isolated playback controls.
+
 - `js/editor/logic-elements-inspector.js`
-  Runtime-adjacent Logic Element authoring surface. Owns Graph/Viewport tabs, hierarchy/components/variables/functions, dependency list inspection, asset-ref picker/relink controls, shared-definition editing, exposed instance overrides, contextual validator diagnostics, and local graph Play/Stop without duplicating the runtime interpreter.
+  Runtime-adjacent Logic Element authoring surface. Owns Graph/Viewport tabs, hierarchy/components/variables/functions, dependency list inspection, asset-ref picker/relink controls, shared-definition editing, exposed instance overrides and contextual validator diagnostics. Graph Run uses the interpreter; Viewport **Play Isolated** drives Character/Vehicle simulation locally and restores authored transforms on Stop.
 
 - `js/editor/input-settings.js`
   Project input settings UI. Edits allowed devices, touch mode, player defaults, device instances, base bindings, and mapping overlay data stored in `meta.input`.

@@ -40,6 +40,8 @@ __pycache__/
 *.swo
 ROADMAP_NODES_BLUEPRINT_JS_PART1.md
 ROADMAP_NODES_BLUEPRINT_JS_PART2.md
+THREE_R185_ADVANCED_RENDERING_ROADMAP.tmp.md
+roadmap_tmp.md
 
 # Local/private environment files
 .env
@@ -54,3 +56,4 @@ ROADMAP_NODES_BLUEPRINT_JS_PART2.md
 # Sandbox fallback git directory used when .git is unavailable/read-only
 .git-local/
 .lotking-local/
+demo/demo-project.previous.lkep.json

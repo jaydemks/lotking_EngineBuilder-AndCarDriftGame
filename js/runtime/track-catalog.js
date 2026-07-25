@@ -100,6 +100,7 @@ function create(options){
     target.id = track.id || target.id;
     target.name = track.name || target.name;
     target.tag = track.tag || 'EDITOR TRACK';
+    target.levelRole = track.levelRole || target.levelRole || 'gameplay';
     if(current && current.id === previousId) current = target;
     render();
   }

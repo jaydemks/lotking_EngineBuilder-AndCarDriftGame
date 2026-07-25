@@ -8,9 +8,11 @@
 function create(deps){
   deps = deps || {};
   const GAME = deps.GAME;
+  const ED = deps.ED || GAME && GAME.editor && GAME.editor.state || {};
   const markDirty = deps.markDirty;
   const musicLibrarySection = deps.musicLibrarySection;
   const section = deps.section;
+  const selectRow = deps.selectRow;
   const sliderRow = deps.sliderRow;
   const checkRow = deps.checkRow;
   const btnRow = deps.btnRow;
@@ -49,10 +51,75 @@ function create(deps){
     sp.body.appendChild(el('<div class="lk-hint">' + tr('In game it remains TAB + slow-motion. In the editor, preview stays fixed so you can lay it out.', 'In gioco resta TAB + slow-motion. In editor la preview resta ferma per poterla impaginare.') + '</div>'));
     box.appendChild(sp.root);
 
+    const binding = section(tr('RADIO OWNERSHIP', 'PROPRIETÀ RADIO'), true);
+    binding.body.appendChild(selectRow(tr('Runtime binding', 'Collegamento runtime'), hud.bindingMode || 'vehicle', [
+      {value:'vehicle', label:tr('Possessed vehicle (recommended)', 'Veicolo posseduto (consigliato)')},
+      {value:'actor', label:tr('Specific actor', 'Actor specifico')},
+      {value:'global', label:tr('Global gameplay', 'Gameplay globale')},
+    ], value => upd({bindingMode:value})).root);
+    const actorOptions = [{value:'', label:tr('Select an actor...', 'Seleziona un actor...')}];
+    if(GAME.world && GAME.world.registry && GAME.world.registry.forEach){
+      GAME.world.registry.forEach(object => {
+        if(!object) return;
+        const data = object.userData || {};
+        const id = String(data.editorId || data.logicInstanceId || data.entityId || data.id || '');
+        if(!id) return;
+        actorOptions.push({value:id, label:String(data.editorName || data.name || object.name || id)});
+      });
+    }
+    binding.body.appendChild(selectRow(
+      tr('Bound actor', 'Actor collegato'),
+      hud.bindingActorId || '',
+      actorOptions,
+      value => upd({bindingActorId:value})
+    ).root);
+    binding.body.appendChild(el('<div class="lk-hint">' + tr(
+      'By default the radio and its TAB interface exist only while Player 1 possesses an enabled native or Logic Element vehicle. Actor and Global are explicit overrides for custom projects.',
+      'Per impostazione predefinita la radio e la sua interfaccia TAB esistono solo mentre il Giocatore 1 possiede un veicolo nativo o Logic Element attivo. Actor e Globale sono override espliciti per progetti personalizzati.'
+    ) + '</div>'));
+    box.appendChild(binding.root);
+
     const radioApi = GAME.systems && GAME.systems.radio;
-    const menuApi = GAME.systems && GAME.systems.menuMusic;
     box.appendChild(musicLibrarySection('GAME RADIO LIBRARY', radioApi));
-    box.appendChild(musicLibrarySection('MENU MUSIC LIBRARY', menuApi));
+    const loadingMusicApi = GAME.systems && GAME.systems.loadingMusic;
+    box.appendChild(musicLibrarySection(
+      tr('LOADING MUSIC LIBRARY', 'LIBRERIA MUSICA CARICAMENTO'),
+      loadingMusicApi
+    ));
+    const menuController = GAME.systems && GAME.systems.menuMusic;
+    const editorMenuApi = GAME.systems && GAME.systems.editorMenuMusic;
+    const gameMenuApi = GAME.systems && GAME.systems.gameMenuMusic;
+    const initialMenuTarget = ED.menuMusicLibraryTarget ||
+      (ED.levelRole === 'editor-menu' ? 'editor-menu' : 'game-menu');
+    ED.menuMusicLibraryTarget = initialMenuTarget;
+    if(menuController && menuController.setEditorTarget) menuController.setEditorTarget(initialMenuTarget);
+    const menuTargetSection = section(tr('MENU MUSIC DESTINATION', 'DESTINAZIONE MUSICA MENU'), true);
+    const menuTarget = selectRow(tr('Edit library for', 'Modifica libreria per'), initialMenuTarget, [
+      {value:'editor-menu', label:tr('Editor Menu', 'Menu Editor')},
+      {value:'game-menu', label:tr('Game Menu', 'Menu di gioco')},
+    ], value => {
+      ED.menuMusicLibraryTarget = value;
+      if(menuController && menuController.setEditorTarget) menuController.setEditorTarget(value);
+      renderMenuLibrary();
+    });
+    menuTargetSection.body.appendChild(menuTarget.root);
+    menuTargetSection.body.appendChild(el('<div class="lk-hint">' + tr(
+      'Editor Menu and Game Menu have independent ordered playlists. The first row is the track that starts when that menu opens.',
+      'Menu Editor e Menu di gioco hanno playlist ordinate indipendenti. La prima riga è il brano che parte quando si apre quel menu.'
+    ) + '</div>'));
+    box.appendChild(menuTargetSection.root);
+    const menuLibraryHost = el('<div></div>');
+    box.appendChild(menuLibraryHost);
+    function renderMenuLibrary(){
+      menuLibraryHost.innerHTML = '';
+      const target = ED.menuMusicLibraryTarget === 'editor-menu' ? 'editor-menu' : 'game-menu';
+      const api = target === 'editor-menu' ? editorMenuApi : gameMenuApi;
+      const title = target === 'editor-menu'
+        ? tr('EDITOR MENU MUSIC LIBRARY', 'LIBRERIA MUSICA MENU EDITOR')
+        : tr('GAME MENU MUSIC LIBRARY', 'LIBRERIA MUSICA MENU DI GIOCO');
+      menuLibraryHost.appendChild(musicLibrarySection(title, api));
+    }
+    renderMenuLibrary();
 
     const si = section('PNG FRAME', false);
     let lock = true;

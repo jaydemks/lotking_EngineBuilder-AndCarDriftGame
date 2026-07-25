@@ -10,11 +10,13 @@ From the repository root, run:
 avvio.bat
 ```
 
-This starts the local server on port `5700` and opens the landing menu:
+This starts the local server on port `5700`, makes it reachable from the local network and opens the landing menu on the host:
 
 ```text
 http://localhost:5700/
 ```
+
+The server window also prints addresses such as `http://192.168.1.20:5700/engine_editor.html`. Open one of those on a Mac or another computer on the same network. Each device receives an independent browser-only project database; remote devices do not write the host's `.lotking-local` disk bridge.
 
 The Engine Editor is loaded only after you press **ENGINE EDITOR**. To bypass the landing menu intentionally, run `set PAGE=engine_editor.html` before `avvio.bat`.
 
@@ -63,6 +65,8 @@ The Project Workspace button is an optional bridge. It does not replace the curr
 demo/demo-project.lkep.json
 ```
 
+Prefer **Projects → chosen project → ★ DEMO**. The active row publishes the exact open state; another row publishes that saved project. On localhost this atomically replaces the repository file and creates `demo/demo-project.previous.lkep.json`; on LAN/hosted browsers it downloads the exact filename because remote devices are not allowed to write the host repository.
+
 The published site offers that file as the Author DEMO. It remains read-only until the visitor explicitly authorizes a local project folder, then an editable copy is written into that workspace without modifying the hosted source.
 - In Chrome or Edge on `localhost`, `Project Workspace -> Open / sync LKEP file` can link a portable project file. The editor imports the file, and the normal Save button writes the portable `.lkep.json` file again.
 - Portable LKEP export/import is responsible for carrying imported asset blobs inside the project data when possible.
@@ -84,6 +88,14 @@ serve_lan_windows.bat
 ```
 
 WSL2 is behind a virtual network, so a phone on Wi-Fi often cannot reach a server started inside WSL.
+
+For the normal Windows workflow, `avvio.bat` now already binds to the LAN. The separate helpers remain useful when you want a different port or a strictly static test server.
+
+## P2P Sessions And Coworking
+
+Open **Plugins → P2P Sessions & Coworking** to connect two browser instances through an encrypted WebRTC DataChannel. The host and guest exchange temporary offer/answer codes manually, so same-LAN testing needs no account or cloud signaling service.
+
+The initial coworking policy has one explicit editing authority, live selected-object transforms and opt-in portable LKEP snapshots. Logic Elements also expose Network send, receive, connection and session-studio nodes. See [P2P Sessions And Coworking](docs/P2P_SESSIONS_AND_COWORKING.md) for the security model, workflow and Internet limitations.
 
 ## Firewall / LAN Troubleshooting
 
@@ -110,6 +122,9 @@ Typical workflows:
 - Build locally in `engine_editor.html`, then export a playable ZIP when you want to publish only the game/runtime.
 - Publish the whole project as a server-read-only hosted editor: visitors may edit only after authorizing their own local folder, while hosted files remain immutable.
 - Use Logic Element from inside the editor when you want Blueprint-style experimental visual scripting for level logic or scene objects.
+- Open Pawn Studio from a Character, Soccer or Vehicle Logic Element when you need its Main Mesh, movement, collision or Motion Animation Set. The default-enabled FBX plugin is available under **Plugins** and compiles portable GLBs while preserving the original authoring sources.
+
+After updating editor JavaScript, use a full browser reload so versioned Pawn Studio/runtime cache keys are fetched before testing imported animations.
 
 For day-to-day work, start with:
 

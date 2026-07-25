@@ -98,6 +98,9 @@ test('project rendering authoring is wired to the shared runtime schema', async 
   // dispatch the pinned inspector action directly in headless mode.
   await page.evaluate(() => document.querySelector('[data-special="rendering"]').click());
   await expect(page.locator('#lkInspector')).toContainText('RENDERING / VIDEO');
+  await expect(page.locator('#lkInspector')).toContainText('PERFORMANCE & DIAGNOSTICS');
+  await expect(page.locator('#lkInspector')).toContainText('Session render scale');
+  await expect(page.locator('#lkInspector')).toContainText('Draw calls');
   const qualitySelect = page.locator('[data-render-panel="defaults"] .lk-row', {hasText:'Default quality'}).locator('select');
   await expect(qualitySelect.locator('option')).toHaveCount(5);
 
@@ -137,6 +140,7 @@ test('project rendering authoring is wired to the shared runtime schema', async 
       lighting:LOT_KING.systems.sky.lighting.get(),
       flare:LOT_KING.systems.sky.flare.get(),
       persistedEnvironment:LK_STORE.collectEnvironment(LOT_KING),
+      environmentOrientation:(()=>{LOT_KING.systems.sky.orientation.set({background:37,environment:123});const saved=LK_STORE.collectEnvironment(LOT_KING).environmentOrientation;LOT_KING.systems.sky.orientation.set({background:0,environment:0});LK_STORE.applyEnvironment(LOT_KING,{environmentOrientation:saved});return {saved,restored:LOT_KING.systems.sky.orientation.get(),background:LOT_KING.core.scene.backgroundRotation.y,environment:LOT_KING.core.scene.environmentRotation.y};})(),
     };
   });
   expect(state.presetCount).toBe(5);
@@ -144,8 +148,11 @@ test('project rendering authoring is wired to the shared runtime schema', async 
   expect(state.hasVideoProfilePass).toBe(true);
   expect(state.hasCinematicFlarePass).toBe(true);
   expect(state.sceneCinematicFlarePasses).toBe(4);
-  expect(state.runtime.quality).toBe('high');
-  expect(state.renderer.quality).toBe('high');
+  // Headless Chromium may legitimately receive the adaptive Low session
+  // profile when the visible pre-benchmark measures below 25 FPS. Authored
+  // project defaults below must remain High either way.
+  expect(['high','low']).toContain(state.runtime.quality);
+  expect(state.renderer.quality).toBe(state.runtime.quality);
   expect(state.project.defaults.rendererMode).toBe('webgl');
   expect(state.project.defaults.exposure).toBe(1.12);
   expect(state.project.defaults.shadowDistance).toBe(55);
@@ -153,11 +160,12 @@ test('project rendering authoring is wired to the shared runtime schema', async 
   expect(state.project.defaults.reflectionQuality).toBe('high');
   expect(state.project.defaults.reflectionDistance).toBe(35);
   expect(state.ssr).not.toBeNull();
-  expect(state.ssr.resolutionScale).toBe(1);
+  const adaptiveLow=state.runtime.quality === 'low';
+  expect(state.ssr.resolutionScale).toBe(adaptiveLow ? .5 : 1);
   expect(state.ssr.maxDistance).toBe(35);
-  expect(state.ssr.thickness).toBe(0.065);
-  expect(state.renderer.shadowQuality).toBe('auto');
-  expect(state.sun.mapSize).toBe(2048);
+  expect(state.ssr.thickness).toBe(adaptiveLow ? .12 : .065);
+  expect(state.renderer.shadowQuality).toBe(adaptiveLow ? 'low' : 'auto');
+  expect(state.sun.mapSize).toBe(adaptiveLow ? 512 : 2048);
   expect(state.sun.distance).toBe(55);
   expect(state.sun.normalBias).toBe(0.035);
   expect(state.sun.intensity).toBeGreaterThan(1.2);
@@ -171,6 +179,10 @@ test('project rendering authoring is wired to the shared runtime schema', async 
   expect(state.persistedEnvironment.lighting.dayAmbient).toBe(0.82);
   expect(state.persistedEnvironment.lensFlare.occlusion).toBe(true);
   expect(state.persistedEnvironment.sunBloom.radius).toBeCloseTo(.14, 4);
+  expect(state.environmentOrientation.saved).toEqual({background:37,environment:123});
+  expect(state.environmentOrientation.restored).toEqual(state.environmentOrientation.saved);
+  expect(state.environmentOrientation.background).toBeCloseTo(37*Math.PI/180,6);
+  expect(state.environmentOrientation.environment).toBeCloseTo(123*Math.PI/180,6);
   expect(state.project.exposed.rendererMode).toBe(true);
   expect(state.project.exposed.reflectionQuality).toBe(true);
   expect(state.project.exposed.reflectionDistance).toBe(true);
@@ -334,9 +346,27 @@ test('project rendering authoring is wired to the shared runtime schema', async 
   });
 
   const gameSection = page.locator('.lk-sec', {hasText:'GAME RADIO LIBRARY'});
-  const menuSection = page.locator('.lk-sec', {hasText:'MENU MUSIC LIBRARY'});
+  const loadingSection = page.locator('.lk-sec', {hasText:'LOADING MUSIC LIBRARY'});
+  const menuTargetRow = page.locator('#lkInspector .lk-row', {hasText:'Edit library for'});
+  const ownershipRow = page.locator('#lkInspector .lk-row', {hasText:'Runtime binding'});
+  await expect(page.locator('#lkInspector')).toContainText('RADIO OWNERSHIP');
+  await expect(ownershipRow.locator('select')).toHaveValue('vehicle');
+  await ownershipRow.locator('select').selectOption('global');
+  await expect(ownershipRow.locator('select')).toHaveValue('global');
+  await expect(page.locator('#lkInspector')).toContainText('MENU MUSIC DESTINATION');
+  await menuTargetRow.locator('select').selectOption('game-menu');
+  const menuSection = page.locator('.lk-sec', {hasText:'GAME MENU MUSIC LIBRARY'});
   await expect(gameSection.locator('button.lk-danger')).not.toHaveCount(0);
+  await expect(loadingSection.locator('button.lk-danger')).not.toHaveCount(0);
+  await expect(gameSection.getByRole('button', {name:'Preview'}).first()).toBeVisible();
+  await expect(gameSection.getByRole('button', {name:'Stop'}).first()).toBeVisible();
+  await page.locator('#lkShowQuickAudio').click();
+  await expect(page.locator('#lkQuickAudio')).toBeVisible();
+  await expect(page.locator('#lkQuickStop')).toBeVisible();
   await expect(menuSection.locator('button.lk-danger')).not.toHaveCount(0);
+  await expect(menuSection.locator('button[title="Move earlier"]')).not.toHaveCount(0);
+  await menuTargetRow.locator('select').selectOption('editor-menu');
+  await expect(page.locator('.lk-sec', {hasText:'EDITOR MENU MUSIC LIBRARY'})).toBeVisible();
 
   await page.evaluate(() => {
     const sections = Array.from(document.querySelectorAll('#lkInspector .lk-sec'));

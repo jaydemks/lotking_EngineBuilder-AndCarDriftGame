@@ -21,12 +21,29 @@ const SHADOW_PRESETS = Object.freeze({
   high:   Object.freeze({label:'High',   mapSize:2048, radius:1.75}),
   ultra:  Object.freeze({label:'Ultra',  mapSize:4096, radius:2.25}),
 });
-const VIDEO_SETTING_KEYS = Object.freeze(['quality','antialiasing','rendererMode','exposure','shadows','shadowQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting']);
+const VIDEO_SETTING_KEYS = Object.freeze(['quality','antialiasing','rendererMode','exposure','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting']);
 const VIDEO_DEFAULTS = Object.freeze({
   quality:'high', antialiasing:'ssaa2x', rendererMode:'webgl', exposure:1.12,
   shadows:true, shadowQuality:'auto', shadowDistance:55, shadowBias:-0.00035, shadowNormalBias:0.035, shadowSoftness:1,
+  ambientOcclusion:true, aoQuality:'medium',
   reflections:true, reflectionQuality:'high', reflectionDistance:35, volumetricLighting:false,
 });
+const VIDEO_BENCHMARK_PREF_KEY = 'lotking.videoBenchmark.v1';
+
+function adaptiveLowValues(input){
+  return Object.assign(normalizeVideoValues(input), {
+    quality:'low',
+    antialiasing:'off',
+    rendererMode:'webgl',
+    shadows:false,
+    shadowQuality:'low',
+    ambientOcclusion:false,
+    aoQuality:'low',
+    reflections:false,
+    reflectionQuality:'low',
+    volumetricLighting:false,
+  });
+}
 
 function clampNumber(value, fallback, min, max){
   const number = Number(value);
@@ -50,6 +67,8 @@ function normalizeVideoValues(input){
     shadowBias: clampNumber(src.shadowBias, VIDEO_DEFAULTS.shadowBias, -.01, .01),
     shadowNormalBias: clampNumber(src.shadowNormalBias, VIDEO_DEFAULTS.shadowNormalBias, 0, .2),
     shadowSoftness: clampNumber(src.shadowSoftness, VIDEO_DEFAULTS.shadowSoftness, 0, 2),
+    ambientOcclusion: src.ambientOcclusion !== false,
+    aoQuality: ['low','medium','high','ultra'].includes(src.aoQuality) ? src.aoQuality : VIDEO_DEFAULTS.aoQuality,
     reflections: src.reflections !== false,
     reflectionQuality: ['low','medium','high','ultra'].includes(src.reflectionQuality) ? src.reflectionQuality : VIDEO_DEFAULTS.reflectionQuality,
     reflectionDistance: clampNumber(src.reflectionDistance, VIDEO_DEFAULTS.reflectionDistance, 5, 120),
@@ -61,7 +80,7 @@ function normalizeVideoProject(input){
   const src = input || {};
   const exposed = {};
   VIDEO_SETTING_KEYS.forEach(key => { exposed[key] = !src.exposed || src.exposed[key] !== false; });
-  return {version:3, defaults:normalizeVideoValues(src.defaults || src), exposed};
+  return {version:4, defaults:normalizeVideoValues(src.defaults || src), exposed};
 }
 
 function createVideo(options){
@@ -70,6 +89,15 @@ function createVideo(options){
   const values = normalizeVideoValues();
   let project = normalizeVideoProject();
   let overlayTimer = 0;
+  let warmProfileSnapshot = null;
+  let benchmarkPreference = {userOverride:false, autoLow:false, fps:null};
+  try { benchmarkPreference = Object.assign(benchmarkPreference, JSON.parse(localStorage.getItem(VIDEO_BENCHMARK_PREF_KEY) || 'null') || {}); }
+  catch(err){}
+
+  function writeBenchmarkPreference(){
+    try { localStorage.setItem(VIDEO_BENCHMARK_PREF_KEY, JSON.stringify(benchmarkPreference)); }
+    catch(err){}
+  }
 
   function ensureChangeOverlay(){
     let overlay = document.getElementById('lkVideoApplyOverlay');
@@ -100,8 +128,11 @@ function createVideo(options){
     const dpr = opts.pixelRatio ? opts.pixelRatio() : window.devicePixelRatio;
     const size = opts.size ? opts.size() : {width: window.innerWidth, height: window.innerHeight};
     const mobile = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || window.innerWidth < 760;
-    const maxPixelRatio = mobile ? 2 : 4;
-    renderer.setPixelRatio(Math.max(.5, Math.min(maxPixelRatio, dpr * preset.pixelRatio * aaRatio * rayRatio)));
+    const backend=window.LK_RUNTIME_RENDERING_BACKEND,compat=backend&&backend.compatibilityProfile?backend.compatibilityProfile(renderer):null;
+    const maxPixelRatio = mobile ? 2 : (compat?compat.maxPixelRatio:4);
+    const effectiveAaRatio=compat&&compat.conservativePost&&values.antialiasing.indexOf('ssaa')===0?1:aaRatio;
+    const sessionScale=backend&&backend.sessionOverrides?backend.sessionOverrides().renderScale:1;
+    renderer.setPixelRatio(Math.max(.5, Math.min(maxPixelRatio, dpr * preset.pixelRatio * effectiveAaRatio * rayRatio * sessionScale)));
     renderer.setSize(size.width, size.height);
     renderer.shadowMap.enabled = !!values.shadows;
     renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -154,6 +185,8 @@ function createVideo(options){
     renderer.userData.videoToneMappingExposure = videoExposure;
     renderer.toneMappingExposure = videoExposure;
     renderer.userData.videoSettings = Object.assign({}, values, {preset:Object.assign({}, preset)});
+    renderer.userData.lkCompatibilityProfile=compat;
+    if(compat)document.body.dataset.lkGpuCompatibility=compat.conservativePost?'conservative':'full';
     document.body.classList.toggle('lk-renderer-raytracing', values.rendererMode === 'raytracing');
     document.body.classList.toggle('lk-volumetric-lighting', !!values.volumetricLighting);
     document.body.dataset.lkVideoQuality = values.quality;
@@ -189,7 +222,59 @@ function createVideo(options){
     return getProjectConfig();
   }
 
-  return {values, apply, presets:VIDEO_PRESETS, getProjectConfig, setProjectConfig, commitValues};
+  function markUserOverride(){
+    benchmarkPreference.userOverride = true;
+    benchmarkPreference.autoLow = false;
+    benchmarkPreference.updatedAt = new Date().toISOString();
+    writeBenchmarkPreference();
+    return Object.assign({}, benchmarkPreference);
+  }
+
+  function setWarmProfile(active){
+    if(active){
+      if(warmProfileSnapshot) return Promise.resolve(values);
+      warmProfileSnapshot = Object.assign({}, values);
+      // Warm exactly the authored profile. Constructing effects that the
+      // project deliberately disabled (especially volumetrics on a software
+      // or compatibility renderer) can leave a heavyweight composer pass
+      // allocated after restoration. Enabled shadows/AO/reflections/shafts are
+      // still rendered and compiled by the visible benchmark frame below.
+      return apply();
+    }
+    if(!warmProfileSnapshot) return Promise.resolve(values);
+    Object.assign(values, warmProfileSnapshot);
+    warmProfileSnapshot = null;
+    return apply();
+  }
+
+  function applyAdaptiveLow(report){
+    const fps = Number(report && report.fps);
+    benchmarkPreference.fps = Number.isFinite(fps) ? fps : null;
+    benchmarkPreference.testedAt = new Date().toISOString();
+    if(benchmarkPreference.userOverride){
+      writeBenchmarkPreference();
+      return Promise.resolve({applied:false, reason:'user-override', fps:benchmarkPreference.fps});
+    }
+    Object.assign(values, adaptiveLowValues(values));
+    benchmarkPreference.autoLow = true;
+    benchmarkPreference.updatedAt = new Date().toISOString();
+    writeBenchmarkPreference();
+    syncVideoControls(project, values);
+    return apply().then(() => ({applied:true, reason:'below-25-fps', fps:benchmarkPreference.fps, values:Object.assign({}, values)}));
+  }
+
+  return {
+    values,
+    apply,
+    presets:VIDEO_PRESETS,
+    getProjectConfig,
+    setProjectConfig,
+    commitValues,
+    markUserOverride,
+    setWarmProfile,
+    applyAdaptiveLow,
+    benchmarkPreference:() => Object.assign({}, benchmarkPreference),
+  };
 }
 
 function syncVideoControls(project, values){
@@ -197,6 +282,7 @@ function syncVideoControls(project, values){
   const selectors = {
     quality:'#videoQuality', antialiasing:'#videoAA', rendererMode:'#videoRenderer',
     exposure:'#videoExposure', shadows:'#videoShadows', shadowQuality:'#videoShadowQuality',
+    ambientOcclusion:'#videoAmbientOcclusion',aoQuality:'#videoAoQuality',
     reflections:'#videoReflections', reflectionQuality:'#videoReflectionQuality', reflectionDistance:'#videoReflectionDistance',
     volumetricLighting:'#videoVolumetricLighting',
   };
@@ -235,6 +321,7 @@ function createMenu(options){
     if(opts.applyAudio) opts.applyAudio();
   }
   function applyVideo(options){
+    if(opts.markVideoUserOverride) opts.markVideoUserOverride();
     if(currentMode === 'editor' && opts.commitVideo){
       opts.commitVideo();
       window.dispatchEvent(new CustomEvent('lotking:video-project-change'));
@@ -262,12 +349,15 @@ function createMenu(options){
     const resume = document.getElementById('pauseResume');
     const backMenu = document.getElementById('pauseBackMenu');
     const tuneOpen = document.getElementById('openGameplayTune');
+    const gameplayDifficulty = document.getElementById('gameplayDifficulty');
     const quality = document.getElementById('videoQuality');
     const aa = document.getElementById('videoAA');
     const rendererMode = document.getElementById('videoRenderer');
     const exposure = document.getElementById('videoExposure');
     const shadows = document.getElementById('videoShadows');
     const shadowQuality = document.getElementById('videoShadowQuality');
+    const ambientOcclusion = document.getElementById('videoAmbientOcclusion');
+    const aoQuality = document.getElementById('videoAoQuality');
     const reflections = document.getElementById('videoReflections');
     const reflectionQuality = document.getElementById('videoReflectionQuality');
     const reflectionDistance = document.getElementById('videoReflectionDistance');
@@ -466,6 +556,18 @@ function createMenu(options){
       setOpen(false);
       if(opts.onOpenTune) opts.onOpenTune();
     });
+    if(gameplayDifficulty){
+      const difficulty=opts.gameplayDifficulty||window.LK_RUNTIME_GAMEPLAY_DIFFICULTY;
+      gameplayDifficulty.value=difficulty&&difficulty.current?difficulty.current():'normal';
+      gameplayDifficulty.addEventListener('change',()=>{
+        if(difficulty&&difficulty.set)difficulty.set(gameplayDifficulty.value);
+        gameplayDifficulty.value=difficulty&&difficulty.current?difficulty.current():gameplayDifficulty.value;
+      });
+      window.addEventListener('lotking:gameplay-difficulty-change',event=>{
+        const value=event&&event.detail&&event.detail.difficulty;
+        if(value)gameplayDifficulty.value=value;
+      });
+    }
     if(quality) quality.addEventListener('change', () => {
       if(video) video.quality = VIDEO_PRESETS[quality.value] ? quality.value : 'high';
       applyVideo({heavy:true, message:tr('Adjusting render quality…', 'Regolazione qualità rendering…')});
@@ -494,6 +596,14 @@ function createMenu(options){
         if(video) video.shadowQuality = ['auto','low','medium','high','ultra'].includes(shadowQuality.value) ? shadowQuality.value : 'auto';
         applyVideo({heavy:true, message:tr('Rebuilding shadow maps…', 'Ricostruzione shadow map…')});
       });
+    }
+    if(ambientOcclusion){
+      ambientOcclusion.checked=video?video.ambientOcclusion!==false:true;
+      ambientOcclusion.addEventListener('change',()=>{if(video)video.ambientOcclusion=!!ambientOcclusion.checked;applyVideo({heavy:true,message:tr('Updating ambient occlusion…','Aggiornamento occlusione ambientale…')});});
+    }
+    if(aoQuality){
+      aoQuality.value=video&&video.aoQuality||VIDEO_DEFAULTS.aoQuality;
+      aoQuality.addEventListener('change',()=>{if(video)video.aoQuality=['low','medium','high','ultra'].includes(aoQuality.value)?aoQuality.value:VIDEO_DEFAULTS.aoQuality;applyVideo({heavy:true,message:tr('Rebuilding ambient occlusion…','Ricostruzione occlusione ambientale…')});});
     }
     if(exposure){
       const syncExposureOutput = () => {
@@ -577,6 +687,6 @@ function createMenu(options){
 
 window.LK_RUNTIME_SETTINGS_MENU = Object.freeze({
   createVideo, createMenu, presets:VIDEO_PRESETS, shadowPresets:SHADOW_PRESETS, defaults:VIDEO_DEFAULTS,
-  normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, syncControls:syncVideoControls,
+  normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, adaptiveLowValues, syncControls:syncVideoControls,
 });
 })();

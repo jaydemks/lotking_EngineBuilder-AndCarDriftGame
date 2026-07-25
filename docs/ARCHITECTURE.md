@@ -1,24 +1,25 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture through the v0.6.7 Vehicle Pawn foundation, after the editor/runtime split, Cinema Studio, workspace stabilization, and the v0.6.5–v0.6.6 Logic Element authoring passes.
+This document describes the current project architecture through the active v0.7.1 work: the editor/runtime split, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
 ## High-Level Shape
 
-- `index.html` is the landing/menu entrypoint. It shows the project menu, owns landing music/mute controls, and can embed gameplay as a seamless frame.
+- `index.html` is the landing/menu entrypoint. It shows the project menu, owns loading/menu music and mute controls, and can embed gameplay as a seamless frame.
 - `gameplay.html` is the playable runtime entrypoint. It loads gameplay/runtime code without loading editor UI modules.
 - `engine_editor.html` is the standalone editor entrypoint. It loads the full runtime/editor DOM needed by editor preview, HUD editing, radio, settings, and the Sound Designer.
 - `drift-parking-lot.html` remains as a compatibility redirect to `index.html`.
 - `js/lot-king.js` is the runtime composition root. It creates `window.LOT_KING`, wires the runtime modules together, owns the main render/update loop, and keeps the public bridge stable for the editor.
 - `js/runtime/` contains focused gameplay/runtime modules: assets, loading, world state, world generation, player camera, player light rig, physics, audio, sky/weather, HUD, menus, input, track/session flow, and model handling.
-- `js/runtime/project-workspace.js` owns the editor-only workspace overlay. It detects local vs hosted origins and presents Browser Editor (DEMO or Empty) and Run Locally.
+- `js/runtime/project-workspace.js` owns the editor-only workspace overlay. It detects local vs hosted origins and provides browser storage on every supported browser, standard LKEP import on Safari/WebKit and optional writable file/folder handles where Chromium exposes them.
+- `js/runtime/p2p-session.js` owns the browser-only WebRTC transport, invite codec, ICE completion, reliable message chunking/backpressure and peer lifecycle shared by editor preview and gameplay.
 - `js/runtime/input/` contains the multi-device input stack introduced in v0.5.2: action schema, physical device sources, per-player assignment, in-game controls menu, visual mapping overlay, and touch controls.
 - `js/runtime/ui/` contains runtime/editor-shared UI utilities, currently the floating window manager used by the mapping overlay and movable editor settings panels.
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
 - `demo/demo-project.lkep.json` is the bundled online template. On hosted origins, `scene-store.js` loads it before a workspace choice and when DEMO is explicitly selected; later reloads preserve the visitor's editable browser-local copy instead of replacing it.
 - `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface. Direct editor pages and the lazy loader must keep the same module order.
-- `js/plugins/` contains the plugin host API, plugin manager, and built-in plugin descriptors. Logic Element is registered there as a built-in plugin while its implementation modules remain in their existing editor/runtime/store locations during the first migration pass.
+- `js/plugins/` contains the plugin host API, plugin manager and plugin descriptors. Logic Element is mandatory; the FBX importer and P2P Sessions & Coworking are default-enabled, user-toggleable reference plugins.
 - `js/editor/` contains the modular Engine Editor: core state, layout, application menu bar, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, viewport layout, Cinema Studio, playable export, Sound Designer, input settings, and preview/runtime handoff.
 - `css/lot-king.css` styles runtime UI, HUD, menus, touch controls, mapping windows, and shared overlays.
 - `css/editor.css` styles the Engine Editor, inspector panels, editor settings, asset dock, outliner, Sound Designer, and editor-specific overlays.
@@ -45,7 +46,7 @@ The editor does not reach directly into every runtime implementation detail. It 
 
 Important `LOT_KING` areas include:
 
-- `LOT_KING.core` - Three.js scene, camera, renderer, composer, canvas, clock, and shared render state.
+- `LOT_KING.core` - Three.js r185 scene, camera, renderer, composer, canvas, frame timing, rendering-backend report and shared render state.
 - `LOT_KING.player` - car root, physics/config, spawn, model, tuning, camera config, lights, exhaust, data widgets, and blueprint-facing setters.
 - `LOT_KING.pawns` - shared Vehicle Pawn registry. It exposes the native Player Car adapter and independent Logic Element Pawn instances through one lifecycle/state/possession contract.
 - Player identity is intentionally split into three independent runtime contracts: input/Player slot, possessed Pawn, and camera source. A Player may own a Pawn with a static or Cinema camera, or render a camera without owning any Pawn. Logic Pawn camera sources are tracked per Player in `runtimeVehicleCameraPawnIds`; the singular `runtimeVehicleCameraPawnId` remains only as a Player 1 compatibility alias.
@@ -87,7 +88,7 @@ The store is responsible for:
 
 LKEP project metadata now includes `meta.input`. That field stores the project-owned input policy: allowed device families, touch mode, player defaults, input contexts, device instances, base bindings, and per-instance overrides. Runtime user remaps are stored separately as local player overrides and do not widen the project-owned allowed-device list. The player blueprint also persists `player.controllerIndex` (zero-based internally, shown as Player 1–4): the runtime Pawn reads that player's resolved command instead of being hardwired to Player 1. Missing slots and numbered gamepad instances are provisioned on demand, while the input manager still assigns connected browser gamepads by stable connected order.
 
-The built-in Player Car Pawn separately persists `enabled`, `hidden` and nullable `controllerIndex`. Disabled suppresses possession/drive and arrests the current physics body; Hidden controls rendering; a null controller is displayed as `None`. `js/runtime/vehicle-pawns.js` registers it as `native-player-car` without taking over its mature behavior. Logic Element candidates use the same contract but keep their own configuration, state, transform, possession and Cannon `RaycastVehicle`; each owns its chassis, wheel infos, suspension and collision listener inside the shared physics world. An arcade fallback remains available while Cannon/world initialization is unavailable. The complete source blueprint remains in `graph.playerPawnBlueprint`, while the versioned authoring/runtime contract is stored in `graph.vehiclePawn` v2.
+The built-in Player Car is now an opt-in compatibility Pawn and starts inactive. Its Scene-sidebar eye is a true activation control: inactive means absent from rendering, physics, input/possession, camera, audio, lights and effects, while its registry row and authoring data remain available for immediate reactivation. Historical `enabled + hidden` snapshots migrate to inactive rather than allowing an invisible native car to keep running. `js/runtime/vehicle-pawns.js` registers it as `native-player-car` without reserving a Player slot while inactive. Logic Element candidates keep their own configuration, state, transform, possession and Cannon `RaycastVehicle`; each owns its chassis, wheel infos, suspension and collision listener inside the shared physics world. An arcade fallback remains available while Cannon/world initialization is unavailable. The complete source blueprint remains in `graph.playerPawnBlueprint`, while the versioned authoring/runtime contract is stored in `graph.vehiclePawn` v2.
 
 `logic-templates.js` also publishes a static `Template - Player Car Logic Element` starter in the normal built-in template list. It is intentionally asset-independent and uses editable placeholders for vehicle model, wheels, Player Camera, headlights, exhaust and collision. `Duplicate as Logic Element` is the complementary project-specific path: it captures the current imported GLB, rig transforms and complete Player blueprint rather than starting from generic placeholders.
 
@@ -99,7 +100,7 @@ Player Car migration deliberately keeps a reference and a candidate implementati
 
 Player-derived graphs mark `ControllerPlayerId` with the `player-id` authoring UI, rendered as None/P1–P4. `input.playerDrive` asks the shared input manager for that resolved player slot and exposes normalized throttle, brake, steer, handbrake and device values; invalid/None IDs are neutral. `Possess Pawn`, `Unpossess Pawn`, `Get Player Pawn`, `Set Pawn Drive Input`, `Reset Vehicle Pawn` and `Get Vehicle State` operate on explicit Pawn references, so two Logic Elements do not share speed, steering, gear or reset state.
 
-Local multiplayer uses an explicit global-UI policy. Player 1 owns pause, menu, radio, tuning, mute and help commands, while driving/camera/light actions continue to follow each possessed Pawn's assigned Player. Audio currently uses one shared stereo mix/listener associated with the active Player 1 frame; per-Pawn engine and effect sources remain isolated before entering that mix. This prevents multiple controllers from toggling global overlays or audio state in the same frame and leaves room for a future selectable-listener policy.
+Local multiplayer uses an explicit global-command policy. Player 1 owns pause, menu, tuning, mute and help commands, while driving/camera/light actions continue to follow each possessed Pawn's assigned Player. Radio commands are accepted only when the authored ownership policy resolves: the default is Player 1's possessed native/Logic Element vehicle, with explicit actor and global overrides. Audio currently uses one shared stereo mix/listener associated with the active Player 1 frame; per-Pawn engine and effect sources remain isolated before entering that mix.
 
 The DOM Vehicle HUD maintains a P1–P4 telemetry cache and renders only the Player owning the active Vehicle camera frame. Speed, gear, RPM, driving mode and radio telemetry are routed from that Pawn rather than read unconditionally from the native car. HUD and radio roots expose `data-player-id`, and their layout remains clipped to the corresponding rendered frame rectangle.
 
@@ -117,11 +118,17 @@ The intended boundary is component-oriented: vehicle physics should eventually b
 
 Editor projects are browser-based by default. `js/editor/project-io.js` owns the editor-facing Projects overlay and stores the project list in browser storage for the current origin, while larger imported assets still live in IndexedDB through `LK_ASSET_BLOBS`. This keeps the editor full-browser/static-server based: there is no required project backend. Because browser storage is scoped by device and origin, the portable path between origins/devices is explicit `.lkep.json` export/import. During export, blob-backed project assets are normalized into portable data so the resulting file does not depend on the original browser cache.
 
-`js/runtime/project-workspace.js` adds an editor-only project workspace layer on top of that storage model. The entrypoint detects hosted versus localhost automatically and asks for the project, not for a storage mode. Local installations can open the author DEMO, create a clean project or link an LKEP. Hosted editing requires a user-selected directory through the File System Access API before DEMO/clean creation; the DEMO LKEP and workspace manifest are copied into that authorized directory while browser state remains origin-scoped. No FTP, upload API or server-side project database write is used. Browsers without writable-directory support are directed to the GitHub/local workflow.
+`js/runtime/project-workspace.js` adds an editor-only project workspace layer on top of that storage model. The entrypoint detects hosted versus local/LAN origins automatically and asks for the project, not for a storage mode. Every supported browser can author against its origin-scoped database; Safari/WebKit imports LKEP through a standard file input, while Chromium may additionally authorize a writable file or folder. No FTP or server-side project database write is used.
+
+## P2P Networking And Collaboration
+
+`js/runtime/p2p-session.js` provides no-account WebRTC DataChannels with temporary out-of-band offer/answer codes. The channel is reliable, DTLS-encrypted, bounded to 64 MB per logical message and split into paced 16 KB packets so large portable snapshots do not overflow Safari's outgoing DataChannel buffer. The static server participates only in delivering application files; it never relays collaboration or gameplay payloads.
+
+`js/plugins/p2p-collaboration-plugin.js` is the reference UI/policy layer. It keeps browser projects independent, assigns exactly one publishing authority, mirrors the authority's selected-object transforms and requires explicit review before a received portable LKEP is imported as a new browser project. It intentionally does not pretend arbitrary simultaneous scene/asset/graph mutations can be merged safely. `js/logic/logic-nodes-network.js` and the `network` Logic service expose the same transport to editor preview and exported gameplay.
 
 On the standalone editor page, `project-workspace.js` is intentionally the first external script after the standalone marker. `requiresInitialChoice()` gates menu preloading, bundled-DEMO installation, runtime `ensureReady()` and final editor entry. First setup is modal and non-dismissible; a successful project choice reloads the page with `workspaceReady`, after which the normal loading UI begins. The same overlay becomes dismissible when reopened later from the editor toolbar.
 
-Every level carries a persisted `meta.levelRole`: `gameplay`, `editor-menu`, or `game-menu`. These roles deliberately reuse the normal scene/LKEP authoring pipeline, allowing the editor shell and future game shell to select authored menu scenes without creating a separate menu document format. `EDITOR MENU` is available now as an authoring classification; `GAME MENU` reserves the same contract for the runtime menu integration pass.
+Every level carries a persisted `meta.levelRole`: `gameplay`, `editor-menu`, or `game-menu`. These roles deliberately reuse the normal scene/LKEP authoring pipeline, allowing the editor and game shells to select authored menu scenes without creating a separate menu document format. Loading, Editor Menu and Game Menu have independent ordered music libraries. Both menu roles suppress gameplay radio/HUD startup when tested or used as a menu background.
 
 The bundled demo path is intentionally static-host friendly. The site owner exports a local project as a portable LKEP, uploads it as `demo/demo-project.lkep.json`, and the online editor/game loads that project for demonstration. No server database, PHP upload endpoint, or shared asset write path is required.
 
@@ -165,6 +172,7 @@ Core modules:
 - `js/logic/logic-templates.js` provides built-in starter Logic Element templates surfaced in the Assets panel as local editable copies.
 - `js/runtime/logic-elements-runner.js` creates Level Logic and scene Logic Element runtimes, starts/steps/disposes their Vehicle Pawns, routes frame/fixed-frame/input/collision/Pawn/device events, and aggregates runtime profiling stats.
 - `js/editor/logic-elements-inspector.js` owns the dedicated Graph/Viewport authoring window, hierarchy/components/variables/functions UI, contextual diagnostics, graph interaction, and the normal Inspector surface for exposed values.
+- `js/editor/pawn-studio.js` owns the schema-driven Pawn authoring overlay and adapter registry used by Character, Soccer, Vehicle, and plugin-provided Pawn categories.
 - Player Camera, Collider, Lights/Neon, Attachments and Setup inspectors accept explicit Player targets. Native selection defaults to `LOT_KING.player`; Vehicle Logic selection receives a graph-backed target adapter, keeping the same UI modules without singleton writes or duplicated tab HTML. Collider history snapshots are applied through that target contract rather than the native singleton.
 - Shared Camera, Lights and Attachments modules also snapshot their target configuration for history replay. Undo/redo invokes the same target API used by normal edits, so a Logic Pawn change cannot be redirected into the native Player singleton. An audit of Pawn Core, Vehicle Pawn, backend and Logic services leaves `GAME.player` only in the named native compatibility adapter.
 - Dynamic light, exhaust, skid and Data Widget entries remain children of their owning Pawn. Their shared inspector actions mutate only the selected target and preserve Pawn-relative transforms when entries are duplicated or reordered.
@@ -216,6 +224,25 @@ The editor now has a first plugin layer intended for future built-in and local e
 - `js/plugins/plugin-manager.js` tracks registered plugins, enabled state, commands, menu entries, scene types, asset types, inspector providers, runtime hooks, and export hooks.
 - `js/editor/editor-menu-bar.js` provides a software-style top menu bar (`File`, `Edit`, `View`, `Tools`, `Plugins`), a non-modal Plugin Manager panel, and the Logic Profiler panel backed by runtime runner stats and timeline samples.
 - `js/plugins/logic-element-plugin.js` registers `Logic Element (Experimental)` as a built-in plugin and declares its scene type, asset type, inspector provider, runtime hook, export hook, and Level Logic command.
+- `js/plugins/fbx-import-plugin.js` is the reference source-format plugin. Its `assetImporter` preserves FBX plus used sidecars and builds the canonical runtime GLB; its `assetPreviewLoader` lets authoring tools inspect the source directly while source-format handling stays out of runtime and export code.
+
+## Pawn Studio And Character Animation
+
+`js/editor/pawn-studio.js` is a schema-driven authoring shell rather than a Character-specific form. An adapter supplies category matching, the authoritative model reference and typed containers; built-in Character, Soccer and Vehicle adapters share the same tree/preview/properties layout, while `pawnStudioType` plugin extensions can add future categories without patching the shell.
+
+For Character and Soccer, `characterPawn.model`/`soccerPawn.model` is the authoritative Main Mesh reference and `logicScene.character_model` mirrors its transform for scene editing. The model asset `fit` normalizes source units to an authored height; the Logic Scene element scale is the final world multiplier. Both values flow through `scene-store.js`, Pawn Studio, the isolated Logic Element viewport, normal editor reconstruction and playable runtime. Reset removes the custom asset, restores the procedural T-pose elements and deliberately preserves `animationSet`.
+
+`characterPawn.animationSet` is the primary motion database. Each entry owns state, local direction, nominal speed, tolerance, priority, loop, playback rate, clip and an optional independent asset. `character-animation-set.js` ranks entries deterministically from movement context; `soccer-locomotion.js` binds/blends the selected clips through one mixer on the Main Mesh. Legacy slot maps remain a compatibility input and are normalized into entries for authoring.
+
+Incomplete humanoid motion sets remain executable through `mixamo-placeholder-clips.js`. It generates target-rest-relative quaternion clips for missing states and actions, while the binding layer filters placeholders out before searching authored takes. Thus real animation assets always win and procedural content cannot alter model position, scale or imported proportions.
+
+Separate Mixamo/Blender takes retain their source scene on cloned clips. Compatible namespaces are rebound by canonical bone name; when both sides expose real skeletons, r185 `SkeletonUtils.retargetClip()` samples the source armature into the target rest pose. Its hip scale is derived from target/source world-space armature spans so independent asset-fit wrappers cannot change Main Mesh scale. Invalid clips, unmatched tracks and static tracks remain distinct diagnostics rather than silent playback failures.
+
+Pawn Studio owns an isolated `THREE.Timer`/`AnimationMixer` preview lifecycle. Logic Element Viewport **Play Isolated** is a separate lightweight simulation layer: it drives Character or Vehicle input without starting the main editor world, and Stop restores the authored root transform. Camera settings are configuration, not a hidden spatial child; interaction objects such as balls, goals and weapons remain modular Logic Elements.
+
+Its isolated viewport owns a dedicated r185 `TransformControls` instance. Main Mesh gizmo edits persist through the Logic Scene transform rather than a preview-only wrapper. Motion **Edit Rig** pauses the selected take, displays the actual Main Mesh skeleton and reattaches the gizmo to one selected bone in local rotation mode. Saved canonical-bone rotation offsets form a non-destructive pose layer; `soccer-locomotion.js` blends those offsets with the same Idle/Walk/Run/action weights after protected rig proportions are restored. This keeps pose correction out of imported keyframes while preventing whole-character spatial shifts during state changes.
+
+Every Pawn Studio save increments `graph.runtimeRevision`. `logic-elements-runner.js` includes that revision and the current editor-preview/game mode in its object signature; changes to Pawn data therefore invalidate an already-created runtime even when node and edge counts are unchanged. Entering Play always consumes the normalized graph currently attached to the Logic Element rather than a Pawn configuration cached before authoring.
 
 This is intentionally a host-first migration. Existing Logic Element code still lives in `js/logic/`, `js/runtime/logic-elements-runner.js`, `js/editor/logic-elements-inspector.js`, and `js/engine/scene-store.js`, so the built-in Logic Element plugin is always enabled for now. Real enable/disable requires moving implementation files and hardcoded editor/runtime/store/export hooks behind plugin registration, then adding missing-plugin fallbacks for projects that reference disabled or unavailable plugins.
 
@@ -258,7 +285,7 @@ The project no longer treats a single HTML page as both the menu, gameplay, and 
 
 Current loading responsibilities:
 
-- `index.html` loads the landing/menu UI and keeps menu music alive while transitioning into embedded gameplay.
+- `index.html` loads the landing/menu UI, keeps Loading Music isolated while a destination is unresolved, then hands playback to the ready Editor Menu, Game Menu or gameplay runtime.
 - `gameplay.html` loads the gameplay runtime, settings, HUD, radio, audio, track catalog, scene store, and runtime modules needed to play.
 - `engine_editor.html` loads the editor-specific DOM and module stack so editor preview works with the same runtime systems while remaining isolated from normal gameplay. Its direct script list mirrors `js/editor/loader.js`; when editor modules are extracted, both paths must be updated.
 - On hosted origins, `engine_editor.html` remains the same page and automatically opens the project chooser. Authoring starts only after the user grants a local folder; mutations then target that folder plus origin-scoped browser storage, never the hosting server. Before consent, the legacy online-demo guard keeps mutation actions disabled.
@@ -320,7 +347,7 @@ Viewport hover work follows an interaction guard: normal entity hover, Live Mate
 
 Live Material Selection owns a stable set of material-slot ids. A normal click replaces the set; Ctrl/Meta/Shift-click toggles slots. Inspector patches apply to every selected slot, including independent slots preserved through split/join. The minimized Player Camera uses its visible panel dimensions for clamping rather than the hidden expanded render size.
 
-Thumbnail generation is also interaction-aware. `thumbnail-manager.js` only starts scene and GLB thumbnail work from an idle callback and defers it while fly-camera or gizmo interaction is active, keeping model parsing and thumbnail rendering out of the editor animation-frame handler. `console-policy.js` filters only explicitly identified third-party diagnostics: the unsupported secondary UV normal-map warning emitted by Three r128 and the closed message-channel rejection generated by browser extensions. Native browser Tracking Prevention and long-task `[Violation]` diagnostics are not intercepted because page JavaScript cannot safely control DevTools reporting.
+Thumbnail generation is also interaction-aware. `thumbnail-manager.js` only starts scene and GLB thumbnail work from an idle callback and defers it while fly-camera or gizmo interaction is active, keeping model parsing and thumbnail rendering out of the editor animation-frame handler. `console-policy.js` filters only explicitly identified third-party or browser-extension diagnostics; native Tracking Prevention and long-task `[Violation]` diagnostics are not intercepted because page JavaScript cannot safely control DevTools reporting. Missing legacy Player GLB probes were removed rather than hidden by this policy.
 
 Mesh joins are stored as ordered definitions referencing stable mesh-edit ids. At reconstruction time the selected non-skinned geometries are transformed into the editable root space and merged into one generated mesh. Source parts remain recoverable for `Unjoin` and undo, while geometry groups are remapped to a compact material array. Material targets on edited meshes use `id|<meshEditId>|<materialIndex>` keys; the runtime still accepts legacy numeric `meshIndex:materialIndex` keys, but new split/join workflows no longer depend on traversal order.
 
@@ -364,7 +391,7 @@ Runtime audio is split between general procedural SFX and the sample-based engin
 
 - `audio.js` owns fallback/procedural SFX such as engine tone, tire sounds, ambient hum, crashes, and thuds.
 - `engine-audio.js` owns engine sound sets: ON/OFF throttle RPM loop banks, continuous layers, one-shots, synthetic fallbacks, reverb, skid channels, and Sound Designer test mode.
-- `music-library.js`, `menu-music.js`, and `radio-hud.js` manage menu music, radio/HUD music, imported browser-session audio, and TAB/radio interactions.
+- `music-library.js`, `menu-music.js`, and `radio-hud.js` manage independent Loading, Editor Menu, Game Menu and vehicle-radio libraries, persistent manual order, imported project audio, ownership policy and TAB/radio interactions.
 - The Sound Designer editor overlay is lazy-loaded from the inspector and split into template, form helpers, and behavior.
 
 Sound sets are assets stored by `LK_STORE.soundSets` and assigned per player blueprint.
@@ -404,7 +431,7 @@ The ZIP bootstrap writes the selected package into browser storage, then launche
 
 This flow is separate from editor project export/import, which remains in `project-io.js` and `scene-store.js`.
 
-The site owner's template is still published as `demo/demo-project.lkep.json`. Visitor edits never rewrite it: Browser Editor creates browser-local state, while LKEP and playable ZIP output are explicit downloads. The playable package embeds selected scene/project data and supported assets, so runtime capabilities do not depend on the author's browser database after export. ZIP assembly fetches independent runtime, vendor and asset files through a bounded six-worker queue; Three r128 already supplies its classic text constructors, so the package no longer waits on nonexistent FontLoader/TextGeometry CDN scripts.
+The site owner's template is still published as `demo/demo-project.lkep.json`. Visitor edits never rewrite it: Browser Editor creates browser-local state, while LKEP and playable ZIP output are explicit downloads. The playable package embeds selected scene/project data and supported assets, so runtime capabilities do not depend on the author's browser database after export. ZIP assembly fetches independent runtime, vendor and asset files through a bounded six-worker queue and packages the pinned local Three.js r185 compatibility bundle, matched addons and local TextGeometry font without a runtime CDN dependency.
 
 ## Editor Performance Diagnostics
 

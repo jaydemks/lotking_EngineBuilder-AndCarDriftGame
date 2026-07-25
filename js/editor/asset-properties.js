@@ -9,6 +9,9 @@ function create(deps){
   deps = deps || {};
   const THREE = deps.THREE || window.THREE;
   const documentRef = deps.document || document;
+  const pluginManager = deps.pluginManager || null;
+  const rebuildImportedAsset = deps.rebuildImportedAsset || null;
+  const refreshFbxSource = deps.refreshFbxSource || null;
   const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return Promise.reject(new Error('asset source missing')); };
   let overlay = null;
   let preview = null;
@@ -70,7 +73,7 @@ function create(deps){
     }
     const w = Math.max(240, box.clientWidth || 420);
     const h = 240;
-    const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    const renderer = window.LK_RUNTIME_RENDERING_BACKEND ? window.LK_RUNTIME_RENDERING_BACKEND.createWebGL({antialias:true,alpha:true},'asset-properties') : new THREE.WebGLRenderer({antialias:true, alpha:true});
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     renderer.setSize(w, h);
     box.innerHTML = '';
@@ -85,9 +88,14 @@ function create(deps){
     const group = new THREE.Group();
     scene.add(group);
     preview = {renderer, raf:0, controls:null};
-    resolveImportedAssetUrl(asset).then(src => new Promise((resolve, reject) => {
-      new THREE.GLTFLoader().load(src, gltf => resolve(gltf.scene), undefined, reject);
-    })).then(root => {
+    const sourceLoaders=pluginManager&&pluginManager.extensions?pluginManager.extensions('assetPreviewLoader'):[];
+    const sourceLoader=sourceLoaders.find(item=>item&&typeof item.accepts==='function'&&typeof item.load==='function'&&item.accepts(asset));
+    const loadRoot=sourceLoader
+      ? Promise.resolve(sourceLoader.load(asset,{THREE,assetBlobs:window.LK_ASSET_BLOBS}))
+      : resolveImportedAssetUrl(asset).then(src => new Promise((resolve, reject) => {
+        new THREE.GLTFLoader().load(src, gltf => resolve(gltf.scene), undefined, reject);
+      }));
+    loadRoot.then(root => {
       group.add(root);
       const box3 = new THREE.Box3().setFromObject(group);
       const size = box3.getSize(new THREE.Vector3());
@@ -164,7 +172,7 @@ function create(deps){
     }
     const w = Math.max(240, box.clientWidth || 420);
     const h = 240;
-    const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    const renderer = window.LK_RUNTIME_RENDERING_BACKEND ? window.LK_RUNTIME_RENDERING_BACKEND.createWebGL({antialias:true,alpha:true},'texture-properties') : new THREE.WebGLRenderer({antialias:true, alpha:true});
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     renderer.setSize(w, h);
     box.innerHTML = '';
@@ -251,6 +259,13 @@ function create(deps){
       row('Name', asset.source || asset.name || 'Imported Asset'),
       row('Display name', asset.name || ''),
       row('Type', 'GLB/GLTF model'),
+      row('Source format', String(asset.sourceFormat || 'glb').toUpperCase()),
+      row('Authoring source', asset.sourceFormat === 'fbx' ? (asset.sourceDbKey || asset.sourceSrc ? 'FBX stored · direct preview' : 'FBX source missing') : 'Canonical asset'),
+      row('Source version', asset.sourceFormat === 'fbx' ? ((asset.sourceName || asset.source || 'FBX') + ' · ' + fmtBytes(asset.sourceSize) + (asset.sourceLastModified ? ' · ' + fmtDate(asset.sourceLastModified) : '')) : '—'),
+      row('Last source check', asset.sourceFormat === 'fbx' ? fmtDate(asset.sourceCheckedAt) : '—'),
+      row('Runtime build', asset.sourceFormat === 'fbx' ? String(asset.compileState || 'unknown').toUpperCase() + (asset.compiledAt ? ' · ' + fmtDate(asset.compiledAt) : '') : 'Canonical'),
+      row('Linked files', Array.isArray(asset.sourceDependencies) ? asset.sourceDependencies.length : 0),
+      row('Conversion warnings', Array.isArray(asset.conversionWarnings) && asset.conversionWarnings.length ? asset.conversionWarnings.join(' · ') : 'None'),
       row('Size', fmtBytes(asset.size)),
       row('Storage', asset.dbKey ? 'IndexedDB blob' : (asset.src ? 'Inline/data URL' : 'Unknown')),
       row('Rigged', asset.rigged ? 'Yes' : 'Unknown'),
@@ -261,6 +276,27 @@ function create(deps){
       row('Asset key', asset.key || ''),
       row('Blob key', asset.dbKey || '')
     );
+    if(asset.sourceFormat==='fbx'&&rebuildImportedAsset){
+      const actions=documentRef.createElement('div');actions.className='lk-ps-actions';
+      const rebuild=documentRef.createElement('button');rebuild.type='button';rebuild.textContent='↻ Rebuild runtime GLB';
+      rebuild.disabled=asset.compileState==='building';
+      rebuild.addEventListener('click',()=>{rebuild.disabled=true;rebuild.textContent='Rebuilding…';rebuildImportedAsset(asset).then(updated=>{close();openImportedGlb(updated||asset);}).catch(error=>{rebuild.disabled=false;rebuild.textContent='Rebuild failed · Retry';rebuild.title=String(error&&error.message||error);});});
+      actions.appendChild(rebuild);
+      if(refreshFbxSource){
+        const check=documentRef.createElement('button');check.type='button';check.textContent='⟳ Check / relink FBX source';
+        check.addEventListener('click',async()=>{
+          let file=null;
+          try {
+            if(window.showOpenFilePicker){const handles=await window.showOpenFilePicker({multiple:false,types:[{description:'FBX source',accept:{'application/octet-stream':['.fbx']}}]});file=handles&&handles[0]&&await handles[0].getFile();}
+            else file=await new Promise(resolve=>{const input=documentRef.createElement('input');input.type='file';input.accept='.fbx';input.addEventListener('change',()=>resolve(input.files&&input.files[0]||null),{once:true});input.click();});
+            if(!file)return;check.disabled=true;check.textContent='Checking source…';
+            const result=await refreshFbxSource(asset,file);close();openImportedGlb(result.asset||asset);
+          }catch(error){if(error&&error.name==='AbortError')return;check.disabled=false;check.textContent='Source check failed · Retry';check.title=String(error&&error.message||error);}
+        });
+        actions.appendChild(check);
+      }
+      info.appendChild(actions);
+    }
     documentRef.body.appendChild(overlay);
     renderGlbPreview(overlay.querySelector('.lk-prop-preview'), asset);
   }

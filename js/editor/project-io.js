@@ -31,7 +31,9 @@ function create(deps){
   const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
   const BROWSER_PROJECT_MARKER = 'lk.editor.browserProject.v1';
   const LOCAL_BRIDGE_URL = '/__lotking/project-state';
+  const LOCAL_DEMO_PUBLISH_URL = '/__lotking/publish-demo';
   const LOCAL_BRIDGE_MARKER = 'lk.localProjectBridge.v1';
+  const LOCAL_BRIDGE_ETAG = 'lk.localProjectBridge.etag.v1';
   const LOCAL_BRIDGE_DUPLICATE_FIX = 'lk.localProjectBridgeDuplicateFix.v1';
   const projectExportAssets = window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS && window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS.create({
     assetLibraryLoad: deps.assetLibraryLoad || function(){ return []; },
@@ -71,7 +73,7 @@ function create(deps){
       : (meta.levelRole === 'gameplay' ? 'gameplay' : (ED.levelRole || 'gameplay'));
     const input = $('#lkTrackName');
     if(input) input.value = ED.trackName;
-    if(GAME.levels && GAME.levels.setEditorTrack) GAME.levels.setEditorTrack({id:ED.trackId, name:ED.trackName});
+    if(GAME.levels && GAME.levels.setEditorTrack) GAME.levels.setEditorTrack({id:ED.trackId, name:ED.trackName, levelRole:ED.levelRole});
     // per-project input config (allowed devices, default bindings, players)
     ED.inputConfig = ACT ? ACT.normalizeConfig(meta.input) : (meta.input || null);
     applyInputConfig(ED.inputConfig);
@@ -117,7 +119,14 @@ function create(deps){
 
   async function preparePortableProject(project){
     if(!projectExportAssets) return {project: JSON.parse(JSON.stringify(project || {})), warnings: []};
-    return projectExportAssets.preparePlayableProject(project, {stripEmbeddedLevels:false});
+    return projectExportAssets.preparePlayableProject(project, {
+      stripEmbeddedLevels:false,
+      // A complete editor project can reference the same large GLB from the
+      // Pawn definition, Logic Scene and several embedded levels. Keep one
+      // portable payload per IndexedDB key instead of repeating its base64
+      // string at every reference.
+      deduplicateEmbeddedAssets:true,
+    });
   }
 
   function createProjectSnapshotWithLevels(sceneData, exportLevels){
@@ -156,6 +165,19 @@ function create(deps){
     return createProjectSnapshotWithLevels(sceneData, null);
   }
 
+  async function createPortableCollaborationSnapshot(){
+    const sceneData = STORE.collect(GAME);
+    const project = createCompleteProjectSnapshot(sceneData);
+    const prepared = await preparePortableProject(project);
+    return prepared.project;
+  }
+
+  function applyPortableCollaborationSnapshot(project, name){
+    const raw = JSON.stringify(project || {});
+    const progressToken = beginStatusWork(tr('Collaboration snapshot', 'Snapshot collaborazione'), tr('Validating peer project', 'Validazione progetto del peer'), 'loading');
+    return importProjectAsBrowserProject({name:name || 'p2p-collaboration.lkep.json'}, raw, progressToken);
+  }
+
   function localBridgeEligible(){
     return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   }
@@ -169,7 +191,11 @@ function create(deps){
       body:JSON.stringify(result.project),
     });
     if(!response.ok) throw new Error('Local project bridge HTTP ' + response.status);
-    try { localStorage.setItem(LOCAL_BRIDGE_MARKER, result.project.savedAt || project.savedAt || 'saved'); } catch(err){}
+    try {
+      localStorage.setItem(LOCAL_BRIDGE_MARKER, result.project.savedAt || project.savedAt || 'saved');
+      const etag = response.headers.get('ETag');
+      if(etag) localStorage.setItem(LOCAL_BRIDGE_ETAG, etag);
+    } catch(err){}
     return result;
   }
 
@@ -177,8 +203,18 @@ function create(deps){
     if(!localBridgeEligible()) return false;
     let progressToken = null;
     try {
-      const response = await fetch(LOCAL_BRIDGE_URL, {cache:'no-store'});
+      let etag = '';
+      try { etag = localStorage.getItem(LOCAL_BRIDGE_ETAG) || ''; } catch(err){}
+      const response = await fetch(LOCAL_BRIDGE_URL, {
+        cache:'no-store',
+        headers:etag ? {'If-None-Match':etag} : {},
+      });
+      if(response.status === 304) return false;
       if(!response.ok) return false;
+      try {
+        const nextEtag = response.headers.get('ETag');
+        if(nextEtag) localStorage.setItem(LOCAL_BRIDGE_ETAG, nextEtag);
+      } catch(err){}
       progressToken = beginStatusWork(tr('Restoring project', 'Ripristino progetto'), tr('Reading the complete project from disk', 'Lettura del progetto completo dal disco'), 'loading');
       updateStatusWork(progressToken, 22, tr('Parsing levels', 'Analisi livelli'), 'loading');
       const project = STORE.parseProject ? STORE.parseProject(await response.text()) : await response.json();
@@ -444,10 +480,10 @@ function create(deps){
     }
   }
 
-  function downloadProject(project){
+  function downloadProject(project, exactName){
     const a = document.createElement('a');
     a.href = URL.createObjectURL(projectJsonBlob(project));
-    a.download = projectFilename(project);
+    a.download = exactName || projectFilename(project);
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
@@ -667,11 +703,12 @@ function create(deps){
   async function moveDataUrlToAssetDb(owner, prop, label, dbProp){
     if(!owner || !isDataUrl(owner[prop]) || !window.LK_ASSET_BLOBS) return;
     const dataUrl = owner[prop];
-    const dbKey = importedAssetDbKey(label, dataUrl);
+    const keyProp = dbProp || 'dbKey';
+    const dbKey = owner[keyProp] || owner.dbKey || (owner.asset && owner.asset.dbKey) || importedAssetDbKey(label, dataUrl);
     const blob = await dataUrlToBlob(dataUrl);
     await window.LK_ASSET_BLOBS.put(dbKey, blob);
     owner[prop] = null;
-    owner[dbProp || 'dbKey'] = dbKey;
+    owner[keyProp] = dbKey;
     if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = dbKey;
   }
 
@@ -700,7 +737,7 @@ function create(deps){
     }
     const musicLibraries = scene.ui && scene.ui.musicLibraries;
     if(musicLibraries){
-      for(const groupName of ['radio', 'menu']){
+      for(const groupName of ['radio', 'loading', 'menu', 'editorMenu', 'gameMenu']){
         const tracks = Array.isArray(musicLibraries[groupName]) ? musicLibraries[groupName] : [];
         for(const track of tracks){
           await moveDataUrlToAssetDb(track, 'url', track.fileName || track.title || track.id || 'music-track', 'dbKey');
@@ -987,6 +1024,7 @@ function create(deps){
       if(!project.active) actions.appendChild(mkBtn(tr('▶ Load', '▶ Carica'), tr('Open this project', 'Apri questo progetto'), () => loadBrowserProject(project.id, project.name), 'lk-level-load'));
       actions.appendChild(mkBtn('✎', tr('Rename', 'Rinomina'), () => renameBrowserProject(project.id, project.name)));
       actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportBrowserProject(project.id), 'lk-level-export'));
+      actions.appendChild(mkBtn('★ DEMO', tr('Publish this project as the root Author DEMO', 'Pubblica questo progetto come DEMO autore principale'), () => publishProjectAsDemo(project.id), 'lk-level-export'));
       actions.appendChild(mkBtn('🗑', tr('Delete', 'Elimina'), () => deleteBrowserProject(project.id, project.name), 'lk-level-del'));
       row.append(meta, actions);
       box.appendChild(row);
@@ -1116,6 +1154,55 @@ function create(deps){
     }).catch(err => status('Export failed: ' + (err && err.message ? err.message : err)));
   }
 
+  async function publishProjectAsDemo(projectId){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return false; }
+    const idx=browserProjectIndex();
+    const activeId=String(idx.activeId||activeBrowserProjectId||'');
+    const selectedId=String(projectId||activeId);
+    const publishingOpenProject=!selectedId||selectedId===activeId;
+    const sceneData=publishingOpenProject?STORE.collect(GAME):null;
+    const project=publishingOpenProject?createCompleteProjectSnapshot(sceneData):readBrowserProject(selectedId);
+    if(!project){status(tr('DEMO publish failed: project not found','Pubblicazione DEMO fallita: progetto non trovato'));return false;}
+    const meta=project&&project.meta||{};
+    const name=meta.trackName||meta.levelName||ED.trackName||'Current project';
+    const approved=await confirmEditorAction({
+      title:tr('Publish "'+name+'" as Author DEMO?','Pubblicare "'+name+'" come DEMO autore?'),
+      message:tr(
+        (publishingOpenProject?'The exact open state':'The selected saved project')+' of "'+name+'" becomes the root online DEMO. On localhost the previous demo is backed up automatically; on LAN/hosted browsers an exact demo-project.lkep.json download is generated instead.',
+        (publishingOpenProject?'Lo stato aperto esatto':'Il progetto salvato selezionato')+' di "'+name+'" diventa il DEMO online principale. Su localhost il demo precedente viene salvato automaticamente come backup; da LAN/browser ospitati viene invece generato il download esatto demo-project.lkep.json.'
+      ),
+      okText:tr('Publish DEMO','Pubblica DEMO'),
+      danger:false,
+    });
+    if(!approved)return false;
+    const progressToken=beginStatusWork(tr('Publish Author DEMO','Pubblicazione DEMO autore'),tr('Verifying current scene','Verifica scena corrente'),'loading');
+    try{
+      if(sceneData)requireExactPersistence(sceneData,project,tr('DEMO snapshot verification','Verifica snapshot DEMO'));
+      updateStatusWork(progressToken,28,tr('Embedding portable assets','Incorporamento asset portabili'),'loading');
+      const result=await preparePortableProject(project);
+      const payload=JSON.stringify(result.project);
+      updateStatusWork(progressToken,72,tr('Writing demo project','Scrittura progetto demo'),'loading');
+      let response=null;
+      try{response=await fetch(LOCAL_DEMO_PUBLISH_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:payload});}catch(err){}
+      if(response&&response.ok){
+        const report=await response.json();
+        const detail=(report.trackName||name)+' · '+Math.round((Number(report.bytes)||payload.length)/1048576)+' MB';
+        finishStatusWork(progressToken,tr('Author DEMO published','DEMO autore pubblicato'),detail,'success');
+        status(tr('DEMO published to demo/demo-project.lkep.json; previous file backed up.','DEMO pubblicato in demo/demo-project.lkep.json; file precedente salvato come backup.'));
+        return report;
+      }
+      if(response&&(response.status===400||response.status===413))throw new Error('Local DEMO publisher HTTP '+response.status);
+      downloadProject(result.project,'demo-project.lkep.json');
+      finishStatusWork(progressToken,tr('DEMO file downloaded','File DEMO scaricato'),tr('Copy it to demo/demo-project.lkep.json on the publishing host','Copialo in demo/demo-project.lkep.json sul computer di pubblicazione'),'warning');
+      status(tr('Downloaded demo-project.lkep.json; replace the repository demo file before upload.','Scaricato demo-project.lkep.json; sostituisci il file demo del repository prima dell’upload.'));
+      return {downloaded:true,file:'demo-project.lkep.json'};
+    }catch(err){
+      finishStatusWork(progressToken,tr('DEMO publish failed','Pubblicazione DEMO fallita'),err&&err.message||String(err),'error');
+      status(tr('DEMO publish failed: ','Pubblicazione DEMO fallita: ')+(err&&err.message||err));
+      return false;
+    }
+  }
+
   async function syncWorkspaceProjectCatalog(options){
     options = options || {};
     const workspace = window.LK_PROJECT_WORKSPACE;
@@ -1168,7 +1255,18 @@ function create(deps){
       const detail = event.detail || {};
       if(!detail.text) return;
       const progressToken = beginStatusWork(tr('Workspace import', 'Importazione workspace'), tr('Reading local project', 'Lettura progetto locale'), 'loading');
-      importProjectAsBrowserProject({name:detail.name || 'workspace-project.lkep.json'}, detail.text, progressToken);
+      Promise.resolve().then(() => importProjectAsBrowserProject(
+        {name:detail.name || 'workspace-project.lkep.json'},
+        detail.text,
+        progressToken
+      )).catch(err => {
+        finishStatusWork(
+          progressToken,
+          tr('Workspace import failed', 'Importazione workspace fallita'),
+          err && err.message ? err.message : String(err || tr('Unknown error', 'Errore sconosciuto')),
+          'error'
+        );
+      });
     });
     window.addEventListener('lot-king:workspace-state', event => {
       const detail = event.detail || {};
@@ -1202,6 +1300,8 @@ function create(deps){
   return Object.freeze({
     slugifyTrackName, setTrackMeta, currentTrackMeta, loadTrackMeta, saveScene, projectFilename, exportProject, importProjectFile,
     setProjectImportTarget, setProjectsOverlayOpen, refreshProjectsOverlay, createBrowserProject, loadBrowserProject, renameBrowserProject, deleteBrowserProject, exportBrowserProject,
+    createPortableCollaborationSnapshot, applyPortableCollaborationSnapshot,
+    publishProjectAsDemo,
   });
 }
 

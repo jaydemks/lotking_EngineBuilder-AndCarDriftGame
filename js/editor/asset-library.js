@@ -11,6 +11,7 @@ const ASSET_LIBRARY_KEY = 'lotking.assetLibrary.v1';
 function create(opts){
   opts = opts || {};
   const store = opts.store;
+  const pluginManager = opts.pluginManager || null;
   const status = typeof opts.status === 'function' ? opts.status : () => {};
   const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
@@ -38,11 +39,14 @@ function create(opts){
     const type = String(file && file.type || '').toLowerCase();
     if(/\.(glb|gltf)$/i.test(name)) return 'glb';
     if(/^image\//.test(type) || /\.(png|jpe?g|webp|gif|avif)$/i.test(name)) return 'texture';
+    const importers = pluginManager && pluginManager.extensions ? pluginManager.extensions('assetImporter') : [];
+    const importer = importers.find(item => typeof item.accepts === 'function' && item.accepts(file));
+    if(importer) return importer.type || 'plugin-asset';
     return 'other';
   }
 
   function fileName(file){
-    return (file.name || 'Asset').replace(/\.(glb|gltf|png|jpe?g|webp|gif|avif)$/i, '');
+    return (file.name || 'Asset').replace(/\.(fbx|glb|gltf|png|jpe?g|webp|gif|avif)$/i, '');
   }
 
   function supportedFiles(files){
@@ -82,7 +86,19 @@ function create(opts){
       key,
       kind,
       name: fileName(file),
-      source: file.name,
+      source: file.__lkImportSource || file.name,
+      sourceFormat: file.__lkSourceFormat || (existing && existing.sourceFormat) || kind,
+      sourceDbKey:info.sourceDbKey || (existing && existing.sourceDbKey) || null,
+      sourceSrc:info.sourceSrc || (existing && existing.sourceSrc) || null,
+      sourceName:info.sourceName || (existing && existing.sourceName) || null,
+      sourceSize:Number(info.sourceSize != null ? info.sourceSize : (existing && existing.sourceSize)) || 0,
+      sourceLastModified:Number(info.sourceLastModified != null ? info.sourceLastModified : (existing && existing.sourceLastModified)) || 0,
+      sourceCheckedAt:info.sourceCheckedAt || (existing && existing.sourceCheckedAt) || null,
+      sourceChangedAt:info.sourceChangedAt || (existing && existing.sourceChangedAt) || null,
+      sourceDependencies:Array.isArray(info.sourceDependencies) ? info.sourceDependencies.slice() : (existing && Array.isArray(existing.sourceDependencies) ? existing.sourceDependencies.slice() : []),
+      compileState:file.__lkSourceFormat === 'fbx' ? 'ready' : (existing && existing.compileState || null),
+      compiledAt:file.__lkSourceFormat === 'fbx' ? new Date().toISOString() : (existing && existing.compiledAt || null),
+      conversionWarnings:Array.isArray(file.__lkConversionWarnings) ? file.__lkConversionWarnings.slice() : (existing && existing.conversionWarnings || []),
       mime: file.type || (kind === 'texture' ? 'image/*' : ''),
       size: file.size || 0,
       src: info.src || null,
@@ -95,6 +111,8 @@ function create(opts){
       hasAnimations: kind === 'glb' ? !!(info.hasAnimations || (existing && existing.hasAnimations)) : undefined,
       skinnedMeshCount: kind === 'glb' ? Number(info.skinnedMeshCount != null ? info.skinnedMeshCount : (existing && existing.skinnedMeshCount)) || 0 : undefined,
       boneCount: kind === 'glb' ? Number(info.boneCount != null ? info.boneCount : (existing && existing.boneCount)) || 0 : undefined,
+      boneNames:kind === 'glb' && Array.isArray(info.boneNames) ? info.boneNames.slice() : (existing && Array.isArray(existing.boneNames) ? existing.boneNames.slice() : undefined),
+      skeletonSignature:kind === 'glb' ? String(info.skeletonSignature || (existing && existing.skeletonSignature) || '') : undefined,
       meshCount: kind === 'glb' ? Number(info.meshCount != null ? info.meshCount : (existing && existing.meshCount)) || 0 : undefined,
       fit: kind === 'glb' ? 5 : undefined,
       importedAt: new Date().toISOString(),

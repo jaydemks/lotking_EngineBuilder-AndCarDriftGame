@@ -110,6 +110,7 @@ function create(deps){
     };
   }
   function gpuDetails(){
+    const backend=window.LK_RUNTIME_RENDERING_BACKEND;if(backend&&backend.describe){const report=backend.describe(renderer);return {renderer:report.gpu,vendor:report.vendor,maxTextureSize:report.maxTextureSize,maxSamples:report.maxSamples,webgl:report.effective.toUpperCase(),backend:report};}
     const gl=renderer.getContext&&renderer.getContext();
     const result={renderer:'Unavailable',vendor:'Unavailable',maxTextureSize:0,maxSamples:0,webgl:renderer.capabilities&&renderer.capabilities.isWebGL2?'WebGL 2':'WebGL 1'};
     try {
@@ -400,11 +401,11 @@ function create(deps){
     computeFrames();
     const rs=rendererStats(),gpu=gpuDetails(),memory=performance.memory;
     return {
-      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.0',mode:reportMode(),
+      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.1',mode:reportMode(),
       project:projectContext(),
       performance:{fps,frameAverageMs:frameAverage,frameP95Ms:frameP95,worstRecentFrameMs:maxFrame,stutterCount,sampleCount:samples.length,frameSamplesMs:samples.slice()},
       renderer:Object.assign({},rs,{pixelRatio:renderer.getPixelRatio?renderer.getPixelRatio():devicePixelRatio||1,width:renderer.domElement.width,height:renderer.domElement.height}),
-      hardware:{gpu:gpu.renderer,gpuVendor:gpu.vendor,webgl:gpu.webgl,maxTextureSize:gpu.maxTextureSize,maxSamples:gpu.maxSamples,logicalCores:navigator.hardwareConcurrency||null,deviceMemoryGb:navigator.deviceMemory||null,userAgent:navigator.userAgent,jsHeap:memory?{usedBytes:memory.usedJSHeapSize,totalBytes:memory.totalJSHeapSize,limitBytes:memory.jsHeapSizeLimit}:null},
+      hardware:{gpu:gpu.renderer,gpuVendor:gpu.vendor,webgl:gpu.webgl,renderBackend:gpu.backend||null,maxTextureSize:gpu.maxTextureSize,maxSamples:gpu.maxSamples,logicalCores:navigator.hardwareConcurrency||null,deviceMemoryGb:navigator.deviceMemory||null,userAgent:navigator.userAgent,jsHeap:memory?{usedBytes:memory.usedJSHeapSize,totalBytes:memory.totalJSHeapSize,limitBytes:memory.jsHeapSizeLimit}:null},
       scene:Object.assign({authoredElements:inventory.length},sceneStats),
       diagnostics:diagnostics.slice(),
       elements:cleanInventory(),

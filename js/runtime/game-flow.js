@@ -69,6 +69,7 @@ function create(options){
     call('clearInput');
     setHudVisible(false);
     call('pauseRadio');
+    call('pauseMenuMusic');
     call('previewRadioHud', false);
     call('resetTimescale');
     call('resetCar');
@@ -109,12 +110,19 @@ function create(options){
     if(editorPreview && !onlineDemoMode()) call('syncEditorSpawnFromPlayer');
     call('resetCar');
     call('resetGameplayCamera');
-    call('initGameplayPhysics');
-    setHudVisible(true);
+    const levelRole = call('currentLevelRole') || 'gameplay';
+    const menuSession = levelRole === 'editor-menu' || levelRole === 'game-menu';
+    call('initGameplayPhysics', {levelRole, menuSession});
+    setHudVisible(!menuSession);
     session.markStarted(editorPreview, editorPreviewMode);
     call('beginLogicRuntime');
-    call('pauseMenuMusic');
-    call('beginRadio');
+    if(menuSession){
+      call('pauseRadio');
+      call('playMenuMusic', levelRole);
+    } else {
+      call('pauseMenuMusic');
+      call('beginRadio');
+    }
   }
 
   function stopEditorPreview(){
@@ -128,6 +136,7 @@ function create(options){
     call('clearInput');
     setHudVisible(false);
     call('pauseRadio');
+    call('stopMenuMusic');
     call('resetTimescale');
     call('resetCar');
     call('resetGameplayCamera');
@@ -171,47 +180,53 @@ function create(options){
     if(loadText) loadText.textContent = label || 'track loading failed';
   }
 
+  function prepareRuntimeForSession(mode, failureLabel){
+    if(session.isPending()) return Promise.resolve(false);
+    session.setPending(true);
+    const pending = opts.ensureRuntimeReady ? opts.ensureRuntimeReady(mode || 'game') : Promise.resolve();
+    return Promise.resolve(pending).then(() => {
+      session.setPending(false);
+      return true;
+    }).catch(() => {
+      session.markStopped();
+      gameState.levelLoaded = false;
+      runtimeFailed(failureLabel);
+      return false;
+    });
+  }
+
   function startGame(){
-    if(session.isStarted() || session.isPending()) return;
+    if(session.isStarted() || session.isPending()) return Promise.resolve(false);
     const currentLevel = trackCatalog.current();
     if(!currentLevel){
       showLevelSelect();
-      return;
+      return Promise.resolve(false);
     }
-    if(!opts.isRuntimeReady || !opts.isRuntimeReady()){
-      session.setPending(true);
-      opts.ensureRuntimeReady('game').then(() => {
-        session.setPending(false);
-        startGame();
-      }).catch(() => {
-        session.markStopped();
-        gameState.levelLoaded = false;
-        runtimeFailed('track loading failed');
-        showLevelSelect();
-      });
-      return;
-    }
-    hideMenuOverlay();
-    enterGameplayMode();
-    beginGameplaySession(false);
+    // Preserve the Play click's user activation across asynchronous runtime
+    // preparation so free-look starts with a real pointer lock.
+    call('armFreeCamera');
+    return prepareRuntimeForSession('game', 'track loading failed').then(ready => {
+      if(!ready){ call('disarmFreeCamera'); showLevelSelect(); return false; }
+      hideMenuOverlay();
+      enterGameplayMode();
+      beginGameplaySession(false);
+      return true;
+    });
   }
 
   function startEditorPreview(mode){
     mode = mode === 'simulate' ? 'simulate' : 'play';
-    if(session.isStarted() || session.isPending()) return;
+    if(session.isStarted() || session.isPending()) return Promise.resolve(false);
     prepareEditorLevel();
-    if(!opts.isRuntimeReady || !opts.isRuntimeReady()){
-      session.setPending(true);
-      opts.ensureRuntimeReady('game').then(() => {
-        session.setPending(false);
-        startEditorPreview(mode);
-      }).catch(() => runtimeFailed('track preview failed'));
-      return;
-    }
-    hideMenuOverlay();
-    const currentLevel = trackCatalog.current();
-    if(loadText) loadText.textContent = currentLevel ? (mode === 'simulate' ? 'simulating track: ' : 'previewing track: ') + currentLevel.name : (mode === 'simulate' ? 'simulating track' : 'previewing track');
-    beginGameplaySession(true, mode);
+    if(mode === 'play') call('armFreeCamera');
+    return prepareRuntimeForSession('game', 'track preview failed').then(ready => {
+      if(!ready){ call('disarmFreeCamera'); return false; }
+      hideMenuOverlay();
+      const currentLevel = trackCatalog.current();
+      if(loadText) loadText.textContent = currentLevel ? (mode === 'simulate' ? 'simulating track: ' : 'previewing track: ') + currentLevel.name : (mode === 'simulate' ? 'simulating track' : 'previewing track');
+      beginGameplaySession(true, mode);
+      return true;
+    });
   }
 
   function launchLevel(levelId){

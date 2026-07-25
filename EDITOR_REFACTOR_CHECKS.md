@@ -1,10 +1,6 @@
 # Editor Refactor Checks
 
-Comandi utili da lanciare dalla root del progetto:
-
-```powershell
-PS C:\Users\w4k3\Desktop\ClaudDriftGame-Fable5>
-```
+Questi controlli vengono eseguiti dalla root del progetto.
 
 ## Controllare Node
 
@@ -119,12 +115,17 @@ Get-ChildItem .\js\editor\*.js | ForEach-Object {
 3. Se tutti i file stampano `OK`, ricarica completamente l'editor nel browser.
 4. Prova rapidamente le parti toccate dal refactor.
 
-## Prima del commit v0.6.5
+## Prima del commit v0.7.1
 
-Questa milestone Logic Element e' chiusa lato implementazione. Prima del commit conviene fare questi controlli da PowerShell Windows, non da WSL:
+La milestone corrente include Three.js r185, Logic Element, Pawn Studio, FBX e Character/Soccer. Eseguire questi controlli da PowerShell Windows, non da WSL:
 
 ```powershell
 node .\tests\logic-core.test.js
+node .\tests\character-core.test.js
+node .\tests\soccer-core.test.js
+node .\tests\pawn-studio.test.js
+node .\tests\asset-imports-batch-delete.test.js
+npm run verify:three
 ```
 
 Poi un controllo sintattico rapido sui moduli principali aggiunti/toccati:
@@ -134,9 +135,20 @@ node --check .\js\logic\logic-graph.js
 node --check .\js\logic\logic-exporter.js
 node --check .\js\logic\logic-runtime.js
 node --check .\js\runtime\logic-elements-runner.js
+node --check .\js\runtime\character-animation-set.js
+node --check .\js\runtime\character-pawn-base.js
+node --check .\js\runtime\soccer-locomotion.js
 node --check .\js\editor\logic-elements-inspector.js
+node --check .\js\editor\pawn-studio.js
+node --check .\js\plugins\fbx-import-plugin.js
 node --check .\js\editor\editor-menu-bar.js
 node --check .\js\engine\scene-store.js
+```
+
+Browser mirato:
+
+```powershell
+npx playwright test tests/browser/three-r185.spec.js tests/browser/character-template.spec.js tests/browser/pawn-studio-preview.spec.js --project=desktop-chromium
 ```
 
 Smoke test manuale consigliato:
@@ -146,3 +158,5 @@ Smoke test manuale consigliato:
 3. Verifica Graph/Viewport, Print, On Start/On Update, variabili esposte e salvataggio progetto.
 4. Avvia Play Preview e controlla il Logic Profiler: timeline, Clear Timeline, breakpoint/step e detail JSON.
 5. Salva, ricarica e verifica che Logic Element, musica e HUD Radio restino persistenti.
+6. In Pawn Studio assegna una Main Mesh, prova un GLB/FBX Mixamo separato, verifica Play/Stop, scala, reset alla T-pose e cambio rapido tra slot.
+7. Nel pannello Assets seleziona più import con Ctrl/Shift e verifica la cancellazione raggruppata.

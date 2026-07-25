@@ -25,21 +25,30 @@ assert(api.normalizeValues({shadowDistance:4}).shadowDistance === 15, 'shadow co
 assert(api.normalizeValues({shadowBias:-.0008}).shadowBias === -.0008, 'project shadow bias survives normalization');
 assert(api.normalizeValues({reflectionQuality:'ultra'}).reflectionQuality === 'ultra', 'Ultra SSR quality survives normalization');
 assert(api.normalizeValues({reflectionDistance:500}).reflectionDistance === 120, 'SSR ray reach is clamped to the supported range');
+assert(api.normalizeValues({ambientOcclusion:false}).ambientOcclusion === false, 'GTAO can be disabled explicitly');
+assert(api.normalizeValues({aoQuality:'ultra'}).aoQuality === 'ultra', 'Ultra GTAO quality survives normalization');
+const adaptiveLow = api.adaptiveLowValues({quality:'extreme', antialiasing:'ssaa4x', shadows:true, ambientOcclusion:true, reflections:true, volumetricLighting:true});
+assert(adaptiveLow.quality === 'low' && adaptiveLow.antialiasing === 'off', 'adaptive fallback selects Low with antialiasing disabled');
+assert(adaptiveLow.shadows === false && adaptiveLow.ambientOcclusion === false, 'adaptive fallback disables dynamic shadows and ambient occlusion');
+assert(adaptiveLow.reflections === false && adaptiveLow.volumetricLighting === false, 'adaptive fallback disables reflections and volumetric light');
 assert(Object.keys(api.shadowPresets).join(',') === 'low,medium,high,ultra', 'four explicit shadow-map profiles are available');
 assert(source.includes('mat.roughness = mat.userData.lkVideoBaseRoughness'), 'video settings restore authored PBR roughness');
 assert(source.includes('mat.metalness = mat.userData.lkVideoBaseMetalness'), 'video settings restore authored PBR metalness');
 assert(!source.includes('baseRoughness * .58') && !source.includes('baseMetalness + .18'), 'ray lighting does not make every scene material glossy and metallic');
 assert(source.includes('videoToneMappingExposure'), 'video settings own the base tone-mapping exposure');
 assert(source.includes('commitValues'), 'shared editor Video controls can commit the live values to project defaults');
-assert(source.includes('dpr * preset.pixelRatio * aaRatio'), 'AA sampling scales from device resolution instead of being capped to it');
+assert(source.includes('dpr * preset.pixelRatio * effectiveAaRatio'), 'AA sampling scales from device resolution while honoring the GPU compatibility profile');
+assert(source.includes("values.antialiasing.indexOf('ssaa')===0?1:aaRatio"), 'Apple/WebKit compatibility avoids multiplying Retina DPR by SSAA a second time');
+assert(source.includes("reason:'user-override'"), 'manual video choices prevent a later benchmark from forcing Low again');
 
 const hidden = api.normalizeProject({defaults:{quality:'extreme'}, exposed:{rendererMode:false}});
 assert(hidden.defaults.quality === 'extreme', 'project default quality is normalized');
 assert(hidden.exposed.rendererMode === false, 'author can hide renderer selection');
 assert(hidden.exposed.quality === true, 'unspecified exposure remains enabled');
-assert(hidden.version === 3, 'project video schema is upgraded to version 3');
+assert(hidden.version === 4, 'project video schema is upgraded to version 4');
 assert(hidden.defaults.exposure === 1.12, 'r185 exposure default brightens the scene without camera grading');
 assert(hidden.defaults.shadowNormalBias === .035, 'sun shadow acne protection has a stable project default');
 assert(hidden.defaults.reflectionQuality === 'high' && hidden.defaults.reflectionDistance === 35, 'SSR has stable quality and ray-reach defaults');
+assert(hidden.defaults.ambientOcclusion === true && hidden.defaults.aoQuality === 'medium', 'r185 GTAO has a guided project default');
 
 console.log('video-settings.test.js: all assertions passed');

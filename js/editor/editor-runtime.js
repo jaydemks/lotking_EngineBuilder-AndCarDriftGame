@@ -78,7 +78,10 @@ function create(deps){
       // use the direct renderer; single view keeps the configured post effects.
       if(!enabled || ED.viewportMode === 'quad') return false;
       try {
-        post.render(camera, {videoOnly:true, width:rect.w, height:rect.h, interactive:!!ED.viewportNavigating});
+        // Navigation may skip editor picking work, but it must not change the
+        // authored render pipeline. Toggling GTAO/SSR on pointer-down caused a
+        // visible full-frame exposure/sky shift.
+        post.render(camera, {videoOnly:true, width:rect.w, height:rect.h, interactive:false});
         return true;
       } catch(err){
         return false;
@@ -121,8 +124,16 @@ function create(deps){
     previewWarmupCompileTimer = setTimeout(() => {
       requestAnimationFrame(() => {
         if(seq !== previewWarmupSeq) return;
-        if(renderer && renderer.compileAsync && scene && gameCam){
-          Promise.resolve(renderer.compileAsync(scene, gameCam)).then(finish, finish);
+        if(renderer && scene && gameCam){
+          const backend = window.LK_RUNTIME_RENDERING_BACKEND;
+          if(backend && backend.compileScene){
+            Promise.resolve(backend.compileScene(renderer, scene, gameCam, {settleFrames:1})).then(finish, finish);
+          } else if(renderer.compile){
+            try { renderer.compile(scene, gameCam); } catch(error) {}
+            finish();
+          } else {
+            requestAnimationFrame(finish);
+          }
         } else {
           requestAnimationFrame(finish);
         }
@@ -190,7 +201,7 @@ function create(deps){
       camHelper.userData.editorOnly = true;
       camHelper.userData.nonExportable = true;
       camHelper.userData.lkFlareIgnore = true;
-      camHelper.visible = ED.camHelperOn;
+      camHelper.visible = ED.camHelperOn && GAME.player.enabled !== false && GAME.player.hidden !== true;
       deps.setCamHelper(camHelper);
     }
     helperGroup.add(camHelper, rigHelper, camRigLine);
@@ -261,15 +272,24 @@ function create(deps){
 
   function startPlayPreview(mode){
     mode = mode === 'simulate' ? 'simulate' : 'play';
+    // Request before saving and before the asynchronous pre-benchmark while
+    // the toolbar click still owns browser user activation.
+    if(mode === 'play' && GAME.actions.armFreeCamera) GAME.actions.armFreeCamera();
     const onlineDemo = window.LK_PROJECT_WORKSPACE
       && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode
       && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
-    if(!onlineDemo && !deps.saveScene()) return;
+    if(!onlineDemo && !deps.saveScene()){
+      if(GAME.actions.disarmFreeCamera) GAME.actions.disarmFreeCamera();
+      return;
+    }
     deps.closeMenu();
-    showPreviewWarmup();
-    deps.status(mode === 'simulate' ? 'Warm-up simulation...' : 'Warm-up preview...');
-    requestAnimationFrame(() => {
-      if(GAME.actions.startEditorPreview) GAME.actions.startEditorPreview(mode);
+    deps.status(mode === 'simulate' ? 'Pre-benchmark simulation...' : 'Pre-benchmark preview...');
+    const startRequest = GAME.actions.startEditorPreview ? GAME.actions.startEditorPreview(mode) : Promise.resolve(false);
+    Promise.resolve(startRequest).then(started => {
+      if(!started){
+        deps.status(mode === 'simulate' ? 'Simulation pre-benchmark failed' : 'Preview pre-benchmark failed');
+        return;
+      }
       if(GAME.player.updateLights) GAME.player.updateLights();
       if(GAME.player.updateExhaust) GAME.player.updateExhaust(0);
       if(GAME.player.updateSkids) GAME.player.updateSkids();
@@ -277,6 +297,9 @@ function create(deps){
       cinemaTriggerState.clear();
       startOnPlayCinematics();
       deps.status(previewModeLabel(mode) + ' running - F8 or Shift+Esc to stop');
+    }).catch(error => {
+      console.warn('LotKing editor: preview pre-benchmark failed', error);
+      deps.status('Preview pre-benchmark failed');
     });
   }
 
@@ -349,6 +372,10 @@ function create(deps){
   }
 
   function editorFrame(dt){
+    // The pre-benchmark owns the renderer while it deliberately exercises
+    // hidden objects, lights and camera views. Rendering the normal editor
+    // frame concurrently doubles GPU work and exposes transient scene state.
+    if(GAME.state.preBenchmarkRunning) return;
     if(ED.playPreview){
       renderPlayPreview(dt);
       return;
@@ -448,6 +475,7 @@ function create(deps){
   }
 
   function updateCameraHelpers(){
+    const nativePlayerCameraActive = ED.camHelperOn && GAME.player.enabled !== false && GAME.player.hidden !== true;
     camProxy.position.copy(gameCam.position);
     camProxy.quaternion.copy(gameCam.quaternion);
     camProxy.fov = gameCam.fov;
@@ -458,18 +486,28 @@ function create(deps){
     camProxy.updateProjectionMatrix();
     camProxy.updateMatrixWorld(true);
     const camHelper = deps.getCamHelper();
+    if(camHelper) camHelper.visible = nativePlayerCameraActive;
     if(camHelper && camHelper.visible) camHelper.update();
     deps.updateCameraRigHelper();
     const rigHelper = deps.ensureCameraRigHelper();
-    if(rigHelper) rigHelper.scale.setScalar(helperSize);
+    if(rigHelper){ rigHelper.visible = nativePlayerCameraActive; rigHelper.scale.setScalar(helperSize); }
     if(camRigLine){
-      camRigLine.visible = ED.camHelperOn;
+      camRigLine.visible = nativePlayerCameraActive;
       const pts = camRigLine.geometry.attributes.position;
       pts.setXYZ(0, gameCam.position.x, gameCam.position.y, gameCam.position.z);
       pts.setXYZ(1, GAME.player.car.position.x, GAME.player.car.position.y + Math.max(.1, Number(GAME.player.cameraCfg.lookHeight) || 1.1), GAME.player.car.position.z);
       pts.needsUpdate = true;
     }
   }
+
+  function syncNativePlayerHelperVisibility(event){
+    const active=event&&event.detail?event.detail.active===true:(GAME.player.enabled!==false&&GAME.player.hidden!==true);
+    const camHelper=deps.getCamHelper(),rigHelper=deps.ensureCameraRigHelper();
+    if(camHelper)camHelper.visible=active&&ED.camHelperOn;
+    if(rigHelper)rigHelper.visible=active&&ED.camHelperOn;
+    if(camRigLine)camRigLine.visible=active&&ED.camHelperOn;
+  }
+  if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('lotking:nativeplayeractivechange',syncNativePlayerHelperVisibility);
 
   function renderEditorViewportFallback(viewRect){
     renderer.setScissorTest(true);
@@ -577,11 +615,12 @@ function create(deps){
   }
   function shouldHideForFinalPreview(node){
     const ud = node && node.userData || {};
+    const renderableHelper = !!(node && (node.isMesh || node.isLine || node.isPoints || node.isSprite || node.isLight));
     return !!(
       ud.helperOnly ||
       ud.colliderPreview ||
       ud.editorOnly ||
-      (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false)) ||
+      (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false) && renderableHelper) ||
       ud.editorCameraHelper ||
       ud.editorCameraHelperPick ||
       ud.editorLightHandle

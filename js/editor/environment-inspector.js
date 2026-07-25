@@ -80,6 +80,7 @@ function create(deps){
       spe.body.appendChild(sliderRow('Intensity', sky.proceduralEnv.getIntensity(), 0, 1, .01, v => { sky.proceduralEnv.setIntensity(v); markDirty(); }, v => (+v).toFixed(2)).root);
       spe.body.appendChild(sliderRow('Warmth', sky.proceduralEnv.getWarmth(), 0, 1, .01, v => { sky.proceduralEnv.setWarmth(v); markDirty(); }, v => (+v).toFixed(2)).root);
       spe.body.appendChild(sliderRow('Contrast', sky.proceduralEnv.getContrast(), 0, 1, .01, v => { sky.proceduralEnv.setContrast(v); markDirty(); }, v => (+v).toFixed(2)).root);
+      if(sky.orientation){const orientation=sky.orientation.get();spe.body.appendChild(sliderRow(tr('Background rotation','Rotazione sfondo'),orientation.background,0,359,1,v=>{sky.orientation.set({background:v});markDirty();},v=>Math.round(v)+'°').root);spe.body.appendChild(sliderRow(tr('Lighting rotation','Rotazione illuminazione'),orientation.environment,0,359,1,v=>{sky.orientation.set({environment:v});markDirty();},v=>Math.round(v)+'°').root);}
       spe.body.appendChild(el('<div class="lk-hint">Lightweight dynamic environment map generated in code. Use this instead of HDRI for faster iteration and lower memory cost.</div>'));
     }
     box.appendChild(spe.root);

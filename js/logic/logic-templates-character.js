@@ -24,6 +24,19 @@ const ANIMATION_SLOTS = [
   ['AnimLand','land','Landing','Land — optional short one-shot, in-place and without root motion. Reserved for landing transitions.'],
   ['AnimInteract','interact','Interact','Interact — optional one-shot in-place action (talk, inspect, press button), without root motion. It must return to the locomotion pose.'],
 ];
+function defaultAnimationSet(){
+  return [
+    {id:'idle',name:'Idle',state:'grounded',direction:[0,0],speed:0,speedTolerance:.65,clip:'Idle',asset:null,loop:true,priority:1},
+    {id:'walk-forward',name:'Walk Forward',state:'grounded',direction:[0,1],speed:1.8,speedTolerance:1.5,clip:'Walking',asset:null,loop:true,priority:1},
+    {id:'run-forward',name:'Run Forward',state:'grounded',direction:[0,1],speed:5.4,speedTolerance:2.4,clip:'Running',asset:null,loop:true,priority:1},
+    {id:'strafe-left',name:'Strafe Left',state:'grounded',direction:[-1,0],speed:1.8,speedTolerance:1.8,clip:'Left Strafe',asset:null,loop:true,priority:1},
+    {id:'strafe-right',name:'Strafe Right',state:'grounded',direction:[1,0],speed:1.8,speedTolerance:1.8,clip:'Right Strafe',asset:null,loop:true,priority:1},
+    {id:'jump-rise',name:'Jump',state:'jump',direction:[0,1],speed:2,speedTolerance:2,clip:'Jump',asset:null,loop:false,priority:1},
+    {id:'fall-loop',name:'Fall',state:'fall',direction:[0,1],speed:2,speedTolerance:3,clip:'Falling Idle',asset:null,loop:true,priority:1},
+    {id:'landing',name:'Land',state:'land',direction:[0,0],speed:0,speedTolerance:1,clip:'Landing',asset:null,loop:false,priority:1},
+    {id:'interact',name:'Interact',state:'action',action:'interact',direction:[0,0],speed:0,speedTolerance:1,clip:'Interact',asset:null,loop:false,priority:1},
+  ];
+}
 
 function makeGraph(){
   const variables = [
@@ -46,7 +59,7 @@ function makeGraph(){
     {name:'Preset',type:'string',value:'normal',exposed:true,binding:'preset',label:'Character Preset',category:'Character',ui:'select',options:PRESET_OPTIONS,description:'Starting behavior profile. Applying it sets the baseline movement values; tune individual Movement fields afterward for a custom subtype.'},
     {name:'BlendResponsiveness',type:'number',value:9,min:.5,max:30,step:.5,exposed:true,binding:'locomotion.responsiveness',label:'Motion Blend Responsiveness',category:'Movement / Motion Blend'},
     {name:'BlendPrediction',type:'number',value:.12,min:0,max:.6,step:.01,exposed:true,binding:'locomotion.predictionTime',label:'Motion Blend Prediction (s)',category:'Movement / Motion Blend'},
-    {name:'CameraMode',type:'string',value:'arcade',exposed:true,binding:'camera.mode',label:'Camera Mode',category:'Camera',ui:'select',options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade follow'},{value:'cinematic',label:'Cinematic'}]},
+    {name:'CameraMode',type:'string',value:'free',exposed:true,binding:'camera.mode',label:'Camera Mode',category:'Camera',ui:'select',options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade follow'},{value:'cinematic',label:'Cinematic'}]},
     {name:'CameraView',type:'string',value:'third',exposed:true,binding:'camera.view',label:'View',category:'Camera',ui:'select',options:[{value:'third',label:'Third person'},{value:'close',label:'Close third person'},{value:'first',label:'First person (lite)'}]},
     {name:'CameraDistance',type:'number',value:6.8,min:.2,max:40,step:.1,exposed:true,binding:'camera.distance',label:'Distance',category:'Camera'},
     {name:'CameraHeight',type:'number',value:2.35,min:.2,max:20,step:.1,exposed:true,binding:'camera.height',label:'Height',category:'Camera'},
@@ -77,18 +90,11 @@ function makeGraph(){
   };
   graph.logicScene = {
     root:{id:'root',name:'Player Character Root',type:'empty',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:'#38bdf8'},
-    elements:[
-      sceneElement('character_model','Character Model / Rigged GLB Placeholder','cube','root',[0,1.05,0],[0,0,0],[.001,.001,.001],'#334155'),
-      sceneElement('torso_shirt','Torso Shirt','cube','root',[0,1.25,0],[0,0,0],[.46,.58,.26],'#4f8fbf'),
-      sceneElement('hips_shorts','Hips Pants','cube','root',[0,.76,0],[0,0,0],[.44,.42,.25],'#263445'),
-      sceneElement('leg_sock_left','Leg Left','cylinder','root',[-.12,.3,0],[0,0,0],[.13,.58,.13],'#263445'),sceneElement('leg_sock_right','Leg Right','cylinder','root',[.12,.3,0],[0,0,0],[.13,.58,.13],'#263445'),
-      sceneElement('arm_skin_left','Arm Skin Left','cylinder','root',[-.31,1.25,0],[0,0,15],[.09,.52,.09],'#d8a184'),sceneElement('arm_skin_right','Arm Skin Right','cylinder','root',[.31,1.25,0],[0,0,-15],[.09,.52,.09],'#d8a184'),
-      sceneElement('head_skin','Head Skin','sphere','root',[0,1.74,0],[0,0,0],[.3,.32,.3],'#d8a184'),sceneElement('hair_top','Hair Top','sphere','root',[0,1.86,-.02],[0,0,0],[.3,.18,.3],'#2b2118'),
-      {id:'camera_anchor',name:'Player Camera Anchor',type:'camera',parentId:'root',linked:true,position:[0,2.1,-4.2],rotation:[0,0,0],scale:[1,1,1],color:'#a78bfa'},
-    ],
+    elements:[sceneElement('character_model','Character Model / Rigged GLB Placeholder','cube','root',[0,1.05,0],[0,0,0],[.001,.001,.001],'#334155')]
+      .concat(window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION?window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.sceneElements({shirtColor:'#4f8fbf',shortsColor:'#263445',socksColor:'#263445',hairColor:'#2b2118',skinColor:'#d8a184'}):[]),
     components:[{id:'root_transform',elementId:'root',name:'Transform',type:'transform',linked:true},{id:'pawn_character',elementId:'root',name:'Character Pawn',type:'player-pawn',linked:true},{id:'pawn_collision',elementId:'root',name:'Character Collision',type:'collider',linked:true,collider:{enabled:true,shape:'box',size:[.7,1.9,.7],offset:[0,.95,0]}},{id:'model_render',elementId:'character_model',name:'Imported Model / Placeholder',type:'render',linked:true}],
   };
-  graph.characterPawn = {template:true,schemaVersion:1,id:'player-character-normal',preset:'normal',playerId:1,enabled:true,hidden:false,possessed:true,spawn:{x:0,y:0,z:8,heading:Math.PI},movement:{walkSpeed:1.8,runSpeed:5.4,sprintMultiplier:1.3,acceleration:13,turnRate:10,jumpHeight:1.05,gravity:22,airControl:.32,inputMode:'camera'},animationLibrary:null,locomotion:{responsiveness:9,predictionTime:.12},animations:ANIMATION_SLOTS.reduce((out,item)=>{out[item[1]]=item[2];return out;},{}),appearance:{shirtColor:'#4f8fbf',shortsColor:'#263445',socksColor:'#20252b',hairColor:'#2b2118',skinColor:'#d8a184'},camera:{mode:'arcade',view:'third',distance:6.8,height:2.35,lag:7,fov:62}};
+  graph.characterPawn = {template:true,schemaVersion:2,cameraDefaultVersion:1,id:'player-character-normal',preset:'normal',playerId:1,enabled:true,hidden:false,possessed:true,model:null,spawn:{x:0,y:0,z:8,heading:Math.PI},movement:{walkSpeed:1.8,runSpeed:5.4,sprintMultiplier:1.3,acceleration:13,turnRate:10,jumpHeight:1.05,gravity:22,airControl:.32,inputMode:'camera'},animationLibrary:null,animationSet:defaultAnimationSet(),locomotion:{responsiveness:9,predictionTime:.12},animations:ANIMATION_SLOTS.reduce((out,item)=>{out[item[1]]=item[2];return out;},{}),cloth:window.LK_RUNTIME_CLOTH?window.LK_RUNTIME_CLOTH.normalizeConfig({}):{enabled:true,backend:'auto',quality:'medium',pieces:[]},appearance:{shirtColor:'#4f8fbf',shortsColor:'#263445',socksColor:'#20252b',hairColor:'#2b2118',skinColor:'#d8a184'},camera:{mode:'free',view:'third',distance:6.8,height:2.35,lag:7,fov:62}};
   return graph;
 }
 
@@ -120,5 +126,5 @@ function makeCharacterTemplates(){ return [
   {id:'logic-template-talkable-civil-npc',name:'Template - Talkable Civil NPC',description:'Unpossessed civil Character Pawn with a reusable Player 1 proximity check and two-message F interaction.',category:'Pawn / Character',graph:talkableNpcGraph()},
 ]; }
 if(window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.register) window.LK_LOGIC_TEMPLATES.register(makeCharacterTemplates());
-window.LK_LOGIC_TEMPLATES_CHARACTER = Object.freeze({ANIMATION_SLOTS,makeCharacterTemplates,talkableNpcGraph});
+window.LK_LOGIC_TEMPLATES_CHARACTER = Object.freeze({ANIMATION_SLOTS,defaultAnimationSet,makeCharacterTemplates,talkableNpcGraph});
 })();

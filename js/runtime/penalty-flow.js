@@ -29,6 +29,8 @@ function create(GAME){
     autoAdvanceDelay:2.2,
     listening:false,
     pendingAdvance:null,
+    lastResult:null,
+    resultSequence:0,
   };
 
   function score(team){
@@ -75,10 +77,11 @@ function create(GAME){
     if(state.phase === 'finished' || state.phase === 'idle') return;
     if(decided()){ finish(); return; }
     if(remaining('A') === 0 && remaining('B') === 0 && score('A') === score('B')) state.suddenDeath = true;
+    state.lastResult = null;
     state.kickingTeam = state.kickingTeam === 'A' ? 'B' : 'A';
     if(state.kickingTeam === 'A') state.round++;
     const soccerBall = GAME && GAME.systems && GAME.systems.soccerBall;
-    if(soccerBall && state.ballId) soccerBall.reset(state.ballId);
+    if(soccerBall && state.ballId){soccerBall.reset(state.ballId);if(soccerBall.setMode)soccerBall.setMode(state.ballId,'penalty',true);}
     setPhase('ready');
     emitEvent('OnPenaltyKickReady', {round:state.round, team:state.kickingTeam, teamName:state.teams[state.kickingTeam].name, suddenDeath:state.suddenDeath});
   }
@@ -87,6 +90,8 @@ function create(GAME){
     if(state.phase !== 'shot' && state.phase !== 'aim' && state.phase !== 'ready') return;
     const team = state.kickingTeam;
     state.teams[team].kicks.push(result);
+    state.lastResult=result;
+    state.resultSequence++;
     setPhase('resolved');
     emitEvent('OnPenaltyResult', {
       result, team, teamName:state.teams[team].name, round:state.round,
@@ -118,6 +123,7 @@ function create(GAME){
     if(opts.teamB != null) state.teams.B.name = String(opts.teamB) || 'Away';
     if(opts.ballId != null) state.ballId = String(opts.ballId);
     if(opts.autoAdvanceDelay != null) state.autoAdvanceDelay = clamp(finite(opts.autoAdvanceDelay, 2.2), .2, 10);
+    const soccerBall=GAME&&GAME.systems&&GAME.systems.soccerBall;if(soccerBall&&state.ballId&&soccerBall.setMode)soccerBall.setMode(state.ballId,'penalty',true);
     return snapshot();
   }
 
@@ -142,6 +148,7 @@ function create(GAME){
     state.teams.B.kicks = [];
     state.suddenDeath = false;
     state.winner = null;
+    state.lastResult = null;
     state.phase = 'idle';
     if(keepConfig !== true){
       state.kicksPerTeam = 5;
@@ -166,6 +173,8 @@ function create(GAME){
       finished:state.phase === 'finished',
       winner:state.winner,
       winnerName:state.winner ? state.teams[state.winner].name : null,
+      lastResult:state.lastResult,
+      resultSequence:state.resultSequence,
     };
   }
 

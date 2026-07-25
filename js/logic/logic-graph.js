@@ -48,6 +48,23 @@ function normalizeVariables(variables){
   })).filter(v => v.name);
 }
 
+function migrateTemplateCameraDefault(graph){
+  const pawns = [graph.characterPawn, graph.soccerPawn, graph.vehiclePawn].filter(Boolean);
+  pawns.forEach(pawn => {
+    if(pawn.template !== true || Number(pawn.cameraDefaultVersion) >= 1) return;
+    const variable = graph.variables.find(item => item && item.name === 'CameraMode' && item.binding === 'camera.mode');
+    const storedMode = pawn.camera && String(pawn.camera.mode || '');
+    // r0.7.1 originally authored every built-in pawn as Arcade even though
+    // Play advertises Free as its initial camera. Only migrate that exact old
+    // template default; explicit Cinematic/Free/custom configurations survive.
+    if(storedMode === 'arcade' && (!variable || String(variable.value || '') === 'arcade')){
+      pawn.camera = Object.assign({}, pawn.camera, {mode:'free'});
+      if(variable) variable.value = 'free';
+    }
+    pawn.cameraDefaultVersion = 1;
+  });
+}
+
 function normalizeComments(comments){
   return (Array.isArray(comments) ? comments : []).filter(Boolean).map((c, i) => ({
     id:String(c.id || ('comment_' + i)),
@@ -171,6 +188,7 @@ function normalizeGraph(graph, fallbackName, fallbackScope){
   }));
   const vehiclePawn = normalizeVehiclePawn(g.vehiclePawn, g.playerPawnBlueprint);
   if(vehiclePawn) g.vehiclePawn = vehiclePawn;
+  migrateTemplateCameraDefault(g);
   return g;
 }
 
@@ -231,6 +249,20 @@ function collectGraphDependencies(graph){
     const backend = window.LK_RUNTIME_VEHICLE_PHYSICS_BACKENDS.manifest(vehicle.physicsBackend || 'auto');
     if(backend) addDependency(deps, 'plugin', backend, 'vehiclePawn:physics');
   }
+  const character=g.characterPawn||g.soccerPawn;
+  if(character){
+    if(character.model)addDependency(deps,'mesh',character.model,'character:model');
+    if(character.animationLibrary)addDependency(deps,'mesh',character.animationLibrary,'character:animationLibrary');
+    (Array.isArray(character.animationSet)?character.animationSet:[]).forEach(entry=>{if(entry&&entry.asset)addDependency(deps,'mesh',entry.asset,'character:motion:'+(entry.id||entry.name||entry.clip||'entry'));});
+  }
+  (Array.isArray(g.variables) ? g.variables : []).forEach(variable => {
+    const binding = String(variable && variable.binding || '');
+    if(binding !== 'animationLibrary' && binding.indexOf('animations.') !== 0) return;
+    let value = variable.value;
+    if(typeof value === 'string' && value.trim().charAt(0) === '{') try { value = JSON.parse(value); } catch(err) { return; }
+    const ref = binding === 'animationLibrary' ? value : value && value.asset;
+    if(ref && typeof ref === 'object') addDependency(deps, 'mesh', ref, 'variable:' + (variable.name || binding));
+  });
   function scanNodes(nodes, owner){
     (Array.isArray(nodes) ? nodes : []).filter(Boolean).forEach(node => {
       const data = node.data || {};

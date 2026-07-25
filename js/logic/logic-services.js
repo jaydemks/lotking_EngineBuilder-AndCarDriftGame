@@ -846,6 +846,16 @@ function createSoccerService(GAME){
   });
 }
 
+function createNetworkService(){
+  function active(){return window.LK_P2P_ACTIVE_SESSION||null;}
+  return Object.freeze({
+    state:()=>{const session=active();return session&&session.state?session.state():{supported:typeof RTCPeerConnection==='function',role:'idle',peerCount:0,peers:[]};},
+    send:(channel,payload)=>{const session=active();return session&&session.send?session.send('logic.event',{channel:String(channel||'gameplay').slice(0,96),payload}):0;},
+    openStudio:()=>!!(window.LK_P2P_COLLABORATION&&window.LK_P2P_COLLABORATION.open&&window.LK_P2P_COLLABORATION.open()),
+    disconnect:()=>{const session=active();if(session&&session.close)session.close();if(window.LK_P2P_ACTIVE_SESSION===session)window.LK_P2P_ACTIVE_SESSION=null;return true;},
+  });
+}
+
 function createContext(opts){
   opts = opts || {};
   const GAME = opts.GAME || window.LOT_KING;
@@ -874,9 +884,10 @@ function createContext(opts){
       audio: createAudioService(),
       animations: createAnimationService(STORE),
       soccer: createSoccerService(GAME),
+      network: createNetworkService(),
     },
   };
 }
 
-window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService, createSoccerService});
+window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService, createSoccerService, createNetworkService});
 })();

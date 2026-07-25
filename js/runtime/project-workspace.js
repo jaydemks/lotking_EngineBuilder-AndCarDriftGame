@@ -70,7 +70,7 @@ function canUseDirectoryPicker(){
 }
 
 function canUseFilePicker(){
-  return !!(!isOnlineDemoMode() && window.isSecureContext && typeof window.showOpenFilePicker === 'function');
+  return typeof window.FileReader === 'function' || !!(window.isSecureContext && typeof window.showOpenFilePicker === 'function');
 }
 
 function isOnlineDemoMode(){
@@ -102,6 +102,18 @@ function saveState(patch){
   syncWorkspaceButtons();
   window.dispatchEvent(new CustomEvent('lot-king:workspace-state', {detail:next}));
   return next;
+}
+
+function requestPersistentBrowserStorage(){
+  const storage=typeof navigator!=='undefined'&&navigator.storage;
+  if(!storage)return Promise.resolve(null);
+  const persist=typeof storage.persist==='function'?Promise.resolve(storage.persist()).catch(()=>false):Promise.resolve(false);
+  return persist.then(async persistent=>{
+    let estimate=null;
+    if(typeof storage.estimate==='function')try{estimate=await storage.estimate();}catch(err){}
+    saveState({storagePersistent:persistent===true,storageUsage:estimate&&Number(estimate.usage)||null,storageQuota:estimate&&Number(estimate.quota)||null});
+    return {persistent:persistent===true,estimate};
+  });
 }
 
 function openDb(){
@@ -430,23 +442,32 @@ async function connectFolder(options){
 }
 
 async function connectProjectFile(){
-  if(isOnlineDemoMode()) throw new Error('The published site is demo-only. Run the project locally to open an LKEP file.');
-  if(!canUseFilePicker()) throw new Error('LKEP file sync is available in Chrome/Edge on localhost or HTTPS.');
-  const handles = await window.showOpenFilePicker({
-    multiple:false,
-    types:[{
-      description:'Lot King Editor Project',
-      accept:{'application/json':['.json', '.lkep']},
-    }],
-  });
-  const handle = handles && handles[0];
-  if(!handle) throw new Error('No project file selected');
-  const text = await readFileHandleText(handle);
-  await putProjectFileHandle(handle);
-  saveState({mode:'file', onlineEditor:true, workspaceReady:true, fileName:handle.name || PROJECT_FILE, projectFile:handle.name || PROJECT_FILE, folderName:null});
-  dispatchLoadedProject(text, handle.name || PROJECT_FILE);
-  showToast('Linked LKEP project file: ' + (handle.name || PROJECT_FILE));
-  return handle;
+  if(window.isSecureContext&&typeof window.showOpenFilePicker==='function'){
+    const handles = await window.showOpenFilePicker({multiple:false,types:[{description:'Lot King Editor Project',accept:{'application/json':['.json', '.lkep']}}]});
+    const handle = handles && handles[0];
+    if(!handle) throw new Error('No project file selected');
+    const text = await readFileHandleText(handle);
+    try { JSON.parse(text); }
+    catch(err){ throw new Error(tr('The selected LKEP is not valid JSON.', 'Il file LKEP selezionato non contiene JSON valido.')); }
+    await putProjectFileHandle(handle);
+    saveState({mode:'file', onlineEditor:true, workspaceReady:true, fileName:handle.name || PROJECT_FILE, projectFile:handle.name || PROJECT_FILE, folderName:null});
+    dispatchLoadedProject(text, handle.name || PROJECT_FILE);
+    showToast('Linked LKEP project file: ' + (handle.name || PROJECT_FILE));
+    return handle;
+  }
+  // Safari/WebKit has no user-visible showOpenFilePicker/showDirectoryPicker.
+  // A standard file input is universally available; it imports the portable
+  // project into browser storage, while later Save/Export downloads a new LKEP.
+  const file=await new Promise((resolve,reject)=>{const input=document.createElement('input');input.type='file';input.accept='.lkep,.json,.lkep.json,application/json';input.style.display='none';document.body.appendChild(input);input.addEventListener('change',()=>{const selected=input.files&&input.files[0];input.remove();if(selected)resolve(selected);else reject(new DOMException('Operation cancelled','AbortError'));},{once:true});input.click();});
+  const text=typeof file.text==='function'?await file.text():await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(reader.error||new Error('Project file not readable'));reader.readAsText(file);});
+  try { JSON.parse(text); }
+  catch(err){ throw new Error(tr('The selected LKEP is not valid JSON.', 'Il file LKEP selezionato non contiene JSON valido.')); }
+  cachedFileHandle=null;
+  saveState({mode:'browser',onlineEditor:true,workspaceReady:true,fileName:file.name||PROJECT_FILE,projectFile:null,folderName:null});
+  requestPersistentBrowserStorage();
+  dispatchLoadedProject(text,file.name||PROJECT_FILE);
+  showToast(tr('LKEP imported into browser storage.','LKEP importato nell’archivio del browser.'));
+  return file;
 }
 
 async function saveProject(project, opts){
@@ -519,8 +540,9 @@ async function readWorkspaceProjects(){
   return {activeId:catalog.activeId || (projects[0] && projects[0].record && projects[0].record.id) || null, projects};
 }
 
-function setBrowserMode(){
-  saveState({mode:'browser', onlineEditor:true, workspaceReady:true});
+function setBrowserMode(patch){
+  saveState(Object.assign({mode:'browser', onlineEditor:true, workspaceReady:true, folderName:null, projectFile:null},patch||{}));
+  requestPersistentBrowserStorage();
   showToast(tr('Using this browser local database. Nothing is uploaded.', 'Uso del database locale del browser. Nessun dato viene caricato.'));
 }
 
@@ -533,12 +555,7 @@ async function chooseEditorProject(template){
       location.reload();
       return;
     }
-    if(!canUseDirectoryPicker()) throw new Error(tr('Online folder projects require Chrome or Edge on HTTPS. You can still use Run locally.', 'I progetti online su cartella richiedono Chrome o Edge su HTTPS. Puoi comunque usare Avvia in locale.'));
-    const handle = await window.showDirectoryPicker({mode:'readwrite', id:'lot-king-project'});
-    await putHandle(handle);
-    const hasWorkspace = await workspaceHasCatalogOrProject(handle);
-    if(!hasWorkspace) await initializeFolderWorkspace(handle, selectedTemplate);
-    saveState({mode:'folder', onlineEditor:true, workspaceReady:true, startupTemplate:hasWorkspace ? null : selectedTemplate, folderName:handle.name || 'Project folder', projectFile:PROJECT_DIR + '/' + PROJECT_FILE});
+    setBrowserMode({startupTemplate:selectedTemplate});
   } else {
     saveState({mode:'browser', onlineEditor:true, workspaceReady:true, startupTemplate:selectedTemplate});
   }
@@ -661,11 +678,10 @@ function renderOverlay(){
     const fileDesc = overlay.querySelector('#lkWorkspaceFile span');
     if(kicker) kicker.textContent = 'ONLINE DEMO';
     if(title) title.textContent = tr('Choose your local project', 'Scegli il progetto locale');
-    if(browserTitle) browserTitle.textContent = tr('Online editor, local files', 'Editor online, file locali');
-    if(browserDesc) browserDesc.textContent = tr('Optional: authorize a folder on this PC for local file mirroring. The DEMO button does not require this.', 'Opzionale: autorizza una cartella su questo PC per una copia locale su file. Il pulsante DEMO non lo richiede.');
-    if(fileCard) fileCard.style.display = 'none';
-    if(fileTitle) fileTitle.textContent = tr('Local browser project', 'Progetto locale del browser');
-    if(fileDesc) fileDesc.textContent = tr('Local-only storage.', 'Archiviazione esclusivamente locale.');
+    if(browserTitle) browserTitle.textContent = tr('Browser project · all browsers', 'Progetto browser · tutti i browser');
+    if(browserDesc) browserDesc.textContent = tr('Work in this browser with local IndexedDB storage. Compatible with Safari, Chrome, Edge and Firefox; nothing is uploaded.', 'Lavora nel browser usando IndexedDB locale. Compatibile con Safari, Chrome, Edge e Firefox; nulla viene caricato online.');
+    if(fileTitle) fileTitle.textContent = canUseDirectoryPicker()?tr('Optional local folder mirror','Copia opzionale su cartella locale'):tr('Import an existing LKEP','Importa un LKEP esistente');
+    if(fileDesc) fileDesc.textContent = canUseDirectoryPicker()?tr('Authorize a folder for automatic file mirroring.','Autorizza una cartella per la copia automatica su file.'):tr('Safari imports the portable file into browser storage; Save/Export downloads a new LKEP.','Safari importa il file portabile nel browser; Salva/Esporta scarica un nuovo LKEP.');
   }
   const guideCard = overlay.querySelector('#lkWorkspaceGuide');
   if(guideCard) guideCard.style.display = hosted ? '' : 'none';
@@ -684,7 +700,8 @@ function renderOverlay(){
   overlay.querySelector('#lkWorkspaceClose').addEventListener('click', closeOverlay);
   overlay.addEventListener('click', event => { if(event.target === overlay) closeOverlay(); });
   overlay.querySelector('#lkWorkspaceFile').addEventListener('click', () => {
-    connectProjectFile().then(() => {
+    const operation=hosted&&canUseDirectoryPicker()?connectFolder({initialize:false}):connectProjectFile();
+    operation.then(() => {
       syncOverlayStatus();
     }).catch(err => {
       const message = friendlyError(err, 'LKEP file connection failed');
@@ -696,19 +713,8 @@ function renderOverlay(){
     browserCard.addEventListener('click', () => {
       if(hosted){
         const initialChoice = requiresInitialChoice();
-        connectFolder({initialize:initialChoice, startupTemplate:initialChoice ? 'empty' : null}).then(() => {
-          if(initialChoice){
-            showToast(tr('Local folder initialized. Opening editor...', 'Cartella locale inizializzata. Apertura editor...'));
-            location.reload();
-            return;
-          }
-          closeOverlay();
-          showToast(tr('Local folder linked.', 'Cartella locale collegata.'));
-        }).catch(err => {
-          const message = friendlyError(err, tr('Folder connection failed.', 'Collegamento cartella fallito.'));
-          showToast(message);
-          syncOverlayStatus(message);
-        });
+        setBrowserMode();
+        if(initialChoice)location.reload();else closeOverlay();
         return;
       }
       setBrowserMode();

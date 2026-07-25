@@ -99,7 +99,7 @@ function create(deps){
       options:[
         {value:'gameplay', label:tr('Gameplay level', 'Livello di gioco')},
         {value:'editor-menu', label:tr('EDITOR MENU', 'MENU EDITOR')},
-        {value:'game-menu', label:tr('GAME MENU (future runtime menu)', 'MENU GIOCO (menu runtime futuro)')},
+        {value:'game-menu', label:tr('GAME MENU', 'MENU GIOCO')},
       ],
       okText:tr('Continue', 'Continua'),
     });
@@ -110,6 +110,8 @@ function create(deps){
       value:'character-movement-playground',
       options:[
         {value:'character-movement-playground', label:tr('Sketch Street - Character Movement', 'Sketch Street - Movimento personaggio')},
+        {value:'penalty-shootout-stadium', label:tr('Penalty Shootout Stadium (Soccer)', 'Stadio Rigori (Calcio)')},
+        {value:'drift-track-minami', label:tr('Drift Track - Minami Drift Park', 'Tracciato Drift - Minami Drift Park')},
         {value:'empty', label:tr('Empty Level', 'Livello vuoto')},
       ],
       okText:tr('Continue', 'Continua'),

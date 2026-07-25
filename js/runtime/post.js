@@ -29,6 +29,8 @@ function createPost(deps){
   const sceneFlareOcclusion = new WeakMap();
   const MAX_SCENE_CINEMATIC_FLARES = 4;
   const MAX_SCENE_FLARE_OCCLUSION_TESTS = 8;
+  const renderingBackend=window.LK_RUNTIME_RENDERING_BACKEND;
+  const compatibility=renderingBackend&&renderingBackend.compatibilityProfile?renderingBackend.compatibilityProfile(renderer):{gtao:true,ssr:true,conservativePost:false,reason:'unavailable'};
   let sceneFlareCandidates = [];
   let sceneFlareScanTime = -Infinity;
   const reflectionProfiles = Object.freeze({
@@ -36,6 +38,12 @@ function createPost(deps){
     medium:{resolutionScale:.75, opacity:.56, thickness:.09, blur:true},
     high:{resolutionScale:1, opacity:.62, thickness:.065, blur:true},
     ultra:{resolutionScale:1.25, opacity:.66, thickness:.045, blur:true},
+  });
+  const aoProfiles=Object.freeze({
+    low:{samples:8,radius:.18,scale:.72,denoiseSamples:8,blend:.62},
+    medium:{samples:12,radius:.15,scale:.62,denoiseSamples:12,blend:.68},
+    high:{samples:16,radius:.13,scale:.54,denoiseSamples:16,blend:.72},
+    ultra:{samples:24,radius:.11,scale:.48,denoiseSamples:24,blend:.76},
   });
 
   const ok = typeof THREE.EffectComposer !== 'undefined' && typeof THREE.RenderPass !== 'undefined' && typeof THREE.ShaderPass !== 'undefined';
@@ -46,7 +54,38 @@ function createPost(deps){
   const renderPass = new THREE.RenderPass(scene, camera);
   composer.addPass(renderPass);
   let currentSize = size();
-  const ssrPass = typeof THREE.SSRPass !== 'undefined' ? new THREE.SSRPass({
+  const gtaoPass=compatibility.gtao&&typeof THREE.GTAOPass!=='undefined'?new THREE.GTAOPass(scene,camera,currentSize.width,currentSize.height):null;
+  let gtaoProfileKey='';
+  if(gtaoPass){
+    gtaoPass.enabled=false;
+    gtaoPass.output=THREE.GTAOPass.OUTPUT.Default;
+
+    // GTAOPass r185 only excludes points and lines from its normal/depth
+    // override. Camera-facing sprites and materials deliberately authored
+    // without depth writes (sun/lens-flare ghosts, clouds, smoke, light
+    // widgets) would therefore become opaque rectangular occluders in the AO
+    // G-buffer. Their rectangle follows the camera and darkens a moving square
+    // of the final frame. Keep optical/transparent effects in the beauty pass,
+    // but never let them contribute fake geometry to ambient occlusion.
+    if(typeof gtaoPass._overrideVisibility === 'function'){
+      const overrideGtaoVisibility=gtaoPass._overrideVisibility.bind(gtaoPass);
+      gtaoPass._overrideVisibility=function(){
+        overrideGtaoVisibility();
+        scene.traverse(node=>{
+          if(!node||node.visible===false) return;
+          const data=node.userData||{};
+          const materials=node.material?(Array.isArray(node.material)?node.material:[node.material]):[];
+          const noDepthMaterial=materials.length>0&&materials.every(material=>material&&material.depthWrite===false);
+          if(node.isSprite||data.lkSkipAoGBuffer===true||data.lkFlareIgnore===true||noDepthMaterial){
+            node.visible=false;
+            this._visibilityCache.push(node);
+          }
+        });
+      };
+    }
+    composer.addPass(gtaoPass);
+  }
+  const ssrPass = compatibility.ssr&&typeof THREE.SSRPass !== 'undefined' ? new THREE.SSRPass({
     renderer,
     scene,
     camera,
@@ -568,6 +607,7 @@ function createPost(deps){
         }
       }
     }
+    if(gtaoPass){gtaoPass.camera=activeCamera;gtaoPass.gtaoMaterial.defines.PERSPECTIVE_CAMERA=activeCamera.isPerspectiveCamera?1:0;gtaoPass.gtaoMaterial.uniforms.cameraNear.value=activeCamera.near;gtaoPass.gtaoMaterial.uniforms.cameraFar.value=activeCamera.far;}
     if(bokeh) bokeh.camera = activeCamera;
   }
   function render(cameraOverride, options){
@@ -671,6 +711,13 @@ function createPost(deps){
       rayLightingPass.uniforms.strength.value = .14;
     }
 
+    if(gtaoPass){
+      const profileKey=video&&video.aoQuality||'medium',profile=aoProfiles[profileKey]||aoProfiles.medium;
+      gtaoPass.enabled=!options.interactive&&!!(video&&video.ambientOcclusion!==false);
+      gtaoPass.blendIntensity=profile.blend;
+      if(gtaoProfileKey!==profileKey){gtaoProfileKey=profileKey;gtaoPass.updateGtaoMaterial({samples:profile.samples,radius:profile.radius,scale:profile.scale,distanceExponent:1.7,thickness:1.2,distanceFallOff:1});gtaoPass.updatePdMaterial({samples:profile.denoiseSamples,rings:2,radiusExponent:2,radius:6,lumaPhi:10,depthPhi:2,normalPhi:3});}
+    }
+
     if(ssrPass){
       ssrPass.enabled = !options.interactive && !!(video && video.rendererMode === 'raytracing' && video.reflections !== false);
       if(ssrPass.enabled) refreshSsrSelection();
@@ -731,7 +778,7 @@ function createPost(deps){
     composer.render();
   }
 
-  return {ok:true, composer, renderPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, hasFailed: () => renderFailed};
+  return {ok:true, compatibility, composer, renderPass, gtaoPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, hasFailed: () => renderFailed};
 }
 
 window.LK_RUNTIME_POST = Object.freeze({createPost});

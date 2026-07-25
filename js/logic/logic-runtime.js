@@ -273,6 +273,11 @@ function create(graph, registry, context, options){
         const wantedButton = Number(readInput(n, def, 'button', {stack:[], dataCache:new Map()})) || 0;
         if(wantedPad !== Number(eventPayload.gamepadIndex) || wantedButton !== Number(eventPayload.button)) return;
       }
+      if(eventType === 'OnNetworkMessage'){
+        const wanted=String(readInput(n,def,'channel',{stack:[],dataCache:new Map()})||'');
+        const got=String(eventPayload.channel||'');
+        if(wanted&&wanted!==got)return;
+      }
       if(n.type === 'event.tickEvery' && eventType === 'OnUpdate'){
         const interval = Math.max(.01, Number(readInput(n, def, 'seconds', {stack:[], dataCache:new Map()})) || .5);
         const elapsed = (eventState.get(n.id) || 0) + (Number(eventPayload.deltaTime) || 0);

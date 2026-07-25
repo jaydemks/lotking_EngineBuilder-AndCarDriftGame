@@ -27,6 +27,7 @@ function create(deps){
   const setGrid = deps.setGrid || function(){};
   const requestDeleteEntity = deps.requestDeleteEntity || function(){};
   const requestDeleteSelection = deps.requestDeleteSelection || function(){ requestDeleteEntity(ED.selected); };
+  const requestDeleteSelectedAssets = deps.requestDeleteSelectedAssets || function(){ return false; };
   const getEditorKeymap = deps.getEditorKeymap || (() => ({select:'q', move:'w', rotate:'e', scale:'r', focus:'f'}));
 
   function onKeyDown(e){
@@ -86,7 +87,10 @@ function create(deps){
     else if(key === keymap.scale) setTool('scale');
     else if(key === keymap.focus) focusSelected();
     else if(key === 'g') setGrid(!ED.gridOn);
-    else if(key === 'delete' || key === 'backspace') requestDeleteSelection();
+    else if(key === 'delete' || key === 'backspace'){
+      if(ED.leftMode==='assets'){e.preventDefault();requestDeleteSelectedAssets();}
+      else requestDeleteSelection();
+    }
   }
   function onKeyUp(e){
     fly.keys[e.key.toLowerCase()] = false;

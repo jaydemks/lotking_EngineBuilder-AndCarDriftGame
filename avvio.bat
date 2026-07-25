@@ -6,7 +6,7 @@ cd /d "%~dp0"
 if "%PORT%"=="" set "PORT=5700"
 set "REQUESTED_PORT=%PORT%"
 if "%HOST%"=="" set "HOST=localhost"
-if "%BIND%"=="" set "BIND=127.0.0.1"
+if "%BIND%"=="" set "BIND=0.0.0.0"
 if "%PAGE%"=="" set "PAGE=index.html"
 set "PYTHON_CMD="
 

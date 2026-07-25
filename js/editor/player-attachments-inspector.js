@@ -48,7 +48,10 @@ function create(deps){
         if(ED.tool === 'select') setTool('translate');
       }
     };
-    sx.body.appendChild(el('<div class="lk-hint">Sources attached to the vehicle: place them on the exhaust. Smoke follows throttle, shifting and limiter.</div>'));
+    sx.body.appendChild(el('<div class="lk-hint">' + tr(
+      'Place each source on an exhaust tip and rotate its dummy along the outlet direction. Smoke becomes a free airflow particle; fire stays attached as a short pressure burst.',
+      'Posiziona ogni sorgente sulla marmitta e ruota il dummy nel verso di uscita. Il fumo passa nell’aria; la fiamma resta attaccata come breve getto di pressione.'
+    ) + '</div>'));
     sx.body.appendChild(btnRow([
       {label:tr('+ Exhaust source', '+ Sorgente scarico'), action:addExhaust},
       {label:tr('Test smoke/fire', 'Prova fumo/fuoco'), action:() => { if(player.testExhaust) player.testExhaust(); }},
@@ -59,8 +62,19 @@ function create(deps){
     sx.body.appendChild(checkRow(tr('Idle smoke while stopped', 'Fumo minimo da fermo'), ex.idleSmoke !== false, v => updEx({idleSmoke:v})).root);
     sx.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), ex.intensity, 0, 4, .05, v => updEx({intensity:v})).root);
     sx.body.appendChild(sliderRow(tr('Throttle threshold', 'Soglia acceleratore'), ex.smokeThrottle, 0, 1, .01, v => updEx({smokeThrottle:v}), v => Math.round(v * 100) + '%').root);
+    sx.body.appendChild(sliderRow(tr('Smoke flow density', 'Densita flusso fumo'), ex.smokeRate == null ? 1 : ex.smokeRate, .05, 4, .05, v => updEx({smokeRate:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Smoke lifetime', 'Durata fumo'), ex.smokeLife == null ? 1 : ex.smokeLife, .1, 4, .05, v => updEx({smokeLife:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Smoke size', 'Dimensione fumo'), ex.smokeSize == null ? 1 : ex.smokeSize, .1, 4, .05, v => updEx({smokeSize:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Outlet pressure', 'Pressione uscita'), ex.smokePressure == null ? 1 : ex.smokePressure, 0, 4, .05, v => updEx({smokePressure:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Smoke rise', 'Salita fumo'), ex.smokeRise == null ? 1 : ex.smokeRise, 0, 4, .05, v => updEx({smokeRise:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Smoke spread', 'Dispersione fumo'), ex.smokeSpread == null ? 1 : ex.smokeSpread, 0, 4, .05, v => updEx({smokeSpread:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Smoke opacity', 'Opacita fumo'), ex.smokeOpacity == null ? .3 : ex.smokeOpacity, 0, 1, .01, v => updEx({smokeOpacity:v}), v => Math.round(v * 100) + '%').root);
     sx.body.appendChild(checkRow(tr('Fire burst', 'Sparo fuoco'), ex.fire !== false, v => updEx({fire:v})).root);
     sx.body.appendChild(sliderRow(tr('Fire RPM', 'Giri fuoco'), ex.fireRpm, .55, 1.08, .01, v => updEx({fireRpm:v}), v => Math.round(v * 100) + '%').root);
+    sx.body.appendChild(sliderRow(tr('Flame length', 'Lunghezza fiamma'), ex.fireLength == null ? 1 : ex.fireLength, .1, 4, .05, v => updEx({fireLength:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Flame width', 'Larghezza fiamma'), ex.fireWidth == null ? 1 : ex.fireWidth, .1, 4, .05, v => updEx({fireWidth:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Flame duration', 'Durata fiamma'), ex.fireDuration == null ? 1 : ex.fireDuration, .1, 4, .05, v => updEx({fireDuration:v}), v => (+v).toFixed(2) + 'x').root);
+    sx.body.appendChild(sliderRow(tr('Flame brightness', 'Luminosita fiamma'), ex.fireOpacity == null ? .95 : ex.fireOpacity, 0, 1, .01, v => updEx({fireOpacity:v}), v => Math.round(v * 100) + '%').root);
     sx.body.appendChild(checkRow(tr('Shift fire', 'Fuoco al cambio'), ex.shiftFire !== false, v => updEx({shiftFire:v})).root);
     sx.body.appendChild(checkRow(tr('Limiter fire', 'Fuoco limitatore'), ex.limiterFire !== false, v => updEx({limiterFire:v})).root);
     (ex.sources || []).forEach((src, idx) => {
@@ -129,11 +143,13 @@ function create(deps){
     ss.body.appendChild(checkRow(tr('Skids enabled', 'Sgommate attive'), sk.enabled !== false, v => updSk({enabled:v})).root);
     ss.body.appendChild(checkRow(tr('Show skid dummies', 'Mostra dummy sgommate'), sk.dummyVisible !== false, v => updSk({dummyVisible:v})).root);
     ss.body.appendChild(checkRow(tr('Tire smoke enabled', 'Fumo gomme attivo'), sk.smokeEnabled !== false, v => updSk({smokeEnabled:v})).root);
-    ss.body.appendChild(sliderRow(tr('Smoke amount', 'Quantita fumo'), sk.smokeAmount == null ? .28 : sk.smokeAmount, 0, 2, .02, v => updSk({smokeAmount:v,smokeModelVersion:3}), v => (+v).toFixed(2) + 'x').root);
-    ss.body.appendChild(sliderRow(tr('Smoke slip threshold', 'Soglia slittamento fumo'), sk.smokeThreshold == null ? .35 : sk.smokeThreshold, 0, 1, .01, v => updSk({smokeThreshold:v,smokeModelVersion:3}), v => Math.round(v * 100) + '%').root);
-    ss.body.appendChild(sliderRow(tr('Minimum tire heat', 'Temperatura minima gomme'), sk.smokeMinHeat == null ? .3 : sk.smokeMinHeat, 0, 1, .01, v => updSk({smokeMinHeat:v,smokeModelVersion:3}), v => Math.round(v * 100) + '%').root);
-    ss.body.appendChild(sliderRow(tr('Tire heating rate', 'Velocita riscaldamento gomme'), sk.smokeHeatRate == null ? .75 : sk.smokeHeatRate, 0, 3, .05, v => updSk({smokeHeatRate:v,smokeModelVersion:3}), v => (+v).toFixed(2) + 'x').root);
-    ss.body.appendChild(sliderRow(tr('Tire cooling rate', 'Velocita raffreddamento gomme'), sk.smokeCoolRate == null ? .4 : sk.smokeCoolRate, 0, 2, .05, v => updSk({smokeCoolRate:v,smokeModelVersion:3}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(sliderRow(tr('Smoke amount', 'Quantita fumo'), sk.smokeAmount == null ? .28 : sk.smokeAmount, 0, 2, .02, v => updSk({smokeAmount:v,smokeModelVersion:4}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(sliderRow(tr('Smoke slip threshold', 'Soglia slittamento fumo'), sk.smokeThreshold == null ? .42 : sk.smokeThreshold, 0, 1, .01, v => updSk({smokeThreshold:v,smokeModelVersion:4}), v => Math.round(v * 100) + '%').root);
+    ss.body.appendChild(sliderRow(tr('Minimum tire heat', 'Temperatura minima gomme'), sk.smokeMinHeat == null ? .58 : sk.smokeMinHeat, 0, 1, .01, v => updSk({smokeMinHeat:v,smokeModelVersion:4}), v => Math.round(v * 100) + '%').root);
+    ss.body.appendChild(sliderRow(tr('Tire heating rate', 'Velocita riscaldamento gomme'), sk.smokeHeatRate == null ? .38 : sk.smokeHeatRate, 0, 3, .05, v => updSk({smokeHeatRate:v,smokeModelVersion:4}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(sliderRow(tr('Tire cooling rate', 'Velocita raffreddamento gomme'), sk.smokeCoolRate == null ? .32 : sk.smokeCoolRate, 0, 2, .05, v => updSk({smokeCoolRate:v,smokeModelVersion:4}), v => (+v).toFixed(2) + 'x').root);
+    ss.body.appendChild(sliderRow(tr('Minimum smoke speed', 'Velocita minima fumo'), sk.smokeMinSpeedKmh == null ? 24 : sk.smokeMinSpeedKmh, 0, 160, 1, v => updSk({smokeMinSpeedKmh:v,smokeModelVersion:4}), v => Math.round(v) + ' km/h').root);
+    ss.body.appendChild(sliderRow(tr('Minimum drift angle', 'Angolo drift minimo'), sk.smokeMinSlipAngle == null ? .14 : sk.smokeMinSlipAngle, 0, .8, .01, v => updSk({smokeMinSlipAngle:v,smokeModelVersion:4}), v => Math.round((+v) * 180 / Math.PI) + '°').root);
     ss.body.appendChild(checkRow(tr('Smoke while drifting', 'Fumo durante il drift'), sk.smokeOnDrift !== false, v => updSk({smokeOnDrift:v})).root);
     ss.body.appendChild(checkRow(tr('Smoke while braking', 'Fumo in frenata'), sk.smokeOnBrake !== false, v => updSk({smokeOnBrake:v})).root);
     ss.body.appendChild(checkRow(tr('Smoke on wheelspin / burnout', 'Fumo in sgommata / burnout'), sk.smokeOnAcceleration !== false, v => updSk({smokeOnAcceleration:v})).root);

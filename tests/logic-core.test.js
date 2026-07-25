@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 global.window = global;
 require('../js/logic/logic-graph.js');
@@ -15,6 +17,7 @@ require('../js/runtime/pawn-core.js');
 require('../js/runtime/vehicle-physics-backends.js');
 require('../js/runtime/vehicle-pawns.js');
 require('../js/runtime/logic-elements-runner.js');
+require('../js/editor/selection-manager.js');
 
 const registry = global.LK_LOGIC_NODES_MVP.createRegistry();
 
@@ -109,9 +112,45 @@ test('Vehicle Pawn registry keeps possession and motion isolated per instance', 
   assert.equal(registry.list().length, 0);
 });
 
+test('inactive native Player Car never reserves a Player slot', () => {
+  const player={enabled:false,hidden:true,controllerIndex:0,car:{},setControllerIndex(index){this.controllerIndex=index;}};
+  const game={player,systems:{}},registry=global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game),native=registry.createNative(player);
+  assert.equal(native.enabled,false);
+  assert.equal(native.hidden,true);
+  assert.equal(native.possessed,false);
+  assert.equal(registry.getByPlayerId(1),null);
+  player.enabled=true;player.hidden=false;registry.syncNativeFromPlayer();
+  assert.equal(registry.getByPlayerId(1),native,'reactivating from Scene may claim its configured Player slot');
+  player.enabled=false;player.hidden=true;registry.syncNativeFromPlayer();
+  assert.equal(registry.getByPlayerId(1),null,'deactivation must immediately release the Player slot');
+});
+
+test('Logic Pawn eye deactivates runtime camera possession instead of hiding only its mesh', () => {
+  const calls=[];
+  const pawn={
+    possessCamera(value){calls.push(['camera',value]);},
+    unpossess(){calls.push(['unpossess']);},
+    setEnabled(value){calls.push(['enabled',value]);},
+    setHidden(value){calls.push(['hidden',value]);},
+    sleep(){calls.push(['sleep']);},
+    dispose(){calls.push(['dispose']);},
+  };
+  const owner={visible:true,userData:{editorType:'logicElement',logicEnabled:true,logicGraph:{vehiclePawn:{enabled:true,playerId:1}},addedEntry:{enabled:true}}};
+  const manager=global.LK_EDITOR_SELECTION_MANAGER.create({GAME:{pawns:{get:target=>target===owner?pawn:null}},ED:{selected:null},markDirty(){},refreshOutliner(){},buildInspector(){}});
+  assert.equal(manager.toggleVisible(owner),false);
+  assert.equal(owner.visible,false);
+  assert.equal(owner.userData.logicEnabled,false);
+  assert.equal(owner.userData.addedEntry.enabled,false);
+  assert.deepEqual(calls,[['camera',false],['unpossess'],['enabled',false],['hidden',true],['sleep'],['dispose']]);
+  assert.equal(manager.toggleVisible(owner),true);
+  assert.equal(owner.visible,true);
+  assert.equal(owner.userData.logicEnabled,true);
+  assert.equal(owner.userData.addedEntry.enabled,true);
+});
+
 test('Vehicle Pawn configuration preserves manual wheel pivots and mesh assignments', () => {
   const wheels = [0,1,2,3,4].map(index => ({x:index,y:.17,z:index<2?1.3:-1.3,front:index<2,driven:index>=2,visualId:'mesh-wheel-' + index}));
-  const skids = {enabled:false,smokeModelVersion:3,smokeEnabled:true,smokeAmount:1.25,smokeThreshold:.4,smokeMinHeat:.5,smokeHeatRate:1.1,smokeCoolRate:.6,smokeOnDrift:true,smokeOnBrake:false,smokeOnAcceleration:true};
+  const skids = {enabled:false,smokeModelVersion:4,smokeEnabled:true,smokeAmount:1.25,smokeThreshold:.4,smokeMinHeat:.5,smokeHeatRate:1.1,smokeCoolRate:.6,smokeMinSpeedKmh:31,smokeMinSlipAngle:.2,smokeOnDrift:true,smokeOnBrake:false,smokeOnAcceleration:true};
   const config = global.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig({physicsBackend:'arcade-fallback', wheels, skids});
   assert.equal(config.wheels.length, 5);
   assert.equal(config.wheels[4].visualId, 'mesh-wheel-4');
@@ -121,18 +160,29 @@ test('Vehicle Pawn configuration preserves manual wheel pivots and mesh assignme
   assert.equal(config.skids.smokeAmount, 1.25);
   assert.equal(config.skids.smokeThreshold, .4);
   assert.equal(config.skids.smokeOnBrake, false);
-  assert.equal(config.skids.smokeModelVersion, 3);
+  assert.equal(config.skids.smokeModelVersion, 4);
   assert.equal(config.skids.smokeMinHeat, .5);
   assert.equal(config.skids.smokeHeatRate, 1.1);
+  assert.equal(config.skids.smokeMinSpeedKmh, 31);
+  assert.equal(config.skids.smokeMinSlipAngle, .2);
   assert.equal(config.skids.smokeCoolRate, .6);
 });
 
 test('Vehicle Pawn migrates legacy always-on tire smoke to the slip and heat model', () => {
   const config = global.LK_RUNTIME_VEHICLE_PAWNS.normalizeConfig({skids:{smokeThreshold:.08}});
-  assert.equal(config.skids.smokeModelVersion, 3);
+  assert.equal(config.skids.smokeModelVersion, 4);
   assert.equal(config.skids.smokeAmount, .28);
-  assert.equal(config.skids.smokeThreshold, .35);
-  assert.equal(config.skids.smokeMinHeat, .3);
+  assert.equal(config.skids.smokeThreshold, .42);
+  assert.equal(config.skids.smokeMinHeat, .58);
+  assert.equal(config.skids.smokeMinSpeedKmh, 24);
+  assert.equal(config.skids.smokeMinSlipAngle, .14);
+});
+
+test('Vehicle Pawn tire effects require physical wheel contact', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'vehicle-pawns.js'), 'utf8');
+  assert.equal(source.includes('const grounded = finite(this.state.groundedWheels, 0) > 0'), true);
+  assert.equal(source.includes('if(this.backend && this.backend.vehicle && !contacts.length) return'), true);
+  assert.equal(source.includes('const smokeCause = grounded &&'), true);
 });
 
 test('Vehicle Pawn arcade parity covers acceleration braking reverse handbrake drift and reset', () => {
@@ -223,6 +273,23 @@ test('Vehicle Pawn disposes exhaust skid widget and audio resources together', (
   assert.deepEqual({removed,geometry,material,widgets,stopped,cleared},{removed:2,geometry:2,material:2,widgets:1,stopped:1,cleared:1});
 });
 
+test('Vehicle Pawn exhaust normalizes continuous smoke and anchored flame controls', () => {
+  const game = {player:null, systems:{}};
+  const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
+  const owner = {position:{x:0,y:0,z:0},rotation:{y:0},visible:true,userData:{}};
+  const pawn = registry.createLogic(owner, {
+    id:'exhaust-controls',
+    exhaust:{smokeRate:99,smokeLife:-2,smokeOpacity:4,fireLength:9,fireDuration:0},
+  }, {});
+  assert.equal(pawn.config.exhaust.smokeRate, 4);
+  assert.equal(pawn.config.exhaust.smokeLife, .1);
+  assert.equal(pawn.config.exhaust.smokeOpacity, 1);
+  assert.equal(pawn.config.exhaust.fireLength, 4);
+  assert.equal(pawn.config.exhaust.fireDuration, .1);
+  assert.deepEqual(pawn.effectsRuntime.fireEdges, {hot:false,shift:false,limiter:false});
+  pawn.dispose();
+});
+
 test('Vehicle Pawn registry assigns P1-P4 deterministically and preserves None', () => {
   const game = {player:null, systems:{}};
   const registry = global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game);
@@ -276,6 +343,21 @@ test('legacy Player Car snapshots migrate to stable Vehicle Pawn v2 authoring da
   assert.deepEqual(roundTrip.vehiclePawn.tuning, migrated.vehiclePawn.tuning);
   assert.equal(roundTrip.vehiclePawn.playerId, 3);
   assert.deepEqual(roundTrip.playerPawnBlueprint, legacy.playerPawnBlueprint);
+});
+
+test('old built-in Pawn camera default migrates to working Free camera once', () => {
+  const graph=global.LK_LOGIC_GRAPH.createEmptyGraph('Old Character Template','element');
+  graph.variables.push({name:'CameraMode',type:'string',value:'arcade',binding:'camera.mode'});
+  graph.characterPawn={template:true,schemaVersion:2,camera:{mode:'arcade'}};
+  const migrated=global.LK_LOGIC_GRAPH.normalizeGraph(graph);
+  assert.equal(migrated.characterPawn.camera.mode,'free');
+  assert.equal(migrated.variables.find(item=>item.name==='CameraMode').value,'free');
+  assert.equal(migrated.characterPawn.cameraDefaultVersion,1);
+  migrated.characterPawn.camera.mode='arcade';
+  migrated.variables.find(item=>item.name==='CameraMode').value='arcade';
+  const explicit=global.LK_LOGIC_GRAPH.normalizeGraph(migrated);
+  assert.equal(explicit.characterPawn.camera.mode,'arcade','a later explicit Arcade choice must survive normalization');
+  assert.equal(explicit.variables.find(item=>item.name==='CameraMode').value,'arcade');
 });
 
 test('validator reports contextual warnings and blocking pin errors', () => {
@@ -705,6 +787,17 @@ test('Logic runner aggregates runtime profiling stats', () => {
   runner.dispose();
   assert.equal(runner.stats().active, false);
   assert.equal(logs.length, 0);
+});
+
+test('Logic runner rebuilds when authoring data or editor/play mode changes without node-count changes', () => {
+  const graph=global.LK_LOGIC_GRAPH.createEmptyGraph('Runtime Revision','element');graph.runtimeRevision=1;
+  const owner={uuid:'revision-owner',userData:{editorType:'logicElement',editorId:'revision-owner',logicEnabled:true,logicGraph:graph,logicRunInEditorPreview:true,editorName:'Runtime Revision'}};
+  let starts=0,stops=0;const fakeStore={load(){return {logic:{}};},startLogicElementAnimations(){starts++;},stopLogicElementAnimations(){stops++;}};
+  const fakeGame={state:{started:true,sceneReady:true,editorPreview:false},hooks:{frame:[]},world:{registry:[owner]},systems:{},ui:{popup(){}},core:{scene:null},pawns:{stepAll(){},get(){return null;},getByPlayerId(){return null;},list(){return [];},register(){},unregister(){}}};
+  const runner=global.LK_LOGIC_ELEMENTS_RUNNER.create(fakeGame,fakeStore);runner.update(.016);assert.equal(starts,1);
+  owner.userData.logicGraph=Object.assign({},graph,{runtimeRevision:2});runner.update(.016);assert.equal(starts,2,'Pawn authoring revision must rebuild the runtime');
+  fakeGame.state.editorPreview=true;runner.update(.016);assert.equal(starts,3,'entering editor Play Preview must rebuild even with unchanged graph topology');
+  assert.ok(stops>=2);runner.dispose();
 });
 
 console.log('Logic core tests completed.');

@@ -24,12 +24,12 @@ const DEVICE_TYPES = ['keyboard', 'gamepad', 'touch'];
 const SINGLE_INSTANCE = {touch: true};   // types that cannot be split
 
 const KEYBOARD_ACTIONS = [
-  'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'reset',
+  'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'sprint', 'reset',
   'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
   'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
 ];
 const GAMEPAD_ACTIONS = [
-  'steer', 'throttle', 'brake', 'handbrake', 'reset',
+  'steer', 'throttle', 'brake', 'handbrake', 'sprint', 'reset',
   'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
   'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
   'cameraLookX', 'cameraLookY',
@@ -48,6 +48,7 @@ function defaultKeyboardScheme(){
     steerLeft:  ['KeyA', 'ArrowLeft'],
     steerRight: ['KeyD', 'ArrowRight'],
     handbrake:  ['Space'],
+    sprint:     ['ShiftLeft', 'ShiftRight'],
     reset:      ['KeyR'],
     pauseMenu:  ['Escape'],
     highBeams:  ['KeyF'],
@@ -68,6 +69,7 @@ function defaultGamepadScheme(){
     throttle:  {type: 'button', index: 7},
     brake:     {type: 'button', index: 6},
     handbrake: {type: 'button', index: 0},
+    sprint:    {type: 'button', index: 5},
     reset:     {type: 'button', index: 10},
     pauseMenu: {type: 'button', index: 9},
     highBeams: {type: 'button', index: 2},
@@ -363,7 +365,7 @@ function applyDeadzone(v, dz){
 }
 function neutralDrive(){
   return {
-    steer: 0, throttle: 0, brake: 0, handbrake: false, reset: false,
+    steer: 0, throttle: 0, brake: 0, handbrake: false, sprint: false, reset: false,
     pauseMenu: false, highBeams: false, radioToggle: false, radioPlay: false,
     radioNext: false, radioPrev: false, cameraMode: false, lookBack: false,
     tuningMenu: false, mute: false, legend: false, cameraLookX: 0, cameraLookY: 0,
@@ -378,6 +380,7 @@ function mergeDrive(a, b){
     throttle: Math.max(a.throttle, b.throttle),
     brake: Math.max(a.brake, b.brake),
     handbrake: a.handbrake || b.handbrake,
+    sprint: a.sprint || b.sprint,
     reset: a.reset || b.reset,
     pauseMenu: a.pauseMenu || b.pauseMenu,
     highBeams: a.highBeams || b.highBeams,
@@ -403,6 +406,7 @@ function resolveKeyboard(scheme, kb){
     throttle: anyDown(scheme.throttle) ? 1 : 0,
     brake: anyDown(scheme.brake) ? 1 : 0,
     handbrake: anyDown(scheme.handbrake),
+    sprint: anyDown(scheme.sprint),
     reset: anyDown(scheme.reset),
     pauseMenu: anyDown(scheme.pauseMenu),
     highBeams: anyDown(scheme.highBeams),
@@ -436,6 +440,7 @@ function resolveGamepad(scheme, gp){
     throttle: clamp01(readGamepadValue(scheme.throttle, gp)),
     brake: clamp01(readGamepadValue(scheme.brake, gp)),
     handbrake: readGamepadPressed(scheme.handbrake, gp),
+    sprint: readGamepadPressed(scheme.sprint, gp),
     reset: readGamepadPressed(scheme.reset, gp),
     pauseMenu: readGamepadPressed(scheme.pauseMenu, gp),
     highBeams: readGamepadPressed(scheme.highBeams, gp),
@@ -460,6 +465,9 @@ function resolveTouch(touch){
     throttle: clamp01(a.throttle || 0),
     brake: clamp01(a.brake || 0),
     handbrake: !!a.handbrake,
+    // No dedicated touch button yet: the handbrake tap doubles as Sprint for
+    // on-foot Pawns, which never read handbrake themselves.
+    sprint: !!a.sprint || !!a.handbrake,
     reset: !!a.reset,
     pauseMenu: !!a.pauseMenu,
     highBeams: !!a.highBeams,
@@ -503,6 +511,7 @@ const ACTION_LABELS = {
   steerRight: {en: 'Steer right', it: 'Sterza destra'},
   steer: {en: 'Steering', it: 'Sterzo'},
   handbrake: {en: 'Handbrake (drift)', it: 'Freno a mano (drift)'},
+  sprint: {en: 'Sprint / Run', it: 'Scatto / Corsa'},
   reset: {en: 'Reset car', it: 'Reset auto'},
   pauseMenu: {en: 'Pause menu', it: 'Menu pausa'},
   highBeams: {en: 'Flash headlights', it: 'Lampeggia fari'},

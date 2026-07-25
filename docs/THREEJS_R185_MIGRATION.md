@@ -1,10 +1,10 @@
 # Three.js r185 Migration Roadmap
 
-Status: completed and verified locally for v0.7.0.
+Status: completed and verified locally for v0.7.1.
 
-## Objective
+## Completed objective
 
-Upgrade every Lot King runtime, editor and playable-export entry point from Three.js r128 to the pinned stable release `0.185.1` while preserving existing projects, rendering behavior and static-host/offline export support.
+Upgrade every Lot King runtime, editor and playable-export entry point from Three.js r128 to the pinned stable release `0.185.1` while preserving existing projects, rendering behavior and static-host/offline export support. This objective was completed; the remaining sections retain the migration plan as an historical verification record.
 
 ## Non-regression contract
 
@@ -32,7 +32,7 @@ Upgrade every Lot King runtime, editor and playable-export entry point from Thre
 - Removed color APIs in use: `WebGLRenderer.outputEncoding`, `Texture.encoding` and `THREE.sRGBEncoding`.
 - TransformControls must use its modern scene helper instead of adding the controls object directly.
 - Modern post-processing requires an explicit output pass so tone mapping and output color conversion occur after custom passes.
-- The ZIP exporter currently downloads r128 core/addons separately and must instead package the pinned local bundle.
+- Before migration, the ZIP exporter downloaded r128 core/addons separately; the completed exporter packages the pinned local bundle.
 - Cannon remains at `0.6.2`, but is vendored locally to prevent an unrelated CDN request from blocking r185 regression tests and offline startup.
 - The existing JSZip `3.10.1` exporter dependency is also pinned locally so playable packaging does not introduce a network-only failure path.
 
@@ -89,4 +89,4 @@ The generated bundle, compatibility entry and API adaptations form one atomic mi
 - Static result: the generated bundle rebuilds successfully; the migration gate passes; syntax checks pass for all `46` changed JavaScript files; `git diff --check` reports no whitespace errors.
 - Visual smoke result: editor level rendering and the Logic Element viewport were inspected with the r185 renderer and modern gizmo helpers active.
 
-The migration is ready for the remaining v0.7.0 feature work. Any future Three.js change must update the exact package version, bundle metadata, cache key, export manifest and this verification matrix together.
+The baseline migration is complete. The v0.7.1 follow-up audit additionally covers `THREE.Timer`, Pawn Studio mixer/action lifecycle, Mixamo skeleton retargeting and animated `SkinnedMesh` bounds; those ongoing-version rules live in `THREEJS_VERSION_TRACKER.md`. Any future Three.js change must update the exact package version, bundle metadata, cache key, export manifest and verification matrix together.

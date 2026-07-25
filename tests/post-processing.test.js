@@ -13,6 +13,7 @@ const editorCoreSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'edito
 const editorRuntimeSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'editor', 'editor-runtime.js'), 'utf8');
 const volumetricCloudSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'volumetric-clouds.js'), 'utf8');
 const playerLightRigSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'player-light-rig.js'), 'utf8');
+const lotKingSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'lot-king.js'), 'utf8');
 
 assert(source.includes('float emitter = smoothstep(1.10, 2.40, bright)'), 'volumetric shafts are sourced only by HDR emitters');
 assert(source.includes('emitter *= sourceMask'), 'volumetric shafts reject aligned headlights and bright SSR pixels outside the sun source');
@@ -20,6 +21,9 @@ assert(source.includes('opticalState.ndcX') && source.includes('opticalState.ndc
 assert(!source.includes('smokeDensity = smoothstep'), 'bright neutral scene meshes are not misclassified as smoke');
 assert(source.includes('onScreen = !!opticalState.visible') && source.includes('onScreen = inFront &&'), 'volumetric lighting is disabled when its optical or fallback source is behind or outside the camera');
 assert(source.includes('new THREE.SSRPass'), 'ray reflections use the official Three.js SSR pass when available');
+assert(source.includes('new THREE.GTAOPass'), 'stable WebGL rendering uses the official r185 GTAO pass');
+assert(source.includes("gtaoProfileKey!==profileKey"), 'GTAO quality changes rebuild shaders only when the profile changes');
+assert(source.includes('video&&video.ambientOcclusion!==false'), 'GTAO follows the shared project/player setting');
 assert(source.includes('ssrPass.isSelective = true'), 'SSR is restricted to reflective metallic meshes');
 assert(source.includes('ssrPass.resolutionScale = profile.resolutionScale'), 'SSR quality controls its internal resolution');
 assert(source.includes('video && video.reflectionDistance'), 'SSR ray reach follows the project/player setting');
@@ -32,6 +36,7 @@ assert(!source.includes('vec3 reflected=max(base-bounce'), 'indirect ray lightin
 assert(source.includes('low:{contrast:1, saturation:1, brightness:0'), 'quality presets keep color and illumination neutral');
 assert(source.includes('videoOnly'), 'editor cameras can render the shared video pipeline without player-camera grading');
 assert(source.includes('renderPass.camera = activeCamera'), 'the shared post pipeline accepts editor and gameplay cameras');
+assert(source.includes('node.isSprite||data.lkSkipAoGBuffer===true||data.lkFlareIgnore===true||noDepthMaterial'), 'GTAO excludes camera-facing flare sprites and non-depth optical effects from its geometry buffers');
 assert(source.includes('new THREE.ShaderPass(THREE.FXAAShader)'), 'FXAA uses the Three.js post-process shader');
 assert(source.includes('new THREE.OutputPass()'), 'modern Three.js output color conversion is explicit in the composer');
 assert(source.includes('LK_RUNTIME_CINEMATIC_LENS_FLARE.createPass'), 'the selectable cinematic sun flare is part of the shared post pipeline');
@@ -61,6 +66,14 @@ assert(volumetricCloudSource.includes('dome.userData.lkFlareTransmission') && vo
 assert(editorCoreSource.includes('helperGroup.userData.lkFlareIgnore = true'), 'the complete editor helper group is excluded from optical occlusion');
 assert(editorRuntimeSource.includes('Number(GAME.player.cameraCfg.helperRange) || 5'), 'the editor camera cone uses a compact authored range instead of the gameplay far plane');
 assert(cameraSource.includes('freePitch: .32') && cameraSource.includes('helperSize: .7'), 'camera placement and helper sizing have persistent defaults');
+assert(!lotKingSource.includes('camMode'), 'Free Camera must not depend on a second legacy chase/orbit sub-state');
+assert(lotKingSource.includes('return pointInRuntimeViewport(e)') && lotKingSource.includes('runtimeCameraAllowsMouseLook(e)'), 'Play Preview mouse look recognizes the viewport before pointer lock');
+assert(!lotKingSource.includes('userCamTimer'), 'Free Camera cannot silently time out and return to chase behavior');
+assert(lotKingSource.includes('anchor.add(p.flame)') && lotKingSource.includes('p.flame.position.set(0,0,0)'), 'exhaust fire remains welded to the authored outlet instead of becoming a smoke particle');
+assert(lotKingSource.includes('GAME.hooks.warmup.push(context=>') && lotKingSource.includes('spawnExhaustParticle(anchor,true'), 'the pre-benchmark renders the real exhaust flame shader before gameplay');
+assert(lotKingSource.includes('exhaustFireEdges.hot=hotFire') && lotKingSource.includes('exhaustFireBurst=Math.max'), 'native exhaust fire is edge-triggered as a finite burst');
+assert(lotKingSource.includes('exhaustFireNext=.075+Math.random()*.085') && lotKingSource.includes('(.038 + Math.random() * .026)'), 'tuning backfire uses separated irregular flashes instead of an overlapping fixed flame');
+assert(lotKingSource.includes('if(!p.s.visible&&!p.flame.visible) continue'), 'exhaust lifecycle advances both smoke sprites and the separate anchored flame meshes');
 assert(source.indexOf('new THREE.OutputPass()') < source.indexOf('new THREE.ShaderPass(THREE.FXAAShader)'), 'OutputPass runs before display-space FXAA');
 assert(source.includes("video.antialiasing === 'fxaa'"), 'FXAA pass follows the shared video setting');
 

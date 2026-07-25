@@ -100,7 +100,16 @@ function create(deps){
   function selectObject(o, opts){
     opts = opts || {};
     o = selectableObject(o);
-    if(ED.selected === o && ED.special === null && !ED.colliderEdit && !ED.playerColliderEdit && !(ED.multiSelected && ED.multiSelected.length)) return;
+    if(ED.selected === o && ED.special === null && !ED.colliderEdit && !ED.playerColliderEdit && !(ED.multiSelected && ED.multiSelected.length)){
+      // An asynchronous scene/Logic Element rebuild can preserve the selected
+      // object while clearing or replacing the Inspector DOM. Treat an
+      // explicit re-selection as a refresh instead of leaving a blank panel.
+      deps.refreshSelectionHelpers();
+      deps.buildInspector();
+      syncOutlinerSelection();
+      if(opts.reveal !== false) revealSelectedInSceneOutliner();
+      return;
+    }
     deps.clearHoverPickHelper();
     ED.multiSelected = null;
     ED.special = null;
@@ -266,7 +275,47 @@ function create(deps){
     return false;
   }
 
+  function logicPawnDefinition(o){
+    const graph=o&&o.userData&&o.userData.logicGraph;
+    return graph&&(graph.vehiclePawn||graph.characterPawn||graph.soccerPawn||graph.playerPawnBlueprint)||null;
+  }
+  function setLogicPawnActive(o,active){
+    if(!o||!o.userData||!logicPawnDefinition(o))return false;
+    const enabled=active===true;
+    o.visible=enabled;
+    o.userData.logicEnabled=enabled;
+    if(o.userData.addedEntry)o.userData.addedEntry.enabled=enabled;
+    const pawn=GAME&&GAME.pawns&&GAME.pawns.get?GAME.pawns.get(o):null;
+    if(!enabled&&pawn){
+      // Release camera and Player slot synchronously; the Logic runner sees
+      // `logicEnabled` in its signature and removes the remaining runtime on
+      // the same/next frame. This prevents one invisible-camera frame.
+      if(pawn.possessCamera)pawn.possessCamera(false);
+      if(pawn.unpossess)pawn.unpossess();
+      if(pawn.setEnabled)pawn.setEnabled(false);
+      if(pawn.setHidden)pawn.setHidden(true);
+      if(pawn.sleep)pawn.sleep();
+      if(pawn.dispose)pawn.dispose();
+    }
+    return true;
+  }
   function toggleVisible(o){
+    if(o && o.userData && o.userData.editorType === 'player' && GAME.player){
+      const active = !(GAME.player.enabled !== false && GAME.player.hidden !== true);
+      if(GAME.player.setEnabled) GAME.player.setEnabled(active);
+      else { GAME.player.enabled = active; GAME.player.hidden = !active; }
+      o.visible = active;
+      deps.markDirty(); deps.refreshOutliner();
+      if(ED.selected === o) deps.buildInspector();
+      return active;
+    }
+    if(logicPawnDefinition(o)){
+      const active=!(o.visible!==false&&o.userData.logicEnabled!==false);
+      setLogicPawnActive(o,active);
+      deps.markDirty();deps.refreshOutliner();
+      if(ED.selected===o)deps.buildInspector();
+      return active;
+    }
     o.visible = !o.visible;
     deps.markDirty(); deps.refreshOutliner();
     if(ED.selected === o) deps.buildInspector();

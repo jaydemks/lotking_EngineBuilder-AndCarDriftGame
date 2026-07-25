@@ -20,6 +20,10 @@ function create(options){
   const startButton = opts.startButton;
   const editorButton = opts.editorButton;
 
+  function setBarComplete(complete){
+    if(loadBar && loadBar.parentElement) loadBar.parentElement.classList.toggle('complete', !!complete);
+  }
+
   function fraction(){
     let total = 0;
     Object.keys(weights).forEach(k => total += weights[k] * (parts[k] || 0));
@@ -40,6 +44,7 @@ function create(options){
     if(!loadBar || !loadText || !mode) return;
     const pct = Math.min(99, Math.floor(fraction() * 100));
     loadBar.style.width = pct + '%';
+    setBarComplete(false);
     loadText.textContent = (label || labelBase()) + '... ' + pct + '%';
   }
 
@@ -56,6 +61,7 @@ function create(options){
 
   function finish(){
     if(loadBar) loadBar.style.width = '100%';
+    setBarComplete(true);
     if(!loadText) return;
     const report = opts.getLoadReport ? opts.getLoadReport() : [];
     const fails = report.filter(r => String(r).includes('✗'));
@@ -76,7 +82,9 @@ function create(options){
   }
 
   function setBar(value){
-    if(loadBar) loadBar.style.width = Math.max(0, Math.min(100, value || 0)) + '%';
+    const amount = Math.max(0, Math.min(100, value || 0));
+    if(loadBar) loadBar.style.width = amount + '%';
+    setBarComplete(amount >= 100);
   }
 
   return {

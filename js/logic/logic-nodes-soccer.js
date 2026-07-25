@@ -58,12 +58,12 @@ function registerSoccerNodes(registry){
 
   registry.register({
     type:'soccer.setMoveInput', title:'Set Soccer Move Input', category:'Soccer Pawn',
-    description:'Writes free-movement input to one Soccer Pawn: X strafes, Z runs forward, sprint boosts.',
-    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('x', 'number', 0), dataIn('z', 'number', 0), dataIn('sprint', 'boolean', false)],
+    description:'Writes continuous football input to one Soccer Pawn. Hold Action to charge and aim, then release to shoot.',
+    inputs:[execIn, dataIn('pawn', 'vehiclePawn', null), dataIn('x', 'number', 0), dataIn('z', 'number', 0), dataIn('sprint', 'boolean', false), dataIn('action', 'boolean', false)],
     outputs:[completedOut],
     run(api){
       const pawn = resolvePawn(api);
-      if(isSoccerPawn(pawn)) pawn.setMoveInput({x:axis(api.getInput('x')), z:axis(api.getInput('z')), sprint:api.getInput('sprint') === true});
+      if(isSoccerPawn(pawn)) pawn.setMoveInput({x:axis(api.getInput('x')), z:axis(api.getInput('z')), sprint:api.getInput('sprint') === true, action:api.getInput('action') === true});
       return {exec:'completed'};
     },
   });
@@ -128,12 +128,12 @@ function registerSoccerNodes(registry){
   registry.register({
     type:'soccer.spawnBall', title:'Spawn Soccer Ball', category:'Soccer Ball',
     description:'Creates (or resets) a regulation soccer ball at a world position.',
-    inputs:[execIn, dataIn('ballId', 'string', ''), dataIn('position', 'vector3', [0,0,0])],
+    inputs:[execIn, dataIn('ballId', 'string', ''), dataIn('position', 'vector3', [0,0,0]), dataIn('mode', 'string', 'match'), dataIn('locked', 'boolean', false)],
     outputs:[completedOut, dataOut('ballId', 'string')],
     run(api){
       const p = api.getInput('position') || [0,0,0];
       const pos = Array.isArray(p) ? {x:p[0], y:p[1], z:p[2]} : p;
-      api.node.data.__ballId = api.services.soccer ? api.services.soccer.spawnBall({id:api.getInput('ballId') || undefined, x:number(pos.x), y:number(pos.y), z:number(pos.z)}) : null;
+      api.node.data.__ballId = api.services.soccer ? api.services.soccer.spawnBall({id:api.getInput('ballId') || undefined, x:number(pos.x), y:number(pos.y), z:number(pos.z), mode:String(api.getInput('mode')||'match'), locked:api.getInput('locked')===true}) : null;
       return {exec:'completed'};
     },
     evaluate(api){ return api.node.data.__ballId || ''; },
@@ -182,7 +182,7 @@ function registerSoccerNodes(registry){
   registry.register({
     type:'soccer.registerGoal', title:'Register Goal Frame', category:'Soccer Ball',
     description:'Registers a goal line for detection. Regulation frame: width 7.32, height 2.44. Heading is the direction the goal mouth faces.',
-    inputs:[execIn, dataIn('goalId', 'string', ''), dataIn('position', 'vector3', [0,0,0]), dataIn('heading', 'number', 0), dataIn('width', 'number', 7.32), dataIn('height', 'number', 2.44), dataIn('team', 'string', '')],
+    inputs:[execIn, dataIn('goalId', 'string', ''), dataIn('position', 'vector3', [0,0,0]), dataIn('heading', 'number', 0), dataIn('width', 'number', 7.32), dataIn('height', 'number', 2.44), dataIn('depth', 'number', 1.8), dataIn('team', 'string', '')],
     outputs:[completedOut, dataOut('goalId', 'string')],
     run(api){
       const p = api.getInput('position') || [0,0,0];
@@ -193,6 +193,7 @@ function registerSoccerNodes(registry){
         heading:number(api.getInput('heading')),
         width:number(api.getInput('width')) || 7.32,
         height:number(api.getInput('height')) || 2.44,
+        depth:number(api.getInput('depth')) || 1.8,
         team:String(api.getInput('team') || ''),
       }) : null;
       return {exec:'completed'};

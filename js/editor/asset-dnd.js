@@ -69,6 +69,12 @@ function create(deps){
   function glbFiles(files){
     return Array.from(files || []).filter(file => /\.(glb|gltf)$/i.test(file.name || ''));
   }
+  function fbxFiles(files){
+    return Array.from(files || []).filter(file => /\.fbx$/i.test(file.name || ''));
+  }
+  function activeFbxFiles(files){
+    return fbxFiles(files).filter(file => !deps.supportedAssetFiles || deps.supportedAssetFiles([file]).length > 0);
+  }
   function imageFiles(files){
     return Array.from(files || []).filter(file => /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name || '') || /^image\//i.test(file.type || ''));
   }
@@ -83,7 +89,7 @@ function create(deps){
     if(!hasModelAsset && !hasFile){ deps.clearReplaceDropHelper(); return null; }
     const fileCountKnown = hasFile && e.dataTransfer.files && e.dataTransfer.files.length > 0;
     const unknownExternalFile = hasFile && !fileCountKnown;
-    const fileModels = hasFile ? glbFiles(e.dataTransfer.files) : [];
+    const fileModels = hasFile ? glbFiles(e.dataTransfer.files).concat(activeFbxFiles(e.dataTransfer.files)) : [];
     const fileImages = hasFile ? imageFiles(e.dataTransfer.files) : [];
     if(hasFile && fileCountKnown && !fileModels.length && !fileImages.length && !hasModelAsset){
       deps.clearReplaceDropHelper();
@@ -119,8 +125,9 @@ function create(deps){
     const files = opts && opts.files ? Array.from(opts.files) : [];
     const textureAsset = asset && asset.kind === 'imported-texture' ? asset.raw : null;
     const textureFiles = imageFiles(files);
-    const modelFiles = glbFiles(files);
-    const textureDrop = !!textureAsset || textureFiles.length > 0;
+    const sourceFbxFiles = activeFbxFiles(files);
+    const modelFiles = glbFiles(files).concat(activeFbxFiles(files));
+    const textureDrop = !!textureAsset || (!sourceFbxFiles.length && textureFiles.length > 0);
     const replaceName = objectLabel(target);
     const playerTarget = target && target.userData && target.userData.editorType === 'player';
     const items = [
@@ -143,6 +150,15 @@ function create(deps){
           deps.clearReplaceDropHelper();
           if(textureAsset && deps.replaceTextureObjectWithAsset){
             deps.replaceTextureObjectWithAsset(textureAsset, target);
+            return;
+          }
+          if(sourceFbxFiles.length){
+            deps.importAssetFiles(files).then(imported => {
+              const model = (imported || []).find(item => item && item.kind === 'glb');
+              if(!model){ deps.status('FBX conversion did not produce a GLB asset'); return; }
+              if(playerTarget && deps.replacePlayerModelWithAsset) deps.replacePlayerModelWithAsset(model);
+              else if(deps.replaceSelectedWithAsset) deps.replaceSelectedWithAsset(model, target);
+            });
             return;
           }
           if(textureFiles.length && deps.replaceTextureObjectWithFile){
@@ -183,7 +199,7 @@ function create(deps){
       const fileCountKnown = hasFile && e.dataTransfer.files && e.dataTransfer.files.length > 0;
       const unknownExternalFile = hasFile && !fileCountKnown;
       const realTarget = normalizeDropTarget(target);
-      const ok = canReplaceTarget(realTarget) && (!!dragAssetModel(e) || !!dragTextureAsset(e) || unknownExternalFile || (hasFile && (glbFiles(e.dataTransfer.files).length > 0 || imageFiles(e.dataTransfer.files).length > 0)));
+      const ok = canReplaceTarget(realTarget) && (!!dragAssetModel(e) || !!dragTextureAsset(e) || unknownExternalFile || (hasFile && (glbFiles(e.dataTransfer.files).length > 0 || activeFbxFiles(e.dataTransfer.files).length > 0 || imageFiles(e.dataTransfer.files).length > 0)));
       return {ok, hasAsset, hasFile};
     };
     el.addEventListener('dragover', e => {
@@ -219,14 +235,26 @@ function create(deps){
         else if(asset) deps.replaceSelectedWithAsset(asset.raw, realTarget);
         return;
       }
-      const files = glbFiles(e.dataTransfer.files);
+      const allFiles = Array.from(e.dataTransfer.files || []);
+      const files = glbFiles(allFiles);
+      const fbx = activeFbxFiles(allFiles);
       const textures = imageFiles(e.dataTransfer.files);
+      if(fbx.length === 1){
+        const realTarget = normalizeDropTarget(target);
+        deps.importAssetFiles(allFiles).then(imported => {
+          const model = (imported || []).find(item => item && item.kind === 'glb');
+          if(!model){ deps.status('FBX conversion did not produce a GLB asset'); return; }
+          if(realTarget.userData.editorType === 'player' && deps.replacePlayerModelWithAsset) deps.replacePlayerModelWithAsset(model);
+          else deps.replaceSelectedWithAsset(model, realTarget);
+        });
+        return;
+      }
       if(textures.length === 1 && deps.replaceTextureObjectWithFile){
         deps.replaceTextureObjectWithFile(normalizeDropTarget(target), textures[0]);
         return;
       }
       if(files.length !== 1){
-        deps.status('Drop one GLB/GLTF or image to replace this object');
+        deps.status('Drop one FBX, GLB/GLTF or image to replace this object');
         return;
       }
       const realTarget = normalizeDropTarget(target);
@@ -288,8 +316,10 @@ function create(deps){
         return;
       }
       if(!acceptEditorFileDrag(e)) return;
-      const files = deps.supportedAssetFiles(e.dataTransfer.files);
-      if(files.length !== 1){
+      const rawFiles = Array.from(e.dataTransfer.files || []);
+      const files = deps.supportedAssetFiles(rawFiles);
+      const fbx = activeFbxFiles(rawFiles);
+      if(files.length !== 1 && fbx.length !== 1){
         deps.clearReplaceDropHelper();
         deps.status('Viewport drop accepts one asset at a time');
         return;
@@ -299,17 +329,17 @@ function create(deps){
         deps.status(tr('This object cannot be replaced directly', 'Questo oggetto non puo essere sostituito direttamente'));
         return;
       }
-      if(replaceTargetNow && (glbFiles(files).length || imageFiles(files).length)){
+      if(replaceTargetNow && (glbFiles(files).length || fbx.length || imageFiles(files).length)){
         openViewportDropChoice(e, {
           target: replaceTargetNow,
-          files,
+          files:fbx.length ? rawFiles : files,
           point: deps.groundPointAt(e.clientX, e.clientY),
         });
         return;
       }
       deps.clearReplaceDropHelper();
       const at = deps.groundPointAt(e.clientX, e.clientY);
-      deps.importAssetFiles(files, {placePoint: at});
+      deps.importAssetFiles(fbx.length ? rawFiles : files, {placePoint: at});
     });
   }
 

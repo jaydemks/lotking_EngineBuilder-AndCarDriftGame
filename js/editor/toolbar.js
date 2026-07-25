@@ -26,7 +26,25 @@ function create(deps){
     deps.updateEditorAxesConvention();
   });
 
-  $('#lkSnap').addEventListener('click', () => {
+  const snapButton = $('#lkSnap');
+  const snapBox = snapButton && snapButton.closest('.lk-snapbox');
+  const snapFields = root.querySelector('.lk-snapfields');
+  const positionSnapFields = () => {
+    if(!snapButton || !snapFields) return;
+    const buttonRect = snapButton.getBoundingClientRect();
+    const topbar = root.querySelector('#lkTopbar');
+    const topbarRect = topbar && topbar.getBoundingClientRect();
+    const width = snapFields.offsetWidth || 190;
+    snapFields.style.left = Math.max(8, Math.min(innerWidth - width - 8, buttonRect.left)) + 'px';
+    snapFields.style.top = Math.round((topbarRect && topbarRect.bottom || buttonRect.bottom) + 4) + 'px';
+  };
+  if(snapBox){
+    snapBox.addEventListener('pointerenter', positionSnapFields);
+    snapBox.addEventListener('focusin', positionSnapFields);
+  }
+  addEventListener('resize', positionSnapFields);
+  snapButton.addEventListener('click', () => {
+    positionSnapFields();
     ED.snap = !ED.snap;
     deps.syncToolbarState();
     const gizmo = getGizmo();
@@ -163,6 +181,10 @@ function create(deps){
     ED.viewportRenderModes[slot] = vpRender.value || 'normal';
   });
   const vpOptions = $('#lkViewportOptions');
+  const showQuickAudio = $('#lkShowQuickAudio');
+  if(showQuickAudio) showQuickAudio.addEventListener('click', () => {
+    if(deps.showQuickAudio) deps.showQuickAudio();
+  });
   const vpOptionsMenu = $('#lkViewportOptionsMenu');
   const vpOptionsWrap = vpOptions && vpOptions.closest ? vpOptions.closest('.lk-viewport-options') : null;
   const vpCollisionDummies = $('#lkShowCollisionDummies');
@@ -185,6 +207,10 @@ function create(deps){
   });
   if(vpCollisionDummies) vpCollisionDummies.addEventListener('change', () => {
     ED.showCollisionDummies = !!vpCollisionDummies.checked;
+    if(ED.showCollisionDummies && Array.isArray(ED.viewportShowHelpers)){
+      const slot = ED.viewportMode === 'quad' ? Math.max(0, Math.min(3, ED.activeViewportSlot || 0)) : 0;
+      ED.viewportShowHelpers[slot] = true;
+    }
     syncViewportOptions();
     if(deps.rebuildColliderHelpers) deps.rebuildColliderHelpers();
     window.dispatchEvent(new CustomEvent('lotking:collisiondummieschange'));

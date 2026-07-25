@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LOT KING ENGINE EDITOR</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/lot-king.css?v=0.6.8-welcome-1">
+  <link rel="stylesheet" href="css/lot-king.css?v=0.7.1-settings-scrollbar-1">
+  <script src="js/runtime/console-policy.js?v=0.7.1-extension-channel-2"></script>
 </head>
 <body>
-  <audio id="menuMusicAudio" preload="auto" loop>
+  <audio id="menuMusicAudio" preload="auto" loop data-loading-src="musics/menu/Num0%20%20JustWait.mp3">
     <source src="musics/menu/Num0%20%20JustWait.mp3" type="audio/mpeg">
   </audio>
 
@@ -58,6 +59,10 @@
       </div>
       <div id="loadBarWrap"><div id="loadBar"></div></div>
       <div id="loadTxt"></div>
+      <aside class="landing-performance-advisory" aria-label="Performance recommendation">
+        <b>FULL PROJECT PERFORMANCE</b>
+        <span>Mid-range or better hardware is recommended. LOT KING runs rendering, physics, assets and editor systems together in your browser; a visible pre-benchmark prepares the project and may select Low video settings on slower devices. You always remain free to change them.</span>
+      </aside>
     </div>
   </div>
 
@@ -98,7 +103,7 @@
   <footer id="landingSignature" aria-label="Project signature">
     <div class="landing-signature-main">
       <span>LOT KING ENGINE EDITOR</span>
-      <span class="landing-version">v0.7.0</span>
+      <span class="landing-version">v0.7.1</span>
       <a href="https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame" target="_blank" rel="noopener noreferrer" title="Open public GitHub repository">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.2c0 3.62 2.29 6.69 5.47 7.77.4.08.55-.18.55-.4v-1.4c-2.23.5-2.7-1.1-2.7-1.1-.36-.95-.89-1.2-.89-1.2-.73-.51.06-.5.06-.5.8.06 1.23.85 1.23.85.72 1.27 1.89.9 2.35.69.07-.53.28-.9.51-1.1-1.78-.21-3.64-.91-3.64-4.04 0-.9.31-1.63.82-2.2-.08-.21-.36-1.05.08-2.18 0 0 .67-.22 2.2.84A7.48 7.48 0 0 1 8 3.96c.68 0 1.36.09 2 .28 1.53-1.06 2.2-.84 2.2-.84.44 1.13.16 1.97.08 2.18.51.57.82 1.3.82 2.2 0 3.14-1.87 3.83-3.65 4.03.29.26.54.76.54 1.53v2.27c0 .22.15.48.55.4A8.18 8.18 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z"/>
@@ -120,6 +125,8 @@
       var menuMusic = document.getElementById('menuMusicAudio');
       var musicMuteBtn = document.getElementById('landingMusicMute');
       var started = false;
+      var activeMenuMusicRole = 'editor-menu';
+      var pendingRoleMenuSelection = null;
       var fadeTimer = null;
       var playPromise = null;
       var menuBootDone = false;
@@ -128,6 +135,7 @@
       var menuBootProgress = 0;
       var menuBootLastProgressAt = Date.now();
       var menuBootLastDetail = null;
+      var destinationLoading = false;
       var editorPreloadStarted = false;
       var editorPreloadReady = false;
       var destinationEpoch = 0;
@@ -141,27 +149,27 @@
       var LANDING_WELCOME_COPY = {
         en: {
           title: 'Welcome to Lot King Engine',
-          intro: 'This landing bridges the playable build and the engine editor. Version 0.7.0 focuses on a smoother editor, reliable project persistence and the upgraded rendering and debugging workflow.',
+          intro: 'This landing bridges the playable build and the engine editor. Version 0.7.1 focuses on a smoother editor, reliable project persistence and the upgraded rendering and debugging workflow.',
           features: [
             'New Soccer Pawn and reusable character movement foundation',
             'Penalty shootout templates, soccer ball physics and editable stadium level',
             'Project exports preserve all levels, while Play Game only shows gameplay levels',
             'Character GLB and animation-library imports are available from the Inspector and Assets'
           ],
-          notice: 'The editor is still experimental: save often, test exported projects, and expect fast iteration across releases.',
+          notice: 'The editor is still experimental: save often and test exported projects. Full projects are intended for mid-range or better hardware; the runtime pre-benchmark can automatically choose a safer profile without locking your video settings.',
           hide: 'Do not show again on this landing',
           continue: 'Continue'
         },
         it: {
           title: 'Benvenuto in Lot King Engine',
-          intro: 'Questa landing collega la build giocabile e l’editor del motore. La versione 0.7.0 punta su un editor piu fluido, persistenza affidabile dei progetti e un flusso di rendering e debugging migliorato.',
+          intro: 'Questa landing collega la build giocabile e l’editor del motore. La versione 0.7.1 punta su un editor piu fluido, persistenza affidabile dei progetti e un flusso di rendering e debugging migliorato.',
           features: [
             'Nuovo Soccer Pawn e base riutilizzabile per il character movement',
             'Template per rigori, fisica del pallone e livello stadio modificabile',
             'Gli export progetto conservano tutti i livelli, mentre Play Game mostra solo livelli gameplay',
             'Import GLB personaggio e librerie animazioni disponibili da Inspector e Assets'
           ],
-          notice: 'L’editor e ancora sperimentale: salva spesso, prova gli export e aspettati iterazioni rapide tra le release.',
+          notice: 'L’editor e ancora sperimentale: salva spesso e prova gli export. Per progetti completi e consigliato un sistema di fascia media o superiore; il pre-benchmark puo scegliere automaticamente un profilo piu sicuro senza bloccare le impostazioni video.',
           hide: 'Non mostrare piu su questa landing',
           continue: 'Continua'
         }
@@ -274,6 +282,7 @@
         var bar = document.getElementById('loadBar');
         var txt = document.getElementById('loadTxt');
         if(bar) bar.style.width = value.toFixed(1) + '%';
+        if(bar && bar.parentElement) bar.parentElement.classList.toggle('complete', value >= 100);
         if(txt) txt.textContent = bootProgressText(label, value, detail);
       }
 
@@ -283,6 +292,45 @@
         musicMuteBtn.textContent = off ? 'MUSIC OFF' : 'MUSIC ON';
         musicMuteBtn.setAttribute('aria-pressed', off ? 'false' : 'true');
         musicMuteBtn.classList.toggle('off', off);
+      }
+
+      function preferredLoadingTrack(){
+        try {
+          var saved = JSON.parse(localStorage.getItem('lotking.loadingMusic.v1') || 'null');
+          var savedUrl = saved && String(saved.url || '').trim();
+          if(savedUrl && !/^javascript:/i.test(savedUrl) && !/^blob:/i.test(savedUrl)) return saved;
+          if(saved && saved.dbKey) return saved;
+        } catch(err){}
+        return {url:menuMusic && menuMusic.getAttribute('data-loading-src') || ''};
+      }
+
+      function activatePreferredLoadingTrack(){
+        var track = preferredLoadingTrack();
+        if(track.url) applyMusicTrack(track, 'loading');
+        else applyMusicTrack({url:menuMusic && menuMusic.getAttribute('data-loading-src') || ''}, 'loading');
+        if(!track.dbKey || !window.indexedDB) return;
+        try {
+          var request = indexedDB.open('lotking-assets', 1);
+          request.onupgradeneeded = function(){
+            var db = request.result;
+            if(!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs');
+          };
+          request.onsuccess = function(){
+            var db = request.result;
+            var tx;
+            try { tx = db.transaction('blobs', 'readonly'); }
+            catch(err){ db.close(); return; }
+            var get = tx.objectStore('blobs').get(String(track.dbKey));
+            get.onsuccess = function(){
+              var blob = get.result;
+              db.close();
+              if(!blob || (menuBootDone && !destinationLoading)) return;
+              var url = URL.createObjectURL(blob);
+              applyMusicTrack({url:url, title:track.title, artist:track.artist}, 'loading');
+            };
+            get.onerror = function(){ db.close(); };
+          };
+        } catch(err){}
       }
 
       function startLandingMusic(forceOn){
@@ -339,12 +387,54 @@
         });
       }
 
+      function applyMusicTrack(track, role){
+        var url = track && String(track.url || '').trim();
+        if(!url || /^javascript:/i.test(url)) return;
+        var wasPlaying = started && !menuMusic.paused;
+        if(fadeTimer){ clearInterval(fadeTimer); fadeTimer = null; }
+        if(activeMenuMusicRole !== role || menuMusic.getAttribute('src') !== url){
+          activeMenuMusicRole = role;
+          menuMusic.src = url;
+          try { menuMusic.load(); } catch(err){}
+        }
+        if(wasPlaying){
+          menuMusic.volume = 0.55;
+          menuMusic.play().catch(function(){});
+        }
+        syncMusicButton();
+      }
+
+      function applyRoleMenuMusic(message, forceMenuTrack){
+        if(!menuMusic || !message) return;
+        var role = message.role === 'editor-menu' ? 'editor-menu' : 'game-menu';
+        var fromLanding = menuBgFrame && message.__source === menuBgFrame.contentWindow;
+        var fromGameplay = frame && message.__source === frame.contentWindow;
+        if((activeDestination === 'menu' && !fromLanding) ||
+           (activeDestination === 'gameplay' && !fromGameplay) ||
+           (activeDestination !== 'menu' && activeDestination !== 'gameplay')) return;
+        if(destinationLoading){
+          if(message.loadingTrack) applyMusicTrack(message.loadingTrack, 'loading');
+          if(fromGameplay){
+            destinationLoading = false;
+            applyMusicTrack(message.track || null, role);
+          }
+          return;
+        }
+        if(activeDestination === 'menu' && !menuBootDone && !forceMenuTrack){
+          pendingRoleMenuSelection = message;
+          if(message.loadingTrack) applyMusicTrack(message.loadingTrack, 'loading');
+          return;
+        }
+        applyMusicTrack(message.track || null, role);
+      }
+
       function resetMenuBoot(label, acceptMessages){
         ++menuBootEpoch;
         menuBootDone = false;
         menuBootProgress = 0;
         menuBootLastProgressAt = Date.now();
         menuBootLastDetail = null;
+        pendingRoleMenuSelection = null;
         window.__LK_MENU_BACKGROUND_READY = null;
         window.__LK_MENU_BACKGROUND_LEVEL = null;
         window.__LK_MENU_BACKGROUND_PROGRESS = 0;
@@ -355,6 +445,7 @@
         if(menuBootTimer) clearTimeout(menuBootTimer);
         var overlay = document.getElementById('overlay');
         if(overlay) overlay.classList.add('menu-preloading');
+        activatePreferredLoadingTrack();
         setBootProgress(0, label || 'loading menu');
         menuBootTimer = setTimeout(menuBootWatchdog, 18000);
       }
@@ -388,6 +479,11 @@
         if(menuBootDone) return;
         var epoch = menuBootEpoch;
         menuBootDone = true;
+        if(pendingRoleMenuSelection){
+          var readySelection = pendingRoleMenuSelection;
+          pendingRoleMenuSelection = null;
+          applyRoleMenuMusic(readySelection, true);
+        }
         if(menuBootTimer) clearTimeout(menuBootTimer);
         setBootProgress(100, hasRoleBackground ? 'menu role level ready' : 'menu ready');
         var overlay = document.getElementById('overlay');
@@ -399,11 +495,13 @@
       }
 
       function beginDestinationLoad(label){
+        destinationLoading = true;
         menuBootProgress = 0;
         menuBootLastDetail = null;
         setBootProgress(0, label);
         var overlay = document.getElementById('overlay');
         if(overlay) overlay.classList.add('menu-preloading');
+        activatePreferredLoadingTrack();
       }
 
       function openGameplay(){
@@ -473,6 +571,8 @@
         beginDestinationLoad('loading engine editor');
         editorFrame.addEventListener('load', function(){
           if(epoch !== destinationEpoch || activeDestination !== 'editor') return;
+          destinationLoading = false;
+          fadeLandingMusic(600);
           editorPreloadReady = true;
           document.body.classList.add('showing-editor');
           document.body.classList.remove('menu-leaving');
@@ -535,8 +635,13 @@
           else if(activeDestination === 'gameplay' && frame && event.source === frame.contentWindow) closeGameplay();
         }
         if(event.data.type === 'lot-king:fade-menu-music') fadeLandingMusic(1200);
+        if(event.data.type === 'lot-king:menu-music-selection'){
+          var selection = Object.assign({}, event.data, {__source:event.source});
+          applyRoleMenuMusic(selection);
+        }
       });
 
+      activatePreferredLoadingTrack();
       setBootProgress(4, 'starting menu shell');
       function menuBootWatchdog(){
         if(menuBootDone) return;

@@ -21,6 +21,9 @@ const SPEC = Object.freeze({
 
 const LINE_H = .022;       // marking thickness above grass
 const LINE_W = .12;        // marking width
+const PITCH_GREEN = '#197a39';
+const FIELD_WHITE = '#ffffff';
+const GOAL_WHITE = '#ffffff';
 const FAN_COLORS = ['#e11d48', '#2563eb', '#f59e0b', '#10b981', '#f8fafc', '#a855f7', '#f97316'];
 
 function prim(primitive, name, p, s, options){
@@ -51,7 +54,7 @@ function cylinder(name, base, radius, height, options){
 
 function marking(name, center, size){
   // Flat white box sitting just above the grass.
-  return box(name, [center[0], 0, center[1]], [size[0], LINE_H, size[1]], {color:'#f4f6f2', roughness:.6});
+  return box(name, [center[0], 0, center[1]], [size[0], LINE_H, size[1]], {color:FIELD_WHITE, roughness:.52});
 }
 
 function buildEntries(origin){
@@ -61,7 +64,7 @@ function buildEntries(origin){
   const halfL = SPEC.fieldLength / 2, halfW = SPEC.fieldWidth / 2;
 
   // ---- Pitch and surroundings ------------------------------------------
-  entries.push(prim('plane', 'Pitch Grass', [ox, 0, oz], [(SPEC.fieldWidth + 10) / 4, 1, (SPEC.fieldLength + 10) / 4], {color:'#1e7d38', roughness:.95, driveSurface:true}));
+  entries.push(prim('plane', 'Pitch Grass', [ox, 0, oz], [(SPEC.fieldWidth + 10) / 4, 1, (SPEC.fieldLength + 10) / 4], {color:PITCH_GREEN, roughness:.95, driveSurface:true}));
   entries.push(prim('plane', 'Outer Apron', [ox, -.02, oz], [(SPEC.fieldWidth + 46) / 4, 1, (SPEC.fieldLength + 46) / 4], {color:'#20242c', roughness:1, driveSurface:true}));
 
   // ---- Markings ---------------------------------------------------------
@@ -70,7 +73,7 @@ function buildEntries(origin){
   entries.push(marking('Goal Line North', [ox, oz + halfL], [SPEC.fieldWidth, LINE_W]));
   entries.push(marking('Goal Line South', [ox, oz - halfL], [SPEC.fieldWidth, LINE_W]));
   entries.push(marking('Halfway Line', [ox, oz], [SPEC.fieldWidth, LINE_W]));
-  entries.push(cylinder('Center Spot', [ox, .005, oz], .18, .02, {color:'#f4f6f2', roughness:.6}));
+  entries.push(cylinder('Center Spot', [ox, .005, oz], .18, .02, {color:FIELD_WHITE, roughness:.52}));
 
   const circleSegments = 20;
   for(let i = 0; i < circleSegments; i++){
@@ -94,34 +97,31 @@ function buildEntries(origin){
     entries.push(marking('Goal Area Front ' + endName, [ox, goalAreaZ], [SPEC.goalAreaWidth, LINE_W]));
     entries.push(marking('Goal Area West ' + endName, [ox - SPEC.goalAreaWidth / 2, goalZ - side * SPEC.goalAreaDepth / 2], [LINE_W, SPEC.goalAreaDepth]));
     entries.push(marking('Goal Area East ' + endName, [ox + SPEC.goalAreaWidth / 2, goalZ - side * SPEC.goalAreaDepth / 2], [LINE_W, SPEC.goalAreaDepth]));
-    entries.push(cylinder('Penalty Spot ' + endName, [ox, .005, goalZ - side * SPEC.penaltySpot], .16, .02, {color:'#f4f6f2', roughness:.6}));
-    for(let i = 0; i < 7; i++){
-      // Arc outside the penalty area, radius 9.15 around the spot.
-      const spread = 1.05;
-      const angle = -spread / 2 + i / 6 * spread;
-      const ax = ox + Math.sin(angle) * SPEC.centerCircleRadius;
-      const az = goalZ - side * (SPEC.penaltySpot + Math.cos(angle) * SPEC.centerCircleRadius);
-      const segment = box('Penalty Arc ' + endName + ' ' + (i + 1), [ax, 0, az], [LINE_W, LINE_H, 1.6], {color:'#f4f6f2', roughness:.6});
-      segment.t.r = [0, side > 0 ? -angle : angle, 0];
-      entries.push(segment);
-    }
+    entries.push(cylinder('Penalty Spot ' + endName, [ox, .005, goalZ - side * SPEC.penaltySpot], .16, .02, {color:FIELD_WHITE, roughness:.52}));
+    // One smooth regulation-radius "D", instead of seven visible blocks.
+    entries.push(prim('arc', 'Penalty Arc ' + endName, [ox, 0, goalZ - side * SPEC.penaltySpot], [1,1,1], {r:[0,side>0?0:Math.PI,0],color:FIELD_WHITE,roughness:.52}));
 
     // ---- Goal frame (regulation 7.32 x 2.44) ----------------------------
     const postX = SPEC.goalWidth / 2 + SPEC.postRadius;
-    entries.push(cylinder('Goal Post West ' + endName, [ox - postX, 0, goalZ], SPEC.postRadius, SPEC.goalHeight, {color:'#f8fafc', roughness:.35, metalness:.25, collide:true}));
-    entries.push(cylinder('Goal Post East ' + endName, [ox + postX, 0, goalZ], SPEC.postRadius, SPEC.goalHeight, {color:'#f8fafc', roughness:.35, metalness:.25, collide:true}));
-    entries.push(box('Goal Crossbar ' + endName, [ox, SPEC.goalHeight + SPEC.postRadius, goalZ], [SPEC.goalWidth + SPEC.postRadius * 4, SPEC.postRadius * 2, SPEC.postRadius * 2], {color:'#f8fafc', roughness:.35, metalness:.25, collide:true}));
-    const netDepth = 1.8, netZ = goalZ + side * netDepth / 2;
-    entries.push(box('Goal Net Back ' + endName, [ox, SPEC.goalHeight / 2, goalZ + side * netDepth], [SPEC.goalWidth + .3, SPEC.goalHeight, .04], {color:'#e6e9ee', roughness:1}));
-    entries.push(box('Goal Net Roof ' + endName, [ox, SPEC.goalHeight, netZ], [SPEC.goalWidth + .3, .04, netDepth], {color:'#e6e9ee', roughness:1}));
-    entries.push(box('Goal Net West ' + endName, [ox - postX, SPEC.goalHeight / 2, netZ], [.04, SPEC.goalHeight, netDepth], {color:'#e6e9ee', roughness:1}));
-    entries.push(box('Goal Net East ' + endName, [ox + postX, SPEC.goalHeight / 2, netZ], [.04, SPEC.goalHeight, netDepth], {color:'#e6e9ee', roughness:1}));
+    entries.push(cylinder('Goal Post West ' + endName, [ox - postX, 0, goalZ], SPEC.postRadius, SPEC.goalHeight, {color:GOAL_WHITE, roughness:.3, metalness:.18, collide:true}));
+    entries.push(cylinder('Goal Post East ' + endName, [ox + postX, 0, goalZ], SPEC.postRadius, SPEC.goalHeight, {color:GOAL_WHITE, roughness:.3, metalness:.18, collide:true}));
+    entries.push(box('Goal Crossbar ' + endName, [ox, SPEC.goalHeight + SPEC.postRadius, goalZ], [SPEC.goalWidth + SPEC.postRadius * 4, SPEC.postRadius * 2, SPEC.postRadius * 2], {color:GOAL_WHITE, roughness:.3, metalness:.18, collide:true}));
+    const netDepth = 1.8, rearHeight=1.72;
+    entries.push(cylinder('Goal Rear Post West ' + endName, [ox-postX,0,goalZ+side*netDepth], SPEC.postRadius*.72, rearHeight, {color:GOAL_WHITE,roughness:.34,metalness:.14,collide:true}));
+    entries.push(cylinder('Goal Rear Post East ' + endName, [ox+postX,0,goalZ+side*netDepth], SPEC.postRadius*.72, rearHeight, {color:GOAL_WHITE,roughness:.34,metalness:.14,collide:true}));
+    entries.push(box('Goal Rear Crossbar ' + endName, [ox,rearHeight,goalZ+side*netDepth], [SPEC.goalWidth+SPEC.postRadius*4,SPEC.postRadius*1.45,SPEC.postRadius*1.45], {color:GOAL_WHITE,roughness:.34,metalness:.14,collide:true}));
+    const railLength=Math.hypot(netDepth,SPEC.goalHeight-rearHeight),railAngle=Math.atan2(SPEC.goalHeight-rearHeight,netDepth);
+    [-1,1].forEach(xSide=>{
+      const rail=box('Goal Top Rail '+(xSide<0?'West ':'East ')+endName,[ox+xSide*postX,(SPEC.goalHeight+rearHeight)/2,goalZ+side*netDepth/2],[SPEC.postRadius*1.45,SPEC.postRadius*1.45,railLength],{color:GOAL_WHITE,roughness:.34,metalness:.14,collide:true});
+      rail.t.r=[side>0?railAngle:-railAngle,0,0];entries.push(rail);
+    });
+    entries.push(prim('goalNet','Goal Net '+endName,[ox,0,goalZ],[1,1,1],{r:[0,side>0?0:Math.PI,0],color:'#e9eef3',roughness:1}));
   });
 
   // ---- Stands with placeholder fans -------------------------------------
   // Two long stands (E/W) and two end stands (N/S), 3 stepped tiers each.
   const standInsetW = halfW + 8, standInsetL = halfL + 8;
-  const tierColors = ['#3b4252', '#434c5e', '#4c566a'];
+  const tierColors = ['#1d3557', '#284b73', '#35648f'];
   const stands = [
     {name:'East', axis:'x', sign:1, length:SPEC.fieldLength + 14},
     {name:'West', axis:'x', sign:-1, length:SPEC.fieldLength + 14},

@@ -2,7 +2,9 @@
 
 ## Recommended daylight baseline
 
-Lot King v0.7.0 uses a brighter r185 baseline: exposure `1.12×`, day sun `1.30` and day ambient fill `0.82`. These values restore readable shaded surfaces without removing the direction and contrast of sunlight.
+Lot King v0.7.1 uses a brighter r185 baseline: exposure `1.12×`, day sun `1.30` and day ambient fill `0.82`. These values restore readable shaded surfaces without removing the direction and contrast of sunlight.
+
+The Environment inspector exposes separate background and image-based-lighting rotation. Both values are saved in degrees with the level and applied through Three.js r185 `Scene.backgroundRotation` and `Scene.environmentRotation`, so editor and gameplay reproduce the same orientation.
 
 Use **Environment → Day / Night Lighting** for level-authored light balance:
 
@@ -80,3 +82,6 @@ The Cinematic mode integrates Anderson Mancini's complete CC0 shader from [R3F U
 For a photographic starting point, keep intensity below `0.9`, chromatic split around `0.35–0.55`, ghost opacity below `0.8` and starburst below `0.4`. Anamorphic mode is a stylistic lens choice, not a universal realism upgrade.
 
 Occlusion performs a throttled ray query toward the sun and fades smoothly. Disable **Scene occlusion** only for stylized scenes or profiling.
+## macOS and WebKit compatibility
+
+The rendering backend derives a compatibility profile from the actual WebGL context, extensions and GPU renderer. Apple Metal/WebKit contexts use a conservative screen-space path: device pixel ratio is capped at 2, SSAA does not add a second Retina multiplier, and GTAO/SSR are disabled when their intermediate HDR/depth buffers are not considered reliable. This does not alter authored materials, lighting, shadows, tone mapping or animation data. The active profile is exposed through `LK_RUNTIME_RENDERING_BACKEND.compatibilityProfile(renderer)` and `renderer.userData.lkCompatibilityProfile`.

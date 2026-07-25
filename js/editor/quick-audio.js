@@ -10,46 +10,90 @@ function create(deps){
   const GAME = deps.GAME;
   const ED = deps.ED;
   const $ = deps.$;
+  const setPanelVisible = deps.setPanelVisible || function(){};
+  let activeApi = null;
+  let activeLabel = 'AUDIO PREVIEW';
 
-  function menuMusic(){
+  function defaultMusic(){
     return GAME && GAME.systems && GAME.systems.menuMusic;
   }
 
+  function music(){ return activeApi || defaultMusic(); }
+  function audioOf(api){
+    if(!api) return null;
+    return api.audio || (typeof api.play === 'function' || typeof api.pause === 'function' ? api : null);
+  }
+
   function sync(){
-    const music = menuMusic();
+    const current = music();
+    const panel = $('#lkQuickAudio');
     const mute = $('#lkQuickMute');
     const vol = $('#lkQuickMusicVol');
-    if(!music){ $('#lkQuickAudio').style.display = 'none'; return; }
-    const audio = music.audio || music;
-    const off = !!(audio.paused || audio.muted || music.muted);
+    const label = $('#lkQuickAudioLabel');
+    if(!current || !panel){ if(panel) panel.style.display = 'none'; return; }
+    const audio = audioOf(current);
+    if(!audio) return;
+    const off = !!(audio.paused || audio.muted || current.muted);
     if(mute) mute.textContent = off ? '♪ Off' : '♪ On';
     if(vol && Number.isFinite(audio.volume)) vol.value = Math.round(audio.volume * 100);
+    if(label) label.textContent = activeLabel;
   }
 
   function play(){
-    const music = menuMusic();
-    if(!music) return Promise.resolve();
-    const audio = music.audio || music;
+    const current = music();
+    if(!current) return Promise.resolve();
+    const audio = audioOf(current);
+    if(!audio) return Promise.resolve();
     if(audio.muted) audio.muted = false;
-    if(music.muted) music.muted = false;
-    if(music.play) return music.play().catch(() => {});
+    if(current.muted) current.muted = false;
+    if(current.play) return Promise.resolve(current.play()).catch(() => {});
     if(audio.play) return audio.play().catch(() => {});
     return Promise.resolve();
   }
 
   function pause(){
-    const music = menuMusic();
-    if(!music) return;
-    const audio = music.audio || music;
-    if(music.pause) music.pause();
+    const current = music();
+    if(!current) return;
+    const audio = audioOf(current);
+    if(current.pause) current.pause();
     else if(audio.pause) audio.pause();
   }
 
-  $('#lkQuickMute').addEventListener('click', () => {
-    const music = menuMusic();
-    if(!music) return;
-    const audio = music.audio || music;
-    if(audio.paused || audio.muted || music.muted){
+  function stop(){
+    const current = music();
+    const audio = audioOf(current);
+    pause();
+    if(audio){
+      try { audio.currentTime = 0; } catch(err){}
+    }
+    sync();
+  }
+
+  function show(){
+    setPanelVisible(true);
+    const panel = $('#lkQuickAudio');
+    if(panel) panel.style.display = '';
+    sync();
+  }
+
+  function preview(api, index, label){
+    if(!api) return;
+    activeApi = api;
+    activeLabel = String(label || 'AUDIO PREVIEW').toUpperCase();
+    ED.quickMusicIndex = Math.max(0, Number(index) || 0);
+    show();
+    if(api.loadTrack) api.loadTrack(ED.quickMusicIndex, true);
+    else play();
+    sync();
+  }
+
+  const muteButton = $('#lkQuickMute');
+  if(muteButton) muteButton.addEventListener('click', () => {
+    const current = music();
+    if(!current) return;
+    const audio = audioOf(current);
+    if(!audio) return;
+    if(audio.paused || audio.muted || current.muted){
       play().then(sync);
       return;
     }
@@ -57,32 +101,38 @@ function create(deps){
     sync();
   });
 
-  $('#lkQuickMusicVol').addEventListener('input', e => {
-    const music = menuMusic();
-    if(!music) return;
-    const audio = music.audio || music;
+  const volume = $('#lkQuickMusicVol');
+  if(volume) volume.addEventListener('input', e => {
+    const current = music();
+    if(!current) return;
+    const audio = audioOf(current);
+    if(!audio) return;
     const v = Math.max(0, Math.min(1, (+e.target.value || 0) / 100));
-    if(music.setVolume) music.setVolume(v); else audio.volume = v;
+    if(current.setVolume) current.setVolume(v); else audio.volume = v;
     sync();
   });
 
-  $('#lkQuickNext').addEventListener('click', () => {
-    const music = menuMusic();
-    if(!music) return;
-    if(music.next) music.next();
-    else if(music.getTracks && music.loadTrack){
-      const tracks = music.getTracks({sort:'order'});
+  const nextButton = $('#lkQuickNext');
+  if(nextButton) nextButton.addEventListener('click', () => {
+    const currentApi = music();
+    if(!currentApi) return;
+    if(currentApi.next) currentApi.next();
+    else if(currentApi.getTracks && currentApi.loadTrack){
+      const tracks = currentApi.getTracks({sort:'order'});
       if(tracks && tracks.length){
-        const current = tracks.findIndex(t => t.index === ED.quickMusicIndex);
-        const row = tracks[(current + 1 + tracks.length) % tracks.length];
+        const currentIndex = tracks.findIndex(t => t.index === ED.quickMusicIndex);
+        const row = tracks[(currentIndex + 1 + tracks.length) % tracks.length];
         ED.quickMusicIndex = row.index;
-        music.loadTrack(row.index, true);
+        currentApi.loadTrack(row.index, true);
       }
     }
     sync();
   });
 
-  return Object.freeze({sync, play, pause});
+  const stopButton = $('#lkQuickStop');
+  if(stopButton) stopButton.addEventListener('click', stop);
+
+  return Object.freeze({sync, play, pause, stop, show, preview, active:() => activeApi});
 }
 
 window.LK_EDITOR_QUICK_AUDIO = Object.freeze({create});

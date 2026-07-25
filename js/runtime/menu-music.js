@@ -45,7 +45,6 @@ function create(options){
   }
 
   function play(){
-    if(editorActive()) return Promise.resolve();
     stopFade();
     audio.volume = targetVolume();
     return audio.play().then(syncButton);
@@ -83,7 +82,6 @@ function create(options){
   }
 
   function toggle(){
-    if(editorActive()) return Promise.resolve();
     if(audio.paused){
       return audio.play()
         .then(() => {
@@ -151,6 +149,7 @@ function create(options){
   function renameTrack(index, title){ return library.updateAt(index, {title}); }
 
   return {
+    menuRole: opts.role || 'menu',
     audio,
     bindButton,
     bindAutoStart,

@@ -57,6 +57,16 @@ function create(deps){
 	      ]},
 	      {label:tr('Level', 'Livello'), icon:'🏟️', sub: [
 	        {label:tr('Soccer Stadium (Penalty)', 'Stadio Calcio (Rigori)'), icon:'⚽', action:() => deps.addSoccerStadium(P)},
+	        {label:tr('Drift Track (Minami)', 'Tracciato Drift (Minami)'), icon:'🏁', action:() => deps.addDriftTrack(P)},
+	        {label:tr('Drift Track (random)', 'Tracciato Drift (casuale)'), icon:'🎲', action:() => {
+	          const gen = window.LK_RUNTIME_DRIFT_TRACK;
+	          if(!gen){ deps.addDriftTrack(P); return; }
+	          const seed = (Date.now() >>> 0) ^ Math.floor(Math.random() * 0xffffffff);
+	          const params = gen.defaultParams();
+	          params.points = gen.generatePoints(seed);
+	          params.treeSeed = seed >>> 0;
+	          deps.addDriftTrack(P, params);
+	        }},
 	      ]},
 	      {sep:true},
       {label:tr('Import GLB/texture asset...', 'Importa asset GLB/Texture...'), icon:'📦', action:() => deps.openGlbImportAt(P)},

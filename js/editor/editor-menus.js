@@ -53,6 +53,7 @@ function create(deps){
       const selectedItems = selectedRefs.map(ref => deps.getAssetByRef(ref)).filter(Boolean);
       const placeable = selectedItems.filter(asset => ['imported-glb','imported-texture','scene','project-asset','logic-blueprint'].includes(asset.kind));
       const deletableLogic = selectedItems.filter(asset => asset.kind === 'logic-blueprint');
+      const imported = selectedItems.filter(asset => asset.kind === 'imported-glb'||asset.kind === 'imported-texture').map(asset=>asset.raw).filter(Boolean);
       return [
         {label:'Add selected to level', icon:'＋', disabled:!placeable.length, action:() => {
           placeable.forEach((asset, index) => {
@@ -70,6 +71,7 @@ function create(deps){
           }
         }},
         {sep:true},
+        {label:tr('Delete selected imported assets','Elimina asset importati selezionati'),icon:'🗑',disabled:!imported.length,action:()=>deps.deleteImportedAssets(imported)},
         {label:tr('Delete selected reusable assets', 'Elimina asset riutilizzabili selezionati'), icon:'🗑', disabled:!deletableLogic.length, action:() => deleteReusableLogicAssets(deletableLogic)},
       ];
     }
@@ -182,7 +184,7 @@ function create(deps){
     }));
     return [
       {label:'Create assets folder/group', icon:'📁', action:() => deps.newFolder('assets')},
-      {label:'Import GLB/Texture assets', icon:'＋', action:() => $('#lkAssetInput').click()},
+      {label:'Import FBX/GLB/Texture assets', icon:'＋', action:() => $('#lkAssetInput').click()},
       {label:'Refresh assets', icon:'↻', action:() => { deps.refreshAssetsPanel(); deps.status('Asset library refreshed'); }},
       {sep:true},
       {label:'Grid view', icon:'▦', disabled:ED.assetsViewMode === 'grid', action:() => deps.setViewMode('grid', 'assets')},

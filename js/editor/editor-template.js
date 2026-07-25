@@ -15,7 +15,9 @@
 	    <button data-app-menu="plugins" type="button">Plugins</button>
 	  </div>
 	  <div id="lkTopbar">
-    <button id="lkLogoBtn" class="lk-logo" type="button" title="Editor settings">⚙ ENGINE EDITOR</button>
+    <div class="lk-topbar-row lk-topbar-primary">
+    <button id="lkLogoBtn" class="lk-logo" type="button" title="Editor settings"><span class="lk-logo-icon">⚙</span><span class="lk-logo-label">ENGINE EDITOR</span></button>
+    <div class="lk-topbar-scroll lk-topbar-tools" role="group" aria-label="Editor tools">
     <div class="lk-tools">
       <button data-tool="select" type="button" title="Select (Q)">☝</button>
       <button data-tool="translate" type="button" title="Move (W)">✥</button>
@@ -43,7 +45,15 @@
     <button id="lkCamHelper" class="on" type="button" title="Toggle camera helpers">🎥 Cam</button>
     <button id="lkPipToggle" class="on" type="button" title="Toggle player camera preview">❐ Preview</button>
     <button id="lkAddMenu" type="button" title="Add object">+ Add ▾</button>
-    <span class="lk-spacer"></span>
+    </div>
+    <div class="lk-preview-tools" role="group" aria-label="Preview controls">
+      <button id="lkPlay" type="button">▶ PREVIEW</button>
+      <button id="lkSimulate" type="button" title="Run events without driving the player vehicle">▶ SIMULATE</button>
+      <button id="lkExit" type="button" title="Exit editor">×</button>
+    </div>
+    </div>
+    <div class="lk-topbar-row lk-topbar-project">
+    <div class="lk-topbar-scroll lk-project-tools" role="group" aria-label="Level and project controls">
     <div class="lk-trackbar"><span>LEVEL</span><input id="lkTrackName" type="text" value="Parking Lot"></div>
     <button id="lkProjects" type="button">🗂 Projects</button>
     <button id="lkLevels" type="button">🗀 Levels</button>
@@ -56,9 +66,8 @@
     <button id="lkExportPlayable" type="button" title="Export playable ZIP">⇩ Export playable ZIP</button>
     <button id="lkImportProject" type="button" title="Import LKEP">⇧ Import project</button>
     <button id="lkResetScene" type="button">↺ Reset</button>
-    <button id="lkPlay" type="button">▶ PREVIEW</button>
-    <button id="lkSimulate" type="button" title="Run events without driving the player vehicle">▶ SIMULATE</button>
-    <button id="lkExit" type="button" title="Exit editor">×</button>
+    </div>
+    </div>
   </div>
   <div id="lkViewportToolbar">
     <button id="lkViewportToolbarFold" type="button" title="Collapse viewport tools">▴</button>
@@ -81,6 +90,7 @@
           <label><input id="lkForceCollisionDummiesInPreview" type="checkbox"><span>Force in Play / Simulate</span></label>
         </div>
       </div>
+      <button id="lkShowQuickAudio" type="button" title="Show audio preview controls">♪</button>
       <button id="lkViewportFps" type="button" title="Toggle FPS status">FPS</button>
       <button id="lkViewportPerf" type="button" title="Toggle performance debug">▤</button>
       <span class="lk-viewport-caption">VIEWPORT</span>
@@ -163,7 +173,8 @@
   <div id="lkQuickAudio">
     <button id="lkQuickHide" type="button" class="lk-qa-close" title="Hide player">×</button>
     <button id="lkQuickMute" type="button" title="Mute menu music">♪ Off</button>
-    <span class="lk-qa-label">MENU MUSIC</span>
+    <button id="lkQuickStop" type="button" title="Stop preview and return to 0:00">■ Stop</button>
+    <span id="lkQuickAudioLabel" class="lk-qa-label">AUDIO PREVIEW</span>
     <input id="lkQuickMusicVol" type="range" min="0" max="100" step="1" value="100" title="Menu music volume">
     <button id="lkQuickNext" type="button" title="Next menu music">Next</button>
   </div>
@@ -351,7 +362,8 @@
 	    </div>
 	    <div id="lkLogicProfilerBody" class="lk-plugin-list"></div>
 	  </div>
-	  <input id="lkAssetInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
+	  <input id="lkAssetInput" type="file" accept=".fbx,.glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
+  <input id="lkFbxFolderInput" type="file" accept=".fbx,.glb,.gltf,image/*" webkitdirectory directory multiple hidden>
   <input id="lkGlbInput" type="file" accept=".glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
   <input id="lkReplaceInput" type="file" accept=".glb,.gltf" hidden>
   <input id="lkPlayerModelInput" type="file" accept=".glb,.gltf" hidden>

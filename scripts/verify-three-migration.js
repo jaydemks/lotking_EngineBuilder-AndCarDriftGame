@@ -22,7 +22,7 @@ assert.ok(exists('vendor/THIRD_PARTY_LICENSES.md'), 'third-party license notices
 
 ['engine_editor.html', 'gameplay.html', 'test-editor.html'].forEach(file => {
   const source = read(file);
-  assert.match(source, /vendor\/three-r185-compat\.min\.js\?v=0\.185\.1-lk2/, `${file} does not load the pinned bundle`);
+  assert.match(source, /vendor\/three-r185-compat\.min\.js\?v=0\.185\.1-lk4/, `${file} does not load the pinned bundle`);
 });
 ['engine_editor.html', 'gameplay.html'].forEach(file => {
   assert.match(read(file), /vendor\/cannon-0\.6\.2\.min\.js\?v=0\.6\.2-lk1/, `${file} does not load local Cannon`);
@@ -34,6 +34,8 @@ const assertVersionedScript = (file, script) => {
 [
   'js/runtime/post.js',
   'js/runtime/settings-menu.js',
+  'js/runtime/rendering-backend.js',
+  'js/runtime/runtime-loader.js',
   'js/lot-king.js',
   'js/runtime/sky.js',
   'js/engine/scene-store.js',
@@ -45,6 +47,7 @@ const assertVersionedScript = (file, script) => {
   ['engine_editor.html', 'gameplay.html', 'test-editor.html'].forEach(file => assertVersionedScript(file, script));
 });
 ['engine_editor.html', 'test-editor.html'].forEach(file => assertVersionedScript(file, 'js/editor/rendering-inspector.js'));
+['engine_editor.html', 'test-editor.html'].forEach(file => assertVersionedScript(file, 'js/editor/pawn-studio.js'));
 ['engine_editor.html', 'gameplay.html'].forEach(file => assertVersionedScript(file, 'js/runtime/vehicle-pawns.js'));
 
 const scanFiles = [
@@ -62,7 +65,17 @@ const scanFiles = [
   'js/editor/thumbnail-manager.js',
   'js/editor/playable-export-zip.js',
 ];
-const joined = scanFiles.map(file => `\n/* ${file} */\n${read(file)}`).join('');
+function sourceFiles(directory){
+  const absolute=path.join(root,directory),result=[];
+  fs.readdirSync(absolute,{withFileTypes:true}).forEach(entry=>{
+    const relative=path.join(directory,entry.name).replace(/\\/g,'/');
+    if(entry.isDirectory())result.push(...sourceFiles(relative));
+    else if(entry.isFile()&&/\.(?:js|html)$/.test(entry.name)&&!/\.min\.js$/.test(entry.name))result.push(relative);
+  });
+  return result;
+}
+const auditedFiles=Array.from(new Set(scanFiles.concat(sourceFiles('js'),['engine_editor.html','gameplay.html','test-editor.html'])));
+const joined = auditedFiles.map(file => `\n/* ${file} */\n${read(file)}`).join('');
 [
   [/three(?:\.js)?\/r128|three@0\.128\.0|three\.js\/r128/i, 'r128 URL'],
   [/examples\/js\//, 'removed examples/js addon'],
@@ -70,7 +83,11 @@ const joined = scanFiles.map(file => `\n/* ${file} */\n${read(file)}`).join('');
   [/\.encoding\s*=\s*THREE\./, 'removed Texture.encoding assignment'],
   [/THREE\.sRGBEncoding\b/, 'removed sRGBEncoding constant'],
   [/THREE\.PCFSoftShadowMap\b/, 'deprecated PCFSoftShadowMap constant'],
+  [/\b(?:THREE\.)?Clock\s*\(/, 'deprecated Clock constructor (use Timer.update before getDelta)'],
+  [/\btruncateDrawRange\s*:/, 'removed GLTFExporter truncateDrawRange option'],
+  [/DRACOLoader\s*\.\s*setDecoderConfig\b/, 'deprecated DRACOLoader.setDecoderConfig'],
 ].forEach(([pattern, label]) => assert.doesNotMatch(joined, pattern, label));
+assert.doesNotMatch(read('js/runtime/runtime-loader.js'), /trackedModel\(['"]player['"]/, 'retired player model fallback must not be requested');
 
 const exportSource = read('js/editor/playable-export-zip.js');
 assert.match(exportSource, /source:'vendor\/three-r185-compat\.min\.js'/, 'playable export must package local r185 bundle');
@@ -78,5 +95,15 @@ assert.match(exportSource, /source:'vendor\/helvetiker_regular\.typeface\.json'/
 assert.match(exportSource, /source:'vendor\/THIRD_PARTY_LICENSES\.md'/, 'playable export must package third-party notices');
 assert.doesNotMatch(exportSource, /GLTFLoader\.js|EffectComposer\.js|BokehPass\.js/, 'playable export still packages split legacy addons');
 assert.match(exportSource, /vendor\/jszip-3\.10\.1\.min\.js/, 'editor exporter must load local JSZip');
+
+const threeEntry = read('js/vendor/three-r185-compat.entry.js');
+assert.match(threeEntry, /FBXLoader/, 'Three.js compatibility bundle must expose FBXLoader for the importer plugin');
+assert.match(threeEntry, /TGALoader/, 'Three.js compatibility bundle must expose TGALoader for common FBX textures');
+assert.match(threeEntry, /GLTFExporter/, 'Three.js compatibility bundle must expose GLTFExporter for browser conversion');
+assert.match(threeEntry, /GTAOPass/, 'Three.js compatibility bundle must expose r185 GTAO for the stable WebGL pipeline');
+assert.ok(exists('js/runtime/rendering-backend.js'), 'central rendering backend service is missing');
+const fbxPlugin = read('js/plugins/fbx-import-plugin.js');
+assert.match(fbxPlugin, /enabledByDefault:true/, 'FBX importer plugin must be enabled by default');
+assert.match(fbxPlugin, /api\.assetImporter\('fbx'/, 'FBX plugin must use the public assetImporter extension point');
 
 console.log('Three.js migration verification passed: pinned r185 bundle, modern APIs and offline export assets.');

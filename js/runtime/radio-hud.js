@@ -15,10 +15,15 @@ function createRadioHud(deps){
   const isRuntimeUiSuppressed = typeof deps.isRuntimeUiSuppressed === 'function'
     ? deps.isRuntimeUiSuppressed
     : function(){ return false; };
+  const resolveAvailability = typeof deps.resolveAvailability === 'function'
+    ? deps.resolveAvailability
+    : function(){ return true; };
   const musicLib = window.LK_RUNTIME_MUSIC_LIBRARY;
 
   const cfg = {
     enabled:true,
+    bindingMode:'vehicle',
+    bindingActorId:'',
     frameX:50,
     frameY:2,
     width:880,
@@ -49,7 +54,7 @@ function createRadioHud(deps){
   audio.volume = .65;
   audio.preload = 'auto';
 
-  let idx = 0, shuffle = false, open = false, started = false;
+  let idx = 0, shuffle = false, open = false, started = false, sessionActive = false, available = false;
   let activePlayerId = 1;
   let frameRect = null;
   const $ = id => document.getElementById(id);
@@ -139,12 +144,14 @@ function createRadioHud(deps){
   }
 
   function applyConfig(){
+    syncAvailability();
     el.radio.classList.toggle('disabled', !cfg.enabled);
+    el.radio.classList.toggle('unavailable', !available);
     el.radio.classList.toggle('hud-edit-frame', editorPreview && cfg.editTarget === 'frame');
     el.radio.classList.toggle('hud-edit-screen', editorPreview && cfg.editTarget === 'screen');
     el.radio.classList.toggle('hud-edit-buttons', editorPreview && cfg.editTarget === 'buttons');
     viewport.classList.toggle('editor-preview', editorPreview);
-    viewport.classList.toggle('interactive', (open || editorPreview) && !isRuntimeUiSuppressed());
+    viewport.classList.toggle('interactive', available && (open || editorPreview) && !isRuntimeUiSuppressed());
     knobWrap.style.setProperty('--knob-alpha', String(cfg.buttonOpacity == null ? .22 : clamp(cfg.buttonOpacity, 0, 1)));
     for(const k in knobs){
       const b = cfg.buttons && cfg.buttons[k];
@@ -199,7 +206,7 @@ function createRadioHud(deps){
     el.radio.style.setProperty('--radio-buttons-z', String(buttonHitLayer));
     el.radio.style.setProperty('--radio-player-z', String(buttonHitLayer + 1));
     syncPlayerHitboxes();
-    if(!cfg.enabled && open && !editorPreview) toggleOpen(false);
+    if((!cfg.enabled || !available) && open && !editorPreview) toggleOpen(false);
   }
 
   function setConfig(patch, meta){
@@ -400,10 +407,16 @@ function createRadioHud(deps){
     const count = library.count();
     return shuffle && count > 1 ? (idx + 1 + Math.floor(Math.random()*(count-1))) % count : idx+1;
   }
-  function next(){ load(pickNext(), true); }
-  function prev(){ load(idx-1, true); }
-  function togglePlay(){ audio.paused ? audio.play().catch(()=>{}) : audio.pause(); }
-  function toggleShuffle(){ shuffle = !shuffle; el.shuf.classList.toggle('on', shuffle); popup(shuffle?'SHUFFLE ON':'SHUFFLE OFF','#4be3a0'); }
+  function next(){ if(available || editorPreview) load(pickNext(), true); }
+  function prev(){ if(available || editorPreview) load(idx-1, true); }
+  function togglePlay(){
+    if(!available && !editorPreview) return;
+    audio.paused ? audio.play().catch(()=>{}) : audio.pause();
+  }
+  function toggleShuffle(){
+    if(!available && !editorPreview) return;
+    shuffle = !shuffle; el.shuf.classList.toggle('on', shuffle); popup(shuffle?'SHUFFLE ON':'SHUFFLE OFF','#4be3a0');
+  }
   let suppressPlayerClickUntil = 0;
   function suppressPlayerClick(){
     suppressPlayerClickUntil = performance.now() + 320;
@@ -462,6 +475,7 @@ function createRadioHud(deps){
   }
   function toggleOpen(force){
     if(isRuntimeUiSuppressed() && force !== false) force = false;
+    if(!available && !editorPreview && force !== false) return;
     if(!cfg.enabled && !editorPreview && force !== false) return;
     open = force == null ? !open : !!force;
     el.radio.classList.toggle('open', open);
@@ -469,7 +483,33 @@ function createRadioHud(deps){
     requestAnimationFrame(syncPlayerHitboxes);
     canvas.classList.toggle('slowmo', open && !editorPreview);
   }
-  function begin(){ if(started) return; started = true; load(0, true); }
+  function syncAvailability(){
+    const next = editorPreview || !!resolveAvailability(cfg);
+    if(next === available) return available;
+    available = next;
+    el.radio.classList.toggle('unavailable', !available);
+    if(!available && !editorPreview){
+      audio.pause();
+      if(open) toggleOpen(false);
+    } else if(sessionActive && cfg.enabled){
+      if(!started){ started = true; load(0, true); }
+      else audio.play().catch(()=>{});
+    }
+    return available;
+  }
+  function begin(){
+    sessionActive = true;
+    syncAvailability();
+    if(!available || started) return;
+    started = true;
+    load(0, true);
+  }
+  function stop(){
+    sessionActive = false;
+    started = false;
+    audio.pause();
+    if(open) toggleOpen(false);
+  }
   async function addTracks(files){
     const added = await library.addFiles(files, 'Game radio project audio');
     if(added.length) popup('RADIO TRACKS ADDED: ' + added.length, '#4be3a0');
@@ -569,6 +609,7 @@ function createRadioHud(deps){
   const artCtx = el.art.getContext('2d'), gCtx = el.gGraph.getContext('2d');
   let artT = 0;
   function updateHUD(dt, rpm01, throttle, playerTelemetry){
+    syncAvailability();
     const t = playerTelemetry || (telemetry ? telemetry() : {});
     el.play.textContent = audio.paused ? '▶' : '⏸';
     el.shuf.classList.toggle('on', shuffle);
@@ -628,7 +669,7 @@ function createRadioHud(deps){
   }
 
   applyConfig();
-  return {toggleOpen, next, prev, togglePlay, toggleShuffle, updateHUD, begin, setVolume,
+  return {toggleOpen, next, prev, togglePlay, toggleShuffle, updateHUD, begin, stop, setVolume,
     setPlayerVol, setBass, getPlayerVol: () => playerVol, getBass: () => bass,
     isOpen: () => open, audio, config: cfg, setConfig, setEditorPreview,
     setFrameRect,
@@ -639,6 +680,8 @@ function createRadioHud(deps){
       return activePlayerId;
     },
     activePlayer: () => activePlayerId,
+    isAvailable: () => available,
+    syncAvailability,
     getTracks: options => library.list(options),
     addTracks,
     removeTrack,

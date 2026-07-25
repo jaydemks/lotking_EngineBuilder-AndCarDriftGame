@@ -28,6 +28,9 @@ function normalizeOptions(options){
     // 'camera': input is relative to the active camera yaw (three-player-
     // controller style). 'heading': input is relative to the character facing.
     inputMode:o.inputMode === 'heading' ? 'heading' : 'camera',
+    // `movement` turns toward velocity (generic third-person character).
+    // `heading` preserves authored facing so X becomes a real lateral strafe.
+    facingMode:o.facingMode === 'heading' ? 'heading' : 'movement',
   };
 }
 
@@ -121,7 +124,12 @@ function create(GAME, options){
     const inputZ = clamp(finite(move.z, 0), -1, 1);
     const sprint = move.sprint === true;
     const magnitude = Math.min(1, Math.sqrt(inputX * inputX + inputZ * inputZ));
-    const topSpeed = (magnitude <= .55 ? opts.walkSpeed : opts.runSpeed) * (sprint ? opts.sprintMultiplier : 1);
+    // Gait is decided by the explicit Sprint input, not analog magnitude:
+    // digital keyboard presses are always full magnitude, so a magnitude
+    // threshold alone could never produce a real walk state. Magnitude still
+    // scales speed within the active gait for analog sticks.
+    const gaitSpeed = sprint ? opts.runSpeed * opts.sprintMultiplier : opts.walkSpeed;
+    const topSpeed = gaitSpeed * magnitude;
 
     // Reference frame: camera yaw (free movement, three-player-controller
     // style) or character heading (tank-ish fallback).
@@ -170,7 +178,7 @@ function create(GAME, options){
 
     const speed = Math.sqrt(state.velocityX * state.velocityX + state.velocityZ * state.velocityZ);
     // Face the actual velocity for free movement.
-    if(speed > .35 && owner && owner.rotation && magnitude > .05){
+    if(state.options.facingMode === 'movement' && speed > .35 && owner && owner.rotation && magnitude > .05){
       const targetHeading = Math.atan2(state.velocityX, state.velocityZ);
       let delta = targetHeading - owner.rotation.y;
       while(delta > Math.PI) delta -= Math.PI * 2;

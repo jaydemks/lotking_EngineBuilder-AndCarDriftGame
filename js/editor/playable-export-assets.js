@@ -149,7 +149,10 @@ function create(deps){
       source: owner.source || (owner.asset && owner.asset.source),
       name: owner.name || (owner.asset && owner.asset.name),
     };
-    const rootPath = await resolveRootAssetPath(owner, prop, label, meta);
+    // A persisted DB blob is authoritative. Probing guessed media/ paths for
+    // its original filename only creates noisy, expected HEAD 404s and can
+    // never be more portable than embedding the stored blob.
+    const rootPath = meta.dbKey ? normalizeRootAssetPath(meta.src) : await resolveRootAssetPath(owner, prop, label, meta);
     if(rootPath){
       owner[prop] = rootPath;
       if(owner[explicitDbProp]) owner[explicitDbProp] = null;
@@ -166,7 +169,7 @@ function create(deps){
         if(lib.name) meta.name = lib.name;
       }
     }
-    const libraryRootPath = await resolveRootAssetPath(owner, prop, label, meta);
+    const libraryRootPath = meta.dbKey ? normalizeRootAssetPath(meta.src) : await resolveRootAssetPath(owner, prop, label, meta);
     if(libraryRootPath){
       owner[prop] = libraryRootPath;
       if(owner[explicitDbProp]) owner[explicitDbProp] = null;
@@ -179,6 +182,7 @@ function create(deps){
       meta.src = null;
     }
     let resolved = meta.src || null;
+    const alreadyEmbedded = !!(meta.dbKey && dbCache && dbCache.lkDeduplicate && dbCache.has(meta.dbKey));
     if(!resolved && meta.dbKey){
       try {
         resolved = await exportResolveAssetFromDbKey(meta.dbKey, dbCache);
@@ -192,10 +196,19 @@ function create(deps){
       warnings.push('Asset ' + fallbackName + tr(' not exportable: no recoverable source', ' non esportabile: nessuna sorgente recuperabile'));
       return;
     }
-    owner[prop] = resolved;
-    if(owner[explicitDbProp]) owner[explicitDbProp] = null;
-    if(owner.dbKey) owner.dbKey = null;
-    if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+    if(meta.dbKey && dbCache && dbCache.lkDeduplicate){
+      // The first occurrence carries the portable payload. Every later
+      // occurrence retains the stable key only; the import/localization pass
+      // stores the first payload in IndexedDB before the scene is applied.
+      owner[prop] = alreadyEmbedded ? null : resolved;
+      owner[explicitDbProp] = meta.dbKey;
+      if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = meta.dbKey;
+    } else {
+      owner[prop] = resolved;
+      if(owner[explicitDbProp]) owner[explicitDbProp] = null;
+      if(owner.dbKey) owner.dbKey = null;
+      if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+    }
   }
 
   async function normalizePlayableObjectBlobs(obj, prefix, dbCache, library, warnings, depth){
@@ -219,6 +232,44 @@ function create(deps){
     }
   }
 
+  async function normalizeAnimationAssetValue(owner, key, binding, label, dbCache, library, warnings){
+    if(!owner || !Object.prototype.hasOwnProperty.call(owner, key)) return;
+    const original = owner[key];
+    let parsed = original;
+    if(typeof parsed === 'string'){
+      const text = parsed.trim();
+      if(text.charAt(0) !== '{') return;
+      try { parsed = JSON.parse(text); } catch(err){ return; }
+    }
+    if(!parsed || typeof parsed !== 'object') return;
+    const ref = binding === 'animationLibrary' ? parsed : parsed.asset;
+    if(!ref || typeof ref !== 'object') return;
+    await normalizePlayableAssetRef(ref, 'src', label, dbCache, library, warnings);
+    owner[key] = typeof original === 'string' ? JSON.stringify(parsed) : parsed;
+  }
+
+  async function normalizeGraphAnimationAssets(graph, overrides, prefix, dbCache, library, warnings){
+    if(!graph) return;
+    const character=graph.characterPawn||graph.soccerPawn;
+    if(character){
+      if(character.model)await normalizePlayableAssetRef(character.model,'src',prefix+'.model',dbCache,library,warnings);
+      if(character.animationLibrary)await normalizePlayableAssetRef(character.animationLibrary,'src',prefix+'.library',dbCache,library,warnings);
+      for(const entry of (Array.isArray(character.animationSet)?character.animationSet:[])){
+        if(entry&&entry.asset)await normalizePlayableAssetRef(entry.asset,'src',prefix+'.motion.'+(entry.id||entry.name||entry.clip||'entry'),dbCache,library,warnings);
+      }
+    }
+    if(!Array.isArray(graph.variables)) return;
+    for(const variable of graph.variables){
+      const binding = String(variable && variable.binding || '');
+      if(binding !== 'animationLibrary' && binding.indexOf('animations.') !== 0) continue;
+      const label = prefix + '.' + (variable.name || binding);
+      await normalizeAnimationAssetValue(variable, 'value', binding, label, dbCache, library, warnings);
+      if(overrides && Object.prototype.hasOwnProperty.call(overrides, variable.name)){
+        await normalizeAnimationAssetValue(overrides, variable.name, binding, label + '.override', dbCache, library, warnings);
+      }
+    }
+  }
+
   async function preparePlayableProject(project, opts){
     opts = opts || {};
     const prepared = JSON.parse(JSON.stringify(project || {}));
@@ -226,7 +277,8 @@ function create(deps){
     if(stripEmbeddedLevels && Object.prototype.hasOwnProperty.call(prepared, 'embeddedLevels')) delete prepared.embeddedLevels;
     const scene = prepared.scene || prepared;
     const warnings = [];
-    const dbCache = new Map();
+    const dbCache = opts._dbCache || new Map();
+    if(opts.deduplicateEmbeddedAssets) dbCache.lkDeduplicate = true;
     const library = assetLibraryLoad();
 
     if(scene && scene.player && (typeof scene.player.modelSrc === 'string' || scene.player.modelDbKey)){
@@ -255,6 +307,10 @@ function create(deps){
             if(element && element.asset) await normalizePlayableAssetRef(element.asset, 'src', 'logicElementAsset.' + (element.name || element.id || 'mesh'), dbCache, library, warnings);
             if(element && (element.matProps || element.materials || element.props)) await normalizePlayableObjectBlobs(element.matProps || element.materials || element.props, 'logicElementAsset.materials.' + (element.name || element.id || 'element'), dbCache, library, warnings, 0);
           }
+          await normalizeGraphAnimationAssets(entry.graph, entry.variableOverrides, 'logicElement.animations', dbCache, library, warnings);
+          if(entry.logicAsset && entry.logicAsset.graph){
+            await normalizeGraphAnimationAssets(entry.logicAsset.graph, null, 'logicElementAsset.animations', dbCache, library, warnings);
+          }
           const vehicleAudio = entry.graph && entry.graph.vehiclePawn && entry.graph.vehiclePawn.engineAudio;
           if(vehicleAudio && vehicleAudio.set) await normalizePlayableObjectBlobs(vehicleAudio.set, 'logicElement.vehiclePawn.engineAudio.set', dbCache, library, warnings, 0);
           const assetVehicleAudio = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.vehiclePawn && entry.logicAsset.graph.vehiclePawn.engineAudio;
@@ -267,7 +323,7 @@ function create(deps){
     }
     const musicLibraries = scene && scene.ui && scene.ui.musicLibraries;
     if(musicLibraries){
-      for(const groupName of ['radio', 'menu']){
+      for(const groupName of ['radio', 'loading', 'menu', 'editorMenu', 'gameMenu']){
         const tracks = Array.isArray(musicLibraries[groupName]) ? musicLibraries[groupName] : [];
         for(const track of tracks){
           await normalizePlayableAssetRef(track, 'url', 'music.' + groupName + '.' + (track.fileName || track.title || track.id || 'track'), dbCache, library, warnings);
@@ -277,7 +333,11 @@ function create(deps){
     if(!stripEmbeddedLevels && Array.isArray(prepared.embeddedLevels)){
       for(const entry of prepared.embeddedLevels){
         if(!entry || !entry.project) continue;
-        const nested = await preparePlayableProject(entry.project, {stripEmbeddedLevels:false});
+        const nested = await preparePlayableProject(entry.project, {
+          stripEmbeddedLevels:false,
+          deduplicateEmbeddedAssets:!!opts.deduplicateEmbeddedAssets,
+          _dbCache:dbCache,
+        });
         entry.project = nested.project;
         if(nested.warnings && nested.warnings.length) warnings.push(...nested.warnings);
       }

@@ -7,6 +7,9 @@
  */
 import * as ThreeCore from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {FBXLoader} from 'three/addons/loaders/FBXLoader.js';
+import {TGALoader} from 'three/addons/loaders/TGALoader.js';
+import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import {FontLoader, Font} from 'three/addons/loaders/FontLoader.js';
 import {TextGeometry} from 'three/addons/geometries/TextGeometry.js';
@@ -23,6 +26,7 @@ import {SSRShader, SSRDepthShader, SSRBlurShader} from 'three/addons/shaders/SSR
 import {SSRPass} from 'three/addons/postprocessing/SSRPass.js';
 import {BokehShader} from 'three/addons/shaders/BokehShader.js';
 import {BokehPass} from 'three/addons/postprocessing/BokehPass.js';
+import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
 import {OutlineEffect} from 'three/addons/effects/OutlineEffect.js';
 import {RectAreaLightUniformsLib} from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
@@ -33,6 +37,9 @@ if(String(ThreeCore.REVISION) !== EXPECTED_REVISION){
 
 const ThreeCompat = Object.assign({}, ThreeCore, {
   GLTFLoader,
+  FBXLoader,
+  TGALoader,
+  GLTFExporter,
   SkeletonUtils,
   FontLoader,
   Font,
@@ -53,6 +60,7 @@ const ThreeCompat = Object.assign({}, ThreeCore, {
   SSRPass,
   BokehShader,
   BokehPass,
+  GTAOPass,
   OutlineEffect,
   RectAreaLightUniformsLib,
 });

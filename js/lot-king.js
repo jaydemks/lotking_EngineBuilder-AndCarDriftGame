@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.7.0',
+  version: '0.7.1',
   assets: null,
   core: {},
   world: {},
@@ -36,8 +36,9 @@ const GAME = window.LOT_KING = {
   actions: {},
   ui: {},
   state: {started:false, editorActive:false, paused:false, sceneReady:false, levelLoaded:false, activeLevel:null, editorPreview:false, editorPreviewMode:null, playPreviewCursorVisible:false, menuCursorVisible:false},
-  hooks: {frame: [], frameOverride: null},
+  hooks: {frame: [], warmup: [], frameOverride: null},
 };
+if(window.LK_RUNTIME_GAMEPLAY_DIFFICULTY)window.LK_RUNTIME_GAMEPLAY_DIFFICULTY.install(GAME);
 const LK_LANG_KEY = 'lotking.lang.v1';
 function readLotKingLang(){
   try {
@@ -128,7 +129,7 @@ const RUNTIME_DOM_I18N = [
   ['.settingsRow[data-audio-row="sfx"]', 'label', 'Game effects', 'Effetti gioco'],
   ['.settingsRow[data-audio-row="sfx"]', 'desc', 'Impacts, cones and parking-lot ambience.', 'Urti, coni e ambiente del parcheggio.'],
   ['.settingsRow[data-audio-row="music"]', 'label', 'Music', 'Musica'],
-  ['.settingsRow[data-audio-row="music"]', 'desc', 'Radio and start-menu music volume.', 'Volume radio e musica del menu iniziale.'],
+  ['.settingsRow[data-audio-row="music"]', 'desc', 'Loading, menu and vehicle-radio music volume.', 'Volume musica di caricamento, menu e radio del veicolo.'],
   ['#videoQuality', 'row-label', 'Render quality', 'Qualita render'],
   ['#videoQuality', 'row-desc', 'Visual profile for the engine editor and viewport.', 'Profilo visivo dell\'engine editor e del viewport.'],
   ['#videoAA', 'row-label', 'Antialiasing', 'Antialiasing'],
@@ -154,6 +155,11 @@ const RUNTIME_DOM_I18N = [
   ['#openGameplayTune', 'row-label', 'Driving setup', 'Setup guida'],
   ['#openGameplayTune', 'row-desc', 'Open the driving parameters already available in the game.', 'Apri i parametri di guida gia presenti nel gioco.'],
   ['#openGameplayTune', 'text', 'Open setup', 'Apri setup'],
+  ['#gameplayDifficulty', 'row-label', 'Gameplay difficulty', 'Difficoltà gameplay'],
+  ['#gameplayDifficulty', 'row-desc', 'General opponent difficulty. In Soccer it changes goalkeeper reaction, prediction, reach and dive ability.', 'Difficoltà generale degli avversari. Nel Soccer modifica reazione, previsione, portata e tuffo del portiere.'],
+  ['#gameplayDifficulty option[value="easy"]', 'text', 'Easy', 'Facile'],
+  ['#gameplayDifficulty option[value="normal"]', 'text', 'Medium', 'Medio'],
+  ['#gameplayDifficulty option[value="hard"]', 'text', 'Hard', 'Difficile'],
   ['#loadTxt', 'text', 'loading world…', 'caricamento mondo…'],
 ];
 
@@ -200,7 +206,8 @@ GAME.assets = {dirs: ASSET_DIR, paths: ASSETS, isFileMode: IS_FILE_MODE};
 // ------------------------------------------------ basics
 const canvas = document.getElementById('c');
 if(canvas && !canvas.hasAttribute('tabindex')) canvas.tabIndex = -1;
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true, powerPreference:'high-performance'});
+const RENDERING_BACKEND=window.LK_RUNTIME_RENDERING_BACKEND;
+const renderer = RENDERING_BACKEND?RENDERING_BACKEND.createWebGL({canvas,antialias:true,powerPreference:'high-performance'},'main'):new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -310,6 +317,7 @@ const carVisual = new THREE.Group();   // procedural body — replaced if a GLTF
 car.add(carVisual);
 const PLAYER_LIGHT_RIG = window.LK_RUNTIME_PLAYER_LIGHT_RIG.create({
   THREERef: THREE,
+  renderer,
   car,
   tagEntity,
   getSky: () => SKY,
@@ -326,8 +334,19 @@ const PLAYER_EXHAUST_CFG = {
   smoke:true,
   idleSmoke:true,
   smokeThrottle:.18,
+  smokeRate:1,
+  smokeLife:1,
+  smokeSize:1,
+  smokePressure:1,
+  smokeRise:1,
+  smokeSpread:1,
+  smokeOpacity:.3,
   fire:true,
   fireRpm:.88,
+  fireLength:1,
+  fireWidth:1,
+  fireDuration:1,
+  fireOpacity:.95,
   shiftFire:true,
   limiterFire:true,
   sources:[
@@ -342,13 +361,15 @@ const PLAYER_SKID_CFG = {
   length:.7,
   opacity:.55,
   life:14,
-  smokeModelVersion:3,
+  smokeModelVersion:4,
   smokeEnabled:true,
   smokeAmount:.28,
-  smokeThreshold:.35,
-  smokeMinHeat:.3,
-  smokeHeatRate:.75,
-  smokeCoolRate:.4,
+  smokeThreshold:.42,
+  smokeMinHeat:.58,
+  smokeHeatRate:.38,
+  smokeCoolRate:.32,
+  smokeMinSpeedKmh:24,
+  smokeMinSlipAngle:.14,
   smokeOnDrift:true,
   smokeOnBrake:true,
   smokeOnAcceleration:true,
@@ -432,8 +453,9 @@ function skidWheelLabel(wheel, idx){
   };
   return labels[wheel] || ('Skid Mark Source ' + (idx + 1));
 }
-function isRearSkidWheel(wheel){ return wheel === 'rearLeft' || wheel === 'rearRight' || /^extra/.test(wheel || ''); }
-function isFrontSkidWheel(wheel){ return wheel === 'frontLeft' || wheel === 'frontRight'; }
+function skidWheelToken(wheel){ return String(wheel || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function isRearSkidWheel(wheel){ const token = skidWheelToken(wheel); return token === 'rearleft' || token === 'rearright' || /^extra/.test(token); }
+function isFrontSkidWheel(wheel){ const token = skidWheelToken(wheel); return token === 'frontleft' || token === 'frontright'; }
 function normalizeSkidSource(idx){
   const base = defaultSkidSourceConfig(idx);
   const cfg = PLAYER_SKID_CFG.sources[idx] || {};
@@ -513,7 +535,8 @@ function duplicatePlayerAuxLight(index){ const result = PLAYER_LIGHT_RIG.duplica
 function movePlayerAuxLight(index, direction){ const result = PLAYER_LIGHT_RIG.moveAux(index, direction); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
 function applyPlayerExhaustConfig(){
   ensureExhaustRigs();
-  const show = !!PLAYER_EXHAUST_CFG.dummyVisible && !!GAME.state.editorActive;
+  const nativeActive=!!(GAME.player&&GAME.player.enabled!==false&&GAME.player.hidden!==true);
+  const show = nativeActive && !!PLAYER_EXHAUST_CFG.dummyVisible && !!GAME.state.editorActive;
   for(const rig of playerExhaustRig.sources) if(rig && rig.helper) rig.helper.visible = show;
 }
 function setPlayerExhaustConfig(patch){
@@ -526,6 +549,16 @@ function setPlayerExhaustConfig(patch){
   const rest = Object.assign({}, patch);
   delete rest.sources;
   Object.assign(PLAYER_EXHAUST_CFG, rest);
+  const exhaustLimits={
+    intensity:[0,4],smokeThrottle:[0,1],smokeRate:[.05,4],smokeLife:[.1,4],
+    smokeSize:[.1,4],smokePressure:[0,4],smokeRise:[0,4],smokeSpread:[0,4],
+    smokeOpacity:[0,1],fireRpm:[.2,1.2],fireLength:[.1,4],fireWidth:[.1,4],
+    fireDuration:[.1,4],fireOpacity:[0,1],
+  };
+  Object.keys(exhaustLimits).forEach(key=>{
+    const value=Number(PLAYER_EXHAUST_CFG[key]);
+    if(Number.isFinite(value)) PLAYER_EXHAUST_CFG[key]=clamp(value,exhaustLimits[key][0],exhaustLimits[key][1]);
+  });
   if(PLAYER_EXHAUST_CFG.sources.length === 2 && PLAYER_EXHAUST_CFG.sources[0] && PLAYER_EXHAUST_CFG.sources[1] && PLAYER_EXHAUST_CFG.sources[1].enabled === false && !PLAYER_EXHAUST_CFG.sources[1].userDisabled){
     PLAYER_EXHAUST_CFG.sources[1].enabled = true;
   }
@@ -555,13 +588,15 @@ function setPlayerSkidConfig(patch){
   });
   const rest = Object.assign({}, patch);
   delete rest.sources;
-  if(Number(rest.smokeModelVersion) < 3 && Array.isArray(patch.sources) && Object.prototype.hasOwnProperty.call(patch, 'enabled')){
-    rest.smokeModelVersion = 3;
+  if(Number(rest.smokeModelVersion) < 4){
+    rest.smokeModelVersion = 4;
     rest.smokeAmount = .28;
-    rest.smokeThreshold = .35;
-    rest.smokeMinHeat = .3;
-    rest.smokeHeatRate = .75;
-    rest.smokeCoolRate = .4;
+    rest.smokeThreshold = .42;
+    rest.smokeMinHeat = .58;
+    rest.smokeHeatRate = .38;
+    rest.smokeCoolRate = .32;
+    rest.smokeMinSpeedKmh = 24;
+    rest.smokeMinSlipAngle = .14;
   }
   Object.assign(PLAYER_SKID_CFG, rest);
   ensureSkidRigs();
@@ -643,6 +678,10 @@ for(const [wheelId, wx, wz, front] of [['wheel_front_left',-.92,1.35,1],['wheel_
 }
 scene.add(car);
 tagEntity(car, 'player_car (Logic)', 'player');
+// The native singleton is retained as an opt-in compatibility/reference Pawn.
+// New projects use Vehicle Logic Elements, so it must not flash or participate
+// in the scene before persisted project state is applied.
+car.visible = false;
 
 const PLAYER_DATA_WIDGETS = window.LK_RUNTIME_PLAYER_DATA_WIDGETS.create({
   THREERef: THREE,
@@ -894,6 +933,7 @@ const initPhysicsWorld = PHYS_WORLD.init;
 const rebuildPhysicsStatics = PHYS_WORLD.rebuildStatics;
 const syncCarBodyToPlayer = PHYS_WORLD.syncPlayer;
 const rebuildPlayerPhysicsBody = PHYS_WORLD.rebuildPlayer;
+const setPhysicsPlayerActive = PHYS_WORLD.setPlayerActive;
 const disposePhysicsWorld = PHYS_WORLD.dispose;
 const setSurfaceWorldCollision = PHYS_WORLD.setSurfaceWorldCollision;
 
@@ -941,13 +981,13 @@ const DRIVE_TUNING = window.LK_RUNTIME_DRIVE_TUNING.create({
 });
 function activeLogicTuningPawn(){
   const pinned = activeDriveTuningPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(activeDriveTuningPawnId) : null;
-  if(pinned && pinned.kind === 'logic-element' && pinned.possessed) return pinned;
+  if(pinned && pinned.kind === 'logic-element' && pinned.pawnType === 'vehicle' && pinned.possessed) return pinned;
   const possessed = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
-  if(possessed && possessed.kind === 'logic-element') return possessed;
+  if(possessed && possessed.kind === 'logic-element' && possessed.pawnType === 'vehicle') return possessed;
   const outputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
   const pawnId = outputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
   const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
-  return pawn && pawn.kind === 'logic-element' ? pawn : null;
+  return pawn && pawn.kind === 'logic-element' && pawn.pawnType === 'vehicle' ? pawn : null;
 }
 function syncActiveTuningTarget(){
   const pawn = activeLogicTuningPawn();
@@ -971,6 +1011,7 @@ function applyAudioSettings(){
   SFX.setVolumes(AUDIO);
   RADIO.setVolume(AUDIO.master * AUDIO.music);
   MENU_MUSIC.setVolume(.55 * AUDIO.master * AUDIO.music);
+  if(LOADING_MUSIC && LOADING_MUSIC.setVolume) LOADING_MUSIC.setVolume(.55 * AUDIO.master * AUDIO.music);
 }
 
 function setAudioChannel(channel, value){
@@ -1011,6 +1052,7 @@ function initSettingsMenu(){
     audio: AUDIO,
     video: VIDEO,
     commitVideo: VIDEO_SETTINGS.commitValues,
+    markVideoUserOverride: VIDEO_SETTINGS.markUserOverride,
     applyAudio: applyAudioSettings,
     applyVideo: applyVideoSettings,
     shouldShowMenuCursor: shouldShowMenuCursorForSource,
@@ -1021,6 +1063,7 @@ function initSettingsMenu(){
     },
     onBackMenu: backToMainMenu,
     onOpenTune: () => setTuneOpen(true),
+    gameplayDifficulty: window.LK_RUNTIME_GAMEPLAY_DIFFICULTY,
   });
   setSettingsOpen = SETTINGS_MENU.setOpen;
   toggleSettingsMenu = SETTINGS_MENU.toggle;
@@ -1282,7 +1325,21 @@ function wheelsOnGround(){
   return n;
 }
 
+function nativeSkidWheelInContact(wheel){
+  const vehicle = PHYS.vehicle;
+  if(!vehicle || !vehicle.wheelInfos) return true;
+  const token = skidWheelToken(wheel);
+  const indexByWheel = {frontleft:0, frontright:1, rearleft:2, rearright:3};
+  if(Object.prototype.hasOwnProperty.call(indexByWheel, token)){
+    const info = vehicle.wheelInfos[indexByWheel[token]];
+    return !!(info && info.isInContact);
+  }
+  if(/^extra/.test(token)) return vehicle.wheelInfos.slice(2).some(info => info && info.isInContact);
+  return vehicle.wheelInfos.some(info => info && info.isInContact);
+}
+
 function updateCarCannon(dt){
+  if(GAME.player && GAME.player.enabled === false) return {vF:0, vR:0, drifting:false};
   if(!initPhysicsWorld()) return null;
   if(PHYS.staticsSignature !== colliderSignature()) rebuildPhysicsStatics();
 
@@ -1884,32 +1941,50 @@ function onCrash(impact){
 }
 
 // ------------------------------------------------ smoke particles
-function makeSmokeTexture(){
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d', {willReadFrequently:true});
-  const gr = g.createRadialGradient(32,32,2,32,32,30);
-  gr.addColorStop(0,'rgba(230,230,235,.85)');
-  gr.addColorStop(.5,'rgba(220,220,228,.35)');
-  gr.addColorStop(1,'rgba(220,220,228,0)');
-  g.fillStyle = gr; g.fillRect(0,0,64,64);
-  return new THREE.CanvasTexture(c);
-}
-function makeFlameTexture(){
-  const c = document.createElement('canvas'); c.width = c.height = 96;
+function makeFluidFxTexture(fire){
+  const size = 128;
+  const c = document.createElement('canvas'); c.width = c.height = size;
   const g = c.getContext('2d');
-  const gr = g.createRadialGradient(48,58,2,48,58,42);
-  gr.addColorStop(0,'rgba(255,255,235,1)');
-  gr.addColorStop(.24,'rgba(255,211,82,.95)');
-  gr.addColorStop(.55,'rgba(255,84,20,.72)');
-  gr.addColorStop(1,'rgba(255,20,0,0)');
-  g.fillStyle = gr;
-  g.beginPath();
-  g.ellipse(48,58,28,39,0,0,Math.PI*2);
-  g.fill();
+  const image = g.createImageData(size, size);
+  const data = image.data;
+  const smooth = value => {
+    const x = Math.max(0, Math.min(1, value));
+    return x * x * (3 - 2 * x);
+  };
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const u=(x+.5)/size*2-1, v=(y+.5)/size*2-1;
+    const vertical = fire ? (v + .12) / 1.12 : v;
+    const radius = Math.sqrt(u*u*(fire?2.25:1) + vertical*vertical*(fire?.72:1));
+    const turbulence =
+      Math.sin(u*13.7 + v*8.3) * .045 +
+      Math.sin(u*27.1 - v*19.4) * .022 +
+      Math.sin((u+v)*41.3) * .012;
+    const edge = 1 - smooth((radius + turbulence - (fire?.08:.12)) / (fire?.92:.88));
+    const alpha = Math.max(0, Math.min(1, edge * (fire ? (1 - smooth(Math.max(0,-v-.86)/.14)) : .82)));
+    const offset=(y*size+x)*4;
+    if(fire){
+      const hot = 1-smooth(Math.min(1,radius*1.35));
+      data[offset]=255;
+      data[offset+1]=Math.round(70+185*hot);
+      data[offset+2]=Math.round(8+220*hot*hot);
+    }else{
+      // Keep RGB bright even where alpha is zero. Linear filtering therefore
+      // cannot pull a black transparent border into the visible cloud.
+      data[offset]=242; data[offset+1]=246; data[offset+2]=252;
+    }
+    data[offset+3]=Math.round(alpha*255);
+  }
+  g.putImageData(image,0,0);
   const tx = new THREE.CanvasTexture(c);
   tx.colorSpace = THREE.SRGBColorSpace;
+  tx.minFilter = THREE.LinearMipmapLinearFilter;
+  tx.magFilter = THREE.LinearFilter;
+  tx.generateMipmaps = true;
+  tx.needsUpdate = true;
   return tx;
 }
+function makeSmokeTexture(){ return makeFluidFxTexture(false); }
+function makeFlameTexture(){ return makeFluidFxTexture(true); }
 const smokeTex = makeSmokeTexture();
 const flameTex = makeFlameTexture();
 const TRANSPARENT_FX_RENDER_ORDER = Object.freeze({
@@ -1922,11 +1997,11 @@ const TRANSPARENT_FX_RENDER_ORDER = Object.freeze({
 const SMOKE_N = 140;
 const smokePool = [];
 for(let i=0;i<SMOKE_N;i++){
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, transparent:true, opacity:0, depthWrite:false, depthTest:true}));
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:smokeTex, transparent:true, opacity:0, depthWrite:false, depthTest:true, alphaTest:.008}));
   s.userData.particleSystem = 'native-tire-smoke';
   s.renderOrder = TRANSPARENT_FX_RENDER_ORDER.smoke;
   s.visible = false; scene.add(s);
-  smokePool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1});
+  smokePool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1, phase:Math.random()*Math.PI*2, spin:(Math.random()-.5)*.65});
 }
 let smokeIdx = 0;
 let tireSmokeHeat = 0;
@@ -1938,6 +2013,9 @@ function spawnSmoke(pos, intensity, configOverride){
   p.s.position.copy(pos); p.s.position.y = .25;
   p.life = 0; p.max = .8 + Math.random()*.7;
   p.size = .6 + intensity*1.4;
+  p.phase = Math.random()*Math.PI*2;
+  p.spin = (Math.random()-.5)*.65;
+  p.s.material.rotation = Math.random()*Math.PI*2;
   p.vel.set((Math.random()-.5)*1.5, 1 + Math.random()*1.2, (Math.random()-.5)*1.5);
 }
 function updateSmoke(dt){
@@ -1946,60 +2024,124 @@ function updateSmoke(dt){
     p.life += dt;
     if(p.life >= p.max){ p.s.visible = false; p.s.material.opacity = 0; continue; }
     const t = p.life / p.max;
+    p.vel.x += Math.sin(p.phase + p.life*2.1) * .12 * dt;
+    p.vel.z += Math.cos(p.phase*.83 + p.life*1.7) * .12 * dt;
+    p.vel.multiplyScalar(Math.max(0,1-dt*.18));
     p.s.position.addScaledVector(p.vel, dt);
     const sc = p.size * (0.6 + t*2.2);
     p.s.scale.set(sc, sc, 1);
+    p.s.material.rotation += p.spin*dt;
     p.s.material.opacity = (1-t) * .5;
   }
 }
 
 const EXHAUST_N = 180;
 const exhaustPool = [];
+const exhaustFlameGeometry = new THREE.ConeGeometry(.5, 1, 14, 1, true);
+// ConeGeometry points along +Y. Rotate it so its open base sits exactly on the
+// exhaust dummy and its tip follows the dummy's local -Z pressure direction.
+exhaustFlameGeometry.rotateX(-Math.PI / 2);
+exhaustFlameGeometry.translate(0, 0, -.5);
 for(let i=0;i<EXHAUST_N;i++){
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({
-    map:smokeTex, transparent:true, opacity:0, depthWrite:false, depthTest:true, blending:THREE.NormalBlending,
-  }));
+  const smokeMaterial = new THREE.SpriteMaterial({
+    map:smokeTex, transparent:true, opacity:0, depthWrite:false, depthTest:true, blending:THREE.NormalBlending, alphaTest:.008,
+  });
+  const fireMaterial = new THREE.MeshBasicMaterial({
+    map:flameTex, color:0xffffff, transparent:true, opacity:0, depthWrite:false, depthTest:true,
+    blending:THREE.AdditiveBlending, alphaTest:.008, side:THREE.DoubleSide,
+  });
+  fireMaterial.toneMapped = false;
+  const s = new THREE.Sprite(smokeMaterial);
   s.userData.particleSystem = 'native-exhaust';
   s.renderOrder = TRANSPARENT_FX_RENDER_ORDER.exhaustSmoke;
   s.visible = false; scene.add(s);
-  exhaustPool.push({s, life:0, max:1, vel:new THREE.Vector3(), size:1, fire:false});
+  const flame = new THREE.Mesh(exhaustFlameGeometry, fireMaterial);
+  flame.userData.particleSystem = 'native-exhaust-fire';
+  flame.renderOrder = TRANSPARENT_FX_RENDER_ORDER.exhaustFire;
+  flame.frustumCulled = false;
+  flame.visible = false;
+  scene.add(flame);
+  exhaustPool.push({
+    s, flame, smokeMaterial, fireMaterial, life:0, max:1,
+    vel:new THREE.Vector3(), size:1, fire:false,
+    phase:Math.random()*Math.PI*2, spin:0, opacity:.3,
+    fireWidth:1, fireLength:1,
+  });
 }
-let exhaustIdx = 0, exhaustSmokeAcc = 0, exhaustFireAcc = 0;
-function spawnExhaustParticle(anchor, fire, intensity, sourceVelocity){
+let exhaustIdx = 0, exhaustSmokeAcc = 0, exhaustFireAcc = 0, exhaustFireBurst = 0, exhaustFireNext = 0;
+const exhaustFireEdges={hot:false,shift:false,limiter:false,test:false};
+function resetExhaustFireEdges(){
+  exhaustFireBurst=0;
+  exhaustFireNext=0;
+  exhaustFireEdges.hot=false;
+  exhaustFireEdges.shift=false;
+  exhaustFireEdges.limiter=false;
+  exhaustFireEdges.test=false;
+}
+function spawnExhaustParticle(anchor, fire, intensity, sourceVelocity, configOverride){
   const p = exhaustPool[exhaustIdx++ % EXHAUST_N];
+  const cfg = configOverride || PLAYER_EXHAUST_CFG;
   const pos = new THREE.Vector3();
   const quat = new THREE.Quaternion();
   anchor.getWorldPosition(pos);
   anchor.getWorldQuaternion(quat);
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat).normalize();
-  p.s.visible = true;
-  p.s.position.copy(pos);
   p.life = 0;
   p.fire = !!fire;
+  p.phase = Math.random()*Math.PI*2;
+  p.s.visible = !fire;
+  p.flame.visible = !!fire;
   if(fire){
-    p.max = .22 + Math.random() * .16;
-    p.size = (.72 + Math.random() * .42) * intensity;
-    p.vel.copy(dir).multiplyScalar(8.5 + Math.random() * 5.5).addScaledVector(sourceVelocity || P.vel, .08);
-    p.s.material.map = flameTex;
-    p.s.material.blending = THREE.AdditiveBlending;
-    p.s.material.color.setHex(0xffffff);
-    p.s.material.opacity = .95;
-    p.s.renderOrder = TRANSPARENT_FX_RENDER_ORDER.exhaustFire;
+    // Fire is a pressure jet, not a world-space particle. Reparenting keeps
+    // its base welded to the exhaust while the dummy rotation controls the
+    // exact outlet direction for both native and Logic Element vehicles.
+    if(p.flame.parent !== anchor){
+      if(p.flame.parent) p.flame.parent.remove(p.flame);
+      anchor.add(p.flame);
+    }
+    p.flame.position.set(0,0,0);
+    p.flame.quaternion.identity();
+    // A tuning backfire is a photographic flash, not a sustained torch.
+    // Its randomized lifetime stays shorter than the crackle interval so
+    // successive pulses always have a visible dark gap between them.
+    p.max = (.038 + Math.random() * .026) * Math.max(.1, Number(cfg.fireDuration) || 1);
+    p.fireWidth = (.34 + Math.random() * .12) * intensity * Math.max(.1, Number(cfg.fireWidth) || 1);
+    p.fireLength = (1.05 + Math.random() * .55) * intensity * Math.max(.1, Number(cfg.fireLength) || 1);
+    p.opacity = Math.max(0, Math.min(1, Number.isFinite(Number(cfg.fireOpacity)) ? Number(cfg.fireOpacity) : .95));
+    p.flame.scale.set(p.fireWidth,p.fireWidth,p.fireLength);
+    p.fireMaterial.opacity = p.opacity;
   } else {
-    p.max = 1.25 + Math.random() * 1.15;
-    p.size = (.32 + Math.random() * .42) * intensity;
-    p.vel.copy(dir).multiplyScalar(.45 + Math.random() * 1.25).add(new THREE.Vector3((Math.random()-.5)*.42, .62 + Math.random()*.72, (Math.random()-.5)*.42)).addScaledVector(sourceVelocity || P.vel, .025);
-    p.s.material.map = smokeTex;
-    p.s.material.blending = THREE.NormalBlending;
+    const life = Math.max(.1, Number(cfg.smokeLife) || 1);
+    const size = Math.max(.1, Number(cfg.smokeSize) || 1);
+    const pressure = Math.max(0, Number(cfg.smokePressure) || 0);
+    const rise = Math.max(0, Number(cfg.smokeRise) || 0);
+    const spread = Math.max(0, Number(cfg.smokeSpread) || 0);
+    p.s.position.copy(pos);
+    p.s.material = p.smokeMaterial;
+    p.s.material.rotation = Math.random()*Math.PI*2;
+    p.spin = (Math.random()-.5) * .75;
+    p.max = (1.1 + Math.random() * 1.05) * life;
+    p.size = (.22 + Math.random() * .30) * intensity * size;
+    p.opacity = Math.max(0, Math.min(1, Number.isFinite(Number(cfg.smokeOpacity)) ? Number(cfg.smokeOpacity) : .3));
+    p.vel.copy(dir).multiplyScalar((.5 + Math.random() * 1.15) * pressure)
+      .add(new THREE.Vector3((Math.random()-.5)*.42*spread, (.5 + Math.random()*.65)*rise, (Math.random()-.5)*.42*spread))
+      .addScaledVector(sourceVelocity || P.vel, .025);
     p.s.material.color.setHex(0xbec3cc);
-    p.s.material.opacity = .30;
+    p.s.material.opacity = p.opacity;
     p.s.renderOrder = TRANSPARENT_FX_RENDER_ORDER.exhaustSmoke;
   }
-  p.s.material.needsUpdate = true;
 }
 function updatePlayerExhaust(dt){
   applyPlayerExhaustConfig();
   const cfg = PLAYER_EXHAUST_CFG;
+  if(GAME.player && (GAME.player.enabled === false || GAME.player.hidden === true)){
+    exhaustSmokeAcc = 0;
+    exhaustFireAcc = 0;
+    exhaustTestPulse = 0;
+    resetExhaustFireEdges();
+    for(const p of exhaustPool){p.life=p.max;p.s.visible=false;p.flame.visible=false;p.smokeMaterial.opacity=0;p.fireMaterial.opacity=0;}
+    return;
+  }
   if(!cfg.enabled){ updateExhaustParticles(dt); return; }
   const active = [];
   for(let i=0;i<playerExhaustRig.sources.length;i++){
@@ -2009,52 +2151,121 @@ function updatePlayerExhaust(dt){
   if(!active.length){ updateExhaustParticles(dt); return; }
   const throttle = ENGINE.throttle || 0;
   const intensity = Math.max(0, Number.isFinite(Number(cfg.intensity)) ? Number(cfg.intensity) : 1);
-  const rpmHot = ENGINE.rpm01 >= (cfg.fireRpm == null ? .88 : cfg.fireRpm);
+  const fireThreshold=cfg.fireRpm == null ? .88 : cfg.fireRpm;
+  // Hysteresis prevents RPM noise around the threshold from creating a new
+  // rising edge every other frame.
+  const rpmHot=ENGINE.rpm01 >= fireThreshold-(exhaustFireEdges.hot ? .055 : 0);
   const shiftFire = cfg.shiftFire && ENGINE.shiftPulse > 0;
   const limiterFire = cfg.limiterFire && ENGINE.limiterPulse > 0;
   const testFire = exhaustTestPulse > 0;
   exhaustTestPulse = Math.max(0, exhaustTestPulse - dt);
   const idleSmoke = cfg.idleSmoke && throttle <= (cfg.smokeThrottle == null ? .18 : cfg.smokeThrottle);
-  const fireOn = !!cfg.fire && ((throttle > .05 && (rpmHot || shiftFire || limiterFire)) || testFire);
+  const hotFire=throttle>.05&&rpmHot;
+  const fireEdge=
+    (hotFire&&!exhaustFireEdges.hot)||
+    (shiftFire&&!exhaustFireEdges.shift)||
+    (limiterFire&&!exhaustFireEdges.limiter)||
+    (testFire&&!exhaustFireEdges.test);
+  exhaustFireEdges.hot=hotFire;
+  exhaustFireEdges.shift=shiftFire;
+  exhaustFireEdges.limiter=limiterFire;
+  exhaustFireEdges.test=testFire;
+  if(fireEdge){
+    exhaustFireBurst=Math.max(exhaustFireBurst,testFire ? .46 : ((shiftFire||limiterFire) ? .30 : .20));
+    exhaustFireNext=0;
+  }
+  const fireOn=!!cfg.fire&&exhaustFireBurst>0;
+  exhaustFireBurst=Math.max(0,exhaustFireBurst-dt);
   if(cfg.smoke && (idleSmoke || throttle > (cfg.smokeThrottle == null ? .18 : cfg.smokeThrottle))){
-    const rate = idleSmoke ? 2.2 : (5 + 22 * throttle * intensity);
+    // A higher overlapping base rate creates a continuous exhaust stream;
+    // Smoke Rate still allows sparse old-engine puffs when desired.
+    const rate = (idleSmoke ? 8 : (12 + 30 * throttle)) * Math.max(.05, Number(cfg.smokeRate) || 1);
     exhaustSmokeAcc += dt * rate * intensity;
     while(exhaustSmokeAcc >= 1){
       exhaustSmokeAcc -= 1;
-      spawnExhaustParticle(active[Math.floor(Math.random() * active.length)], false, intensity);
+      spawnExhaustParticle(active[Math.floor(Math.random() * active.length)], false, intensity, null, cfg);
     }
   }
   if(fireOn){
-    exhaustFireAcc += dt * (testFire || shiftFire || limiterFire ? 120 : 24) * intensity;
-    while(exhaustFireAcc >= 1){
-      exhaustFireAcc -= 1;
-      spawnExhaustParticle(active[Math.floor(Math.random() * active.length)], true, intensity);
+    exhaustFireNext-=dt;
+    if(exhaustFireNext<=0){
+      // Fire all authored outlets on the same engine pulse. The next pulse is
+      // deliberately irregular to reproduce a tuning-car crackle sequence.
+      for(const anchor of active) spawnExhaustParticle(anchor,true,intensity,null,cfg);
+      exhaustFireNext=.075+Math.random()*.085;
     }
   } else {
-    exhaustFireAcc = Math.min(exhaustFireAcc, .6);
+    exhaustFireAcc=0;
+    exhaustFireNext=0;
   }
   updateExhaustParticles(dt);
 }
 function testPlayerExhaust(targetAnchor){
+  if(GAME.player && (GAME.player.enabled === false || GAME.player.hidden === true)) return false;
   exhaustTestPulse = .55;
   const targets = targetAnchor ? [targetAnchor] : playerExhaustRig.sources.map(r => r && r.anchor).filter(Boolean);
   for(const anchor of targets){
-    spawnExhaustParticle(anchor, false, Math.max(0, Number.isFinite(Number(PLAYER_EXHAUST_CFG.intensity)) ? Number(PLAYER_EXHAUST_CFG.intensity) : 1));
+    const intensity=Math.max(0, Number.isFinite(Number(PLAYER_EXHAUST_CFG.intensity)) ? Number(PLAYER_EXHAUST_CFG.intensity) : 1);
+    spawnExhaustParticle(anchor, false, intensity, null, PLAYER_EXHAUST_CFG);
+    spawnExhaustParticle(anchor, true, intensity, null, PLAYER_EXHAUST_CFG);
   }
+  return true;
 }
 function updateExhaustParticles(dt){
   for(const p of exhaustPool){
-    if(!p.s.visible) continue;
+    // Smoke and fire use different render objects. Checking only the smoke
+    // sprite skipped every active flame, freezing its life at zero forever.
+    if(!p.s.visible&&!p.flame.visible) continue;
     p.life += dt;
-    if(p.life >= p.max){ p.s.visible = false; p.s.material.opacity = 0; continue; }
+    if(p.life >= p.max){
+      p.s.visible=false;
+      p.flame.visible=false;
+      p.smokeMaterial.opacity=0;
+      p.fireMaterial.opacity=0;
+      continue;
+    }
     const t = p.life / p.max;
+    if(p.fire){
+      const pulse=.82+Math.sin(t*Math.PI)*.28+Math.sin(p.phase+t*19)*.06;
+      p.flame.scale.set(p.fireWidth*pulse,p.fireWidth*pulse,p.fireLength*(.78+pulse*.28));
+      p.fireMaterial.opacity=p.opacity*Math.sin(Math.PI*Math.min(1,t));
+      continue;
+    }else{
+      p.vel.x += Math.sin(p.phase+p.life*2.8)*.16*dt;
+      p.vel.z += Math.cos(p.phase*.7+p.life*2.2)*.16*dt;
+      p.vel.multiplyScalar(Math.max(0,1-dt*.22));
+    }
     p.s.position.addScaledVector(p.vel, dt);
-    if(!p.fire) p.vel.y += .28 * dt;
-    const sc = p.fire ? p.size * (1.25 - t * .55) : p.size * (.65 + t * 2.9);
+    p.vel.y += .28 * dt;
+    const sc = p.size * (.65 + t * 2.9);
     p.s.scale.set(sc, sc, 1);
-    p.s.material.opacity = p.fire ? (.95 * (1 - t)) : (.30 * (1 - t));
+    p.s.material.rotation += p.spin*dt;
+    p.s.material.opacity = p.opacity * (1 - t);
   }
 }
+
+// The pool exists before the benchmark takes its material snapshot, but hidden
+// flame cones still need one real draw so WebGL compiles the additive mesh
+// program before the first backfire seen by the player.
+GAME.hooks.warmup.push(context=>{
+  const anchors=playerExhaustRig.sources.map(item=>item&&item.anchor).filter(Boolean);
+  if(!anchors.length) return;
+  if(context&&context.progress) context.progress(.62,'Preparing exhaust smoke and fire','Compiling continuous smoke and anchored backfire shaders');
+  const intensity=Math.max(.35,Number(PLAYER_EXHAUST_CFG.intensity)||1);
+  for(const anchor of anchors.slice(0,2)){
+    spawnExhaustParticle(anchor,false,intensity,null,PLAYER_EXHAUST_CFG);
+    spawnExhaustParticle(anchor,true,intensity,null,PLAYER_EXHAUST_CFG);
+  }
+  updateExhaustParticles(.016);
+  if(context&&context.render) context.render();
+  for(const p of exhaustPool){
+    p.life=p.max;
+    p.s.visible=false;
+    p.flame.visible=false;
+    p.smokeMaterial.opacity=0;
+    p.fireMaterial.opacity=0;
+  }
+});
 
 // ------------------------------------------------ skid marks
 const SKID_N = 700;
@@ -2141,9 +2352,9 @@ const playerDriveOffsetQuatTmp = new THREE.Quaternion();
 const playerVisualBaseEulerTmp = new THREE.Euler();
 const playerVisualBaseRotation = {x:0, z:0};
 let playerDriveHeadingOffset = 0;
-let camYaw = 0, camPitch = .32, camDist = 9, camMode = 0; // 0 chase, 1 free orbit
+let camYaw = 0, camPitch = .32, camDist = 9;
 let runtimeCameraMode = null;
-let dragging = false, lastMX = 0, lastMY = 0, userCamTimer = 0, camShake = 0;
+let dragging = false, lastMX = 0, lastMY = 0, camShake = 0;
 let camDriftSide = 0, camReverseBlend = 0, camCinematicRoll = 0, lastCamVF = 0, lastCamVR = 0, lastCamDrifting = false;
 let camSnapNext = false;
 let camReverseHold = 0;
@@ -2383,7 +2594,6 @@ function resetCameraState(preserveRuntimeMode){
     if(GAME.state) GAME.state.runtimeActiveSceneCameraId = null;
   }
   dragging = false;
-  camMode = 0;
   camPitch = clamp(Number(CAM_CFG.freePitch) || .32, .05, 1.2);
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist || CAM_CFG.arcadeDistance || 9));
   camYaw = Math.atan2(-playerCameraForwardVector(camVisualForward).x, -camVisualForward.z) + THREE.MathUtils.degToRad(Number(CAM_CFG.freeYawOffset) || 0);
@@ -2398,7 +2608,6 @@ function resetCameraState(preserveRuntimeMode){
   lastCamVF = 0;
   lastCamVR = 0;
   lastCamDrifting = false;
-  userCamTimer = 0;
   camSnapNext = true;
 }
 function cycleGameplayCameraMode(){
@@ -2407,10 +2616,6 @@ function cycleGameplayCameraMode(){
   runtimeCameraMode = modes[(Math.max(0, modes.indexOf(current)) + 1) % modes.length];
   resetCameraState(true);
   if(GAME.pawns && GAME.pawns.list) GAME.pawns.list().forEach(pawn => { if(pawn) pawn.cameraRuntime = null; });
-  if(runtimeCameraMode === 'free'){
-    camMode = 1;
-    userCamTimer = 1e9;
-  }
   const labels = {free:'FREE CAMERA', arcade:'ARCADE CAMERA', cinematic:'CINEMATIC CAMERA'};
   popup(labels[runtimeCameraMode], '#9db4ff');
   return runtimeCameraMode;
@@ -2531,6 +2736,7 @@ function setCameraConfig(patch, reset){
 const LETTERBOX_COLOR = new THREE.Color(0x141518);
 let TOUCH_CONTROLS = null;
 let runtimePointerPlayerId = null;
+let runtimePointerLockArmed = false;
 function activeRuntimePlayerId(){
   const cameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
   const pawnId = cameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
@@ -2581,11 +2787,12 @@ function syncHudRect(css){
 }
 function shouldHideForFinalGameplayRender(node){
   const ud = node && node.userData || {};
+  const renderableHelper = !!(node && (node.isMesh || node.isLine || node.isPoints || node.isSprite || node.isLight));
   return !!(
     ud.helperOnly ||
     ud.colliderPreview ||
     ud.editorOnly ||
-    (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false)) ||
+    (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false) && renderableHelper) ||
     ud.editorCameraHelper ||
     ud.editorCameraHelperPick ||
     ud.editorLightHandle
@@ -2717,14 +2924,15 @@ function renderLocalMultiplayer(dt){
   GAME.state.runtimeVehicleCameraPawnId = previousPawnId;
   return true;
 }
-function requestRuntimeCameraPointerLock(){
+function requestRuntimeCameraPointerLock(armForPendingSession){
   if(!canvas.requestPointerLock || document.pointerLockElement === canvas) return;
+  runtimePointerLockArmed = !!armForPendingSession;
   runtimePointerPlayerId = activeRuntimePlayerId();
   canvas.dataset.pointerPlayerId = String(runtimePointerPlayerId);
   try {
     const result = canvas.requestPointerLock();
-    if(result && result.catch) result.catch(() => {});
-  } catch(err){}
+    if(result && result.catch) result.catch(() => { runtimePointerLockArmed = false; });
+  } catch(err){ runtimePointerLockArmed = false; }
 }
 function pointInRuntimeViewport(e){
   const playerId = activeRuntimePlayerId();
@@ -2781,13 +2989,16 @@ addEventListener('pointerup', () => dragging = false);
 addEventListener('pointerlockchange', () => {
   if(document.pointerLockElement !== canvas){
     dragging = false;
+    runtimePointerLockArmed = false;
     runtimePointerPlayerId = null;
     delete canvas.dataset.pointerPlayerId;
   }
 });
-function isCameraUiTarget(target){
-  return !!(target && target.closest && target.closest('#lkEditor, #settingsOverlay, #tunePanel, #radio, #overlay'));
-}
+addEventListener('pointerlockerror', () => {
+  runtimePointerLockArmed = false;
+  runtimePointerPlayerId = null;
+  delete canvas.dataset.pointerPlayerId;
+});
 function isGameplayOverlayOpen(){
   const menu = document.getElementById('overlay');
   const settings = document.getElementById('settingsOverlay');
@@ -2836,9 +3047,14 @@ function syncRuntimeCursorState(){
     document.body.classList.add('lk-free-camera-cursor-hidden');
   }
 }
-function runtimeCameraAllowsMouseLook(target){
+function runtimeCameraAllowsMouseLook(e){
   if(shouldShowRuntimeCursor()) return false;
-  return !isCameraUiTarget(target);
+  if(!e || runtimePointerLookUiTarget(e.target)) return false;
+  // In Play Preview the viewport is visually inside #lkEditor. Treating the
+  // whole editor root as UI made ordinary mouse movement inert until pointer
+  // lock was acquired with a click. Coordinates and explicit UI exclusions
+  // identify the real interactive viewport without stealing panel input.
+  return pointInRuntimeViewport(e);
 }
 function runtimeWheelBelongsToUi(target){
   if(!target || !target.closest) return false;
@@ -2857,18 +3073,24 @@ function viewportOwnsPointerEvent(e){
 });
 addEventListener('pointermove', e => {
   if(isEditorSimulationPreview()) return;
+  const aimingPawn=GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(activeRuntimePlayerId()):null;
+  const shotAiming=!!(aimingPawn&&aimingPawn.pawnType==='soccer'&&aimingPawn.adjustShotAim&&((aimingPawn.wantsShotAimInput&&aimingPawn.wantsShotAimInput())||aimingPawn.state&&aimingPawn.state.shotCharge));
   const freeMouseLook = !dragging && activeCameraMode() === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
-    !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e.target);
+    !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e);
   const locked = document.pointerLockElement === canvas;
   if(locked && runtimePointerPlayerId !== activeRuntimePlayerId()) return;
-  if((!dragging && !freeMouseLook && !locked) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
+  if((!dragging && !freeMouseLook && !locked&&!shotAiming) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
   const dx = locked ? (e.movementX || 0) : (dragging ? (e.clientX-lastMX) : (e.movementX || 0));
   const dy = locked ? (e.movementY || 0) : (dragging ? (e.clientY-lastMY) : (e.movementY || 0));
+  if(shotAiming){
+    aimingPawn.adjustShotAim(dx,dy);
+    lastMX=e.clientX;lastMY=e.clientY;
+    return;
+  }
   camYaw   -= dx*.005;
   camPitch += dy*.004;
   camPitch = Math.max(.05, Math.min(1.2, camPitch));
   lastMX = e.clientX; lastMY = e.clientY;
-  userCamTimer = (freeMouseLook || locked) ? 1.6 : 2.2;
 });
 addEventListener('wheel', e => {
   if(isEditorSimulationPreview()) return;
@@ -2935,9 +3157,10 @@ function updateCamera(dt){
   const mode = activeCameraMode();
   const cursorVisible = shouldShowRuntimeCursor();
   const runtimeCameraActive = !isEditorSimulationPreview() && runtimeSessionActive() && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
+  if(runtimeCameraActive) runtimePointerLockArmed = false;
   document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
   syncRuntimeCursorState();
-  if((!runtimeCameraActive || mode !== 'free') && document.pointerLockElement === canvas && document.exitPointerLock){
+  if(((!runtimeCameraActive && !runtimePointerLockArmed) || mode !== 'free') && document.pointerLockElement === canvas && document.exitPointerLock){
     try { document.exitPointerLock(); } catch(err){}
   }
   const focusAlpha = snap ? 1 : dampAlpha(mode === 'free' ? 13 : 16, dt);
@@ -2952,17 +3175,6 @@ function updateCamera(dt){
       camYaw -= lookX * 2.4 * dt;
       camPitch += lookY * 1.65 * dt;
       camPitch = Math.max(.05, Math.min(1.2, camPitch));
-      userCamTimer = 1.45;
-      camMode = 0;
-    }
-  }
-  if(mode === 'free' && camMode === 0 && !dragging){
-    userCamTimer -= dt;
-    if(userCamTimer <= 0){
-      // ease yaw back behind the car
-      const fwd = playerCameraForwardVector(camVisualForward);
-      const targetYaw = Math.atan2(-fwd.x, -fwd.z) + THREE.MathUtils.degToRad(Number(CAM_CFG.freeYawOffset) || 0);
-      camYaw += angleDelta(targetYaw, camYaw) * (snap ? 1 : dampAlpha(2.4, dt));
     }
   }
   let look = new THREE.Vector3(camFocus.x, camFocus.y + clamp(Number(CAM_CFG.lookHeight) || 1.1, .1, 6), camFocus.z);
@@ -3082,7 +3294,6 @@ addEventListener('keydown', e => {
     } else {
       document.body.classList.remove('lk-game-ui-cursor');
       document.body.classList.add('lk-free-camera-cursor-hidden');
-      userCamTimer = 1.6;
       if(activeCameraMode() === 'free') requestRuntimeCameraPointerLock();
     }
     popup(GAME.state.playPreviewCursorVisible ? 'PREVIEW CURSOR ON' : 'PREVIEW CURSOR OFF', '#9db4ff');
@@ -3103,7 +3314,7 @@ addEventListener('keydown', e => {
   if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
   if(key === 'u'){
     e.preventDefault();
-    toggleTunePanel();
+    if(activeLogicTuningPawn() || GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true) toggleTunePanel();
     return;
   }
   keys[key] = true;
@@ -3257,7 +3468,7 @@ function handleGamepadActions(){
       if(gamepadEdge(uiState, 'radioPlay', lastUiGamepadActions)) RADIO.togglePlay();
       if(gamepadEdge(uiState, 'radioNext', lastUiGamepadActions)) RADIO.next();
       if(gamepadEdge(uiState, 'radioPrev', lastUiGamepadActions)) RADIO.prev();
-      if(gamepadEdge(uiState, 'tuningMenu', lastUiGamepadActions)) toggleTunePanel();
+      if(gamepadEdge(uiState, 'tuningMenu', lastUiGamepadActions) && (activeLogicTuningPawn() || GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true)) toggleTunePanel();
       if(gamepadEdge(uiState, 'mute', lastUiGamepadActions)){
         const muted = SFX.toggleMute();
         popup(muted ? 'MUTED' : 'SOUND ON', '#9aa3b8');
@@ -3359,8 +3570,9 @@ function syncEditorSpawnFromPlayer(){
 }
 
 // ------------------------------------------------ local 3D models
-// Load order: ./models/*.glb first, optional ./models/*/scene.gltf fallback,
-// then procedural placeholders if no model can be loaded.
+// Parked props load local GLBs with an optional scene.gltf fallback. The
+// retired player fallback is no longer requested: the procedural vehicle is
+// used until the project or Asset Library assigns a player model.
 // You can also DRAG & DROP a .glb file onto the page to use it as the player car.
 const MODEL_ASSETS = window.LK_RUNTIME_MODEL_ASSETS.create({THREERef: THREE, car, isFileMode: IS_FILE_MODE});
 const gltfLoader = MODEL_ASSETS.gltfLoader;
@@ -3392,6 +3604,30 @@ function setPlayerModel(sceneRoot){
 PLAYER_MODEL.bindDrop(window);
 
 // ------------------------------------------------ RADIO (soundhud) + slow-motion
+function radioBindingActor(actorId){
+  const wanted = String(actorId || '').trim();
+  if(!wanted || !GAME.world || !GAME.world.registry) return null;
+  let match = null;
+  GAME.world.registry.forEach(object => {
+    if(match || !object) return;
+    const data = object.userData || {};
+    if(String(data.editorId || data.logicInstanceId || data.entityId || data.id || '') === wanted) match = object;
+  });
+  return match;
+}
+function radioRuntimeAvailable(config){
+  const cfg = config || {};
+  const mode = cfg.bindingMode === 'global' || cfg.bindingMode === 'actor' ? cfg.bindingMode : 'vehicle';
+  if(mode === 'global') return true;
+  if(mode === 'actor'){
+    const actor = radioBindingActor(cfg.bindingActorId);
+    return !!(actor && actor.visible !== false && !(actor.userData && actor.userData.hidden === true));
+  }
+  const pawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+  if(!pawn || pawn.enabled === false || pawn.hidden === true || pawn.possessed === false) return false;
+  const isVehicle = pawn.pawnType === 'vehicle' || pawn.kind === 'native-adapter' || pawn.id === 'native-player-car';
+  return !!(isVehicle && (!pawn.config || !pawn.config.radio || pawn.config.radio.enabled !== false));
+}
 const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
   paths: ASSETS,
   canvas,
@@ -3399,6 +3635,7 @@ const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
   popup,
   telemetry: () => ({speedKmh, lastLatG}),
   isRuntimeUiSuppressed: () => isEditorSimulationPreview(),
+  resolveAvailability: radioRuntimeAvailable,
 });
 
 // slow-motion state (radio open → super slow-mo)
@@ -3411,11 +3648,15 @@ const MENU_PREVIEW_MODE = window.__LK_MENU_PREVIEW === 'editor' || window.__LK_M
 const DEFAULT_MENU_MUSIC_TRACKS = [
   {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Menu default'},
 ];
-function createNoopMenuMusic(){
+const DEFAULT_LOADING_MUSIC_TRACKS = [
+  {url: ASSETS.menuMusic, title:'JUST WAIT', artist:'NUM0', fileName:'Num0  JustWait.mp3', source:'Loading default'},
+];
+function createNoopMenuMusic(role, tracks){
   const libApi = window.LK_RUNTIME_MUSIC_LIBRARY;
-  const library = libApi && libApi.create ? libApi.create(DEFAULT_MENU_MUSIC_TRACKS) : null;
+  const library = libApi && libApi.create ? libApi.create(tracks || DEFAULT_MENU_MUSIC_TRACKS) : null;
   let index = 0;
   return {
+    menuRole: role || 'menu',
     audio: null,
     bindAutoStart: function(){},
     bindButton: function(){},
@@ -3443,12 +3684,140 @@ function createNoopMenuMusic(){
   };
 }
 
-// menu music (loops on the start screen; starts at first interaction - browser policy)
-const MENU_MUSIC = IS_EMBEDDED_GAMEPLAY ? createNoopMenuMusic() : window.LK_RUNTIME_MENU_MUSIC.create({
-  tracks: DEFAULT_MENU_MUSIC_TRACKS,
-  popup,
-  getVolume: () => .55 * AUDIO.master * AUDIO.music,
-});
+function normalizeMenuMusicRole(role){
+  return role === 'editor-menu' ? 'editor-menu' : 'game-menu';
+}
+let editorMenuMusicTarget = '';
+function activeMenuMusicRole(explicitRole){
+  if(explicitRole === 'editor-menu' || explicitRole === 'game-menu') return explicitRole;
+  if(GAME.state && GAME.state.editorPreview && GAME.editor && GAME.editor.state){
+    return normalizeMenuMusicRole(GAME.editor.state.levelRole);
+  }
+  if(MENU_PREVIEW_MODE === 'editor') return 'editor-menu';
+  if(MENU_PREVIEW_MODE === 'game') return 'game-menu';
+  if(GAME.state && GAME.state.menuBackgroundLevel && GAME.state.menuBackgroundLevel.role){
+    return normalizeMenuMusicRole(GAME.state.menuBackgroundLevel.role);
+  }
+  if(GAME.state && GAME.state.editorActive && editorMenuMusicTarget){
+    return normalizeMenuMusicRole(editorMenuMusicTarget);
+  }
+  if(GAME.editor && GAME.editor.state && GAME.editor.state.levelRole === 'editor-menu') return 'editor-menu';
+  return 'game-menu';
+}
+function createMenuMusicForRole(role){
+  if(IS_EMBEDDED_GAMEPLAY) return createNoopMenuMusic(role);
+  return window.LK_RUNTIME_MENU_MUSIC.create({
+    role,
+    tracks: DEFAULT_MENU_MUSIC_TRACKS,
+    popup,
+    getVolume: () => .55 * AUDIO.master * AUDIO.music,
+  });
+}
+const EDITOR_MENU_MUSIC = createMenuMusicForRole('editor-menu');
+const GAME_MENU_MUSIC = createMenuMusicForRole('game-menu');
+const LOADING_MUSIC = IS_EMBEDDED_GAMEPLAY
+  ? createNoopMenuMusic('loading', DEFAULT_LOADING_MUSIC_TRACKS)
+  : window.LK_RUNTIME_MENU_MUSIC.create({
+      role:'loading',
+      tracks:DEFAULT_LOADING_MUSIC_TRACKS,
+      popup,
+      getVolume:() => .55 * AUDIO.master * AUDIO.music,
+    });
+function menuMusicForRole(role){
+  return normalizeMenuMusicRole(role) === 'editor-menu' ? EDITOR_MENU_MUSIC : GAME_MENU_MUSIC;
+}
+function createMenuMusicController(){
+  let button = null;
+  let playbackEpoch = 0;
+  function current(role){ return menuMusicForRole(activeMenuMusicRole(role)); }
+  function pauseOthers(role){
+    const selected = current(role);
+    [EDITOR_MENU_MUSIC, GAME_MENU_MUSIC].forEach(music => {
+      if(music !== selected && music.pause) music.pause();
+    });
+    return selected;
+  }
+  function syncButton(){
+    if(!button) return;
+    const audio = current().audio;
+    const off = !audio || audio.paused;
+    button.textContent = off ? '♪ MUSIC OFF' : '♪ MUSIC ON';
+    button.classList.toggle('off', off);
+  }
+  const controller = {
+    menuRole:'menu-controller',
+    setEditorTarget(role){
+      editorMenuMusicTarget = normalizeMenuMusicRole(role);
+      syncButton();
+      return editorMenuMusicTarget;
+    },
+    getEditorTarget:() => activeMenuMusicRole(),
+    forRole:menuMusicForRole,
+    play(role){
+      playbackEpoch += 1;
+      const music = pauseOthers(role);
+      return Promise.resolve(music.play ? music.play() : null).then(() => { syncButton(); });
+    },
+    pause(){
+      [EDITOR_MENU_MUSIC, GAME_MENU_MUSIC].forEach(music => { if(music.pause) music.pause(); });
+      syncButton();
+    },
+    fadeOut(duration){
+      return Promise.all([EDITOR_MENU_MUSIC, GAME_MENU_MUSIC].map(music =>
+        music.fadeOut ? music.fadeOut(duration) : (music.pause && music.pause())
+      )).then(() => { syncButton(); });
+    },
+    stopAndReset(duration){
+      const stopEpoch = ++playbackEpoch;
+      return controller.fadeOut(duration).then(() => {
+        if(stopEpoch !== playbackEpoch) return;
+        [EDITOR_MENU_MUSIC, GAME_MENU_MUSIC].forEach(music => {
+          const audio = music && music.audio;
+          if(!audio || !audio.paused) return;
+          try { audio.currentTime = 0; } catch(err){}
+        });
+        syncButton();
+      });
+    },
+    toggle(){
+      const music = current();
+      const audio = music.audio;
+      const result = audio && !audio.paused ? (music.pause(), Promise.resolve()) : controller.play();
+      return Promise.resolve(result).then(() => { syncButton(); });
+    },
+    bindButton(el){
+      if(!el) return;
+      button = el;
+      button.addEventListener('click', controller.toggle);
+      syncButton();
+    },
+    bindAutoStart(overlay, isStarted){
+      if(!overlay) return;
+      overlay.addEventListener('pointerdown', () => {
+        if(GAME.state && GAME.state.editorActive) return;
+        const audio = current().audio;
+        if(!(isStarted && isStarted()) && audio && audio.paused) controller.play().catch(() => {});
+      }, {once:true});
+    },
+    syncButton,
+    setVolume(value){
+      [EDITOR_MENU_MUSIC, GAME_MENU_MUSIC].forEach(music => { if(music.setVolume) music.setVolume(value); });
+    },
+    getTracks(options){ const music = current(); return music.getTracks ? music.getTracks(options) : []; },
+    addTracks(files){ const music = current(); return music.addTracks ? music.addTracks(files) : Promise.resolve([]); },
+    removeTrack(index){ const music = current(); return music.removeTrack ? music.removeTrack(index) : null; },
+    moveTrack(index, direction){ const music = current(); return music.moveTrack ? music.moveTrack(index, direction) : null; },
+    renameTrack(index, title){ const music = current(); return music.renameTrack ? music.renameTrack(index, title) : null; },
+    restoreTracks(tracks){ const music = current(); return music.restoreTracks ? music.restoreTracks(tracks) : Promise.resolve([]); },
+    getStoredTracks(){ const music = current(); return music.getStoredTracks ? music.getStoredTracks() : []; },
+    loadTrack(index, autoplay){ const music = pauseOthers(); return music.loadTrack ? music.loadTrack(index, autoplay) : null; },
+  };
+  Object.defineProperty(controller, 'audio', {enumerable:true, get(){ return current().audio; }});
+  return controller;
+}
+// Editor Menu and Game Menu keep independent ordered libraries. The active
+// role owns playback; the game radio is reserved for gameplay levels.
+const MENU_MUSIC = createMenuMusicController();
 initSettingsMenu();
 applyAudioSettings();
 
@@ -3482,8 +3851,8 @@ function enterGameplayMode(){ if(GAME_FLOW) GAME_FLOW.enterGameplayMode(); }
 function beginGameplaySession(editorPreview, editorPreviewMode){ if(GAME_FLOW) GAME_FLOW.beginGameplaySession(editorPreview, editorPreviewMode); }
 function stopEditorPreview(){ if(GAME_FLOW) GAME_FLOW.stopEditorPreview(); }
 function backToMainMenu(){ if(GAME_FLOW) GAME_FLOW.backToMainMenu(); }
-function startGame(){ if(GAME_FLOW) { GAME_FLOW.startGame(); } }
-function startEditorPreview(mode){ if(GAME_FLOW) GAME_FLOW.startEditorPreview(mode); }
+function startGame(){ return GAME_FLOW ? GAME_FLOW.startGame() : Promise.resolve(false); }
+function startEditorPreview(mode){ return GAME_FLOW ? GAME_FLOW.startEditorPreview(mode) : Promise.resolve(false); }
 function launchLevel(levelId){
   // livelli della libreria editor: se serve, lo store attiva il livello
   // scelto (ed eventualmente ricarica la pagina quando la scena è già applicata)
@@ -3552,6 +3921,7 @@ function preloadMenuShell(){
   const setMenuProgress = (pct, label, detail) => {
     const value = Math.max(0, Math.min(100, Number(pct) || 0));
     if(loadBar) loadBar.style.width = value + '%';
+    if(loadBar && loadBar.parentElement) loadBar.parentElement.classList.toggle('complete', value >= 100);
     if(loadTxt) loadTxt.textContent = progressText(label, value, detail);
     if(MENU_PREVIEW_MODE && window.parent && window.parent !== window){
       window.parent.postMessage({
@@ -3578,6 +3948,34 @@ function preloadMenuShell(){
         level: GAME.state && GAME.state.menuBackgroundLevel || null,
       }, '*');
     }
+  };
+  const postMenuMusicSelection = () => {
+    if(!IS_EMBEDDED_GAMEPLAY || !window.parent || window.parent === window) return;
+    const backgroundRole = GAME.state && GAME.state.menuBackgroundLevel && GAME.state.menuBackgroundLevel.role;
+    const role = backgroundRole || (MENU_PREVIEW_MODE === 'editor' ? 'editor-menu' : 'game-menu');
+    const music = menuMusicForRole(role);
+    const tracks = music && music.getTracks ? music.getTracks({sort:'order', dir:'asc'}) : [];
+    const first = tracks && tracks[0];
+    const loadingTracks = LOADING_MUSIC && LOADING_MUSIC.getTracks
+      ? LOADING_MUSIC.getTracks({sort:'order', dir:'asc'})
+      : [];
+    const loadingFirst = loadingTracks && loadingTracks[0];
+    window.parent.postMessage({
+      type:'lot-king:menu-music-selection',
+      role:normalizeMenuMusicRole(role),
+      track:first ? {
+        url:first.url || '',
+        title:first.title || '',
+        artist:first.artist || '',
+        order:first.order == null ? 1 : first.order,
+      } : null,
+      loadingTrack:loadingFirst ? {
+        url:loadingFirst.url || '',
+        title:loadingFirst.title || '',
+        artist:loadingFirst.artist || '',
+        order:loadingFirst.order == null ? 1 : loadingFirst.order,
+      } : null,
+    }, '*');
   };
   const waitForMenuBackgroundPaint = hasBackground => {
     if(!hasBackground) return Promise.resolve(false);
@@ -3623,6 +4021,7 @@ function preloadMenuShell(){
   Promise.all(tasks).then(results => {
     const hasRoleBackground = results.some(Boolean) || !!(GAME.state && GAME.state.menuBackgroundLevel);
     setMenuProgress(100, hasRoleBackground ? 'menu role level ready' : 'menu ready');
+    postMenuMusicSelection();
     postMenuBackgroundReady(hasRoleBackground);
     setTimeout(() => {
       if(GAME.state.editorActive){
@@ -3698,6 +4097,7 @@ if(!editorWorkspacePending) preloadMenuShell();
 else {
   if(loadTxt) loadTxt.textContent = GAME.i18n.pick('Choose a project to begin', 'Scegli un progetto per iniziare');
   if(loadBar) loadBar.style.width = '0%';
+  if(loadBar && loadBar.parentElement) loadBar.parentElement.classList.remove('complete');
 }
 RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
   loading: LOADING,
@@ -3724,6 +4124,20 @@ RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
   setHighBeams: v => PLAYER_LIGHT_RIG.setHighBeams(v),
   renderGameplayCamera: renderPlayerCamera,
   updatePlayerLights,
+  warmPhysics:() => {
+    if(!initPhysicsWorld()) return false;
+    rebuildPhysicsStatics();
+    setPhysicsPlayerActive(!GAME.player || GAME.player.enabled !== false);
+    if(PHYS.carBody) syncCarBodyToPlayer();
+    return true;
+  },
+  runWarmupHooks:context => {
+    const hooks = GAME.hooks && Array.isArray(GAME.hooks.warmup) ? GAME.hooks.warmup.slice() : [];
+    return hooks.reduce((chain, hook) => chain.then(() => typeof hook === 'function' ? hook(context) : null), Promise.resolve());
+  },
+  setVideoWarmProfile:active => VIDEO_SETTINGS.setWarmProfile(active),
+  applyAdaptiveLow:report => VIDEO_SETTINGS.applyAdaptiveLow(report),
+  schedulePipelineWarmup:() => RENDERING_BACKEND&&RENDERING_BACKEND.scheduleWarmup?RENDERING_BACKEND.scheduleWarmup(renderer,scene,camera,{timeout:1800}):null,
   getSceneReady: () => window.LK_STORE && (window.LK_STORE.ensureApplied ? window.LK_STORE.ensureApplied(GAME) : window.LK_STORE.ready),
 });
 
@@ -3739,14 +4153,22 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   clearInput: () => { for(const k of Object.keys(keys)) keys[k] = false; },
   pauseRadio: () => {
     RADIO.toggleOpen(false);
-    RADIO.audio.pause();
+    if(RADIO.stop) RADIO.stop();
+    else RADIO.audio.pause();
     try { RADIO.audio.currentTime = 0; } catch(err){}
     ENGINE_AUDIO.stop();
     if(SFX.stopEngineSynth) SFX.stopEngineSynth();
   },
   beginRadio: () => {
     RADIO.begin();
-    RADIO.audio.play().catch(()=>{});
+  },
+  currentLevelRole: () => {
+    const editorRole = GAME.editor && GAME.editor.state && GAME.editor.state.levelRole;
+    if(GAME.state && (GAME.state.editorActive || GAME.state.editorPreview) && editorRole) return editorRole;
+    const current = TRACK_CATALOG.current();
+    if(current && current.levelRole) return current.levelRole;
+    const background = GAME.state && GAME.state.menuBackgroundLevel;
+    return background && background.role || 'gameplay';
   },
   previewRadioHud: visible => {
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(visible);
@@ -3763,17 +4185,31 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   },
   clearFrameOverride: () => { GAME.hooks.frameOverride = null; },
   setDragging: value => { dragging = !!value; },
+  armFreeCamera: () => {
+    if(activeCameraMode() !== 'free') return false;
+    requestRuntimeCameraPointerLock(true);
+    return true;
+  },
+  disarmFreeCamera: () => {
+    runtimePointerLockArmed = false;
+    if(document.pointerLockElement === canvas && document.exitPointerLock){
+      try { document.exitPointerLock(); } catch(err){}
+    }
+  },
   resetGameplayCamera: resetCameraState,
   refreshTouchControls,
   setSettingsOpen,
   setTuneOpen,
-  initGameplayPhysics: () => {
+  initGameplayPhysics: context => {
+    const menuSession = !!(context && context.menuSession);
     if(initPhysicsWorld()){
       rebuildPhysicsStatics();
-      syncCarBodyToPlayer();
+      setPhysicsPlayerActive(!menuSession && (!GAME.player || GAME.player.enabled !== false));
+      if(PHYS.carBody) syncCarBodyToPlayer();
     }
     SFX.init();
-    ENGINE_AUDIO.start();   // sample engine + accensione (fallback synth se set assente)
+    if(!menuSession && GAME.player && GAME.player.enabled !== false) ENGINE_AUDIO.start();   // sample engine + accensione (fallback synth se set assente)
+    else ENGINE_AUDIO.stop();
   },
   beginLogicRuntime: () => { if(GAME.systems && GAME.systems.logic && GAME.systems.logic.rebuild) GAME.systems.logic.rebuild(); },
   stopLogicRuntime: () => { if(GAME.systems && GAME.systems.logic && GAME.systems.logic.dispose) GAME.systems.logic.dispose(); },
@@ -3781,7 +4217,15 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
     if(MENU_MUSIC.fadeOut) return MENU_MUSIC.fadeOut(2200);
     return MENU_MUSIC.pause();
   },
-  playMenuMusic: () => MENU_MUSIC.play().catch(()=>{}),
+  stopMenuMusic: () => {
+    if(MENU_MUSIC.stopAndReset) return MENU_MUSIC.stopAndReset(2200);
+    MENU_MUSIC.pause();
+    const audio = MENU_MUSIC.audio;
+    if(audio){
+      try { audio.currentTime = 0; } catch(err){}
+    }
+  },
+  playMenuMusic: role => MENU_MUSIC.play(role).catch(()=>{}),
   setMenuBusy: RUNTIME_LOADER.setBusy,
   requestHostMenu: () => {
     if(!IS_EMBEDDED_GAMEPLAY || MENU_PREVIEW_MODE || !window.parent || window.parent === window) return false;
@@ -3803,6 +4247,7 @@ Object.assign(GAME.assets, {
   setLoadingStage: RUNTIME_LOADER.setLoadingStage,
   finishLoading: RUNTIME_LOADER.finishLoading,
   failLoading: RUNTIME_LOADER.failLoading,
+  benchmark: RUNTIME_LOADER.benchmark,
 });
 GAME.levels = {
   available: TRACK_CATALOG.available(),
@@ -3863,8 +4308,8 @@ Object.assign(GAME.world, {
 });
 Object.assign(GAME.player, {
   car,
-  enabled: true,
-  hidden: false,
+  enabled: false,
+  hidden: true,
   controllerIndex: 0,
   setControllerIndex(index){
     this.controllerIndex = index == null || index === 'none' ? null : Math.max(0, Math.min(3, Number(index) | 0));
@@ -3875,17 +4320,38 @@ Object.assign(GAME.player, {
   },
   setEnabled(value){
     this.enabled = value !== false;
-    if(!this.enabled && PHYS.carBody){
-      PHYS.carBody.velocity.set(0,0,0);
-      PHYS.carBody.angularVelocity.set(0,0,0);
-      if(PHYS.carBody.sleep) PHYS.carBody.sleep();
-    } else if(this.enabled && PHYS.carBody && PHYS.carBody.wakeUp){
-      PHYS.carBody.wakeUp();
+    this.hidden = !this.enabled;
+    car.visible = this.enabled && !this.hidden;
+    if(PHYS.world && setPhysicsPlayerActive){
+      setPhysicsPlayerActive(this.enabled);
+      if(this.enabled && PHYS.carBody) syncCarBodyToPlayer();
+    }
+    if(!this.enabled){
+      P.vel.set(0,0,0);
+      P.vF = 0; P.vR = 0; P.yawRate = 0; P.steer = 0;
+      speedKmh = 0; lastCamVF = 0; lastCamVR = 0; lastCamDrifting = false;
+      tireSmokeHeat = 0;
+      resetEngine();
+      PLAYER_LIGHT_RIG.setHighBeams(false);
+      ENGINE_AUDIO.stop();
+      if(SFX.stopEngineSynth) SFX.stopEngineSynth();
+      exhaustSmokeAcc = 0;
+      exhaustFireAcc = 0;
+      exhaustTestPulse = 0;
+      resetExhaustFireEdges();
+      for(const p of exhaustPool){p.life=p.max;p.s.visible=false;p.flame.visible=false;p.smokeMaterial.opacity=0;p.fireMaterial.opacity=0;}
+      for(const rig of playerExhaustRig.sources)if(rig&&rig.helper)rig.helper.visible=false;
+      for(const rig of playerSkidRig.sources)if(rig&&rig.helper)rig.helper.visible=false;
+    } else if((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview){
+      ENGINE_AUDIO.start();
+    }
+    if(typeof window!=='undefined'&&window.dispatchEvent&&window.CustomEvent){
+      window.dispatchEvent(new CustomEvent('lotking:nativeplayeractivechange',{detail:{active:this.enabled,hidden:this.hidden}}));
     }
     if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer();
     return this.enabled;
   },
-  setHidden(value){ this.hidden = value === true; car.visible = !this.hidden; if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer(); return this.hidden; },
+  setHidden(value){ this.setEnabled(value !== true); return this.hidden; },
   visual: carVisual,
   wheels,
   physics: P,
@@ -3941,7 +4407,7 @@ Object.assign(GAME.player, {
   updateExhaust: updatePlayerExhaust,
   testExhaust: testPlayerExhaust,
   vehicleEffects: Object.freeze({
-    spawnExhaust(anchor, fire, intensity, velocity){ spawnExhaustParticle(anchor, fire === true, intensity, velocity); },
+    spawnExhaust(anchor, fire, intensity, velocity, config){ spawnExhaustParticle(anchor, fire === true, intensity, velocity, config || PLAYER_EXHAUST_CFG); },
     spawnTireSmoke(point, intensity, config){
       if(!point) return;
       spawnSmoke(new THREE.Vector3(point.x, point.y, point.z), intensity, config || {});
@@ -3965,20 +4431,10 @@ Object.assign(GAME.systems, {
   engineAudio: ENGINE_AUDIO,
   rain: RAIN,
   radio: RADIO,
-  menuMusic: {
-    audio: MENU_MUSIC.audio,
-    play: MENU_MUSIC.play,
-    pause: MENU_MUSIC.pause,
-    toggle: MENU_MUSIC.toggle,
-    setVolume: MENU_MUSIC.setVolume,
-    getTracks: MENU_MUSIC.getTracks,
-    addTracks: MENU_MUSIC.addTracks,
-    removeTrack: MENU_MUSIC.removeTrack,
-    restoreTracks: MENU_MUSIC.restoreTracks,
-    getStoredTracks: MENU_MUSIC.getStoredTracks,
-    loadTrack: MENU_MUSIC.loadTrack,
-    fadeOut: MENU_MUSIC.fadeOut,
-  },
+  menuMusic: MENU_MUSIC,
+  loadingMusic: LOADING_MUSIC,
+  editorMenuMusic: EDITOR_MENU_MUSIC,
+  gameMenuMusic: GAME_MENU_MUSIC,
   sky: SKY,
   rig: RIG,
   post: POST,
@@ -3998,6 +4454,17 @@ Object.assign(GAME.systems, {
 });
 Object.assign(GAME.actions, {
   start: startGame,
+  armFreeCamera: () => {
+    if(activeCameraMode() !== 'free') return false;
+    requestRuntimeCameraPointerLock(true);
+    return true;
+  },
+  disarmFreeCamera: () => {
+    runtimePointerLockArmed = false;
+    if(document.pointerLockElement === canvas && document.exitPointerLock){
+      try { document.exitPointerLock(); } catch(err){}
+    }
+  },
   chooseLevel: showLevelSelect,
   launchLevel,
   startEditorPreview,
@@ -4031,10 +4498,15 @@ Object.assign(GAME.settings, {
   getVideoProject: VIDEO_SETTINGS.getProjectConfig,
   setVideoProject: VIDEO_SETTINGS.setProjectConfig,
   menuMusic: MENU_MUSIC.audio,
+  loadingMusic: LOADING_MUSIC.audio,
   setAudioOpen: setSettingsOpen,
   toggleAudio: toggleSettingsMenu,
   setTuningOpen: setTuneOpen,
   toggleTuning: toggleTunePanel,
+  renderingBackend:RENDERING_BACKEND||null,
+  getRenderingReport:()=>RENDERING_BACKEND?RENDERING_BACKEND.describe(renderer):null,
+  getPreBenchmarkReport:()=>RUNTIME_LOADER&&RUNTIME_LOADER.benchmark?RUNTIME_LOADER.benchmark.report():null,
+  getVideoBenchmarkPreference:VIDEO_SETTINGS.benchmarkPreference,
 });
 
 // ------------------------------------------------ main loop
@@ -4053,32 +4525,35 @@ function stepGameplayFrame(dt, shouldRender){
   // super slow-motion while the radio is open (smooth in/out)
   TS.cur += (TS.target - TS.cur) * Math.min(1, dt*4);
   const sdt = dt * TS.cur;
+  const nativePlayerActive = !!(GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true);
 
   const {vF, vR, drifting} = updateCar(sdt);
   lastCamVF = vF;
   lastCamVR = vR;
   lastCamDrifting = drifting;
-  updatePlayerLights();
+  if(nativePlayerActive) updatePlayerLights();
   updatePlayerExhaust(sdt);
-  updateScoring(sdt, drifting);
-  PLAYER_DATA_WIDGETS.update();
+  if(nativePlayerActive) updateScoring(sdt, drifting);
+  if(nativePlayerActive) PLAYER_DATA_WIDGETS.update();
   WORLD_STATE.updatePhysicsObjects(sdt);
 
   // Tire mark decals: drift, braking, wheelspin, burnout and spinout all feed
   // the same ground marks; intensity controls both density and opacity.
   const slide = Math.min(1, Math.abs(vR)/12);
   const driveFx = readDriveInput();
+  const groundedWheelCount = PHYS.vehicle ? wheelsOnGround() : 4;
+  const hasTireContact = nativePlayerActive && groundedWheelCount > 0;
   const speed01 = clamp(speedKmh / 120, 0, 1);
   const tireRotation01 = clamp(Math.abs(vF) / 28, 0, 1);
   const yawSpin = clamp(Math.abs(P.yawRate || 0) / 2.8, 0, 1);
   const gSlip = clamp((lastLatG || 0) / .75, 0, 1);
   const decelSlip = clamp(Math.max(0, -axPrev) / (G_ACC * .72), 0, 1);
   const accelForce = clamp(Math.max(0, axPrev) / (G_ACC * .95), 0, 1);
-  const brakeSlip = driveFx.brake > .05 && !ENGINE.reverseActive && speedKmh > 16;
-  const burnoutSlip = !!ENGINE.burnout && !ENGINE.reverseActive;
+  const brakeSlip = hasTireContact && driveFx.brake > .05 && !ENGINE.reverseActive && speedKmh > 16;
+  const burnoutSlip = hasTireContact && !!ENGINE.burnout && !ENGINE.reverseActive;
   const accelSlip = (ENGINE.throttle || 0) > .55 && !ENGINE.reverseActive &&
-    speedKmh > 2 && speedKmh < 26 && (ENGINE.rpm01 || 0) > .4;
-  const lateralSlip = (drifting || (handbrake && speedKmh > 15)) && speedKmh > 12;
+    hasTireContact && speedKmh > 2 && speedKmh < 26 && (ENGINE.rpm01 || 0) > .4;
+  const lateralSlip = hasTireContact && (drifting || (handbrake && speedKmh > 15)) && speedKmh > 12;
   const driveWheelMismatch = clamp(
     ((ENGINE.rpm01 || 0) * Math.max(.25, ENGINE.throttle || 0)) + (burnoutSlip ? .55 : 0) - tireRotation01 * .68 - speed01 * .18,
     0,
@@ -4096,21 +4571,25 @@ function stepGameplayFrame(dt, shouldRender){
     accelSlip ? clamp(.22 + driveWheelMismatch * .62 + (ENGINE.rpm01 || 0) * .28 + accelForce * .34 + slide * .18, 0, 1) : 0
   );
   const frontWheelSlip = Math.max(allWheelSlip, brakeSlip ? decelSlip : 0);
-  const skidAudioDrift = Math.max(lateralSlip ? Math.min(1, .35 + slide * .8) : 0, spinoutSlip > .42 ? spinoutSlip : 0);
+  const skidAudioDrift = hasTireContact ? Math.max(lateralSlip ? Math.min(1, .35 + slide * .8) : 0, spinoutSlip > .42 ? spinoutSlip : 0) : 0;
   const skidAudioBrake = brakeSlip ? Math.min(1, .34 + driveFx.brake * .42 + speedKmh / 170 + decelSlip * .36) : 0;
   const skidAudioAccel = Math.max(
     accelSlip ? Math.min(1, .28 + driveWheelMismatch * .56 + (ENGINE.rpm01 || 0) * .32 + accelForce * .2) : 0,
     burnoutSlip ? Math.min(1, .62 + (ENGINE.rpm01 || 0) * .3) : 0
   );
   const tireSmokeAmount = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeAmount)) ? Number(PLAYER_SKID_CFG.smokeAmount) : .28, 0, 4);
-  const tireSmokeThreshold = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeThreshold)) ? Number(PLAYER_SKID_CFG.smokeThreshold) : .35, 0, 1);
-  const tireSmokeMinHeat = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeMinHeat)) ? Number(PLAYER_SKID_CFG.smokeMinHeat) : .3, 0, 1);
-  const tireSmokeHeatRate = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeHeatRate)) ? Number(PLAYER_SKID_CFG.smokeHeatRate) : .75);
-  const tireSmokeCoolRate = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeCoolRate)) ? Number(PLAYER_SKID_CFG.smokeCoolRate) : .4);
+  const tireSmokeThreshold = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeThreshold)) ? Number(PLAYER_SKID_CFG.smokeThreshold) : .42, 0, 1);
+  const tireSmokeMinHeat = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeMinHeat)) ? Number(PLAYER_SKID_CFG.smokeMinHeat) : .58, 0, 1);
+  const tireSmokeHeatRate = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeHeatRate)) ? Number(PLAYER_SKID_CFG.smokeHeatRate) : .38);
+  const tireSmokeCoolRate = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeCoolRate)) ? Number(PLAYER_SKID_CFG.smokeCoolRate) : .32);
+  const tireSmokeMinSpeed = Math.max(0, Number.isFinite(Number(PLAYER_SKID_CFG.smokeMinSpeedKmh)) ? Number(PLAYER_SKID_CFG.smokeMinSpeedKmh) : 24);
+  const tireSmokeMinSlipAngle = clamp(Number.isFinite(Number(PLAYER_SKID_CFG.smokeMinSlipAngle)) ? Number(PLAYER_SKID_CFG.smokeMinSlipAngle) : .14, 0, Math.PI / 2);
+  const tireSlipAngle = Math.atan2(Math.abs(vR), Math.max(2, Math.abs(vF)));
+  const driftSmokeCause = PLAYER_SKID_CFG.smokeOnDrift !== false && (lateralSlip || spinoutSlip > .42) && speedKmh >= tireSmokeMinSpeed && tireSlipAngle >= tireSmokeMinSlipAngle;
+  const brakeSmokeCause = PLAYER_SKID_CFG.smokeOnBrake !== false && brakeSlip && speedKmh >= Math.max(30, tireSmokeMinSpeed);
+  const accelerationSmokeCause = PLAYER_SKID_CFG.smokeOnAcceleration !== false && (burnoutSlip || (accelSlip && speedKmh >= Math.min(12, tireSmokeMinSpeed) && driveWheelMismatch >= .4));
   const tireSmokeCauseActive = (
-    (PLAYER_SKID_CFG.smokeOnDrift !== false && (lateralSlip || spinoutSlip > .42)) ||
-    (PLAYER_SKID_CFG.smokeOnBrake !== false && brakeSlip) ||
-    (PLAYER_SKID_CFG.smokeOnAcceleration !== false && (accelSlip || burnoutSlip))
+    hasTireContact && (driftSmokeCause || brakeSmokeCause || accelerationSmokeCause)
   );
   const tireSmokeSlip = tireSmokeCauseActive ? Math.max(rearWheelSlip, frontWheelSlip) : 0;
   const tireSmokeWork = tireSmokeSlip > .15
@@ -4122,7 +4601,7 @@ function stepGameplayFrame(dt, shouldRender){
     tireSmokeCoolRate * (1 - tireSmokeWork * .65)
   ), 0, 1);
   const tireSmokeActive = PLAYER_SKID_CFG.smokeEnabled !== false && tireSmokeAmount > 0 && tireSmokeCauseActive && tireSmokeHeat >= tireSmokeMinHeat;
-  if(lateralSlip || brakeSlip || accelSlip || burnoutSlip || spinoutSlip > .42){
+  if(hasTireContact && (lateralSlip || brakeSlip || accelSlip || burnoutSlip || spinoutSlip > .42)){
     const activeSkids = playerSkidRig.sources
       .map((rig, i) => ({rig, cfg:PLAYER_SKID_CFG.sources[i]}))
       .filter(item => item.rig && item.rig.anchor && item.cfg && item.cfg.enabled !== false);
@@ -4131,6 +4610,7 @@ function stepGameplayFrame(dt, shouldRender){
       for(const item of activeSkids){
         const idx = item.rig.anchor.userData.skidIndex;
         const wheel = skidWheelKey(idx, item.cfg);
+        if(!nativeSkidWheelInContact(wheel)) continue;
         const slipAmount = clamp(isFrontSkidWheel(wheel) ? frontWheelSlip : (isRearSkidWheel(wheel) ? rearWheelSlip : allWheelSlip), 0, 1);
         if(slipAmount < tireSmokeThreshold && slipAmount < .08) continue;
         const anchor = item.rig.anchor;
@@ -4153,7 +4633,11 @@ function stepGameplayFrame(dt, shouldRender){
         {z:1.35, s:-1, slip:frontWheelSlip},
         {z:1.35, s:1, slip:frontWheelSlip},
       ];
-      for(const src of fallback){
+      const fallbackWheelIndices = [2, 3, 0, 1];
+      for(let fallbackIndex = 0; fallbackIndex < fallback.length; fallbackIndex++){
+        const src = fallback[fallbackIndex];
+        const wheelInfoIndex = fallbackWheelIndices[fallbackIndex];
+        if(PHYS.vehicle && !(PHYS.vehicle.wheelInfos[wheelInfoIndex] && PHYS.vehicle.wheelInfos[wheelInfoIndex].isInContact)) continue;
         const slipAmount = clamp(src.slip, 0, 1);
         if(slipAmount < tireSmokeThreshold && slipAmount < .08) continue;
         const wp = P.pos.clone().addScaledVector(fwd, src.z).addScaledVector(side, src.s*.92);
@@ -4171,7 +4655,7 @@ function stepGameplayFrame(dt, shouldRender){
   const playerCameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
   const playerOneLogicCameraId = playerCameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
   const playerOneLogicCameraPawn = playerOneLogicCameraId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(playerOneLogicCameraId) : null;
-  if(!(playerOneLogicCameraPawn && playerOneLogicCameraPawn.kind === 'logic-element' && playerOneLogicCameraPawn.possessed && playerOneLogicCameraPawn.hidden !== true)){
+  if(nativePlayerActive && !(playerOneLogicCameraPawn && playerOneLogicCameraPawn.kind === 'logic-element' && playerOneLogicCameraPawn.possessed && playerOneLogicCameraPawn.hidden !== true)){
     updateCamera(dt);                     // native camera only when it owns Player 1
   }
   updateSceneCameraOverride(dt);          // level/cinema camera owns the final Player 1 frame
@@ -4183,17 +4667,20 @@ function stepGameplayFrame(dt, shouldRender){
   // sgommate → engine audio: stessi flag delle skid mark, cosi' suono e segni
   // partono e finiscono insieme; lo screech del synth resta come fallback
   const skidByEngineAudio = ENGINE_AUDIO.handlesSkids();
-  ENGINE_AUDIO.setSkids({
+  ENGINE_AUDIO.setSkids(nativePlayerActive ? {
     drift: skidAudioDrift * TS.cur,
     brake: skidAudioBrake * TS.cur,
     accel: skidAudioAccel * TS.cur,
-  });
-  const screech01 = skidByEngineAudio ? 0 : (drifting || (handbrake && speedKmh>15) ? Math.min(1,.3+slide) : 0);
-  SFX.update(rpm01 * TS.cur, throttle * TS.cur, screech01 * TS.cur);
+  } : {drift:0, brake:0, accel:0});
+  const screech01 = nativePlayerActive && !skidByEngineAudio ? (drifting || (handbrake && speedKmh>15) ? Math.min(1,.3+slide) : 0) : 0;
+  SFX.update(nativePlayerActive ? rpm01 * TS.cur : 0, nativePlayerActive ? throttle * TS.cur : 0, screech01 * TS.cur);
+  ENGINE_AUDIO.setMuted(!nativePlayerActive);
   ENGINE_AUDIO.update(sdt);
 
   const hudPawnId = GAME.state && GAME.state.runtimeVehicleCameraPawnId;
-  const hudPawn = hudPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(hudPawnId) : null;
+  const cameraHudPawn = hudPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(hudPawnId) : null;
+  const possessedHudPawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+  const hudPawn = cameraHudPawn && cameraHudPawn.possessed && cameraHudPawn.hidden !== true ? cameraHudPawn : possessedHudPawn;
   const hudState = hudPawn && hudPawn.state || null;
   const hudPlayerId = hudPawn && hudPawn.playerId || (playerControllerIndex() >= 0 ? playerControllerIndex() + 1 : 1);
   const hudSpeedKmh = hudState ? Number(hudState.speedKmh) || 0 : speedKmh;
@@ -4203,8 +4690,34 @@ function stepGameplayFrame(dt, shouldRender){
     : ((ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1));
   const modeLabel = DRIVE_TUNING.getMode ? DRIVE_TUNING.getMode() : 'custom';
   const playerTelemetry = hudState ? Object.assign({}, hudState, {speedKmh:hudSpeedKmh}) : null;
+  const hudContext = hudPawn && hudPawn.pawnType === 'soccer'
+    ? 'soccer'
+    : (hudPawn && hudPawn.pawnType === 'character' ? 'character' : 'vehicle');
   HUD.setActivePlayer(hudPlayerId);
-  HUD.setVehicleData(hudPlayerId, {speedKmh:hudSpeedKmh, gearLabel, rpm:hudRpm, rpm01:clamp((hudRpm || 0) / GEARBOX.limiter, 0, 1), mode:modeLabel});
+  if(HUD.setContext) HUD.setContext(hudContext);
+  if(hudContext === 'soccer' && HUD.setSoccerData){
+    const penaltyState = GAME.systems && GAME.systems.penaltyFlow && GAME.systems.penaltyFlow.state
+      ? GAME.systems.penaltyFlow.state() : null;
+    const shotCharge=hudState&&hudState.shotCharge;
+    const setupAim=!shotCharge&&hudPawn&&hudPawn.wantsShotAimInput&&hudPawn.wantsShotAimInput()?hudState&&hudState.setupAim:null;
+    const activeAim=shotCharge||setupAim;
+    let shotScreen=null;
+    if(activeAim&&activeAim.target&&camera){
+      const point=new THREE.Vector3(Number(activeAim.target.x)||0,Number(activeAim.target.y)||0,Number(activeAim.target.z)||0);
+      camera.updateMatrixWorld(true);point.project(camera);
+      if(Number.isFinite(point.x)&&Number.isFinite(point.y)&&point.z>=-1&&point.z<=1){
+        const frames=GAME.state&&GAME.state.runtimePlayerFrames||{},frame=frames[hudPlayerId]||{x:0,y:0,w:innerWidth,h:innerHeight};
+        shotScreen={reticleX:frame.x+(point.x*.5+.5)*frame.w,reticleY:frame.y+(-point.y*.5+.5)*frame.h};
+      }
+    }
+    const shotHud={shootout:true,role:hudPawn&&hudPawn.config&&hudPawn.config.role,aiming:!!activeAim,charge:shotCharge&&shotCharge.normalized,aimX:activeAim&&activeAim.aimX,aimY:activeAim&&activeAim.aimY,aimReticle:!(hudPawn&&hudPawn.config&&hudPawn.config.ball&&hudPawn.config.ball.aimReticle===false)};
+    if(shotScreen)Object.assign(shotHud,shotScreen);
+    HUD.setSoccerData(penaltyState && penaltyState.phase !== 'idle'
+      ? Object.assign(shotHud,penaltyState)
+      : Object.assign(shotHud,{shootout:false,action:hudState&&hudState.action}));
+  } else if(hudContext === 'vehicle'){
+    HUD.setVehicleData(hudPlayerId, {speedKmh:hudSpeedKmh, gearLabel, rpm:hudRpm, rpm01:clamp((hudRpm || 0) / GEARBOX.limiter, 0, 1), mode:modeLabel});
+  }
   if(RADIO.setActivePlayer) RADIO.setActivePlayer(hudPlayerId);
   RADIO.updateHUD(dt, rpm01, throttle, playerTelemetry);
   if(shouldRender && !renderLocalMultiplayer(dt)) renderPlayerCamera();
@@ -4223,6 +4736,7 @@ function stepMenuBackgroundFrame(dt){
 
 function loop(now){
   requestAnimationFrame(loop);
+  if(GAME.state.preBenchmarkRunning){ prevT = now; return; }
   if(INPUT) INPUT.update();              // poll gamepads / refresh device assignments each frame
   handleGamepadActions();
   let dt = (now - prevT)/1000; prevT = now;

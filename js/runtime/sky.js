@@ -120,6 +120,11 @@ function createSky(deps){
     pmrem: null,
     bucket: -1,
   };
+  const ENV_ORIENTATION={background:0,environment:0};
+  function applyEnvironmentOrientation(){
+    if(scene.backgroundRotation)scene.backgroundRotation.y=THREE.MathUtils.degToRad(ENV_ORIENTATION.background);
+    if(scene.environmentRotation)scene.environmentRotation.y=THREE.MathUtils.degToRad(ENV_ORIENTATION.environment);
+  }
   const hdriGroup = new THREE.Group();
   hdriGroup.name = 'LK_HDRI_SkyBlend';
   hdriGroup.renderOrder = -20;
@@ -668,6 +673,7 @@ function createSky(deps){
     }
   }
   update(0);
+  applyEnvironmentOrientation();
 
   return {update,
     getTime: () => t,
@@ -699,6 +705,10 @@ function createSky(deps){
       setContrast: v => { PROC_ENV.contrast = clamp01(v); rebuildProceduralEnv(t, true); update(0); },
       getContrast: () => PROC_ENV.contrast,
       isReady: () => !!PROC_ENV.env,
+    },
+    orientation:{
+      get:()=>Object.assign({},ENV_ORIENTATION),
+      set:patch=>{const next=patch||{};if(next.background!=null)ENV_ORIENTATION.background=((Number(next.background)||0)%360+360)%360;if(next.environment!=null)ENV_ORIENTATION.environment=((Number(next.environment)||0)%360+360)%360;applyEnvironmentOrientation();return Object.assign({},ENV_ORIENTATION);},
     },
     flare: {
       state: FLARE,

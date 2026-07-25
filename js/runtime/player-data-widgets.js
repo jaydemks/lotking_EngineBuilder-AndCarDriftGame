@@ -26,13 +26,15 @@ function create(deps){
   const isEditorActive = deps.isEditorActive;
   const isEditorPreview = deps.isEditorPreview;
   const getSelected = deps.getSelected;
+  const renderer = deps.renderer || null;
   const config = clone(DEFAULT_CONFIG);
   const rig = [];
 
   function makeTexture(){
     const c = document.createElement('canvas');
     c.width = 512; c.height = 160;
-    const tex = new THREE.CanvasTexture(c);
+    const backend=window.LK_RUNTIME_RENDERING_BACKEND,support=backend&&backend.featureSupport?backend.featureSupport(renderer):null;
+    const tex = support&&support.webgpu&&THREE.HTMLTexture ? new THREE.HTMLTexture(c) : new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     return {canvas:c, ctx:c.getContext('2d'), texture:tex};
@@ -254,7 +256,7 @@ function create(deps){
   }
 
   ensure();
-  return {config, update, set, add, remove, duplicate, move, syncFromAnchor, dispose};
+  return {config, update, set, add, remove, duplicate, move, syncFromAnchor,dispose,textureBackend:()=>rig[0]&&rig[0].tex&&rig[0].tex.texture&&rig[0].tex.texture.isHTMLTexture?'html':'canvas'};
 }
 
 window.LK_RUNTIME_PLAYER_DATA_WIDGETS = Object.freeze({create});

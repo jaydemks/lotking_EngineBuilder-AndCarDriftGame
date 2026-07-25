@@ -15,6 +15,7 @@ const HUD_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level Test';
 const PLAYER_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level';
 const PLAYER_TEMPLATE_KEY = 'lotking.playerBlueprintDefault.v1';
 const HUD_TEMPLATE_KEY = 'lotking.radioHudDefault.v1';
+const LOADING_MUSIC_HINT_KEY = 'lotking.loadingMusic.v1';
 const PLAYER_BLUEPRINT_ASSETS_KEY = 'lotking.playerBlueprintAssets.v1';
 const LOGIC_ELEMENT_ASSETS_KEY = 'lotking.logicElementAssets.v1';
 const ASSET_DB_NAME = 'lotking-assets';
@@ -568,6 +569,22 @@ function disposeLogicElementAnimations(object){
   });
   if(object && object.userData) object.userData.logicElementMixers = [];
 }
+function normalizeLogicElementFbxSource(model,fit){
+  if(!model||!window.THREE)return model;
+  const animations=(model.animations||[]).map(clip=>clip&&clip.clone?clip.clone():clip),wrap=new THREE.Group();wrap.add(model);wrap.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(wrap),size=box.getSize(new THREE.Vector3()),maxDim=Math.max(size.x,size.y,size.z),target=Math.max(.05,Number(fit)||1.9);
+  if(maxDim>1e-5)wrap.scale.setScalar(target/maxDim);
+  wrap.updateMatrixWorld(true);const fitted=new THREE.Box3().setFromObject(wrap),center=fitted.getCenter(new THREE.Vector3());wrap.position.set(-center.x,-fitted.min.y,-center.z);
+  const root=new THREE.Group();root.add(wrap);root.animations=animations;root.userData.lkLogicAssetSourceFallback='fbx';return root;
+}
+function loadLogicElementFbxFallback(asset,canonicalError){
+  if(!asset||asset.sourceFormat!=='fbx'||(!asset.sourceDbKey&&!asset.sourceSrc))return Promise.reject(canonicalError);
+  const plugin=window.LK_FBX_IMPORT_PLUGIN;
+  if(!plugin||typeof plugin.loadSource!=='function')return Promise.reject(canonicalError);
+  return Promise.resolve(plugin.loadSource(asset,{THREE:window.THREE,assetBlobs:window.LK_ASSET_BLOBS})).then(model=>normalizeLogicElementFbxSource(model,asset.fit)).catch(fallbackError=>{
+    const error=new Error('Canonical GLB failed ('+String(canonicalError&&canonicalError.message||canonicalError)+'); FBX fallback failed ('+String(fallbackError&&fallbackError.message||fallbackError)+')');error.cause=canonicalError;throw error;
+  });
+}
 function loadLogicElementAsset(asset){
   if(!asset) return Promise.reject(new Error('Logic Element asset missing'));
   const key = logicElementAssetKey(asset);
@@ -578,11 +595,20 @@ function loadLogicElementAsset(asset){
       : (asset.dbKey && window.LK_ASSET_BLOBS
         ? window.LK_ASSET_BLOBS.getUrl(asset.dbKey)
         : Promise.reject(new Error('Logic Element asset source missing')));
-    pending = source.then(src => loadGlb(src, Math.max(.05, Number(asset.fit) || 1)));
+    pending = source.then(src => loadGlb(src, Math.max(.05, Number(asset.fit) || 1))).catch(error=>loadLogicElementFbxFallback(asset,error));
     logicElementAssetCache.set(key, pending);
     pending.catch(() => logicElementAssetCache.delete(key));
   }
   return pending.then(cloneLogicElementAsset);
+}
+const CHARACTER_PLACEHOLDER_ID=/^(torso_|hips_|leg_sock_|arm_skin_|hand_skin_|head_skin|hair_top)/;
+function setCharacterPlaceholderVisibility(owner,visible){if(!owner||!owner.traverse)return;owner.traverse(child=>{const id=child&&child.userData&&child.userData.logicElementSceneId;if(id&&CHARACTER_PLACEHOLDER_ID.test(String(id)))child.visible=visible!==false;});}
+function removeCharacterAssetFallback(owner){const fallback=owner&&owner.userData&&owner.userData.characterAssetFallback;if(!fallback)return;if(fallback.parent)fallback.parent.remove(fallback);disposeObject3D(fallback);delete owner.userData.characterAssetFallback;}
+function ensureCharacterAssetFallback(owner,parent,definition){
+  if(!owner||!parent||!window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION||!LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.createVisual)return null;
+  const current=owner.userData&&owner.userData.characterAssetFallback;if(current&&current.parent)return current;
+  const visual=LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.createVisual(window.THREE,definition&&definition.appearance);if(!visual)return null;
+  visual.userData.characterAssetFallback=true;visual.userData.logicElementInternal=true;visual.userData.logicElementRuntimeVisual=true;visual.traverse(child=>{child.userData.logicElementInternal=true;child.userData.logicElementRuntimeVisual=true;child.userData.editorLocked=true;child.userData.nonExportable=true;});parent.add(visual);owner.userData.characterAssetFallback=visual;return visual;
 }
 function hydrateLogicElementPreviewAsset(node, element, owner){
   if(!node || !element || !element.asset) return Promise.resolve(node);
@@ -618,7 +644,14 @@ function hydrateLogicElementPreviewAsset(node, element, owner){
     }
     node.add(model);
     configureLogicElementAnimation(node, model, element, owner);
+    delete node.userData.logicElementAssetError;
+    if(element.id==='character_model'&&owner&&owner.userData){delete owner.userData.characterModelError;owner.userData.characterModelSource=model.userData&&model.userData.lkLogicAssetSourceFallback||'glb';setCharacterPlaceholderVisibility(owner,false);removeCharacterAssetFallback(owner);}
     return node;
+  }).catch(error=>{
+    const message=String(error&&error.message||error||'Character model load failed');
+    node.userData.logicElementAssetError=message;
+    if(element.id==='character_model'&&owner&&owner.userData){owner.userData.characterModelError=message;setCharacterPlaceholderVisibility(owner,true);}
+    throw error;
   });
 }
 function removeLogicElementColliders(object, GAME){
@@ -702,6 +735,106 @@ function syncLogicElementColliders(object, elements, nodes){
   const rawPhysics = GAME.systems && GAME.systems.physics && GAME.systems.physics.raw;
   if(rawPhysics) rawPhysics.staticsSignature = '';
 }
+
+// ------------------------------------------------ Drift Track composite colliders
+// The generated track ships a list of local-space wall/cone box specs. They are
+// registered as a single compound arcade collider (root.ref.parts) so the whole
+// set follows the object transform and world.unregister() cleans it up on delete.
+function driftTrackColliderList(GAME){
+  return GAME && GAME.world && GAME.world.colliders ? GAME.world.colliders.box : null;
+}
+function removeDriftTrackColliders(obj, GAME){
+  const root = obj && obj.userData && obj.userData.collider && obj.userData.collider.ref;
+  const list = driftTrackColliderList(GAME);
+  if(!root || !root.driftTrackRoot || !list || !Array.isArray(root.parts)) return;
+  root.parts.forEach(part => { const i = list.indexOf(part); if(i >= 0) list.splice(i, 1); });
+  root.parts = [];
+}
+function driftTrackPartWorld(obj, spec, out){
+  const w = obj.localToWorld(new THREE.Vector3(Number(spec.x) || 0, Number(spec.y) || 0, Number(spec.z) || 0));
+  const worldEuler = new THREE.Euler().setFromQuaternion(obj.getWorldQuaternion(new THREE.Quaternion()), 'XYZ');
+  const worldScale = obj.getWorldScale(new THREE.Vector3());
+  const sx = Math.abs(worldScale.x || 1), sy = Math.abs(worldScale.y || 1), sz = Math.abs(worldScale.z || 1);
+  out.x = w.x; out.y = w.y; out.z = w.z;
+  out.hx = Math.max(.02, (Number(spec.hx) || .1) * sx);
+  out.hy = Math.max(.02, (Number(spec.hy) || .1) * sy);
+  out.hz = Math.max(.02, (Number(spec.hz) || .1) * sz);
+  out.rotX = worldEuler.x;
+  out.rotY = worldEuler.y + (Number(spec.rotY) || 0);
+  out.rotZ = worldEuler.z;
+  out.rot = out.rotY;
+  return out;
+}
+function syncDriftTrackColliders(GAME, obj){
+  const list = driftTrackColliderList(GAME);
+  if(!list || !obj || !window.THREE) return;
+  const specs = obj.userData.driftTrackColliderSpecs || [];
+  let root = obj.userData.collider && obj.userData.collider.ref;
+  if(!root || !root.driftTrackRoot){
+    root = {driftTrackRoot:true, owner:obj, enabled:true, physics:false, _boxList:list, parts:[]};
+    obj.userData.collider = {kind:'box', ref:root};
+  }
+  root.owner = obj;
+  root.parts.forEach(part => { const i = list.indexOf(part); if(i >= 0) list.splice(i, 1); });
+  root.parts = [];
+  obj.updateMatrixWorld(true);
+  specs.forEach(spec => {
+    const part = {owner:obj, parentRef:root, compoundPart:true, driftTrackPart:true, colliderKind:spec.kind, _boxList:list, enabled:root.enabled !== false, physics:false, mass:0};
+    driftTrackPartWorld(obj, spec, part);
+    root.parts.push(part);
+    list.push(part);
+  });
+  const rawPhysics = GAME.systems && GAME.systems.physics && GAME.systems.physics.raw;
+  if(rawPhysics) rawPhysics.staticsSignature = '';
+}
+function updateDriftTrackColliderRefs(obj){
+  const root = obj && obj.userData && obj.userData.collider && obj.userData.collider.ref;
+  if(!root || !root.driftTrackRoot || !Array.isArray(root.parts) || !window.THREE) return;
+  const specs = obj.userData.driftTrackColliderSpecs || [];
+  obj.updateMatrixWorld(true);
+  root.parts.forEach((part, i) => {
+    const spec = specs[i];
+    if(!spec) return;
+    driftTrackPartWorld(obj, spec, part);
+    part.enabled = root.enabled !== false;
+  });
+}
+function createDriftTrack(props){
+  const gen = window.LK_RUNTIME_DRIFT_TRACK;
+  if(!gen || !window.THREE){
+    const fallback = new THREE.Group();
+    fallback.name = 'MinamiDriftPark';
+    fallback.userData.driftTrack = true;
+    fallback.userData.driftTrackParams = props ? cloneData(props) : {};
+    fallback.userData.driftTrackColliderSpecs = [];
+    return fallback;
+  }
+  const params = gen.normalizeParams(props || {});
+  const result = gen.build(THREE, params);
+  const group = result.group;
+  group.userData.driftTrack = true;
+  group.userData.driftTrackParams = params;
+  group.userData.driftTrackColliderSpecs = result.colliders || [];
+  group.userData.driftTrackInfo = {length:result.length, spawn:result.spawn};
+  group.userData.editorLocked = false;
+  return group;
+}
+function rebuildDriftTrack(GAME, obj, props){
+  if(!obj) return obj;
+  const gen = window.LK_RUNTIME_DRIFT_TRACK;
+  const params = gen ? gen.normalizeParams(props || obj.userData.driftTrackParams || {}) : (props || obj.userData.driftTrackParams || {});
+  Array.from(obj.children).forEach(child => { obj.remove(child); disposeObject3D(child); });
+  removeDriftTrackColliders(obj, GAME);
+  if(gen && window.THREE){
+    const result = gen.build(THREE, params);
+    Array.from(result.group.children).forEach(child => obj.add(child));
+    obj.userData.driftTrackColliderSpecs = result.colliders || [];
+    obj.userData.driftTrackInfo = {length:result.length, spawn:result.spawn};
+  }
+  obj.userData.driftTrackParams = params;
+  syncDriftTrackColliders(GAME, obj);
+  return obj;
+}
 function applyLogicElementPreviewTransform(THREERef, node, element){
   const pos = logicElementElementPosition(element);
   const rot = logicElementElementRotation(element);
@@ -715,11 +848,86 @@ function syncLogicElementSceneObject(object, graph, opts){
   opts = opts || {};
   const THREERef = window.THREE;
   const normalized = ensureLogicElementScene(graph || object.userData.logicGraph || object.userData.addedEntry && object.userData.addedEntry.graph);
+  // Template placement stores a graph copy. Upgrade Soccer elements already
+  // embedded in levels created with the first modular preset, otherwise a
+  // catalog update alone cannot remove its referee cube or add the ball marker.
+  if(normalized.name === 'Template - Penalty Shootout Manager' && normalized.logicScene){
+    const oldElements = normalized.logicScene.elements || [];
+    const legacyCube = oldElements.length === 1 && oldElements[0] &&
+      oldElements[0].id === 'root' && (oldElements[0].name === 'Default Mesh' || oldElements[0].mesh === 'box');
+    if(legacyCube) normalized.logicScene = {
+      root:{id:'root',name:'Penalty Shootout Referee',type:'empty',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:'#38bdf8'},
+      elements:[],
+      components:[{id:'root_transform',elementId:'root',name:'Transform',type:'transform',linked:true}],
+    };
+  }
+  if(normalized.name === 'Template - Soccer Ball' && normalized.logicScene){
+    const elements = normalized.logicScene.elements || (normalized.logicScene.elements = []);
+    if(!elements.some(element => element && element.id === 'ball_preview')){
+      elements.push({id:'ball_preview',name:'Soccer Ball Preview',type:'mesh',primitive:'sphere',parentId:'root',linked:true,position:[0,.11,0],rotation:[0,0,0],scale:[.23,.23,.23],color:'#f8fafc',runtimeVisual:false});
+    }
+  }
+  if(normalized.soccerPawn){
+    normalized.soccerPawn.keeper = normalized.soccerPawn.keeper || {};
+    if(normalized.soccerPawn.keeper.aiEnabled == null) normalized.soccerPawn.keeper.aiEnabled = normalized.soccerPawn.role === 'goalkeeper';
+    if(normalized.soccerPawn.keeper.aiReaction == null) normalized.soccerPawn.keeper.aiReaction = .14;
+    if(normalized.soccerPawn.keeper.aiPrediction == null) normalized.soccerPawn.keeper.aiPrediction = 1.15;
+    const variables = normalized.variables || (normalized.variables = []);
+    const addKeeperVariable = spec => {
+      if(!variables.some(variable => variable && (variable.name === spec.name || variable.binding === spec.binding))) variables.push(spec);
+    };
+    addKeeperVariable({name:'KeeperAI',type:'boolean',value:normalized.soccerPawn.keeper.aiEnabled!==false,exposed:true,binding:'keeper.aiEnabled',label:'Goalkeeper AI',category:'Goalkeeper / AI'});
+    addKeeperVariable({name:'KeeperAIReaction',type:'number',value:normalized.soccerPawn.keeper.aiReaction,min:.02,max:.8,step:.01,exposed:true,binding:'keeper.aiReaction',label:'Reaction Time (s)',category:'Goalkeeper / AI'});
+    addKeeperVariable({name:'KeeperAIPrediction',type:'number',value:normalized.soccerPawn.keeper.aiPrediction,min:.2,max:2.5,step:.05,exposed:true,binding:'keeper.aiPrediction',label:'Prediction Window (s)',category:'Goalkeeper / AI'});
+    // The first Soccer template fired Shoot from a key-down edge. Continuous
+    // Action input is required for charge, aim and release, so upgrade embedded
+    // copies without touching user-authored nodes with different ids.
+    const nodes=normalized.nodes||(normalized.nodes=[]),edges=normalized.edges||(normalized.edges=[]);
+    const legacyShootIds=new Set(['on_key_shoot','play_shoot']);
+    if(nodes.some(node=>node&&legacyShootIds.has(node.id))){
+      normalized.nodes=nodes.filter(node=>!(node&&legacyShootIds.has(node.id)));
+      normalized.edges=edges.filter(edge=>!(edge&&(legacyShootIds.has(edge.from&&edge.from.node)||legacyShootIds.has(edge.to&&edge.to.node)||edge.id==='e_key_shoot')));
+    }
+    if(normalized.nodes.some(node=>node&&node.id==='move_input')&&normalized.nodes.some(node=>node&&node.id==='set_move')&&!normalized.edges.some(edge=>edge&&edge.id==='e_input_action')){
+      normalized.edges.push({id:'e_input_action',from:{node:'move_input',pin:'action'},to:{node:'set_move',pin:'action'}});
+    }
+    normalized.soccerPawn.ball=normalized.soccerPawn.ball||{};
+    if(normalized.soccerPawn.ball.shotMinPower==null)normalized.soccerPawn.ball.shotMinPower=10;
+    if(normalized.soccerPawn.ball.shotChargeTime==null)normalized.soccerPawn.ball.shotChargeTime=1.15;
+    if(normalized.soccerPawn.ball.shotCurve==null)normalized.soccerPawn.ball.shotCurve=.65;
+    if(normalized.soccerPawn.ball.aimReticle==null)normalized.soccerPawn.ball.aimReticle=true;
+    const addShotVariable=spec=>{if(!variables.some(variable=>variable&&(variable.name===spec.name||variable.binding===spec.binding)))variables.push(spec);};
+    addShotVariable({name:'ShotMinPower',type:'number',value:normalized.soccerPawn.ball.shotMinPower,min:4,max:25,step:.5,exposed:true,binding:'ball.shotMinPower',label:'Minimum Shot Power (m/s)',category:'Soccer / Shot'});
+    addShotVariable({name:'ShotChargeTime',type:'number',value:normalized.soccerPawn.ball.shotChargeTime,min:.3,max:3,step:.05,exposed:true,binding:'ball.shotChargeTime',label:'Full Charge Time (s)',category:'Soccer / Shot'});
+    addShotVariable({name:'ShotCurve',type:'number',value:normalized.soccerPawn.ball.shotCurve,min:0,max:1,step:.05,exposed:true,binding:'ball.shotCurve',label:'Maximum Curve',category:'Soccer / Shot'});
+    addShotVariable({name:'AimReticle',type:'boolean',value:normalized.soccerPawn.ball.aimReticle!==false,exposed:true,binding:'ball.aimReticle',label:'Show Aim Reticle',category:'Soccer / Shot'});
+  }
+  const characterDefinition=normalized.characterPawn||normalized.soccerPawn;
+  if(characterDefinition&&window.LK_RUNTIME_CLOTH){
+    characterDefinition.cloth=window.LK_RUNTIME_CLOTH.normalizeConfig(characterDefinition.cloth||{});
+  }
+  if(characterDefinition&&normalized.logicScene){
+    // Camera is Pawn configuration, never a spatial child. Early Character /
+    // Soccer instances embedded a visible camera_anchor inside every Pawn,
+    // which could survive at the sideline even after the native car was hidden.
+    const removedPawnCameraIds=new Set((normalized.logicScene.elements||[]).filter(element=>element&&element.type==='camera').map(element=>element.id));
+    normalized.logicScene.elements=(normalized.logicScene.elements||[]).filter(element=>!(element&&removedPawnCameraIds.has(element.id)));
+    normalized.logicScene.components=(normalized.logicScene.components||[]).filter(component=>!(component&&removedPawnCameraIds.has(component.elementId)));
+    const sceneElements=normalized.logicScene.elements;
+    const modelElement=sceneElements.find(element=>element&&element.id==='character_model');
+    if(!characterDefinition.model&&modelElement&&modelElement.asset)characterDefinition.model=cloneData(modelElement.asset);
+    if(modelElement&&characterDefinition.model){modelElement.asset=cloneData(characterDefinition.model);modelElement.linked=true;const scale=Array.isArray(modelElement.scale)?modelElement.scale:[1,1,1];if(Math.max.apply(Math,scale.map(value=>Math.abs(Number(value)||0)))<.01){modelElement.position=[0,0,0];modelElement.rotation=[0,0,0];modelElement.scale=[1,1,1];}}
+    if(!characterDefinition.model&&window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION&&window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.sceneElements){
+      const pose=window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.sceneElements(characterDefinition.appearance||{});
+      pose.forEach(spec=>{let element=sceneElements.find(item=>item&&item.id===spec.id);if(!element){element={};sceneElements.push(element);}Object.assign(element,cloneData(spec),{linked:true});});
+    }
+  }
   object.userData.logicGraph = normalized;
   disposeLogicElementAnimations(object);
   object.userData.logicAnimationUpdate = dt => {
     const mixers = object.userData.logicElementMixers || [];
     mixers.forEach(entry => entry && entry.mixer && entry.mixer.update(Math.max(0, Number(dt) || 0)));
+    mixers.forEach(entry => {const post=entry&&entry.node&&entry.node.userData&&entry.node.userData.logicCharacterRigPostUpdate;if(typeof post==='function')post();});
   };
   const old = (object.children || []).filter(child => {
     if(child.userData && (child.userData.logicElementInternal || child.userData.logicElementShell)) return true;
@@ -729,6 +937,7 @@ function syncLogicElementSceneObject(object, graph, opts){
     object.remove(child);
     disposeObject3D(child);
   });
+  if(object.userData)delete object.userData.characterAssetFallback;
   const elements = logicElementSceneElements(normalized);
   const rootElement = elements.find(element => element && element.id === 'root');
   if(rootElement){
@@ -750,14 +959,15 @@ function syncLogicElementSceneObject(object, graph, opts){
     node.userData.logicElementOwnerId = object.userData.editorId || null;
     node.userData.editorLocked = true;
     node.userData.nonExportable = true;
-    node.userData.logicElementRuntimeVisual = true;
+    node.userData.logicElementRuntimeVisual = element.runtimeVisual !== false;
     node.traverse(child => {
       child.userData.logicElementInternal = true;
       child.userData.logicElementSceneId = element.id;
       child.userData.logicElementOwnerId = object.userData.editorId || null;
       child.userData.editorLocked = true;
       child.userData.nonExportable = true;
-      if(child.userData.logicElementRuntimeVisual == null) child.userData.logicElementRuntimeVisual = !(
+      if(element.runtimeVisual === false) child.userData.logicElementRuntimeVisual = false;
+      else if(child.userData.logicElementRuntimeVisual == null) child.userData.logicElementRuntimeVisual = !(
         element.type === 'empty' || element.type === 'camera' || (element.type === 'light' && !child.isLight)
       );
     });
@@ -839,6 +1049,11 @@ function syncLogicElementSceneObject(object, graph, opts){
     const parent = parentId && nodes.get(parentId) ? nodes.get(parentId) : object;
     parent.add(node);
   });
+  if(characterDefinition&&characterDefinition.model){
+    const hasAuthoredPlaceholder=Array.from(nodes.keys()).some(id=>CHARACTER_PLACEHOLDER_ID.test(String(id||'')));
+    if(!hasAuthoredPlaceholder)ensureCharacterAssetFallback(object,nodes.get('root')||object,characterDefinition);
+    else setCharacterPlaceholderVisibility(object,true);
+  }
   syncLogicElementColliders(object, elements, nodes);
   if(normalized.vehiclePawn && window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.applyModelShading){
     window.LK_RUNTIME_PLAYER_MODEL.applyModelShading(object, normalized.vehiclePawn.modelShading || 'original', THREERef);
@@ -1219,11 +1434,15 @@ function demoAssetDbKey(label, dataUrl){
 async function moveDataUrlToAssetDb(owner, prop, label, dbProp){
   if(!owner || !isDataUrl(owner[prop])) return;
   const dataUrl = owner[prop];
-  const dbKey = demoAssetDbKey(label, dataUrl);
+  // Deduplicated portable projects deliberately keep their original key on
+  // the single reference that carries the payload. Reusing it lets all the
+  // key-only references resolve without cloning the same blob.
+  const keyProp = dbProp || 'dbKey';
+  const dbKey = owner[keyProp] || owner.dbKey || (owner.asset && owner.asset.dbKey) || demoAssetDbKey(label, dataUrl);
   const blob = await dataUrlToBlob(dataUrl);
   await assetBlobPut(dbKey, blob);
   owner[prop] = null;
-  owner[dbProp || 'dbKey'] = dbKey;
+  owner[keyProp] = dbKey;
   if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = dbKey;
 }
 async function localizePortableObjectAssets(value, path, seen, depth){
@@ -1273,7 +1492,7 @@ async function localizePortableProjectAssets(project, depth){
   }
   const musicLibraries = scene.ui && scene.ui.musicLibraries;
   if(musicLibraries){
-    for(const groupName of ['radio', 'menu']){
+    for(const groupName of ['radio', 'loading', 'menu', 'editorMenu', 'gameMenu']){
       const tracks = Array.isArray(musicLibraries[groupName]) ? musicLibraries[groupName] : [];
       for(const track of tracks){
         await moveDataUrlToAssetDb(track, 'url', track.fileName || track.title || track.id || 'music-track', 'dbKey');
@@ -1291,16 +1510,44 @@ async function localizePortableProjectAssets(project, depth){
   }
   return project;
 }
+async function localizeBundledMenuRoleAssets(project){
+  if(!project) return project;
+  const candidates = [];
+  if(isMenuLevelRole(project.meta && project.meta.levelRole)) candidates.push(project);
+  (Array.isArray(project.embeddedLevels) ? project.embeddedLevels : []).forEach(entry => {
+    const embedded = entry && entry.project;
+    const role = entry && (entry.role || entry.levelRole) || embedded && embedded.meta && embedded.meta.levelRole;
+    if(embedded && isMenuLevelRole(role)) candidates.push(embedded);
+  });
+  // Depth 3 deliberately prevents a menu level from recursively preparing
+  // unrelated embedded gameplay levels. The landing only needs its ROLE scene.
+  for(const candidate of candidates) await localizePortableProjectAssets(candidate, 3);
+  return project;
+}
 function isLocalOrigin(){
   const host = location.hostname;
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+}
+function hasLocalMenuRoleProject(){
+  const idx = readIndex();
+  return idx.levels.some(entry => {
+    const project = entry && readLevelProject(entry.id);
+    const role = project && project.meta && project.meta.levelRole || entry && entry.levelRole;
+    return isMenuLevelRole(role);
+  });
 }
 function shouldUseBundledDemoProject(){
   try {
     const workspace = JSON.parse(localStorage.getItem('lk.projectWorkspace.v1') || 'null');
     if(window.__LK_STANDALONE_EDITOR && (!workspace || workspace.workspaceReady !== true)) return false;
     if(workspace && workspace.startupTemplate === 'demo') return true;
-    if(isLocalOrigin()) return false;
+    if(isLocalOrigin()){
+      // Keep the author's current local ROLE level when it exists. A new LAN
+      // browser has no such level yet, so its menu iframe must use the published
+      // DEMO immediately instead of showing the fallback world until refresh.
+      if(window.__LK_MENU_PREVIEW) return !hasLocalMenuRoleProject();
+      return false;
+    }
     return !workspace || workspace.onlineEditor !== true || workspace.startupTemplate === 'demo';
   } catch(err){ return true; }
 }
@@ -1585,7 +1832,21 @@ function ensureBundledDemoProject(){
         LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
       }
       const isMenuPreviewFrame = !!(window.__LK_MENU_PREVIEW && window.parent && window.parent !== window);
-      if(!isMenuPreviewFrame){
+      if(isMenuPreviewFrame){
+        // The landing background runs in an isolated iframe and intentionally
+        // does not install the published project in localStorage. It still has
+        // to hydrate portable assets into IndexedDB before apply(): otherwise a
+        // cold browser profile cannot resolve dbKey-backed GLB/textures, while
+        // a later refresh appears to work only because another editor/runtime
+        // frame happened to populate the asset database in the meantime.
+        reportBundledDemoProgress({progress:61, step:'preparing role menu assets', url});
+        try {
+          await localizeBundledMenuRoleAssets(project);
+          reportBundledDemoProgress({progress:64, step:'role menu assets ready', url});
+        } catch(err){
+          console.warn('LotKing menu: asset portabili non localizzati, uso riferimenti originali', err);
+        }
+      } else {
         try {
           await installBundledDemoProject(cloneData(project));
         } catch(err){
@@ -2192,6 +2453,22 @@ function radioHudTemplateFromLevelLibrary(GAME){
   return radioHud || null;
 }
 
+function writeLoadingMusicHint(tracks){
+  const first = Array.isArray(tracks) && tracks[0];
+  if(!first || (!first.url && !first.dbKey)) return false;
+  try {
+    localStorage.setItem(LOADING_MUSIC_HINT_KEY, JSON.stringify({
+      url:first.url ? String(first.url) : '',
+      dbKey:first.dbKey ? String(first.dbKey) : '',
+      title:String(first.title || ''),
+      artist:String(first.artist || ''),
+    }));
+    return true;
+  } catch(err){
+    return false;
+  }
+}
+
 const LEVELS = {
   list(opts){
     opts = opts || {};
@@ -2335,6 +2612,8 @@ const LEVELS = {
   templateScene(GAME, templateId){
     const d = blank();
     const characterTemplate = templateId === 'character-movement-playground';
+    const penaltyTemplate = templateId === 'penalty-shootout-stadium';
+    const driftTemplate = templateId === 'drift-track-minami';
     const seen = new Set();
     if(GAME && GAME.world && GAME.world.registry){
       for(const o of GAME.world.registry){
@@ -2342,26 +2621,66 @@ const LEVELS = {
         seen.add(o.userData.editorId);
         if(o.isLight || o.userData.light) continue;
         const type = o.userData.editorType || '';
-        if(!characterTemplate && (type === 'player' || type.indexOf('player') === 0)) continue;
+        if(!characterTemplate && !penaltyTemplate && (type === 'player' || type.indexOf('player') === 0)) continue;
         d.deleted.push(o.userData.editorId);
       }
     }
     for(const id of builtinIds){ if(!seen.has(id)) d.deleted.push(id); }
-    d.added.push({
-      id: 'lvlground_' + Date.now().toString(36),
-      prim: 'plane',
-      name: 'Ground',
-      collide: false,
-      props: {color: 0x39404d, roughness: .95, metalness: 0},
-      t: {p:[0, 0, 0], r:[0, 0, 0], s:[40, 1, 40], v: true},
-      asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
-    });
+    if(driftTemplate){
+      // Large drivable apron under the track (the track ships its own grass at y=0)
+      d.added.push({
+        id: 'lvlground_' + Date.now().toString(36),
+        prim: 'plane',
+        name: 'Ground',
+        collide: false,
+        driveSurface: true,
+        props: {color: 0x2a2f39, roughness: .98, metalness: 0},
+        t: {p:[6, -0.03, -40], r:[0, 0, 0], s:[90, 1, 90], v: true},
+        asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
+      });
+    } else {
+      d.added.push({
+        id: 'lvlground_' + Date.now().toString(36),
+        prim: 'plane',
+        name: 'Ground',
+        collide: false,
+        props: {color: 0x39404d, roughness: .95, metalness: 0},
+        t: {p:[0, 0, 0], r:[0, 0, 0], s:[40, 1, 40], v: true},
+        asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
+      });
+    }
     d.env = {skyTime: .3, dayLength: 999999};
     d.player = playerTemplateFromLevelLibrary(GAME);
     const radioHud = radioHudTemplateFromLevelLibrary(GAME);
     if(radioHud) d.ui.radioHud = radioHud;
     if(characterTemplate && window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE){
       return window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE.buildScene(d);
+    }
+    if(penaltyTemplate && window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE){
+      return window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE.buildScene(d);
+    }
+    if(driftTemplate && window.LK_RUNTIME_DRIFT_TRACK){
+      const gen = window.LK_RUNTIME_DRIFT_TRACK;
+      const params = gen.defaultParams();
+      let spawn = null;
+      try {
+        const built = gen.build(THREE, params);
+        spawn = built.spawn;
+        disposeObject3D(built.group);
+      } catch(err){ console.warn('LotKing drift template: spawn probe failed', err); }
+      d.added.push({
+        id: 'drifttrack_' + Date.now().toString(36),
+        kind: 'driftTrack',
+        name: 'Drift Track (Minami)',
+        collide: false,
+        physics: false,
+        props: params,
+        asset: {key:'level:driftTrack', name:'Drift Track', source:'Drift Track generator'},
+        t: {p:[0, 0, 0], r:[0, 0, 0], s:[1, 1, 1], v: true},
+      });
+      if(spawn && d.player){
+        d.player.spawn = Object.assign({}, d.player.spawn, {x: spawn.position[0], z: spawn.position[2], heading: spawn.yaw});
+      }
     }
     return d;
   },
@@ -2455,8 +2774,10 @@ function applyParentLink(obj, GAME){
 // keep the arcade collider (axis-aligned box / circle) in sync with the object
 function syncCollider(obj){
   updateLogicElementColliderRefs(obj);
+  updateDriftTrackColliderRefs(obj);
   const col = obj.userData.collider;
   if(!col || !col.ref) return;
+  if(col.ref.driftTrackRoot) return;
   if(col.ref.logicElementCollider){
     updateLogicElementColliderRef(col.ref);
     return;
@@ -2905,8 +3226,11 @@ function applyMatProps(obj, p){
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       mats.forEach((m, materialIndex) => {
         if(!materialSlotMatches(o, meshIndex, materialIndex, targetSlot)) return;
-        if(patch.color != null && m.color) m.color.setHex(patch.color);
-        if(patch.emissive != null && m.emissive) m.emissive.setHex(patch.emissive);
+        // Three.Color.setHex expects a number. Editor/template colors are also
+        // authored as CSS strings, and passing "#ffffff" to setHex coerced it
+        // to NaN/black after primitive creation.
+        if(patch.color != null && m.color) m.color.set(patch.color);
+        if(patch.emissive != null && m.emissive) m.emissive.set(patch.emissive);
         if(patch.roughness != null && m.roughness != null) m.roughness = patch.roughness;
         if(patch.metalness != null && m.metalness != null) m.metalness = patch.metalness;
         if(patch.opacity != null){ m.opacity = patch.opacity; m.transparent = patch.opacity < 1 || !!patch.transparent; }
@@ -2989,6 +3313,11 @@ const PRIM_DEFS = {
   cone:     () => new THREE.ConeGeometry(1, 2, 20),
   plane:    () => new THREE.PlaneGeometry(4, 4),
   torus:    () => new THREE.TorusGeometry(1.4, .4, 12, 28),
+  arc:      () => {
+    const arc=1.85,g=new THREE.TorusGeometry(9.15, .06, 6, 56, arc);
+    g.rotateZ((Math.PI-arc)/2);
+    return g;
+  },
   triangle: () => new THREE.CircleGeometry(1, 3),
   ramp:     () => {
     const shape = new THREE.Shape();
@@ -3000,6 +3329,34 @@ const PRIM_DEFS = {
 };
 function createPrimitive(prim, props){
   props = props || {};
+  if(prim === 'goalNet'){
+    const width=7.32,height=2.44,depth=1.8,backHeight=1.72,half=width/2,vertices=[];
+    const segment=(ax,ay,az,bx,by,bz)=>vertices.push(ax,ay,az,bx,by,bz);
+    const columns=18,rows=8,depthRows=6;
+    for(let i=0;i<=columns;i++){
+      const x=-half+width*i/columns;
+      segment(x,0,depth,x,backHeight,depth);
+      segment(x,height,0,x,backHeight,depth);
+    }
+    for(let i=0;i<=rows;i++){
+      const t=i/rows,y=backHeight*t;
+      segment(-half,y,depth,half,y,depth);
+      segment(-half,height*t,0,-half,y,depth);
+      segment(half,height*t,0,half,y,depth);
+    }
+    for(let i=0;i<=depthRows;i++){
+      const t=i/depthRows,z=depth*t,y=height+(backHeight-height)*t;
+      segment(-half,y,z,half,y,z);
+      segment(-half,0,z,-half,y,z);
+      segment(half,0,z,half,y,z);
+    }
+    const geometry=new THREE.BufferGeometry();
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+    const material=new THREE.LineBasicMaterial({color:props.color!=null?props.color:0xe9eef3,transparent:true,opacity:.58});
+    const lines=new THREE.LineSegments(geometry,material),group=new THREE.Group();
+    lines.castShadow=false;lines.receiveShadow=false;group.add(lines);
+    return group;
+  }
   const geo = (PRIM_DEFS[prim] || PRIM_DEFS.box)();
   const materialOptions = {color:props.color != null ? props.color : 0x8899aa, side:prim === 'plane' || prim === 'triangle' ? THREE.DoubleSide : THREE.FrontSide};
   let mat;
@@ -3023,9 +3380,9 @@ function createPrimitive(prim, props){
   }
   const m = new THREE.Mesh(geo, mat);
   m.castShadow = m.receiveShadow = true;
-  if(prim === 'plane') m.rotation.x = -Math.PI/2;
+  if(prim === 'plane' || prim === 'arc') m.rotation.x = -Math.PI/2;
   const gp = new THREE.Group();
-  m.position.y = props.centered === true ? 0 : (prim === 'plane' ? 0.01 : (prim === 'ramp' ? 0 : 1));
+  m.position.y = props.centered === true ? 0 : (prim === 'plane' || prim === 'arc' ? 0.01 : (prim === 'ramp' ? 0 : 1));
   gp.add(m);
   if(prim === 'cone'){
     gp.userData.isCone = true;
@@ -4358,6 +4715,39 @@ function extractEmbeddedLights(GAME, root, sourceEntry){
   return created;
 }
 
+// THREE.Object3D.copy() clones userData through JSON serialization. Runtime
+// collider metadata contains owner/list links back into the scene, so cloning a
+// saved builtin duplicate directly can throw on a circular structure. Keep the
+// source untouched and give Three only the serializable authoring metadata.
+function cloneSerializableUserData(value){
+  if(!value || typeof value !== 'object') return {};
+  const seen = new WeakSet();
+  try {
+    return JSON.parse(JSON.stringify(value, (key, item) => {
+      if(typeof item === 'function') return undefined;
+      if(key === 'owner' || key === '_boxList' || item && item.isObject3D) return undefined;
+      if(item && typeof item === 'object'){
+        if(seen.has(item)) return undefined;
+        seen.add(item);
+      }
+      return item;
+    }));
+  } catch(err){ return {}; }
+}
+
+function cloneObject3DForRestore(source){
+  const savedUserData = [];
+  source.traverse(node => {
+    savedUserData.push([node, node.userData]);
+    node.userData = cloneSerializableUserData(node.userData);
+  });
+  try {
+    return source.clone(true);
+  } finally {
+    savedUserData.forEach(item => { item[0].userData = item[1]; });
+  }
+}
+
 // ------------------------------------------------ create from a saved "added" entry
 function createFromEntry(entry, GAME){
   if(entry.kind === 'camera') return Promise.resolve(createSceneCamera(entry.props));
@@ -4376,6 +4766,7 @@ function createFromEntry(entry, GAME){
     });
     return Promise.resolve(object.userData.logicElementAssetReady).then(() => object);
   }
+  if(entry.kind === 'driftTrack') return Promise.resolve(createDriftTrack(entry.props));
   if(entry.kind === 'light') return Promise.resolve(createLight(entry.light, entry.props));
   if(entry.kind === 'effect') return Promise.resolve(createEmitter(entry.effect, entry.params));
   if(entry.kind === 'text') return Promise.resolve(createText(entry.textKind || '2d', entry.props));
@@ -4384,7 +4775,7 @@ function createFromEntry(entry, GAME){
   if(entry.kind === 'clone'){
     const src = GAME && GAME.world.registry.find(o => o.userData.editorId === entry.srcId);
     if(!src) return Promise.reject(new Error('sorgente clone non trovata: ' + entry.srcId));
-    const c = src.clone(true);
+    const c = cloneObject3DForRestore(src);
     c.userData = {};
     // A duplicate is an editable object of its own. Three's default clone
     // shares geometries and materials, which made later Inspector edits leak
@@ -4412,15 +4803,47 @@ function entryType(entry, obj){
   return entry.kind === 'light' ? 'light' : entry.kind === 'effect' ? 'effect' : 'mesh';
 }
 
+function migrateLegacyCharacterGroundPlacement(entry){
+  if(!entry || entry.kind !== 'logicElement' || Number(entry.logicGroundPlacementVersion) >= 2) return false;
+  const graph = entry.graph || entry.logic || entry.logicAsset && entry.logicAsset.graph;
+  const character = graph && (graph.characterPawn || graph.soccerPawn);
+  const source = String(entry.asset && entry.asset.source || '');
+  const editorPlaced = source === 'Logic Element template' || source === 'Reusable Logic Element' || source === 'Editor logic';
+  const position = entry.t && Array.isArray(entry.t.p) ? entry.t.p : null;
+  const root = graph && graph.logicScene && graph.logicScene.root;
+  const rootY = root && Array.isArray(root.position) ? Number(root.position[1]) || 0 : 0;
+  let migrated = false;
+  if(character && editorPlaced && position && Math.abs((Number(position[1]) || 0) - .15) < 1e-6 && Math.abs(rootY) < 1e-6){
+    position[1] = 0;
+    migrated = true;
+    if(character.spawn && Math.abs((Number(character.spawn.y) || 0) - .15) < 1e-6) character.spawn.y = 0;
+    const spawnY = (graph.variables || []).find(variable => variable && variable.binding === 'spawn.y');
+    if(spawnY && Math.abs((Number(spawnY.value) || 0) - .15) < 1e-6) spawnY.value = 0;
+    if(entry.variableOverrides && spawnY && Math.abs((Number(entry.variableOverrides[spawnY.name]) || 0) - .15) < 1e-6) entry.variableOverrides[spawnY.name] = 0;
+  }
+  entry.logicGroundPlacementVersion = 2;
+  return migrated;
+}
+
 // register + optional box collider for an added object
 function registerAdded(GAME, obj, entry){
   ensureEffectHook(GAME);
+  const groundPlacementMigrated = migrateLegacyCharacterGroundPlacement(entry);
   obj.userData.addedEntry = entry;
   if(entry.meshEdits) applyMeshEdits(obj, entry.meshEdits);
   if(entry.kind === 'logicElement'){
     obj.userData.logicAssetId = entry.logicAssetId || obj.userData.logicAssetId || null;
     obj.userData.logicLinked = !!(entry.logicLinked !== false && obj.userData.logicAssetId);
     obj.userData.logicVariableOverrides = cloneData(entry.variableOverrides || obj.userData.logicVariableOverrides || {});
+    if(groundPlacementMigrated){
+      obj.userData.logicGraph = resolveLogicElementGraph({
+        graph:entry.graph || entry.logic,
+        logicAssetId:entry.logicAssetId,
+        logicLinked:entry.logicLinked,
+        logicAsset:entry.logicAsset,
+        variableOverrides:entry.variableOverrides,
+      }, entry.name || 'Logic Element');
+    }
   }
   if(entry.asset){
     obj.userData.assetKey = entry.asset.key;
@@ -4454,9 +4877,9 @@ function registerAdded(GAME, obj, entry){
       n.renderOrder = 997;
     });
   }
-  const wantPhysics = !!(entry && entry.physics);
+  const wantPhysics = !!(entry && entry.physics) && entry.kind !== 'driftTrack';
   let colliderOpt = null;
-  const hasCollider = !!(entry && (entry.collide || wantPhysics));
+  const hasCollider = entry.kind !== 'driftTrack' && !!(entry && (entry.collide || wantPhysics));
   if(hasCollider){
     const colliderKind = colliderKindFrom(entry && entry.colliderKind);
     const col = colliderKind === 'circle'
@@ -4480,6 +4903,7 @@ function registerAdded(GAME, obj, entry){
   GAME.core.scene.add(obj);
   applyT(obj, entry.t);
   if(entry.kind === 'logicElement') syncLogicElementSceneObject(obj, obj.userData.logicGraph || entry.graph || entry.logic);
+  if(entry.kind === 'driftTrack') syncDriftTrackColliders(GAME, obj);
   if(hasCollider) syncCollider(obj);
   return obj;
 }
@@ -4530,6 +4954,15 @@ function snapshotAddedEntry(obj, baseEntry){
   else if(entry.kind === 'texture') entry.props = cloneData(ud.textureProps || entry.props || {});
   else if(entry.kind === 'camera') entry.props = cloneData(ud.cameraProps || entry.props || {});
   else if(entry.kind === 'cinemaStudio') entry.props = normalizeCinemaStudioProps(cloneData(ud.cinemaProps || entry.props || {}));
+  else if(entry.kind === 'driftTrack'){
+    entry.props = cloneData(ud.driftTrackParams || entry.props || {});
+    entry.collide = false;
+    entry.physics = false;
+    delete entry.colliderKind;
+    delete entry.colliderShape;
+    delete entry.physicsMass;
+    delete entry.physicsImpact;
+  }
   else if(entry.kind === 'logicElement'){
     entry.graph = normalizeLogicGraph(ud.logicGraph || entry.graph || entry.logic, entry.name, 'element');
     entry.enabled = ud.logicEnabled !== false;
@@ -4581,6 +5014,7 @@ function applyEnvironment(GAME, env){
     if(env.procEnvWarmth != null) GAME.systems.sky.proceduralEnv.setWarmth(env.procEnvWarmth);
     if(env.procEnvContrast != null) GAME.systems.sky.proceduralEnv.setContrast(env.procEnvContrast);
   }
+  if(env.environmentOrientation&&GAME.systems.sky.orientation)GAME.systems.sky.orientation.set(env.environmentOrientation);
   if(GAME.systems.sky.flare){
     if(env.lensFlare && GAME.systems.sky.flare.set){
       GAME.systems.sky.flare.set(env.lensFlare);
@@ -4613,6 +5047,7 @@ function collectEnvironment(GAME){
     env.procEnvWarmth = GAME.systems.sky.proceduralEnv.getWarmth();
     env.procEnvContrast = GAME.systems.sky.proceduralEnv.getContrast();
   }
+  if(GAME.systems.sky.orientation)env.environmentOrientation=GAME.systems.sky.orientation.get();
   if(GAME.systems.sky.flare){
     if(GAME.systems.sky.flare.get) env.lensFlare = GAME.systems.sky.flare.get();
     // chiavi legacy: un livello salvato ora resta leggibile da build precedenti
@@ -4637,13 +5072,80 @@ function apply(GAME, sceneOverride){
     return Promise.resolve(null);
   }
   GAME.state.sceneReady = false;
+  // v0.7.1's first penalty preset accidentally authored 20:52 (.62 on the
+  // sunrise-based clock) while intending a fixed daytime scene. Migrate only
+  // that exact generated value so deliberate user-authored lighting remains
+  // untouched.
+  const generatedPenaltyScene = Array.isArray(data.added) && data.added.some(entry =>
+    entry && entry.kind === 'logicElement' &&
+    (entry.name === 'Penalty Shootout Manager' || entry.asset && entry.asset.key === 'logic:template:logic-template-penalty-shootout')
+  );
+  if(generatedPenaltyScene && data.env && Math.abs((Number(data.env.skyTime) || 0) - .62) < .0001){
+    data.env.skyTime = .25;
+    data.env.dayNightCycleEnabled = false;
+    data.env.lighting = Object.assign({daySun:1.45,dayAmbient:.95,moonDirect:.16,moonIndirect:.18}, data.env.lighting || {});
+  }
+  if(generatedPenaltyScene){
+    // Repair already-saved copies of the original preset. The first revision
+    // changed the keeper component directly but left its exposed Role/kit
+    // variables at striker defaults; runtime bindings then won in Play.
+    data.added.forEach(entry=>{
+      if(!(entry&&entry.kind==='logicElement'&&entry.name==='Penalty Goalkeeper'&&entry.graph&&entry.graph.soccerPawn))return;
+      const graph=entry.graph,write=(name,value)=>{const variable=(graph.variables||[]).find(item=>item&&item.name===name);if(variable)variable.value=value;};
+      graph.soccerPawn.role='goalkeeper';graph.soccerPawn.playerId=null;graph.soccerPawn.possessed=false;
+      graph.soccerPawn.appearance=Object.assign({},graph.soccerPawn.appearance||{},{shirtColor:'#facc15',shortsColor:'#111827',socksColor:'#facc15'});
+      write('Role','goalkeeper');write('ControllerPlayerId',-1);write('KeeperAI',true);
+      write('ShirtColor','#facc15');write('ShortsColor','#111827');write('SocksColor','#facc15');
+    });
+    const replaceGeneratedColor = (entry, expected, next) => {
+      const current = entry && entry.props && entry.props.color;
+      if(typeof current === 'string' && current.toLowerCase() === expected) entry.props.color = next;
+    };
+    data.added.forEach(entry => {
+      if(!(entry && entry.asset && entry.asset.source === 'Penalty Shootout Stadium template')) return;
+      const name = String(entry.name || '');
+      if(name === 'Stadium - Pitch Grass') replaceGeneratedColor(entry, '#1e7d38', '#197a39');
+      if(/Stadium - (?:Touchline|Goal Line|Halfway Line|Center Spot|Penalty Spot|Penalty Arc)/.test(name)) {
+        replaceGeneratedColor(entry, '#f4f6f2', '#ffffff');
+      }
+      if(/Stadium - Goal (?:Post|Crossbar)/.test(name)) replaceGeneratedColor(entry, '#f8fafc', '#ffffff');
+      if(/Stadium - Stand .* Tier 1$/.test(name)) replaceGeneratedColor(entry, '#3b4252', '#1d3557');
+      if(/Stadium - Stand .* Tier 2$/.test(name)) replaceGeneratedColor(entry, '#434c5e', '#284b73');
+      if(/Stadium - Stand .* Tier 3$/.test(name)) replaceGeneratedColor(entry, '#4c566a', '#35648f');
+      if(/^Stadium - Goal Top Rail (?:West|East) (?:North|South)$/.test(name)&&entry.t){
+        const railAngle=Math.atan2(2.44-1.72,1.8);
+        entry.t.r=[/ North$/.test(name)?railAngle:-railAngle,0,0];
+        if(data.template&&data.template.id==='penalty-shootout-stadium')data.template.version=Math.max(4,Number(data.template.version)||0);
+      }
+    });
+    const legacyGoal=data.added.some(entry=>entry&&entry.asset&&entry.asset.source==='Penalty Shootout Stadium template'&&entry.name==='Stadium - Goal Net Back North');
+    if(legacyGoal&&window.LK_RUNTIME_SOCCER_STADIUM){
+      const replacePattern=/^Stadium - (?:Penalty Arc|Goal Post|Goal Crossbar|Goal Net|Goal Rear|Goal Top Rail)/;
+      data.added=data.added.filter(entry=>!(entry&&entry.asset&&entry.asset.source==='Penalty Shootout Stadium template'&&replacePattern.test(String(entry.name||''))));
+      let upgradeIndex=0;
+      window.LK_RUNTIME_SOCCER_STADIUM.buildEntries({x:0,z:0}).filter(item=>replacePattern.test(String(item.name||''))).forEach(item=>{
+        const id='penalty_stadium_goal_v3_'+String(++upgradeIndex).padStart(3,'0');
+        const props={color:item.color,roughness:item.roughness,metalness:item.metalness};
+        data.added.push({id,kind:'primitive',prim:item.prim,name:item.name,collide:item.collide===true,driveSurface:false,props,t:cloneData(item.t),asset:{key:'primitive:'+item.prim,name:item.name,source:'Penalty Shootout Stadium template'},templateGroup:'Stadium'});
+      });
+      if(data.template&&data.template.id==='penalty-shootout-stadium')data.template.version=4;
+    }
+  }
   GAME.world.characterGround = cloneData(data.characterGround || null);
   const pending = [];
 
   // Vehicle light config can create extra built-in light anchors; do it before
   // transform replay so custom Aux 3/4/... offsets have real targets.
-  if(data.player && GAME.player.setEnabled) GAME.player.setEnabled(data.player.enabled !== false);
-  if(data.player && GAME.player.setHidden) GAME.player.setHidden(data.player.hidden === true);
+  if(data.player){
+    // The native singleton has one scene-level activation state. Historical
+    // `enabled + hidden` snapshots are migrated to inactive so a visually
+    // absent car cannot retain physics, input, audio or camera ownership.
+    const nativePlayerId = GAME.player && GAME.player.car && GAME.player.car.userData && GAME.player.car.userData.editorId;
+    const nativeTransform = nativePlayerId && data.transforms && data.transforms[nativePlayerId];
+    const nativePlayerActive = data.player.enabled !== false && data.player.hidden !== true && !(nativeTransform && nativeTransform.v === false);
+    if(GAME.player.setEnabled) GAME.player.setEnabled(nativePlayerActive);
+    else { GAME.player.enabled = nativePlayerActive; GAME.player.hidden = !nativePlayerActive; }
+  }
   if(data.player && GAME.player.setControllerIndex) GAME.player.setControllerIndex(Object.prototype.hasOwnProperty.call(data.player, 'controllerIndex') ? data.player.controllerIndex : 0);
   if(data.player && data.player.lights && GAME.player.setLights) GAME.player.setLights(data.player.lights);
   if(data.player && data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
@@ -4665,6 +5167,7 @@ function apply(GAME, sceneOverride){
     else delete o.userData.colliderDummyVisibility;
     syncCollider(o);
   }
+  if(GAME.player && GAME.player.car) GAME.player.car.visible = GAME.player.enabled !== false && GAME.player.hidden !== true;
   for(const id in data.transforms){
     const o = byId[id];
     if(o) applyParentLink(o, GAME);
@@ -4696,13 +5199,16 @@ function apply(GAME, sceneOverride){
   }
   // added objects
   for(const entry of data.added || []){
-    const p = createFromEntry(entry, GAME)
+    // Start inside a Promise so synchronous factory failures are isolated to
+    // the offending entry instead of rejecting the whole editor bootstrap.
+    const p = Promise.resolve()
+      .then(() => createFromEntry(entry, GAME))
       .then(obj => {
 	        registerAdded(GAME, obj, entry);
 	        applyParentLink(obj, GAME);
 	        if(entry.props && entry.kind === 'texture') updateTextureObject(obj, entry.props);
 	        else if(entry.props && entry.kind === 'camera') updateSceneCameraObject(obj, entry.props);
-	        else if(entry.props && entry.kind !== 'light' && entry.kind !== 'cinemaStudio') applyMatProps(obj, entry.props);
+	        else if(entry.props && entry.kind !== 'light' && entry.kind !== 'cinemaStudio' && entry.kind !== 'driftTrack') applyMatProps(obj, entry.props);
 	      })
       .catch(err => console.warn('LotKing store: oggetto "' + entry.name + '" non ricaricato', err));
     pending.push(p);
@@ -4717,8 +5223,32 @@ function apply(GAME, sceneOverride){
     if(GAME.systems.radio && GAME.systems.radio.restoreTracks && Array.isArray(musicLibraries.radio)){
       pending.push(GAME.systems.radio.restoreTracks(musicLibraries.radio));
     }
-    if(GAME.systems.menuMusic && GAME.systems.menuMusic.restoreTracks && Array.isArray(musicLibraries.menu)){
-      pending.push(GAME.systems.menuMusic.restoreTracks(musicLibraries.menu));
+    if(GAME.systems.loadingMusic && GAME.systems.loadingMusic.restoreTracks && Array.isArray(musicLibraries.loading)){
+      pending.push(Promise.resolve(GAME.systems.loadingMusic.restoreTracks(musicLibraries.loading)).then(result => {
+        writeLoadingMusicHint(GAME.systems.loadingMusic.getStoredTracks
+          ? GAME.systems.loadingMusic.getStoredTracks()
+          : musicLibraries.loading);
+        return result;
+      }));
+    }
+    const editorMenu = GAME.systems.editorMenuMusic;
+    const gameMenu = GAME.systems.gameMenuMusic;
+    if(editorMenu && editorMenu.restoreTracks && Array.isArray(musicLibraries.editorMenu)){
+      pending.push(editorMenu.restoreTracks(musicLibraries.editorMenu));
+    }
+    if(gameMenu && gameMenu.restoreTracks && Array.isArray(musicLibraries.gameMenu)){
+      pending.push(gameMenu.restoreTracks(musicLibraries.gameMenu));
+    }
+    if(Array.isArray(musicLibraries.menu)){
+      // v0.7.0 and older stored one shared menu list. Restore it into any
+      // missing role so old projects sound exactly as before while new saves
+      // keep Editor Menu and Game Menu independent.
+      if(editorMenu && editorMenu.restoreTracks && !Array.isArray(musicLibraries.editorMenu)){
+        pending.push(editorMenu.restoreTracks(musicLibraries.menu));
+      }
+      if(gameMenu && gameMenu.restoreTracks && !Array.isArray(musicLibraries.gameMenu)){
+        pending.push(gameMenu.restoreTracks(musicLibraries.menu));
+      }
     }
   }
   // player blueprint
@@ -4952,8 +5482,19 @@ function collect(GAME){
   if(GAME.settings && GAME.settings.getVideoProject) d.ui.video = cloneData(GAME.settings.getVideoProject());
   if(GAME.systems){
     const radioTracks = GAME.systems.radio && GAME.systems.radio.getStoredTracks ? GAME.systems.radio.getStoredTracks() : [];
-    const menuTracks = GAME.systems.menuMusic && GAME.systems.menuMusic.getStoredTracks ? GAME.systems.menuMusic.getStoredTracks() : [];
-    d.ui.musicLibraries = {radio:cloneData(radioTracks), menu:cloneData(menuTracks)};
+    const loadingTracks = GAME.systems.loadingMusic && GAME.systems.loadingMusic.getStoredTracks ? GAME.systems.loadingMusic.getStoredTracks() : [];
+    writeLoadingMusicHint(loadingTracks);
+    const editorMenuTracks = GAME.systems.editorMenuMusic && GAME.systems.editorMenuMusic.getStoredTracks ? GAME.systems.editorMenuMusic.getStoredTracks() : [];
+    const gameMenuTracks = GAME.systems.gameMenuMusic && GAME.systems.gameMenuMusic.getStoredTracks ? GAME.systems.gameMenuMusic.getStoredTracks() : [];
+    const legacyMenuTracks = GAME.systems.menuMusic && GAME.systems.menuMusic.getStoredTracks ? GAME.systems.menuMusic.getStoredTracks() : gameMenuTracks;
+    d.ui.musicLibraries = {
+      schemaVersion:4,
+      radio:cloneData(radioTracks),
+      loading:cloneData(loadingTracks),
+      editorMenu:cloneData(editorMenuTracks),
+      gameMenu:cloneData(gameMenuTracks),
+      menu:cloneData(legacyMenuTracks),
+    };
   }
   d.player = collectPlayerBlueprint(GAME) || {};
   d.characterGround = cloneData(old && old.characterGround || GAME && GAME.world && GAME.world.characterGround || null);
@@ -4978,9 +5519,10 @@ function ensureApplied(GAME){
   if(applied) return ready;
   applied = true;
   appliedMode = 'active';
-  ready = ensureBundledDemoProject().then(() => {
+  ready = ensureBundledDemoProject().then(bundledProject => {
     appliedLevelId = normalizeLevelId(ensureLibrary().activeId);
-    return apply(GAME || window.LOT_KING);
+    const bundledScene=bundledProject&&sceneFromProject(bundledProject);
+    return apply(GAME || window.LOT_KING,bundledScene||undefined);
   });
   window.LK_STORE.ready = ready;
   return ready;
@@ -5105,7 +5647,7 @@ window.LK_STORE = {
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
   lightProps, applyLightProps, applyMatProps, stageMatProps, snapshotAddedEntry,
   verifyPersistenceRoundTrip, persistenceDifferences,
-	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
+	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createDriftTrack, rebuildDriftTrack, syncDriftTrackColliders, removeDriftTrackColliders, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, ensureMenuBackgroundApplied, findMenuBackgroundLevel, collect, nextId,
   ensureBundledDemoProject,
@@ -5156,13 +5698,23 @@ window.LK_STORE = {
     if(auto) sessionStorage.removeItem('lk.autolaunch');
   } catch(err){}
   if(!auto) return;
-  // il reload arriva senza user gesture: al primo input riattiva audio e radio
+  // A reload arrives without a user gesture. Resume the audio family owned by
+  // the active level role instead of always reviving the gameplay radio.
   const resumeAudio = () => {
     const g = window.LOT_KING;
     if(!g) return;
     if(g.systems && g.systems.audio && g.systems.audio.resume) g.systems.audio.resume();
-    if(g.state && g.state.started && g.systems && g.systems.radio && g.systems.radio.audio && g.systems.radio.audio.paused){
-      g.systems.radio.audio.play().catch(()=>{});
+    const idx = ensureLibrary();
+    const project = idx.activeId && readLevelProject(idx.activeId);
+    const role = project && project.meta && project.meta.levelRole || 'gameplay';
+    if((role === 'editor-menu' || role === 'game-menu') && g.state && g.state.started && g.systems && g.systems.menuMusic){
+      if(g.systems.menuMusic.play) g.systems.menuMusic.play(role).catch(()=>{});
+    } else if(g.state && g.state.started && g.systems && g.systems.radio){
+      const radio = g.systems.radio;
+      if(!radio.isAvailable || radio.isAvailable()){
+        if(radio.begin) radio.begin();
+        else if(radio.audio && radio.audio.paused) radio.audio.play().catch(()=>{});
+      }
     }
   };
   addEventListener('pointerdown', resumeAudio, {once: true});

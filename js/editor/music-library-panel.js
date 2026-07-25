@@ -14,6 +14,7 @@ function create(deps){
   const section = deps.section;
   const selectRow = deps.selectRow;
   const el = deps.el;
+  const getQuickAudio = deps.getQuickAudio || function(){ return null; };
   const confirmEditorAction = deps.confirmEditorAction || (opts => Promise.resolve(confirm((opts && opts.message) || 'Confirm?')));
   const promptEditorAction = deps.promptEditorAction || (opts => Promise.resolve(prompt((opts && opts.message) || 'Value:', (opts && opts.value) || '')));
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
@@ -90,7 +91,7 @@ function create(deps){
         if(!ok) return;
         const removed = api.removeTrack(t.index);
         if(removed){
-          if(api === (GAME.systems && GAME.systems.menuMusic) && ED.quickMusicIndex != null) ED.quickMusicIndex = Math.max(0, ED.quickMusicIndex - (t.index <= ED.quickMusicIndex ? 1 : 0));
+          if(api.menuRole && ED.quickMusicIndex != null) ED.quickMusicIndex = Math.max(0, ED.quickMusicIndex - (t.index <= ED.quickMusicIndex ? 1 : 0));
           markDirty();
           status(tr('Removed: ', 'Rimosso: ') + (removed.title || tr('track', 'brano')));
           render();
@@ -109,13 +110,26 @@ function create(deps){
         sub.textContent = (t.fileName || t.source || 'Default') + (t.persisted ? ' · project asset' : (t.uploaded ? ' · unsaved upload' : ''));
         meta.append(name, sub);
         const actions = el('<div class="lk-asset-actions"></div>');
-        const play = el('<button type="button">' + tr('Load', 'Carica') + '</button>');
+        const play = el('<button type="button">' + tr('Preview', 'Anteprima') + '</button>');
         play.addEventListener('click', () => {
-          if(api.loadTrack) api.loadTrack(t.index, true);
-          if(api === (GAME.systems && GAME.systems.menuMusic)) ED.quickMusicIndex = t.index;
-          status(tr('Loaded: ', 'Caricato: ') + (t.title || tr('track', 'brano')));
+          const quickAudio = getQuickAudio();
+          if(quickAudio && quickAudio.preview) quickAudio.preview(api, t.index, title + ' · ' + (t.title || tr('track', 'brano')));
+          else if(api.loadTrack) api.loadTrack(t.index, true);
+          ED.quickMusicIndex = t.index;
+          status(tr('Previewing: ', 'Anteprima: ') + (t.title || tr('track', 'brano')));
         });
-        actions.appendChild(play);
+        const stop = el('<button type="button">' + tr('Stop', 'Ferma') + '</button>');
+        stop.addEventListener('click', () => {
+          const quickAudio = getQuickAudio();
+          if(quickAudio && quickAudio.active && quickAudio.active() === api) quickAudio.stop();
+          else {
+            const audio = api.audio || api;
+            if(api.pause) api.pause(); else if(audio && audio.pause) audio.pause();
+            if(audio){ try { audio.currentTime = 0; } catch(err){} }
+          }
+          status(tr('Audio preview stopped', 'Anteprima audio fermata'));
+        });
+        actions.append(play, stop);
         if(api.moveTrack){
           const up = el('<button type="button" title="' + tr('Move earlier', 'Sposta prima') + '">↑</button>');
           const down = el('<button type="button" title="' + tr('Move later', 'Sposta dopo') + '">↓</button>');
@@ -124,7 +138,7 @@ function create(deps){
           const move = direction => {
             const moved = api.moveTrack(t.index, direction);
             if(!moved) return;
-            if(api === (GAME.systems && GAME.systems.menuMusic) && ED.quickMusicIndex != null){
+            if(api.menuRole && ED.quickMusicIndex != null){
               if(ED.quickMusicIndex === moved.fromIndex) ED.quickMusicIndex = moved.index;
               else if(ED.quickMusicIndex === moved.index) ED.quickMusicIndex = moved.fromIndex;
             }

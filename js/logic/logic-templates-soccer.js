@@ -72,18 +72,33 @@ function playerSoccerTemplateGraph(){
     {name:'TurnRate', type:'number', value:10, min:.5, max:30, step:.5, exposed:true, binding:'movement.turnRate', label:'Turn Rate (rad/s)', category:'Movement'},
     {name:'JumpHeight', type:'number', value:1.1, min:0, max:5, step:.1, exposed:true, binding:'movement.jumpHeight', label:'Jump Height (m)', category:'Movement'},
     {name:'Gravity', type:'number', value:22, min:1, max:80, step:.5, exposed:true, binding:'movement.gravity', label:'Gravity (m/s²)', category:'Movement'},
-    {name:'InputMode', type:'string', value:'camera', exposed:true, binding:'movement.inputMode', label:'Input Mode', category:'Movement', ui:'select', options:[{value:'camera',label:'Camera relative (free)'},{value:'heading',label:'Character heading'}]},
+    {name:'InputMode', type:'string', value:'heading', exposed:true, binding:'movement.inputMode', label:'Movement Space', category:'Movement', ui:'select', options:[{value:'camera',label:'Camera relative'},{value:'heading',label:'Character heading (football)'}]},
+    {name:'FacingMode', type:'string', value:'heading', exposed:true, binding:'movement.facingMode', label:'Facing Behaviour', category:'Movement', ui:'select', options:[{value:'heading',label:'Keep heading / strafe (football)'},{value:'movement',label:'Turn toward movement'}]},
     {name:'BlendResponsiveness', type:'number', value:9, min:.5, max:30, step:.5, exposed:true, binding:'locomotion.responsiveness', label:'Motion Blend Responsiveness', category:'Movement / Motion Blend'},
     {name:'BlendPrediction', type:'number', value:.12, min:0, max:.6, step:.01, exposed:true, binding:'locomotion.predictionTime', label:'Motion Blend Prediction (s)', category:'Movement / Motion Blend'},
     {name:'KeeperDiveDistance', type:'number', value:2.6, min:.5, max:5, step:.1, exposed:true, binding:'keeper.diveDistance', label:'Dive Distance (m)', category:'Goalkeeper'},
     {name:'KeeperDiveDuration', type:'number', value:.55, min:.2, max:1.5, step:.05, exposed:true, binding:'keeper.diveDuration', label:'Dive Duration (s)', category:'Goalkeeper'},
     {name:'KeeperReach', type:'number', value:1.1, min:.4, max:2.5, step:.05, exposed:true, binding:'keeper.reach', label:'Save Reach (m)', category:'Goalkeeper'},
+    {name:'KeeperAI', type:'boolean', value:true, exposed:true, binding:'keeper.aiEnabled', label:'Goalkeeper AI', category:'Goalkeeper / AI'},
+    {name:'KeeperAIReaction', type:'number', value:.14, min:.02, max:.8, step:.01, exposed:true, binding:'keeper.aiReaction', label:'Reaction Time (s)', category:'Goalkeeper / AI'},
+    {name:'KeeperAIPrediction', type:'number', value:1.15, min:.2, max:2.5, step:.05, exposed:true, binding:'keeper.aiPrediction', label:'Prediction Window (s)', category:'Goalkeeper / AI'},
+    {name:'FieldOpponentAI', type:'boolean', value:false, exposed:true, binding:'fieldAI.enabled', label:'Field-player Opponent AI', category:'Soccer / Opponent AI',description:'Enable this on an unpossessed outfield Soccer Pawn. Gameplay difficulty controls its reaction, pace and shot error.'},
+    {name:'BallAutoControl', type:'boolean', value:true, exposed:true, binding:'ball.autoControl', label:'Automatic Soft Ball Control', category:'Soccer / Ball'},
+    {name:'BallControlRadius', type:'number', value:1.35, min:.4, max:3, step:.05, exposed:true, binding:'ball.controlRadius', label:'Ball Control Radius (m)', category:'Soccer / Ball'},
+    {name:'BallTouchDistance', type:'number', value:.68, min:.3, max:1.2, step:.02, exposed:true, binding:'ball.touchDistance', label:'Ball Distance From Foot (m)', category:'Soccer / Ball'},
+    {name:'ShootPower', type:'number', value:26, min:8, max:40, step:.5, exposed:true, binding:'ball.shootPower', label:'Maximum Shot Power (m/s)', category:'Soccer / Shot'},
+    {name:'ShotMinPower', type:'number', value:10, min:4, max:25, step:.5, exposed:true, binding:'ball.shotMinPower', label:'Minimum Shot Power (m/s)', category:'Soccer / Shot'},
+    {name:'ShotChargeTime', type:'number', value:1.15, min:.3, max:3, step:.05, exposed:true, binding:'ball.shotChargeTime', label:'Full Charge Time (s)', category:'Soccer / Shot'},
+    {name:'ShotCurve', type:'number', value:.65, min:0, max:1, step:.05, exposed:true, binding:'ball.shotCurve', label:'Maximum Curve', category:'Soccer / Shot'},
+    {name:'AimReticle', type:'boolean', value:true, exposed:true, binding:'ball.aimReticle', label:'Show Aim Reticle', category:'Soccer / Shot'},
+    {name:'PassPower', type:'number', value:10, min:2, max:30, step:.5, exposed:true, binding:'ball.passPower', label:'Pass Power (m/s)', category:'Soccer / Ball'},
+    {name:'CrossPower', type:'number', value:16, min:2, max:35, step:.5, exposed:true, binding:'ball.crossPower', label:'Cross Power (m/s)', category:'Soccer / Ball'},
     {name:'ShirtColor', type:'string', value:'#e11d48', exposed:true, binding:'appearance.shirtColor', label:'Shirt Color', category:'Appearance', ui:'color'},
     {name:'ShortsColor', type:'string', value:'#f8fafc', exposed:true, binding:'appearance.shortsColor', label:'Shorts Color', category:'Appearance', ui:'color'},
     {name:'SocksColor', type:'string', value:'#e11d48', exposed:true, binding:'appearance.socksColor', label:'Socks Color', category:'Appearance', ui:'color'},
     {name:'HairColor', type:'string', value:'#2b2118', exposed:true, binding:'appearance.hairColor', label:'Hair Color', category:'Appearance', ui:'color'},
     {name:'SkinColor', type:'string', value:'#d8a184', exposed:true, binding:'appearance.skinColor', label:'Skin Color', category:'Appearance', ui:'color'},
-    {name:'CameraMode', type:'string', value:'arcade', exposed:true, binding:'camera.mode', label:'Camera Mode', category:'Camera', ui:'select', options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade'},{value:'cinematic',label:'Cinematic'}]},
+    {name:'CameraMode', type:'string', value:'free', exposed:true, binding:'camera.mode', label:'Camera Mode', category:'Camera', ui:'select', options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade'},{value:'cinematic',label:'Cinematic'}]},
     {name:'CameraView', type:'string', value:'third', exposed:true, binding:'camera.view', label:'View', category:'Camera', ui:'select', options:[{value:'third',label:'Third person'},{value:'close',label:'Close third person'},{value:'first',label:'First person (lite)'}]},
     {name:'CameraDistance', type:'number', value:7.5, min:1, max:40, step:.1, exposed:true, binding:'camera.distance', label:'Distance', category:'Camera'},
     {name:'CameraHeight', type:'number', value:2.6, min:.2, max:20, step:.1, exposed:true, binding:'camera.height', label:'Height', category:'Camera'},
@@ -106,8 +121,6 @@ function playerSoccerTemplateGraph(){
     node('on_update', 'event.onUpdate', 80, 400),
     node('move_input', 'soccer.getMoveInput', 340, 380),
     node('set_move', 'soccer.setMoveInput', 640, 400),
-    node('on_key_shoot', 'event.onKeyDown', 80, 620, {key:'f'}),
-    node('play_shoot', 'soccer.playAction', 380, 620, {action:'shoot'}),
     node('on_key_dive_left', 'event.onKeyDown', 80, 780, {key:'q'}),
     node('play_dive_left', 'soccer.playAction', 380, 780, {action:'diveLeft'}),
     node('on_key_dive_right', 'event.onKeyDown', 80, 940, {key:'e'}),
@@ -126,13 +139,13 @@ function playerSoccerTemplateGraph(){
     edge('e_input_x', 'move_input', 'x', 'set_move', 'x'),
     edge('e_input_z', 'move_input', 'z', 'set_move', 'z'),
     edge('e_input_sprint', 'move_input', 'sprint', 'set_move', 'sprint'),
-    edge('e_key_shoot', 'on_key_shoot', 'then', 'play_shoot', 'exec'),
+    edge('e_input_action', 'move_input', 'action', 'set_move', 'action'),
     edge('e_key_dive_left', 'on_key_dive_left', 'then', 'play_dive_left', 'exec'),
     edge('e_key_dive_right', 'on_key_dive_right', 'then', 'play_dive_right', 'exec'),
     edge('e_key_jump', 'on_key_jump', 'then', 'do_jump', 'exec'),
   ], [
-    {id:'comment_pawn', title:'Soccer Pawn: possession + camera on start, camera-relative free movement with motion blending every update.', x:42, y:42, w:1330, h:460, color:'#4ade80'},
-    {id:'comment_actions', title:'Role actions: F = shoot (kicker roles). Q/E = dive left/right (goalkeeper). Space = jump. Add Kick Soccer Ball after the shoot action to hit the ball.', x:42, y:560, w:900, h:640, color:'#fbbf24'},
+    {id:'comment_pawn', title:'Soccer Pawn: possession + camera on start, heading-relative football movement with true lateral strafe and motion blending every update.', x:42, y:42, w:1330, h:460, color:'#4ade80'},
+    {id:'comment_actions', title:'Role actions: hold F/X to charge and aim, then release to shoot. Q/E = dive left/right (goalkeeper). Space = jump. Foot contact, ball physics and shot error are synchronized automatically; use Soccer Ball nodes only for custom scripted plays.', x:42, y:560, w:1080, h:640, color:'#fbbf24'},
   ]);
 
   // Placeholder humanoid rig. Element names intentionally match the
@@ -140,18 +153,8 @@ function playerSoccerTemplateGraph(){
   // variables work before a Mixamo GLB replaces the placeholder.
   g.logicScene = {
     root:{id:'root', name:'Player Soccer Root', type:'empty', linked:true, position:[0,0,0], rotation:[0,0,0], scale:[1,1,1], color:'#4ade80'},
-    elements:[
-      sceneElement('character_model', 'Character Model / Mixamo GLB Placeholder', 'cube', 'root', [0,1.05,0], [0,0,0], [.001,.001,.001], '#334155'),
-      sceneElement('torso_shirt', 'Torso Shirt', 'cube', 'root', [0,1.25,0], [0,0,0], [.46,.58,.26], '#e11d48'),
-      sceneElement('hips_shorts', 'Hips Shorts', 'cube', 'root', [0,.82,0], [0,0,0], [.44,.3,.25], '#f8fafc'),
-      sceneElement('leg_sock_left', 'Leg Sock Left', 'cylinder', 'root', [-.12,.35,0], [0,0,0], [.13,.62,.13], '#e11d48'),
-      sceneElement('leg_sock_right', 'Leg Sock Right', 'cylinder', 'root', [.12,.35,0], [0,0,0], [.13,.62,.13], '#e11d48'),
-      sceneElement('arm_skin_left', 'Arm Skin Left', 'cylinder', 'root', [-.31,1.25,0], [0,0,15], [.09,.52,.09], '#d8a184'),
-      sceneElement('arm_skin_right', 'Arm Skin Right', 'cylinder', 'root', [.31,1.25,0], [0,0,-15], [.09,.52,.09], '#d8a184'),
-      sceneElement('head_skin', 'Head Skin', 'sphere', 'root', [0,1.74,0], [0,0,0], [.3,.32,.3], '#d8a184'),
-      sceneElement('hair_top', 'Hair Top', 'sphere', 'root', [0,1.86,-.02], [0,0,0], [.3,.18,.3], '#2b2118'),
-      {id:'camera_anchor', name:'Player Camera Anchor', type:'camera', parentId:'root', linked:true, position:[0,2.2,-4.5], rotation:[0,0,0], scale:[1,1,1], color:'#a78bfa'},
-    ],
+    elements:[sceneElement('character_model', 'Character Model / Mixamo GLB Placeholder', 'cube', 'root', [0,1.05,0], [0,0,0], [.001,.001,.001], '#334155')]
+      .concat(window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION?window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.sceneElements({shirtColor:'#e11d48',shortsColor:'#f8fafc',socksColor:'#e11d48',hairColor:'#2b2118',skinColor:'#d8a184'}):[]),
     components:[
       {id:'root_transform', elementId:'root', name:'Transform', type:'transform', linked:true},
       {id:'pawn_soccer', elementId:'root', name:'Soccer Pawn', type:'player-pawn', linked:true},
@@ -166,13 +169,17 @@ function playerSoccerTemplateGraph(){
   g.soccerPawn = {
     template:true, schemaVersion:1, id:'player-soccer-logic', playerId:1, enabled:true, hidden:false, possessed:true,
     role:'striker',
-    movement:{walkSpeed:1.9, runSpeed:6, sprintMultiplier:1.35, acceleration:14, turnRate:10, jumpHeight:1.1, gravity:22, airControl:.35, inputMode:'camera'},
+    movement:{walkSpeed:1.9, runSpeed:6, sprintMultiplier:1.35, acceleration:14, turnRate:10, jumpHeight:1.1, gravity:22, airControl:.35, inputMode:'heading', facingMode:'heading'},
     animationLibrary:null,
     locomotion:{responsiveness:9, predictionTime:.12},
-    keeper:{diveDistance:2.6, diveDuration:.55, reach:1.1},
+    keeper:{diveDistance:2.6, diveDuration:.55, reach:1.1, aiEnabled:true, aiReaction:.14, aiPrediction:1.15, aiReturnSpeed:3.8},
+    fieldAI:{enabled:false,reaction:.32,shootDistance:1.05},
+    ball:{autoControl:true, controlRadius:1.35, touchDistance:.68, shootPower:26, shotMinPower:10, shotChargeTime:1.15, shotCurve:.65, aimReticle:true, passPower:10, crossPower:16},
     animations:ANIMATION_SLOTS.reduce((map, [, slot, clip]) => { map[slot] = clip; return map; }, {}),
+    cloth:window.LK_RUNTIME_CLOTH?window.LK_RUNTIME_CLOTH.normalizeConfig({}):{enabled:true,backend:'auto',quality:'medium',pieces:[]},
     appearance:{shirtColor:'#e11d48', shortsColor:'#f8fafc', socksColor:'#e11d48', hairColor:'#2b2118', skinColor:'#d8a184', hairStyle:'short', number:9},
-    camera:{mode:'arcade', view:'third', distance:7.5, height:2.6, lag:6.5, fov:60},
+    cameraDefaultVersion:1,
+    camera:{mode:'free', view:'third', distance:7.5, height:2.6, lag:6.5, fov:60},
   };
   return g;
 }
@@ -183,6 +190,7 @@ function penaltyShootoutTemplateGraph(){
     {name:'TeamAName', type:'string', value:'Home', exposed:true, label:'Team A Name', category:'Shootout'},
     {name:'TeamBName', type:'string', value:'Away', exposed:true, label:'Team B Name', category:'Shootout'},
     {name:'BallId', type:'string', value:'penalty-ball', exposed:true, label:'Ball ID', category:'Ball'},
+    {name:'GoalId', type:'string', value:'penalty-goal', exposed:true, label:'Goal Frame ID', category:'Goal'},
     {name:'SpotX', type:'number', value:0, step:.1, exposed:true, label:'Penalty Spot X', category:'Ball'},
     {name:'SpotZ', type:'number', value:0, step:.1, exposed:true, label:'Penalty Spot Z', category:'Ball'},
     {name:'GoalX', type:'number', value:0, step:.1, exposed:true, label:'Goal Center X', category:'Goal'},
@@ -194,6 +202,7 @@ function penaltyShootoutTemplateGraph(){
     node('get_goal_z', 'variable.get', 320, 90, {name:'GoalZ'}),
     node('make_goal_pos', 'vector.make3', 560, 40, {y:0}),
     node('get_goal_heading', 'variable.get', 560, 170, {name:'GoalHeading'}),
+    node('get_goal_id', 'variable.get', 560, 240, {name:'GoalId'}),
     node('register_goal', 'soccer.registerGoal', 820, 120, {team:'A'}),
     node('get_spot_x', 'variable.get', 820, 320, {name:'SpotX'}),
     node('get_spot_z', 'variable.get', 820, 390, {name:'SpotZ'}),
@@ -219,6 +228,7 @@ function penaltyShootoutTemplateGraph(){
     edge('e_goal_z', 'get_goal_z', 'value', 'make_goal_pos', 'z'),
     edge('e_goal_pos', 'make_goal_pos', 'vector', 'register_goal', 'position'),
     edge('e_goal_heading', 'get_goal_heading', 'value', 'register_goal', 'heading'),
+    edge('e_goal_id', 'get_goal_id', 'value', 'register_goal', 'goalId'),
     edge('e_goal_ball', 'register_goal', 'completed', 'spawn_ball', 'exec'),
     edge('e_spot_x', 'get_spot_x', 'value', 'make_spot_pos', 'x'),
     edge('e_spot_z', 'get_spot_z', 'value', 'make_spot_pos', 'z'),
@@ -236,18 +246,86 @@ function penaltyShootoutTemplateGraph(){
     edge('e_result_print', 'on_result', 'then', 'print_result', 'exec'),
     edge('e_finished_print', 'on_finished', 'then', 'print_finished', 'exec'),
   ], [
-    {id:'comment_setup', title:'On Start: register the goal line (7.32 x 2.44), spawn the ball on the penalty spot (11 m from goal), configure and start the shootout.', x:42, y:-40, w:2380, h:560, color:'#38bdf8'},
+    {id:'comment_setup', title:'On Start: reuse the Ball ID and Goal ID supplied by explicit Soccer Ball / Goal Frame Logic Elements, configure and start the shootout. For compatibility, missing runtime ball/goal objects are created automatically.', x:42, y:-40, w:2380, h:560, color:'#38bdf8'},
     {id:'comment_events', title:'Shootout events: kick ready -> aim phase; ball outcome (goal / saved / out) is detected automatically and advances the rounds. Replace the prints with your HUD.', x:42, y:560, w:1000, h:520, color:'#fbbf24'},
   ]);
-  g.logicScene = {
-    version:1,
-    selected:'root',
-    elements:[{
-      id:'root', name:'Default Mesh', kind:'mesh', parent:null, mesh:'box', color:'#38bdf8',
-      t:{p:[0,0,0], r:[0,0,0], s:[.4,.4,.4]},
-      components:{render:true, collider:{enabled:false, shape:'box', size:[1,1,1], radius:.5, offset:[0,0,0], static:true}},
-    }],
+  // The manager is rules/referee data, not a world prop. Keep only its
+  // selectable Logic Element origin instead of rendering the legacy blue cube.
+  g.logicScene={root:{id:'root',name:'Penalty Shootout Referee',type:'empty',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:'#38bdf8'},elements:[],components:[{id:'root_transform',elementId:'root',name:'Transform',type:'transform',linked:true}]};
+  return g;
+}
+
+function soccerBallTemplateGraph(){
+  const g=graph('Template - Soccer Ball',[
+    {name:'BallId',type:'string',value:'match-ball',exposed:true,label:'Ball ID',category:'Soccer Ball'},
+    {name:'BallMode',type:'string',value:'match',exposed:true,label:'Ball Mode',category:'Soccer Ball',ui:'select',options:[{value:'match',label:'Classic match / free ball'},{value:'penalty',label:'Penalty spot / locked'}]},
+    {name:'LockedAtStart',type:'boolean',value:false,exposed:true,label:'Locked At Start',category:'Soccer Ball'},
+  ],[
+    node('on_start','event.onStart',80,120),
+    node('get_owner','scene.getOwner',300,20),
+    node('get_position','scene.getPosition',520,20),
+    node('get_ball_id','variable.get',520,150,{name:'BallId'}),
+    node('get_mode','variable.get',520,240,{name:'BallMode'}),
+    node('get_locked','variable.get',520,330,{name:'LockedAtStart'}),
+    node('spawn_ball','soccer.spawnBall',800,120),
+    node('print_ready','debug.print',1080,120,{message:'Soccer Ball ready.',duration:2}),
+  ],[
+    edge('e_start','on_start','then','spawn_ball','exec'),
+    edge('e_owner','get_owner','object','get_position','object'),
+    edge('e_position','get_position','position','spawn_ball','position'),
+    edge('e_id','get_ball_id','value','spawn_ball','ballId'),
+    edge('e_mode','get_mode','value','spawn_ball','mode'),
+    edge('e_locked','get_locked','value','spawn_ball','locked'),
+    edge('e_ready','spawn_ball','completed','print_ready','exec'),
+  ],[
+    {id:'comment_ball',title:'Place this Logic Element where the ball must start. Match mode enables soft dribbling and normal play; Penalty mode locks it until a valid foot contact. A Penalty Manager can reuse this exact ball through Ball ID.',x:42,y:-40,w:1320,h:500,color:'#4ade80'},
+  ]);
+  g.logicScene={
+    root:{id:'root',name:'Soccer Ball Spawn',type:'empty',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:'#f8fafc'},
+    // Regulation-size editor preview. runtimeVisual=false makes the authored
+    // marker disappear from final rendering when the physical runtime ball is
+    // present, avoiding two balls in Play.
+    elements:[{id:'ball_preview',name:'Soccer Ball Preview',type:'mesh',primitive:'sphere',parentId:'root',linked:true,position:[0,.11,0],rotation:[0,0,0],scale:[.23,.23,.23],color:'#f8fafc',runtimeVisual:false}],
+    components:[{id:'root_transform',elementId:'root',name:'Transform',type:'transform',linked:true}],
   };
+  return g;
+}
+
+function soccerGoalTemplateGraph(){
+  const g=graph('Template - Soccer Goal Frame',[
+    {name:'GoalId',type:'string',value:'goal-a',exposed:true,label:'Goal Frame ID',category:'Soccer Goal'},
+    {name:'Team',type:'string',value:'A',exposed:true,label:'Team / scoring side',category:'Soccer Goal'},
+    {name:'Heading',type:'number',value:0,step:.01,exposed:true,label:'Goal Heading (rad)',category:'Soccer Goal'},
+    {name:'Width',type:'number',value:7.32,min:1,max:20,step:.01,exposed:true,label:'Inner Width (m)',category:'Soccer Goal'},
+    {name:'Height',type:'number',value:2.44,min:.5,max:10,step:.01,exposed:true,label:'Crossbar Height (m)',category:'Soccer Goal'},
+    {name:'Depth',type:'number',value:1.8,min:.4,max:8,step:.05,exposed:true,label:'Net Depth (m)',category:'Soccer Goal'},
+  ],[
+    node('on_start','event.onStart',80,120),
+    node('get_owner','scene.getOwner',300,20),
+    node('get_position','scene.getPosition',520,20),
+    node('get_id','variable.get',520,130,{name:'GoalId'}),
+    node('get_team','variable.get',520,210,{name:'Team'}),
+    node('get_heading','variable.get',520,290,{name:'Heading'}),
+    node('get_width','variable.get',520,370,{name:'Width'}),
+    node('get_height','variable.get',520,450,{name:'Height'}),
+    node('get_depth','variable.get',520,530,{name:'Depth'}),
+    node('register_goal','soccer.registerGoal',820,120),
+    node('print_ready','debug.print',1100,120,{message:'Soccer Goal Frame registered.',duration:2}),
+  ],[
+    edge('e_start','on_start','then','register_goal','exec'),
+    edge('e_owner','get_owner','object','get_position','object'),
+    edge('e_position','get_position','position','register_goal','position'),
+    edge('e_id','get_id','value','register_goal','goalId'),
+    edge('e_team','get_team','value','register_goal','team'),
+    edge('e_heading','get_heading','value','register_goal','heading'),
+    edge('e_width','get_width','value','register_goal','width'),
+    edge('e_height','get_height','value','register_goal','height'),
+    edge('e_depth','get_depth','value','register_goal','depth'),
+    edge('e_ready','register_goal','completed','print_ready','exec'),
+  ],[
+    {id:'comment_goal',title:'Place this Logic Element on the goal line. It is the scoring sensor, independent from the visible posts/net, so any authored goal mesh can be used. Heading points out of the goal mouth toward the field.',x:42,y:-40,w:1380,h:580,color:'#38bdf8'},
+  ]);
+  g.logicScene={root:{id:'root',name:'Soccer Goal Sensor',type:'empty',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:'#38bdf8'},elements:[],components:[{id:'root_transform',elementId:'root',name:'Transform',type:'transform',linked:true}]};
   return g;
 }
 
@@ -256,14 +334,28 @@ function makeSoccerTemplates(){
     {
       id:'logic-template-player-soccer',
       name:'Template - Player Soccer Element',
-      description:'Editable Soccer Pawn starter: role up to goalkeeper, Mixamo GLB slot with per-action animation clips, motion-blended free movement, live-edit kit colors and camera. Duplicate per player and change role/kit per instance.',
+      description:'Editable Soccer Pawn starter: role up to goalkeeper, independent Mixamo motion slots, football-facing forward/back/strafe movement, live-edit kit colors and camera. Duplicate per player and change role/kit per instance.',
       category:'Pawn / Soccer',
       graph:playerSoccerTemplateGraph(),
     },
     {
+      id:'logic-template-soccer-ball',
+      name:'Template - Soccer Ball',
+      description:'Explicit reusable soccer ball spawn. Match mode supports free play and soft control; Penalty mode locks the same ball on its spot until a valid kick.',
+      category:'Gameplay / Soccer',
+      graph:soccerBallTemplateGraph(),
+    },
+    {
+      id:'logic-template-soccer-goal',
+      name:'Template - Soccer Goal Frame',
+      description:'Reusable invisible goal-line sensor, independent from the visible goal mesh. Place one per scoring end and assign a stable Goal ID/team.',
+      category:'Gameplay / Soccer',
+      graph:soccerGoalTemplateGraph(),
+    },
+    {
       id:'logic-template-penalty-shootout',
       name:'Template - Penalty Shootout Manager',
-      description:'Referee Logic Element for a penalty shootout: registers the goal line, spawns the ball on the spot, runs alternating kicks with sudden death and emits score events.',
+      description:'Referee Logic Element for a penalty shootout: reuses the configured Ball/Goal IDs, runs alternating kicks with early decision and sudden death, and emits score events. Missing runtime objects are created for compatibility.',
       category:'Gameplay / Soccer',
       graph:penaltyShootoutTemplateGraph(),
     },
@@ -273,5 +365,5 @@ function makeSoccerTemplates(){
 if(window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.register){
   window.LK_LOGIC_TEMPLATES.register(makeSoccerTemplates());
 }
-window.LK_LOGIC_TEMPLATES_SOCCER = Object.freeze({makeSoccerTemplates});
+window.LK_LOGIC_TEMPLATES_SOCCER = Object.freeze({makeSoccerTemplates,soccerBallTemplateGraph,soccerGoalTemplateGraph,penaltyShootoutTemplateGraph});
 })();

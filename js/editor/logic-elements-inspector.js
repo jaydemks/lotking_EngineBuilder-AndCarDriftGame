@@ -33,6 +33,15 @@ function create(deps){
   const commitTransformHistory = deps.commitTransformHistory || function(){};
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   let logicWindowState = null;
+  let logicRevisionSequence = 0;
+  function stampRuntimeRevision(graph, object){
+    if(!graph||typeof graph!=='object')return graph;
+    const previous=Math.max(Number(graph.runtimeRevision)||0,Number(object&&object.userData&&object.userData.logicRevision)||0),revision=Math.max(previous+1,Date.now()*1000+(logicRevisionSequence++%1000));
+    graph.runtimeRevision=revision;if(object&&object.userData)object.userData.logicRevision=revision;return graph;
+  }
+  const pawnStudio = window.LK_EDITOR_PAWN_STUDIO && window.LK_EDITOR_PAWN_STUDIO.create(Object.assign({}, deps, {
+    onSave:(object, graph) => { const saved=saveElementGraph(object, graph);status(saved?tr('Pawn Studio saved', 'Pawn Studio salvato'):tr('Pawn Studio save failed', 'Salvataggio Pawn Studio non riuscito'));return saved; },
+  }));
 
   function registry(){
     return window.LK_LOGIC_NODES_MVP ? window.LK_LOGIC_NODES_MVP.createRegistry() : null;
@@ -215,6 +224,8 @@ function create(deps){
     let viewportTool = 'move';
     let viewportSpace = 'world';
     let viewportSnap = false;
+    let viewportSimulation = null;
+    let viewportSimulationRaf = 0;
     let selection = {kind:'graph'};
     let graphClipboard = null;
     let suppressPinClick = false;
@@ -242,7 +253,7 @@ function create(deps){
         '</aside>' +
         '<section class="lk-le-stage">' +
           '<div class="lk-le-panel on" data-panel="graph"><div class="lk-lg-canvas-wrap"><svg class="lk-lg-wires"></svg><div class="lk-lg-canvas"></div><div class="lk-lg-selection-box"></div><div class="lk-lg-context-menu"></div><div class="lk-lg-minimap"></div></div></div>' +
-          '<div class="lk-le-panel" data-panel="viewport"><div class="lk-le-viewport"><div class="lk-le-viewport-mount"></div><div class="lk-le-viewport-tools"><button class="on" type="button" data-viewport-tool="move" title="Move (W)">↔</button><button type="button" data-viewport-tool="rotate" title="Rotate (E)">⟳</button><button type="button" data-viewport-tool="scale" title="Scale (R)">□</button><span class="lk-le-viewport-tool-divider"></span><button type="button" data-viewport-space title="Transform space: World">W</button><button type="button" data-viewport-snap title="Toggle transform snap">◎</button><button type="button" data-viewport-focus title="Frame selected">⌖</button></div><div class="lk-le-viewport-card"><b>Viewport</b><span>Select an element in the hierarchy.</span></div></div></div>' +
+          '<div class="lk-le-panel" data-panel="viewport"><div class="lk-le-viewport"><div class="lk-le-viewport-mount"></div><div class="lk-le-viewport-tools"><button class="on" type="button" data-viewport-tool="move" title="Move (W)">↔</button><button type="button" data-viewport-tool="rotate" title="Rotate (E)">⟳</button><button type="button" data-viewport-tool="scale" title="Scale (R)">□</button><span class="lk-le-viewport-tool-divider"></span><button type="button" data-viewport-space title="Transform space: World">W</button><button type="button" data-viewport-snap title="Toggle transform snap">◎</button><button type="button" data-viewport-focus title="Frame selected">⌖</button><span class="lk-le-viewport-tool-divider"></span><button type="button" data-viewport-play title="Play this Pawn only">▶</button><button type="button" data-viewport-stop title="Stop isolated preview">■</button></div><div class="lk-le-preview-pad" hidden><button type="button" data-preview-input="forward">▲</button><button type="button" data-preview-input="left">◀</button><button type="button" data-preview-input="backward">▼</button><button type="button" data-preview-input="right">▶</button><button type="button" data-preview-input="sprint">RUN</button></div><div class="lk-le-viewport-card"><b>Viewport</b><span>Select an element in the hierarchy.</span></div></div></div>' +
         '</section>' +
         '<aside class="lk-le-right"><div class="lk-le-inspector"></div></aside>' +
       '</div>';
@@ -267,6 +278,9 @@ function create(deps){
     const viewportToolButtons = Array.from(root.querySelectorAll('[data-viewport-tool]'));
     const viewportSpaceButton = root.querySelector('[data-viewport-space]');
     const viewportSnapButton = root.querySelector('[data-viewport-snap]');
+    const viewportPlayButton = root.querySelector('[data-viewport-play]');
+    const viewportStopButton = root.querySelector('[data-viewport-stop]');
+    const viewportPreviewPad = root.querySelector('.lk-le-preview-pad');
     let viewport = null;
     const onCollisionDummiesChange = () => {
       if(!root.isConnected){
@@ -280,8 +294,25 @@ function create(deps){
     const graphView = {x:80, y:60, zoom:1};
     canvasWrap.tabIndex = 0;
     setupLogicElementSidebarResizers(root);
+    // Character camera behavior is configuration on the Pawn, not a spatial
+    // child. Early Character/Soccer templates carried a camera helper several
+    // metres behind the body; Box3 then included that invisible helper and
+    // made the Logic Element dummy look much larger than the actual character.
+    // Migrate only the exact legacy template helper. Vehicle camera anchors
+    // remain authored scene elements because that system exposes anchor sets.
+    let removedLegacyCharacterHelper=false;
+    if(rootGraph.characterPawn||rootGraph.soccerPawn){
+      const scene=rootGraph.logicScene||{};
+      if(Array.isArray(scene.elements)){
+        const before=scene.elements.length;
+        scene.elements=scene.elements.filter(item=>!(item&&item.id==='camera_anchor'&&item.type==='camera'&&String(item.name||'')==='Player Camera Anchor'));
+        removedLegacyCharacterHelper=scene.elements.length!==before;
+      }
+      if(removedLegacyCharacterHelper&&Array.isArray(scene.components))scene.components=scene.components.filter(item=>item&&item.elementId!=='camera_anchor');
+    }
     if(!Array.isArray(graph.comments)) graph.comments = [];
     lastGraphSnapshot = graphSnapshot();
+    if(removedLegacyCharacterHelper)opts.saveGraph(rootGraph);
 
     function syncStatus(saved){
       const checked = validate(graph);
@@ -731,6 +762,7 @@ function create(deps){
         initViewport3D();
         requestAnimationFrame(syncViewport3D);
       }
+      const runButton=root.querySelector('.lk-lg-run');if(runButton)runButton.textContent=activeTab==='viewport'?tr('▶ Play Isolated','▶ Play isolato'):'▶ Run';
       renderInspector();
     }
 
@@ -2382,7 +2414,7 @@ function create(deps){
           ['tuning.horsepower','Horsepower'], ['tuning.torque','Torque'], ['tuning.maxSpeed','Max speed'],
           ['tuning.acceleration','Acceleration'], ['tuning.brake','Brake'], ['tuning.steer','Steering'], ['tuning.grip','Grip'],
           ['camera.mode','Camera mode'], ['lights.front.enabled','Headlights'], ['effects.neonEnabled','Neon'],
-          ['effects.exhaustEnabled','Exhaust'], ['effects.skidEnabled','Skids'], ['engineAudio.enabled','Engine audio'], ['dataWidgets.enabled','Data widgets'],
+          ['effects.exhaustEnabled','Exhaust'], ['effects.skidEnabled','Skids'], ['engineAudio.enabled','Engine audio'], ['radio.enabled','Vehicle radio'], ['dataWidgets.enabled','Data widgets'],
         ].forEach(item => { const option = document.createElement('option'); option.value = item[0]; option.textContent = item[1]; binding.appendChild(option); });
         binding.value = variable.binding || '';
         binding.addEventListener('change', () => { variable.binding = binding.value || null; if(variable.binding) variable.exposed = true; persist(); renderVariables(); });
@@ -3253,7 +3285,7 @@ function create(deps){
       const scene3d = new THREERef.Scene();
       scene3d.background = new THREERef.Color(0x090d14);
       const camera = new THREERef.PerspectiveCamera(55, 1, .1, 200);
-      const renderer = new THREERef.WebGLRenderer({antialias:true, alpha:false});
+      const renderer = window.LK_RUNTIME_RENDERING_BACKEND ? window.LK_RUNTIME_RENDERING_BACKEND.createWebGL({antialias:true,alpha:false},'logic-element-preview') : new THREERef.WebGLRenderer({antialias:true, alpha:false});
       renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
       renderer.domElement.tabIndex = 0;
       viewportMount.appendChild(renderer.domElement);
@@ -3343,6 +3375,7 @@ function create(deps){
 
     function syncViewportGizmo(){
       if(!viewport || !viewport.gizmo) return;
+      if(viewportSimulation){viewport.gizmo.detach();return;}
       applyViewportGizmoSettings();
       const id = selectedSceneElementId();
       const node = id && viewport.meshes.get(id);
@@ -3361,6 +3394,89 @@ function create(deps){
         return component && component.elementId || null;
       }
       return null;
+    }
+
+    function viewportSimulationType(){
+      if(rootGraph.vehiclePawn||rootGraph.playerPawnBlueprint)return 'vehicle';
+      if(rootGraph.characterPawn||rootGraph.soccerPawn)return 'character';
+      return 'generic';
+    }
+
+    function viewportSimulationDefinition(){
+      return rootGraph.characterPawn||rootGraph.soccerPawn||rootGraph.vehiclePawn||rootGraph.playerPawnBlueprint||{};
+    }
+
+    function prepareViewportCharacterAnimation(simulation,attempt){
+      if(!viewportSimulation||viewportSimulation!==simulation)return;
+      const node=viewport&&viewport.meshes.get('character_model'),model=node&&node.userData&&node.userData.logicElementAssetModel;
+      if(!node||!model){if((attempt||0)<120)setTimeout(()=>prepareViewportCharacterAnimation(simulation,(attempt||0)+1),25);return;}
+      const base=window.LK_RUNTIME_CHARACTER_PAWN_BASE,runtime=window.LK_RUNTIME_CHARACTER_LOCOMOTION||window.LK_RUNTIME_SOCCER_LOCOMOTION,definition=viewportSimulationDefinition();
+      if(!runtime||!runtime.createController)return;
+      const refs=[];if(definition.animationLibrary)refs.push(definition.animationLibrary);(definition.animationSet||[]).forEach(entry=>{if(entry&&entry.asset)refs.push(entry.asset);});
+      const unique=[],seen=new Set();refs.forEach(ref=>{const key=base&&base.animationLibraryKey?base.animationLibraryKey(ref):String(ref&&ref.dbKey||ref&&ref.key||'');if(key&&!seen.has(key)){seen.add(key);unique.push(ref);}});
+      Promise.all(unique.map(ref=>base&&base.loadAnimationLibrary?base.loadAnimationLibrary(ref).catch(()=>null):Promise.resolve(null))).then(libraries=>{
+        if(!viewportSimulation||viewportSimulation!==simulation)return;
+        disposeViewportElementAnimation('character_model');
+        node.userData.logicAnimationClips=(model.animations||[]).filter(Boolean);
+        delete node.userData.logicAnimationMixer;
+        const movement=definition.movement||{},controller=runtime.createController({THREERef:viewport.THREE,walkSpeed:Number(movement.walkSpeed)||1.8,runSpeed:Number(movement.runSpeed)||5.4,responsiveness:9,predictionTime:.12,animationSet:definition.animationSet||[]});
+        const clips=libraries.filter(Boolean).reduce((all,library)=>all.concat(library.clips||[]),[]);
+        if(controller.bind(node,definition.animations||{},clips,definition.animationSet||[])){
+          simulation.controller=controller;
+          const report=node.userData&&node.userData.characterAnimationBinding,bindings=report&&Array.isArray(report.clips)?report.clips.map(item=>item.binding).filter(Boolean):[];
+          const total=bindings.reduce((sum,item)=>sum+(Number(item.total)||0),0),matched=bindings.reduce((sum,item)=>sum+(Number(item.matched)||0),0);
+          if(statusEl&&total)statusEl.textContent=matched?tr('Isolated preview running · '+matched+'/'+total+' animation tracks bound','Preview isolata in esecuzione · '+matched+'/'+total+' tracce animazione collegate'):tr('Animation loaded, but 0/'+total+' tracks match the Main Mesh skeleton','Animazione caricata, ma 0/'+total+' tracce corrispondono allo skeleton della Mesh principale');
+        } else {controller.dispose();if(statusEl)statusEl.textContent=tr('No playable animation clip is assigned to this Character Pawn','Nessuna clip di animazione riproducibile è assegnata a questo Character Pawn');}
+      });
+    }
+
+    function stopViewportSimulation(){
+      const simulation=viewportSimulation;
+      viewportSimulation=null;
+      if(viewportSimulationRaf)cancelAnimationFrame(viewportSimulationRaf);
+      viewportSimulationRaf=0;
+      if(simulation&&simulation.controller)simulation.controller.dispose();
+      if(simulation&&simulation.root){simulation.root.position.copy(simulation.position);simulation.root.quaternion.copy(simulation.quaternion);simulation.root.scale.copy(simulation.scale);}
+      if(viewportPlayButton)viewportPlayButton.classList.remove('on');
+      if(viewport&&viewport.renderer)viewport.renderer.domElement.classList.remove('is-playing');
+      if(viewportMount){viewportMount.dataset.previewState='stopped';delete viewportMount.dataset.previewPosition;}
+      if(viewportPreviewPad)viewportPreviewPad.hidden=true;
+      if(viewport){syncViewport3D();renderViewport();}
+      return !!simulation;
+    }
+
+    function startViewportSimulation(){
+      initViewport3D();stopViewportSimulation();
+      const rootNode=viewport&&viewport.meshes.get('root');if(!rootNode)return false;
+      const simulation={type:viewportSimulationType(),root:rootNode,keys:Object.create(null),position:rootNode.position.clone(),quaternion:rootNode.quaternion.clone(),scale:rootNode.scale.clone(),speed:0,last:performance.now(),controller:null};
+      viewportSimulation=simulation;
+      if(viewport.gizmo)viewport.gizmo.detach();
+      viewport.renderer.domElement.classList.add('is-playing');viewport.renderer.domElement.focus({preventScroll:true});
+      if(viewportPlayButton)viewportPlayButton.classList.add('on');
+      viewportMount.dataset.previewState='playing';viewportMount.dataset.previewType=simulation.type;
+      if(viewportPreviewPad)viewportPreviewPad.hidden=false;
+      viewportCard.querySelector('b').textContent=simulation.type==='vehicle'?tr('Isolated Vehicle Preview','Preview veicolo isolata'):simulation.type==='character'?tr('Isolated Character Preview','Preview personaggio isolata'):tr('Isolated Preview','Preview isolata');
+      viewportCard.querySelector('span').textContent=tr('WASD / arrows drive · Shift sprint · R reset · the editor world is paused and untouched.','WASD / frecce guidano · Shift corre · R reset · il mondo editor resta fermo e intatto.');
+      if(simulation.type==='character')prepareViewportCharacterAnimation(simulation,0);
+      const tick=now=>{
+        if(!viewportSimulation||viewportSimulation!==simulation)return;
+        const dt=Math.min(.05,Math.max(.001,(now-simulation.last)/1000));simulation.last=now;
+        const keys=simulation.keys,forward=(keys.w||keys.arrowup?1:0)-(keys.s||keys.arrowdown?1:0),turn=(keys.a||keys.arrowleft?1:0)-(keys.d||keys.arrowright?1:0),definition=viewportSimulationDefinition();
+        const movement=definition.movement||{},tuning=definition.tuning||{};
+        const maxSpeed=simulation.type==='vehicle'?Math.max(2,Math.min(35,(Number(tuning.maxSpeed)||45)*.28)):Math.max(.5,Number(keys.shift?movement.runSpeed:movement.walkSpeed)||(keys.shift?5.4:1.8));
+        const target=forward*maxSpeed,acceleration=simulation.type==='vehicle'?Math.max(2,Number(tuning.acceleration)||9):Math.max(3,Number(movement.acceleration)||13);
+        simulation.speed+=Math.max(-acceleration*dt,Math.min(acceleration*dt,target-simulation.speed));
+        const turnRate=simulation.type==='vehicle'?(1.35*Math.min(1,Math.abs(simulation.speed)/3)):Math.max(.5,Number(movement.turnRate)||10)*.18;
+        simulation.root.rotation.y+=turn*turnRate*dt*(simulation.speed<0?-1:1);
+        simulation.root.translateZ(simulation.speed*dt);
+        viewportMount.dataset.previewPosition=[simulation.root.position.x,simulation.root.position.y,simulation.root.position.z].map(value=>Number(value).toFixed(3)).join(',');
+        if(keys.r){simulation.root.position.copy(simulation.position);simulation.root.quaternion.copy(simulation.quaternion);simulation.speed=0;keys.r=false;}
+        if(simulation.controller)simulation.controller.update({x:0,z:simulation.speed,speed:Math.abs(simulation.speed),grounded:true,velocityY:0,sprinting:keys.shift===true},dt);
+        if(simulation.type==='vehicle'){['wheel_front_left','wheel_front_right','wheel_rear_left','wheel_rear_right'].forEach(id=>{const wheel=viewport.meshes.get(id);if(wheel)wheel.rotation.x+=simulation.speed*dt*2.4;});}
+        const world=simulation.root.getWorldPosition(new viewport.THREE.Vector3());viewport.orbit.target.lerp(world.add(new viewport.THREE.Vector3(0,1,0)),1-Math.exp(-6*dt));updateViewportCamera();viewport.renderer.render(viewport.scene,viewport.camera);
+        viewportSimulationRaf=requestAnimationFrame(tick);
+      };
+      viewportSimulationRaf=requestAnimationFrame(tick);return true;
     }
 
     function updateViewportCamera(){
@@ -3830,7 +3946,7 @@ function create(deps){
       const collider = element && element.collider;
       const signature = collider && collider.enabled === true ? JSON.stringify(collider) : '';
       const mode = colliderDummyMode(collider);
-      const visible = !!(ED && ED.showCollisionDummies === true) && (mode === 'show' || (mode === 'auto' && selectedSceneElementId() === element.id));
+      const visible = !!(ED && ED.showCollisionDummies === true) && mode !== 'hide';
       if(old && node.userData.logicElementColliderSignature === signature){
         old.visible = visible;
         return;
@@ -3974,15 +4090,15 @@ function create(deps){
           viewport.meshes.set(element.id, mesh);
           viewport.scene.add(mesh);
         }
+        const simulatedRoot=viewportSimulation&&viewportSimulation.root===mesh;
         const pos = Array.isArray(element.position) ? element.position : [index * 1.25, 0, 0];
-        mesh.position.set(Number(pos[0]) || 0, Number.isFinite(Number(pos[1])) ? Number(pos[1]) : 0, Number(pos[2]) || 0);
         const rot = Array.isArray(element.rotation) ? element.rotation : [0,0,0];
-        mesh.rotation.set(THREERef.MathUtils.degToRad(Number(rot[0]) || 0), THREERef.MathUtils.degToRad(Number(rot[1]) || 0), THREERef.MathUtils.degToRad(Number(rot[2]) || 0));
         const scale = Array.isArray(element.scale) ? element.scale : [1,1,1];
+        if(!simulatedRoot){mesh.position.set(Number(pos[0]) || 0, Number.isFinite(Number(pos[1])) ? Number(pos[1]) : 0, Number(pos[2]) || 0);mesh.rotation.set(THREERef.MathUtils.degToRad(Number(rot[0]) || 0), THREERef.MathUtils.degToRad(Number(rot[1]) || 0), THREERef.MathUtils.degToRad(Number(rot[2]) || 0));}
         mesh.name = element.name || element.id;
         mesh.visible = element.linked !== false;
         const selected = selectedSceneElementId() === element.id;
-        mesh.scale.set(
+        if(!simulatedRoot)mesh.scale.set(
           Number.isFinite(Number(scale[0])) ? Number(scale[0]) : 1,
           Number.isFinite(Number(scale[1])) ? Number(scale[1]) : 1,
           Number.isFinite(Number(scale[2])) ? Number(scale[2]) : 1
@@ -4017,6 +4133,10 @@ function create(deps){
 
     function disposeViewport3D(){
       if(!viewport) return;
+      if(viewportSimulation&&viewportSimulation.controller)viewportSimulation.controller.dispose();
+      viewportSimulation=null;
+      if(viewportSimulationRaf)cancelAnimationFrame(viewportSimulationRaf);
+      viewportSimulationRaf=0;
       if(viewport.animationRaf) cancelAnimationFrame(viewport.animationRaf);
       viewport.animationRaf = 0;
       if(viewport.resizeObserver) viewport.resizeObserver.disconnect();
@@ -4642,6 +4762,7 @@ function create(deps){
       if(!isLogicEditorKeyEvent(e) || isFormTarget(e.target)) return;
       if(activeTab === 'viewport'){
         const key = String(e.key || '').toLowerCase();
+        if(viewportSimulation&&['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright','shift','r',' '].includes(key)){viewportSimulation.keys[key]=true;viewportSimulation.keys.shift=e.shiftKey||key==='shift';stopLogicEditorKey(e);return;}
         const mod = e.ctrlKey || e.metaKey;
         if(mod && key === 'z'){
           if(e.shiftKey) redoGraph();
@@ -4708,6 +4829,7 @@ function create(deps){
     function handleKeyUp(e){
       if(!isLogicEditorKeyEvent(e)) return;
       const key = String(e.key || '').toLowerCase();
+      if(activeTab==='viewport'&&viewportSimulation&&['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright','shift','r',' '].includes(key)){viewportSimulation.keys[key]=false;if(key==='shift')viewportSimulation.keys.shift=false;stopLogicEditorKey(e);return;}
       if(activeTab === 'viewport' && viewport && viewport.fly && ['w','a','s','d','q','e','shift'].includes(key)){
         viewport.fly.keys[key] = false;
         viewport.fly.keys.shift = e.shiftKey;
@@ -4725,11 +4847,13 @@ function create(deps){
       raf = 0;
       if(runtime) runtime.stop();
       runtime = null;
+      stopViewportSimulation();
       statusEl.textContent = 'Stopped';
     }
 
     function runRuntime(){
       stopRuntime();
+      if(activeTab==='viewport'){if(startViewportSimulation()){statusEl.classList.remove('bad');statusEl.textContent=tr('Isolated preview running','Preview isolata in esecuzione');}return;}
       const checked = validate(graph);
       if(!checked.ok){
         statusEl.textContent = 'Fix graph errors before running';
@@ -4802,6 +4926,14 @@ function create(deps){
     viewportSpaceButton.addEventListener('click', toggleViewportSpace);
     viewportSnapButton.addEventListener('click', toggleViewportSnap);
     root.querySelector('[data-viewport-focus]').addEventListener('click', frameSelectedViewportElement);
+    viewportPlayButton.addEventListener('click',()=>{setActiveTab('viewport');runRuntime();});
+    viewportStopButton.addEventListener('click',stopRuntime);
+    viewportPreviewPad.querySelectorAll('[data-preview-input]').forEach(button=>{
+      const mapping={forward:'w',backward:'s',left:'a',right:'d',sprint:'shift'},key=mapping[button.dataset.previewInput];
+      const press=event=>{event.preventDefault();if(viewportSimulation)viewportSimulation.keys[key]=true;button.classList.add('on');};
+      const release=event=>{event.preventDefault();if(viewportSimulation)viewportSimulation.keys[key]=false;button.classList.remove('on');};
+      button.addEventListener('pointerdown',press);button.addEventListener('pointerup',release);button.addEventListener('pointercancel',release);button.addEventListener('pointerleave',event=>{if(event.buttons)release(event);});
+    });
     root.querySelector('.lk-le-add-element').addEventListener('click', addSceneElement);
     root.querySelector('.lk-lg-zoom-out').addEventListener('click', () => setGraphZoom(graphView.zoom * .86));
     root.querySelector('.lk-lg-zoom-in').addEventListener('click', () => setGraphZoom(graphView.zoom * 1.16));
@@ -4848,8 +4980,16 @@ function create(deps){
   }
 
   function saveElementGraph(object, graph){
-    if(!object || !object.userData) return;
+    if(!object || !object.userData) return false;
     const normalized = window.LK_LOGIC_GRAPH.normalizeGraph(graph, object.userData.editorName || 'Logic Element', 'element');
+    stampRuntimeRevision(normalized, object);
+    // The selected world instance is authoritative for immediate editor/Play
+    // parity. Update it before propagating a reusable linked definition, so a
+    // storage failure or delayed linked-instance scan cannot leave Pawn Studio
+    // showing a transform that the actual scene object has never received.
+    object.userData.logicGraph = normalized;
+    if(object.userData.addedEntry) object.userData.addedEntry.graph = window.LK_LOGIC_GRAPH.clone(normalized);
+    if(STORE.syncLogicElementSceneObject) STORE.syncLogicElementSceneObject(object, normalized);
     const api = STORE.logicElementAssets;
     const assetId = object.userData.logicAssetId;
     if(object.userData.logicLinked && assetId && api){
@@ -4858,13 +4998,10 @@ function create(deps){
         id:assetId,
         createdAt:current && current.createdAt,
       });
-      if(asset) syncLogicAssetInstances(asset);
-    } else {
-      object.userData.logicGraph = normalized;
-      if(object.userData.addedEntry) object.userData.addedEntry.graph = window.LK_LOGIC_GRAPH.clone(normalized);
-      if(STORE.syncLogicElementSceneObject) STORE.syncLogicElementSceneObject(object, normalized);
+      if(asset)syncLogicAssetInstances(asset);else {markDirty();return false;}
     }
     markDirty();
+    return normalized;
   }
 
   function logicAssetForObject(object){
@@ -4889,6 +5026,7 @@ function create(deps){
     GAME.world.registry.forEach(instance => {
       if(!instance || !instance.userData || !instance.userData.logicLinked || instance.userData.logicAssetId !== asset.id) return;
       const graph = resolvedLinkedGraph(instance, asset);
+      stampRuntimeRevision(graph, instance);
       instance.userData.logicGraph = graph;
       const entry = instance.userData.addedEntry;
       if(entry){
@@ -5228,6 +5366,23 @@ function create(deps){
       kind:asset.kind || 'glb',
     });
   }
+  function storableAssetRefObject(asset){
+    return parseStoredAssetRef(storableAssetRef(asset));
+  }
+  function parseAnimationSlotValue(value){
+    let parsed=value;
+    if(typeof parsed==='string'){
+      const text=parsed.trim();
+      if(text.charAt(0)==='{')try{parsed=JSON.parse(text);}catch(err){parsed=text;}
+      else parsed=text;
+    }
+    if(parsed&&typeof parsed==='object')return {clip:String(parsed.clip||parsed.name||''),asset:parsed.asset&&typeof parsed.asset==='object'?parsed.asset:null};
+    return {clip:String(parsed||''),asset:null};
+  }
+  function animationSlotValue(clip, asset){
+    const name=String(clip||'').trim();
+    return asset ? JSON.stringify({clip:name,asset}) : name;
+  }
   function glbLabelText(asset, fallback){
     return String(asset && (asset.name || asset.source || asset.key || asset.id) || fallback || 'GLB');
   }
@@ -5296,17 +5451,71 @@ function create(deps){
       if(onReady) onReady(library.names);
     }).catch(() => {});
   }
-  // Clip-name field with a native dropdown of every clip found in the model
-  // GLB plus the assigned animation-library GLB.
+  // Each slot may use the model/common library or its own clips-only GLB. FBX
+  // sources enter through the default importer plugin and arrive here as GLB.
   function buildAnimationClipControl(object, variable, row){
+    const spec = parseAnimationSlotValue(variable.value);
+    const allGlbs = assetLibraryLoad().filter(asset => asset && asset.kind === 'glb');
+    const assets = allGlbs.filter(soccerAnimationCompatible);
+    const refKey = ref => String(ref && (ref.dbKey || ref.key || ref.id || ref.src) || '');
+    const currentKey = refKey(spec.asset);
+    let selectedAsset = assets.find(asset => refKey(asset) === currentKey) || null;
+    const source = document.createElement('select');
+    source.title = tr('Animation source for this slot', 'Sorgente animazione per questo slot');
+    source.appendChild(new Option(tr('Model / common library', 'Modello / libreria comune'), ''));
+    assets.forEach(asset => {
+      const key = refKey(asset);
+      const suffix = Array.isArray(asset.clips) ? ' · ' + asset.clips.length + ' clips' : '';
+      const option = new Option(glbLabelText(asset, key) + suffix, 'asset:' + key);
+      if(key && key === currentKey) option.selected = true;
+      source.appendChild(option);
+    });
+    if(spec.asset && !selectedAsset){
+      const external = new Option((spec.asset.name || tr('External GLB', 'GLB esterno')) + ' (external)', 'current');
+      external.selected = true;
+      source.appendChild(external);
+    }
+    source.appendChild(new Option(tr('Import FBX/GLB for this slot…', 'Importa FBX/GLB per questo slot…'), '__import__'));
     const listId = 'lkAnimClips_' + (++animationDatalistSeq);
     const input = el('<input type="text" list="' + listId + '" placeholder="' + tr('clip name (Mixamo)', 'nome clip (Mixamo)') + '">');
-    input.value = variable.value == null ? '' : String(variable.value);
-    input.addEventListener('change', () => updateVariable(object, variable, input.value));
+    input.value = spec.clip;
     const datalist = document.createElement('datalist');
     datalist.id = listId;
-    fillClipDatalist(datalist, collectAnimationClipNames(object));
-    ensureLibraryClipNames(object, () => fillClipDatalist(datalist, collectAnimationClipNames(object)));
+    const sourceClipNames = () => selectedAsset && Array.isArray(selectedAsset.clips) && selectedAsset.clips.length
+      ? selectedAsset.clips.slice()
+      : collectAnimationClipNames(object);
+    fillClipDatalist(datalist, sourceClipNames());
+    if(!selectedAsset) ensureLibraryClipNames(object, () => fillClipDatalist(datalist, sourceClipNames()));
+    input.addEventListener('change', () => updateVariable(object, variable, animationSlotValue(input.value, selectedAsset ? storableAssetRefObject(selectedAsset) : spec.asset && source.value === 'current' ? spec.asset : null)));
+    const applyAsset = asset => {
+      selectedAsset=asset||null;
+      const clips=selectedAsset&&Array.isArray(selectedAsset.clips)?selectedAsset.clips:[];
+      const nextClip=clips.length&&clips.indexOf(input.value)<0?clips[0]:input.value;
+      updateVariable(object, variable, animationSlotValue(nextClip, selectedAsset ? storableAssetRefObject(selectedAsset) : null));
+      rebuildInspector();
+    };
+    source.addEventListener('change', () => {
+      const value=source.value;
+      if(value==='__import__'){
+        const picker=document.createElement('input');
+        picker.type='file';picker.multiple=true;picker.accept='.fbx,.glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif,.tga,.bmp';
+        picker.addEventListener('change',()=>{
+          const files=Array.from(picker.files||[]);
+          if(!files.length){rebuildInspector();return;}
+          importAssetFiles(files).then(imported=>{
+            const asset=(imported||[]).find(item=>item&&item.kind==='glb');
+            if(asset){applyAsset(asset);refreshAssetsPanel();}
+            else{status(tr('Animation import failed.', 'Importazione animazione fallita.'));rebuildInspector();}
+          });
+        },{once:true});
+        picker.click();return;
+      }
+      if(value===''){applyAsset(null);return;}
+      if(value==='current')return;
+      const key=value.slice(6);
+      applyAsset(assets.find(asset=>refKey(asset)===key)||null);
+    });
+    row.appendChild(source);
     row.appendChild(input);
     row.appendChild(datalist);
     return row;
@@ -5334,7 +5543,7 @@ function create(deps){
       external.selected = true;
       select.appendChild(external);
     }
-    select.appendChild(new Option(tr('Import GLB from disk...', 'Importa GLB da disco...'), '__import__'));
+    select.appendChild(new Option(tr('Import FBX/GLB from disk...', 'Importa FBX/GLB da disco...'), '__import__'));
     const apply = asset => {
       updateVariable(object, variable, asset ? storableAssetRef(asset) : '');
       delete object.userData.soccerLibraryClipNames;
@@ -5348,11 +5557,12 @@ function create(deps){
       if(value === '__import__'){
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.glb,.gltf';
+        input.multiple = true;
+        input.accept = '.fbx,.glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif,.tga,.bmp';
         input.addEventListener('change', () => {
-          const file = input.files && input.files[0];
-          if(!file){ rebuildInspector(); return; }
-          importAssetFiles([file]).then(imported => {
+          const files = Array.from(input.files || []);
+          if(!files.length){ rebuildInspector(); return; }
+          importAssetFiles(files).then(imported => {
             const asset = (imported || []).find(item => item && item.kind === 'glb');
             if(asset){ apply(asset); refreshAssetsPanel(); }
             else { status(tr('GLB import failed.', 'Importazione GLB fallita.')); rebuildInspector(); }
@@ -5459,7 +5669,8 @@ function create(deps){
 
   function buildExposedVariables(box, object){
     const graph = graphOf(object);
-    const vars = graph.variables.filter(v => v.exposed === true);
+    const hasMotionSet=!!((graph.characterPawn||graph.soccerPawn)&&Array.isArray((graph.characterPawn||graph.soccerPawn).animationSet));
+    const vars = graph.variables.filter(v => v.exposed === true&&!(hasMotionSet&&(v.binding==='animationLibrary'||/^animations\./.test(String(v.binding||'')))));
     if(!vars.length){
       const sec = section(tr('EXPOSED VARIABLES', 'VARIABILI ESPOSTE'));
       sec.body.appendChild(el('<div class="lk-hint">' + tr('No exposed variables. Open the Logic Graph and expose a variable from the Variables panel.', 'Nessuna variabile esposta. Apri il Logic Graph ed esponi una variabile dal pannello Variables.') + '</div>'));
@@ -5515,10 +5726,53 @@ function create(deps){
 
   function hideSoccerPlaceholderRig(graph){
     const scene = graph.logicScene || {};
-    const placeholders = /^(torso_|hips_|leg_sock_|arm_skin_|head_skin|hair_top)/;
+    const placeholders = /^(torso_|hips_|leg_sock_|arm_skin_|hand_skin_|head_skin|hair_top)/;
     (scene.elements || []).forEach(element => {
       if(element && placeholders.test(String(element.id || ''))) element.linked = false;
     });
+  }
+
+  function buildCharacterMotionSetInspector(box,object,graph){
+    const definition=graph.characterPawn||graph.soccerPawn;
+    if(!definition)return;
+    const runtime=window.LK_RUNTIME_CHARACTER_ANIMATION_SET;
+    if(!Array.isArray(definition.animationSet))definition.animationSet=runtime?runtime.fromLegacy(definition.animations||{}):[];
+    const assets=assetLibraryLoad().filter(asset=>asset&&asset.kind==='glb');
+    const sec=section(tr('MOTION ANIMATION SET','SET ANIMAZIONI DI MOVIMENTO'),false);
+    sec.body.appendChild(el('<div class="lk-hint">'+tr(
+      'A data-driven motion database. Every entry may use a different GLB or converted FBX. At runtime speed, local direction, airborne phase, acceleration and priority choose and blend the best candidates.',
+      'Un database di movimento data-driven. Ogni voce può usare un GLB o FBX convertito diverso. A runtime velocità, direzione locale, fase aerea, accelerazione e priorità scelgono e fondono i candidati migliori.'
+    )+'</div>'));
+    const save=()=>{definition.animationSet=definition.animationSet.map((entry,index)=>runtime?runtime.normalizeEntry(entry,index):entry);saveElementGraph(object,graph);rebuildInspector();};
+    const refId=ref=>String(ref&&ref.id||ref&&ref.key||ref&&ref.dbKey||ref&&ref.src||'');
+    definition.animationSet.forEach((entry,index)=>{
+      entry=runtime?runtime.normalizeEntry(entry,index):entry;
+      definition.animationSet[index]=entry;
+      const card=el('<div class="lk-le-block"></div>');
+      const title=el('<div class="lk-le-block-head"></div>');
+      const strong=document.createElement('b');strong.textContent=(index+1)+'. '+(entry.name||entry.clip||tr('Motion','Movimento'));title.appendChild(strong);card.appendChild(title);
+      const stateRow=el('<div class="lk-row"></div>'),stateLabel=document.createElement('label');stateLabel.textContent=tr('State','Stato');
+      const state=document.createElement('select');[['grounded',tr('Ground locomotion','Locomozione a terra')],['jump',tr('Jump / rising','Salto / salita')],['fall',tr('Falling','Caduta')],['land',tr('Landing','Atterraggio')],['action',tr('Action','Azione')]].forEach(item=>state.appendChild(new Option(item[1],item[0])));state.value=entry.state;state.addEventListener('change',()=>{definition.animationSet[index].state=state.value;save();});stateRow.append(stateLabel,state);card.appendChild(stateRow);
+      const dirRow=el('<div class="lk-row"></div>'),dirLabel=document.createElement('label');dirLabel.textContent=tr('Motion direction','Direzione movimento');
+      const direction=document.createElement('select');[['idle',tr('Idle / none','Idle / nessuna')],['forward',tr('Forward','Avanti')],['backward',tr('Backward','Indietro')],['left',tr('Left','Sinistra')],['right',tr('Right','Destra')]].forEach(item=>direction.appendChild(new Option(item[1],item[0])));
+      const dirs={idle:[0,0],forward:[0,1],backward:[0,-1],left:[-1,0],right:[1,0]},dirName=Object.keys(dirs).find(key=>dirs[key][0]===entry.direction[0]&&dirs[key][1]===entry.direction[1])||'forward';direction.value=dirName;direction.addEventListener('change',()=>{definition.animationSet[index].direction=dirs[direction.value].slice();save();});dirRow.append(dirLabel,direction);card.appendChild(dirRow);
+      const speedRow=el('<div class="lk-row"></div>'),speedLabel=document.createElement('label');speedLabel.textContent=tr('Nominal speed (m/s)','Velocità nominale (m/s)');const speed=el('<input type="number" min="0" max="20" step=".1">');speed.value=entry.speed;speed.addEventListener('change',()=>{definition.animationSet[index].speed=Math.max(0,Number(speed.value)||0);save();});speedRow.append(speedLabel,speed);card.appendChild(speedRow);
+      const assetRow=el('<div class="lk-row"></div>'),assetLabel=document.createElement('label');assetLabel.textContent=tr('Animation asset','Asset animazione');const assetSelect=document.createElement('select');assetSelect.appendChild(new Option(tr('Character model clips','Clip del modello personaggio'),''));
+      assets.forEach(asset=>assetSelect.appendChild(new Option(glbLabelText(asset,asset.name||'GLB'),'asset:'+refId(asset))));assetSelect.appendChild(new Option(tr('Import GLB/FBX…','Importa GLB/FBX…'),'__import__'));const currentAssetId=refId(entry.asset);assetSelect.value=currentAssetId?'asset:'+currentAssetId:'';
+      if(currentAssetId&&!assets.some(asset=>refId(asset)===currentAssetId)){assetSelect.insertBefore(new Option(glbLabelText(entry.asset,'Project GLB'),'current'),assetSelect.lastChild);assetSelect.value='current';}
+      assetSelect.addEventListener('change',()=>{
+        if(assetSelect.value==='current')return;
+        if(assetSelect.value==='__import__'){
+          const input=document.createElement('input');input.type='file';input.accept='.glb,.gltf,.fbx,image/*,.tga';input.multiple=true;input.addEventListener('change',()=>{const files=Array.from(input.files||[]);if(!files.length){rebuildInspector();return;}importAssetFiles(files).then(imported=>{const asset=(imported||[]).find(item=>item&&item.kind==='glb');if(asset){definition.animationSet[index].asset=storableAssetRefObject(asset);if(asset.clips&&asset.clips[0]&&!asset.clips.includes(definition.animationSet[index].clip))definition.animationSet[index].clip=asset.clips[0];save();}else{status(tr('Animation import failed.','Importazione animazione fallita.'));rebuildInspector();}});},{once:true});input.click();return;
+        }
+        const wanted=assetSelect.value.slice(6),asset=assets.find(item=>refId(item)===wanted);definition.animationSet[index].asset=asset?storableAssetRefObject(asset):null;if(asset&&Array.isArray(asset.clips)&&asset.clips.length&&!asset.clips.includes(definition.animationSet[index].clip))definition.animationSet[index].clip=asset.clips[0];save();
+      });assetRow.append(assetLabel,assetSelect);card.appendChild(assetRow);
+      const clipRow=el('<div class="lk-row"></div>'),clipLabel=document.createElement('label');clipLabel.textContent=tr('Clip','Clip');const clip=el('<input type="text" placeholder="clip name">');clip.value=entry.clip||'';clip.addEventListener('change',()=>{definition.animationSet[index].clip=clip.value.trim();definition.animationSet[index].name=definition.animationSet[index].name||clip.value.trim();save();});clipRow.append(clipLabel,clip);card.appendChild(clipRow);
+      const priorityRow=el('<div class="lk-row"></div>'),priorityLabel=document.createElement('label');priorityLabel.textContent=tr('Selection priority','Priorità selezione');const priority=el('<input type="number" min=".05" max="10" step=".05">');priority.value=entry.priority;priority.addEventListener('change',()=>{definition.animationSet[index].priority=Math.max(.05,Number(priority.value)||1);save();});priorityRow.append(priorityLabel,priority);card.appendChild(priorityRow);
+      card.appendChild(btnRow([{label:tr('Remove motion','Rimuovi movimento'),action:()=>{definition.animationSet.splice(index,1);save();}}]));sec.body.appendChild(card);
+    });
+    sec.body.appendChild(btnRow([{label:tr('Add animation state','Aggiungi stato animazione'),action:()=>{definition.animationSet.push({id:'motion-'+Date.now(),name:tr('New motion','Nuovo movimento'),state:'grounded',direction:[0,1],speed:1.8,speedTolerance:2.2,asset:null,clip:'',loop:true,priority:1,playbackRate:1});save();}}]));
+    box.appendChild(sec.root);
   }
 
   function buildSoccerPawnInspector(box, object, graph){
@@ -5526,13 +5780,15 @@ function create(deps){
     const genericCharacter = !!graph.characterPawn;
     const sec = section(genericCharacter ? tr('CHARACTER PAWN MODEL', 'MODELLO CHARACTER PAWN') : tr('SOCCER PAWN MODEL', 'MODELLO SOCCER PAWN'), false);
     const modelElement = ensureSoccerCharacterElement(graph);
-    const current = modelElement.asset || null;
+    const pawnDefinition = graph.characterPawn || graph.soccerPawn;
+    const current = pawnDefinition.model || modelElement.asset || null;
+    if(current && !modelElement.asset) modelElement.asset = current;
     const currentId = current && String(current.id || current.key || current.dbKey || current.src || '');
     const compatibleAssets = assetLibraryLoad().filter(soccerModelCompatible);
 
     sec.body.appendChild(el('<div class="lk-hint">' + tr(
-      genericCharacter ? 'Assign the rigged humanoid GLB used by this Character Pawn. Use in-place locomotion clips without root motion; animation-only GLBs stay in the Animation Library field below.' : 'Assign the humanoid GLB used by this Soccer Pawn. Imports are saved in Assets and applied to this selected Logic Element; animation-only GLBs stay in the Animation Library field below.',
-      genericCharacter ? 'Assegna il GLB umanoide riggato usato da questo Character Pawn. Usa clip di locomozione in-place senza root motion; i GLB solo animazioni restano nel campo Animation Library sotto.' : 'Assegna il GLB umanoide usato da questo Soccer Pawn. Gli import vengono salvati in Assets e applicati a questo Logic Element selezionato; i GLB solo animazioni restano nel campo Animation Library sotto.'
+      genericCharacter ? 'Assign the rigged humanoid GLB used by this Character Pawn. Use in-place clips without root motion; animation-only FBX/GLB assets can be assigned as a common library or separately on every animation slot.' : 'Assign the humanoid GLB used by this Soccer Pawn. Imports are saved in Assets; animation-only FBX/GLB assets can be assigned as a common library or separately on every animation slot.',
+      genericCharacter ? 'Assegna il GLB umanoide riggato usato da questo Character Pawn. Usa clip in-place senza root motion; gli FBX/GLB solo animazioni possono essere assegnati come libreria comune oppure separatamente in ogni slot.' : 'Assegna il GLB umanoide usato da questo Soccer Pawn. Gli import vengono salvati negli Asset; gli FBX/GLB solo animazioni possono essere assegnati come libreria comune oppure separatamente in ogni slot.'
     ) + '</div>'));
 
     const currentLine = current
@@ -5545,6 +5801,9 @@ function create(deps){
     currentStrong.textContent = currentLine;
     currentInfo.appendChild(currentStrong);
     sec.body.appendChild(currentInfo);
+    if(object&&object.userData&&object.userData.characterModelError){
+      const errorLine=el('<div class="lk-hint"></div>');errorLine.style.color='#fb7185';errorLine.textContent=tr('Model load failed: ','Caricamento modello fallito: ')+object.userData.characterModelError;sec.body.appendChild(errorLine);
+    }
 
     const assignModelAsset = asset => {
       if(!asset) return;
@@ -5557,6 +5816,7 @@ function create(deps){
       target.rotation = [0,0,0];
       target.scale = [1,1,1];
       target.asset = serializeSoccerModelAsset(asset, previousFit);
+      pawnDefinition.model = JSON.parse(JSON.stringify(target.asset));
       target.primitive = target.primitive || 'cube';
       delete target.animation;
       hideSoccerPlaceholderRig(graph);
@@ -5601,6 +5861,7 @@ function create(deps){
       const target = ensureSoccerCharacterElement(graph);
       if(!target.asset) return;
       target.asset.fit = Math.max(.2, Math.min(5, Number(fit.value) || 1.9));
+      pawnDefinition.model = JSON.parse(JSON.stringify(target.asset));
       saveElementGraph(object, graph);
     });
     const fitRow = el('<div class="lk-row"></div>');
@@ -5614,7 +5875,7 @@ function create(deps){
       {label:tr('Import character GLB...', 'Importa GLB personaggio...'), action:() => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.glb,.gltf';
+        input.accept = '.glb,.gltf,.fbx';
         input.addEventListener('change', () => {
           const file = input.files && input.files[0];
           if(!file) return;
@@ -5634,6 +5895,7 @@ function create(deps){
       sec.body.appendChild(el('<div class="lk-hint">' + tr('No compatible GLB assets yet. Import a humanoid/Mixamo GLB to add it here.', 'Nessun asset GLB compatibile. Importa un GLB umanoide/Mixamo per aggiungerlo qui.') + '</div>'));
     }
     box.appendChild(sec.root);
+    buildCharacterMotionSetInspector(box,object,graph);
   }
 
   function buildElement(box, object){
@@ -5679,6 +5941,16 @@ function create(deps){
       ]));
     }
     box.appendChild(mg.root);
+
+    const studioAdapter=pawnStudio&&pawnStudio.resolveType(graph);
+    if(studioAdapter&&pawnStudio){
+      const studio=section(tr('PAWN STUDIO','PAWN STUDIO'),false),definition=studioAdapter.definition?studioAdapter.definition(graph):(graph.characterPawn||graph.soccerPawn||graph.vehiclePawn||graph.playerPawnBlueprint),model=studioAdapter.model&&studioAdapter.model(graph),motionCount=definition&&Array.isArray(definition.animationSet)?definition.animationSet.length:(definition&&definition.animations?Object.keys(definition.animations).length:0);
+      studio.body.appendChild(el('<div class="lk-hint">'+tr('Pawn-specific assets and behavior are authored in one dedicated workspace with a live 3D preview.','Asset e comportamento specifici del Pawn vengono configurati in un unico workspace dedicato con preview 3D live.')+'</div>'));
+      studio.body.appendChild(el('<div class="lk-hint"><b>'+studioAdapter.label+'</b> · '+tr('Main mesh: ','Mesh principale: ')+(model?(model.name||model.source||'GLB'):tr('missing','mancante'))+(motionCount?' · Motion samples: '+motionCount:'')+'</div>'));
+      studio.body.appendChild(btnRow([{label:tr('Open Pawn Studio…','Apri Pawn Studio…'),action:()=>pawnStudio.open(object,graph)}]));
+      box.appendChild(studio.root);
+      return;
+    }
 
     if(graph.playerPawnBlueprint || graph.vehiclePawn || graph.soccerPawn || graph.characterPawn){
       const runtimeSection = section(tr('RUNTIME DIAGNOSTICS', 'DIAGNOSTICA RUNTIME'), false);
@@ -5993,8 +6265,13 @@ function create(deps){
           try { return value ? JSON.parse(JSON.stringify(value)) : JSON.parse(JSON.stringify(fallback)); }
           catch(err){ return JSON.parse(JSON.stringify(fallback)); }
         };
-        graph.vehiclePawn.exhaust = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.exhaust, {enabled:true,dummyVisible:true,smoke:true,idleSmoke:true,intensity:1,smokeThrottle:.12,fire:true,fireRpm:.82,shiftFire:true,limiterFire:true,sources:[]}), graph.vehiclePawn.exhaust || {});
-        graph.vehiclePawn.skids = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.skids, {enabled:true,dummyVisible:true,width:.24,length:.7,opacity:.55,life:12,smokeModelVersion:3,smokeEnabled:true,smokeAmount:.28,smokeThreshold:.35,smokeMinHeat:.3,smokeHeatRate:.75,smokeCoolRate:.4,smokeOnDrift:true,smokeOnBrake:true,smokeOnAcceleration:true,sources:[]}), graph.vehiclePawn.skids || {});
+        graph.vehiclePawn.exhaust = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.exhaust, {
+          enabled:true,dummyVisible:true,smoke:true,idleSmoke:true,intensity:1,smokeThrottle:.12,
+          smokeRate:1,smokeLife:1,smokeSize:1,smokePressure:1,smokeRise:1,smokeSpread:1,smokeOpacity:.3,
+          fire:true,fireRpm:.82,fireLength:1,fireWidth:1,fireDuration:1,fireOpacity:.95,
+          shiftFire:true,limiterFire:true,sources:[],
+        }), graph.vehiclePawn.exhaust || {});
+        graph.vehiclePawn.skids = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.skids, {enabled:true,dummyVisible:true,width:.24,length:.7,opacity:.55,life:12,smokeModelVersion:4,smokeEnabled:true,smokeAmount:.28,smokeThreshold:.42,smokeMinHeat:.58,smokeHeatRate:.38,smokeCoolRate:.32,smokeMinSpeedKmh:24,smokeMinSlipAngle:.14,smokeOnDrift:true,smokeOnBrake:true,smokeOnAcceleration:true,sources:[]}), graph.vehiclePawn.skids || {});
         graph.vehiclePawn.dataWidgets = mergePawnConfig(clonePlayerConfig(GAME.player && GAME.player.dataWidgets, {visibleInEditor:true,items:[]}), graph.vehiclePawn.dataWidgets || {});
         const findAttachmentAnchor = id => {
           const value = String(id || '');

@@ -60,6 +60,13 @@ This matrix tracks implementation-side verification for Logic Element Part 1. Us
 | Viewport tab canvas render | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Assets-panel template placement | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Character template pack/runtime loading | `tests/browser/character-template.spec.js` | Automated and passing |
+| Character/Soccer template spatial modularity | No legacy Camera helper or implicit football interaction geometry enlarges the Pawn dummy | Node + browser coverage present |
+| Logic Element Viewport Play Isolated | Character/Vehicle input runs only in the internal viewport and Stop restores authored transform | Browser path present; manual control acceptance pending |
+| Pawn Studio Main Mesh/reset/scale | Custom mesh replaces placeholder; reset restores T-pose while preserving Motion Set | Node + browser coverage present |
+| Pawn Studio Mixamo preview | Separate animation source retargets, advances, stops and restarts through r185 Timer/Mixer | `tests/browser/pawn-studio-preview.spec.js` |
+| Cloth Studio/runtime parity | Default plugin registration, garment detection, pinned/free simulation, mask painting and source restoration | `tests/cloth-system.test.js` |
+| FBX direct preview and ordered motion switching | Preserved source loads through plugin; stale async requests cannot replace current selection | `tests/browser/pawn-studio-preview.spec.js` |
+| Imported asset batch deletion | Multi-selection removes each logical asset and linked records once | `tests/asset-imports-batch-delete.test.js` |
 | Save/reload linked asset round trip | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Export/import portable local Logic Element template | `tests/browser/logic-element-editor.spec.js` | Automated browser spec present |
 | Logic Profiler panel | Shows active runtime stats during Play Preview | Automated browser spec present |

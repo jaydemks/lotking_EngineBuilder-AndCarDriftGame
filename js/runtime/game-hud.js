@@ -22,9 +22,31 @@ function create(){
   const rpmHud = byId('rpmHud');
   const rpmBar = byId('rpmBar');
   const driveType = byId('driveTypeHud');
+  const soccer = byId('soccerHud');
+  const soccerMode = byId('soccerModeHud');
+  const soccerScoreA = byId('soccerScoreA');
+  const soccerScoreB = byId('soccerScoreB');
+  const soccerRound = byId('soccerRoundHud');
+  const soccerPhase = byId('soccerPhaseHud');
+  const soccerResult = byId('soccerResultHud');
+  const soccerKicksA = byId('soccerKicksA');
+  const soccerKicksB = byId('soccerKicksB');
+  const soccerShotMeter = byId('soccerShotMeter');
+  const soccerShotPower = byId('soccerShotPower');
+  const soccerShotAim = byId('soccerShotAim');
+  const soccerAimReticle = byId('soccerAimReticle');
+  const legendTitle = byId('legendTitle');
+  const legendBody = byId('legendBody');
+  const tuneDock = byId('tuneDock');
+  const tuneOpen = byId('openGameplayTune');
   let popupTimer = null;
   let activePlayerId = 1;
+  let activeContext = '';
+  let lastPenaltyResultSequence = 0;
   const vehicleByPlayer = new Map();
+  const VEHICLE_CONTROLS = '<b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br><b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> look back · <b>C / R3</b> camera · <b>R / L3</b> reset<br><b>TAB / View</b> radio · <b>U / D-pad up</b> driving setup · <b>ESC / Start</b> menu · <b>H</b> help';
+  const SOCCER_CONTROLS = '<b>W A S D / arrows</b> move · <b>Shift</b> sprint · <b>Space</b> jump<br><b>Hold F / X</b> charge · <b>Mouse / right stick</b> aim · <b>release</b> shoot · <b>Shift while aiming</b> curve<br><b>Q / E</b> goalkeeper dive left / right · <b>C / R3</b> camera · <b>H</b> help';
+  const CHARACTER_CONTROLS = '<b>W A S D / arrows</b> move · <b>Shift</b> sprint · <b>Space</b> jump · <b>F / X</b> interact<br><b>Mouse / RS</b> look around · <b>Scroll</b> zoom · <b>C / R3</b> camera<br><b>ESC / Start</b> menu · <b>H</b> help';
 
   function popup(txt, color, duration){
     if(!popupEl) return;
@@ -83,8 +105,55 @@ function create(){
     if(id === activePlayerId) renderVehicleData();
   }
 
+  function setContext(value){
+    const context = value === 'soccer' ? 'soccer' : (value === 'character' ? 'character' : 'vehicle');
+    if(context === activeContext) return context;
+    activeContext = context;
+    if(root) root.dataset.context = context;
+    if(tuneDock && context !== 'vehicle') tuneDock.classList.remove('open');
+    if(tuneOpen) tuneOpen.hidden = context !== 'vehicle';
+    if(legendTitle) legendTitle.textContent = (context === 'soccer' ? 'FOOTBALL CONTROLS' : (context === 'character' ? 'CHARACTER CONTROLS' : 'DRIVING CONTROLS')) + ' · [H]';
+    if(legendBody) legendBody.innerHTML = context === 'soccer' ? SOCCER_CONTROLS : (context === 'character' ? CHARACTER_CONTROLS : VEHICLE_CONTROLS);
+    return context;
+  }
+
+  function setSoccerData(data){
+    const value = data || {};
+    const shootout = value.shootout === true;
+    if(soccerMode) soccerMode.textContent = shootout ? 'PENALTY SHOOTOUT' : 'FOOTBALL';
+    if(soccerScoreA) soccerScoreA.textContent = String(Math.max(0, Number(value.scoreA) || 0));
+    if(soccerScoreB) soccerScoreB.textContent = String(Math.max(0, Number(value.scoreB) || 0));
+    if(soccerRound) soccerRound.textContent = shootout ? ('ROUND ' + Math.max(1, Number(value.round) || 1)) : String(value.role || 'PLAYER').toUpperCase();
+    if(soccerPhase) soccerPhase.textContent = shootout ? String(value.phase || 'ready').toUpperCase() : String(value.action || 'PLAY').toUpperCase();
+    const result=String(value.lastResult||'');
+    const resultLabel=result==='goal'?'GOAL!':(result==='saved'?'SAVED!':(result==='miss'?'MISSED':''));
+    if(soccerResult){soccerResult.textContent=resultLabel;soccerResult.dataset.result=result;}
+    const renderKicks=(node,values)=>{
+      if(!node)return;node.innerHTML='';
+      (Array.isArray(values)?values:[]).forEach(outcome=>{const mark=document.createElement('i');mark.dataset.result=String(outcome);mark.textContent=outcome==='goal'?'●':'×';mark.title=outcome==='goal'?'Goal':(outcome==='saved'?'Saved':'Missed');node.appendChild(mark);});
+    };
+    renderKicks(soccerKicksA,value.kicksA);renderKicks(soccerKicksB,value.kicksB);
+    const sequence=Math.max(0,Number(value.resultSequence)||0);
+    if(shootout&&resultLabel&&sequence>lastPenaltyResultSequence){
+      lastPenaltyResultSequence=sequence;
+      popup(resultLabel,result==='goal'?'#7bf0b3':(result==='saved'?'#ffd166':'#ff667d'),1650);
+    }
+    if(soccer) soccer.dataset.phase = String(value.phase || '');
+    const charging=value.charge!=null,showReticle=(charging||value.aiming===true)&&value.aimReticle!==false;
+    if(soccerShotMeter)soccerShotMeter.classList.toggle('on',charging);
+    if(soccerShotPower)soccerShotPower.style.width=(Math.max(0,Math.min(1,Number(value.charge)||0))*100).toFixed(1)+'%';
+    if(soccerShotAim)soccerShotAim.style.left=((Math.max(-1,Math.min(1,Number(value.aimX)||0))*.5+.5)*100).toFixed(1)+'%';
+    if(soccerAimReticle){
+      soccerAimReticle.classList.toggle('on',showReticle);
+      soccerAimReticle.style.left=Number.isFinite(Number(value.reticleX))?Number(value.reticleX).toFixed(1)+'px':(50+Math.max(-1,Math.min(1,Number(value.aimX)||0))*22).toFixed(2)+'%';
+      soccerAimReticle.style.top=Number.isFinite(Number(value.reticleY))?Number(value.reticleY).toFixed(1)+'px':(46-Math.max(-1,Math.min(1,Number(value.aimY)||0))*20).toFixed(2)+'%';
+      soccerAimReticle.style.setProperty('--shot-charge',String(Math.max(0,Math.min(1,Number(value.charge)||0))));
+    }
+  }
+
+  setContext('vehicle');
   setActivePlayer(1);
-  return {popup, setTotal, showDrift, hideDrift, setSpeedGear, setActivePlayer, setVehicleData, activePlayer:() => activePlayerId};
+  return {popup, setTotal, showDrift, hideDrift, setSpeedGear, setActivePlayer, setVehicleData, setContext, setSoccerData, activePlayer:() => activePlayerId, context:() => activeContext};
 }
 
 window.LK_RUNTIME_GAME_HUD = Object.freeze({create});

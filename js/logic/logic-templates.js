@@ -80,7 +80,7 @@ function playerCarTemplateGraph(){
     {name:'SuspensionCompression', type:'number', value:4.4, min:.1, max:20, step:.1, exposed:true, binding:'suspension.compression', label:'Compression', category:'Suspension'},
     {name:'SuspensionRelaxation', type:'number', value:2.6, min:.1, max:20, step:.1, exposed:true, binding:'suspension.relaxation', label:'Relaxation', category:'Suspension'},
     {name:'RollInfluence', type:'number', value:.22, min:0, max:1, step:.01, exposed:true, binding:'suspension.rollInfluence', label:'Roll Influence', category:'Suspension'},
-    {name:'CameraMode', type:'string', value:'arcade', exposed:true, binding:'camera.mode', label:'Camera Mode', category:'Camera', ui:'select', options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade'},{value:'cinematic',label:'Cinematic'}]},
+    {name:'CameraMode', type:'string', value:'free', exposed:true, binding:'camera.mode', label:'Camera Mode', category:'Camera', ui:'select', options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade'},{value:'cinematic',label:'Cinematic'}]},
     {name:'CameraDistance', type:'number', value:9, min:1, max:40, step:.1, exposed:true, binding:'camera.distance', label:'Distance', category:'Camera'},
     {name:'CameraHeight', type:'number', value:3.1, min:.2, max:20, step:.1, exposed:true, binding:'camera.height', label:'Height', category:'Camera'},
     {name:'CameraLag', type:'number', value:5.8, min:.1, max:30, step:.1, exposed:true, binding:'camera.lag', label:'Lag', category:'Camera'},
@@ -94,10 +94,12 @@ function playerCarTemplateGraph(){
     {name:'SmokeIntensity', type:'number', value:1, min:0, max:5, step:.05, exposed:true, binding:'effects.smokeIntensity', label:'Exhaust Smoke Intensity', category:'Effects'},
     {name:'TireSmokeEnabled', type:'boolean', value:true, exposed:true, binding:'skids.smokeEnabled', label:'Tire Smoke', category:'Effects'},
     {name:'TireSmokeAmount', type:'number', value:.28, min:0, max:2, step:.02, exposed:true, binding:'skids.smokeAmount', label:'Tire Smoke Amount', category:'Effects'},
-    {name:'TireSmokeThreshold', type:'number', value:.35, min:0, max:1, step:.01, exposed:true, binding:'skids.smokeThreshold', label:'Tire Smoke Slip Threshold', category:'Effects'},
-    {name:'TireSmokeMinHeat', type:'number', value:.3, min:0, max:1, step:.01, exposed:true, binding:'skids.smokeMinHeat', label:'Minimum Tire Heat', category:'Effects'},
-    {name:'TireSmokeHeatRate', type:'number', value:.75, min:0, max:3, step:.05, exposed:true, binding:'skids.smokeHeatRate', label:'Tire Heating Rate', category:'Effects'},
-    {name:'TireSmokeCoolRate', type:'number', value:.4, min:0, max:2, step:.05, exposed:true, binding:'skids.smokeCoolRate', label:'Tire Cooling Rate', category:'Effects'},
+    {name:'TireSmokeThreshold', type:'number', value:.42, min:0, max:1, step:.01, exposed:true, binding:'skids.smokeThreshold', label:'Tire Smoke Slip Threshold', category:'Effects'},
+    {name:'TireSmokeMinHeat', type:'number', value:.58, min:0, max:1, step:.01, exposed:true, binding:'skids.smokeMinHeat', label:'Minimum Tire Heat', category:'Effects'},
+    {name:'TireSmokeHeatRate', type:'number', value:.38, min:0, max:3, step:.05, exposed:true, binding:'skids.smokeHeatRate', label:'Tire Heating Rate', category:'Effects'},
+    {name:'TireSmokeCoolRate', type:'number', value:.32, min:0, max:2, step:.05, exposed:true, binding:'skids.smokeCoolRate', label:'Tire Cooling Rate', category:'Effects'},
+    {name:'TireSmokeMinSpeed', type:'number', value:24, min:0, max:160, step:1, exposed:true, binding:'skids.smokeMinSpeedKmh', label:'Minimum Smoke Speed (km/h)', category:'Effects'},
+    {name:'TireSmokeMinAngle', type:'number', value:.14, min:0, max:1.57, step:.01, exposed:true, binding:'skids.smokeMinSlipAngle', label:'Minimum Smoke Slip Angle', category:'Effects'},
     {name:'TireSmokeOnDrift', type:'boolean', value:true, exposed:true, binding:'skids.smokeOnDrift', label:'Smoke While Drifting', category:'Effects'},
     {name:'TireSmokeOnBrake', type:'boolean', value:true, exposed:true, binding:'skids.smokeOnBrake', label:'Smoke While Braking', category:'Effects'},
     {name:'TireSmokeOnAcceleration', type:'boolean', value:true, exposed:true, binding:'skids.smokeOnAcceleration', label:'Smoke On Wheelspin / Burnout', category:'Effects'},
@@ -105,6 +107,7 @@ function playerCarTemplateGraph(){
     {name:'EngineAudioEnabled', type:'boolean', value:true, exposed:true, binding:'engineAudio.enabled', label:'Engine Audio', category:'Audio'},
     {name:'EngineVolume', type:'number', value:.28, min:0, max:1, step:.01, exposed:true, binding:'engineAudio.volume', label:'Engine Volume', category:'Audio'},
     {name:'EnginePitch', type:'number', value:1, min:.2, max:3, step:.01, exposed:true, binding:'engineAudio.pitch', label:'Engine Pitch', category:'Audio'},
+    {name:'RadioEnabled', type:'boolean', value:true, exposed:true, binding:'radio.enabled', label:'Vehicle Radio', category:'Audio'},
     {name:'DataWidgetsEnabled', type:'boolean', value:true, exposed:true, binding:'dataWidgets.enabled', label:'Data Widgets', category:'HUD / Widgets'},
   ], [
     node('on_start', 'event.onStart', 80, 100),
@@ -191,7 +194,7 @@ function playerCarTemplateGraph(){
       {id:'model_render', elementId:'vehicle_model', name:'Imported Model / Placeholder', type:'render', linked:true},
     ],
   };
-  g.vehiclePawn = {template:true, schemaVersion:2, id:'player-car-logic', playerId:1, enabled:true, hidden:false, possessed:true, proceduralFallback:'native-player-visual-v1', modelShading:'original', collision:{mass:1200}, suspension:{stiffness:32,restLength:.34,travel:.28,radius:.38,compression:4.4,relaxation:2.6,rollInfluence:.22}, camera:{mode:'arcade',distance:9,height:3.1,lag:5.8,fov:70}, lights:{enabled:true,front:{enabled:true},rear:{enabled:true},highBeamsEnabled:true}, effects:{neonEnabled:true,exhaustEnabled:true,skidEnabled:true,smokeIntensity:1,skidLife:12}, skids:{enabled:true,smokeModelVersion:3,smokeEnabled:true,smokeAmount:.28,smokeThreshold:.35,smokeMinHeat:.3,smokeHeatRate:.75,smokeCoolRate:.4,smokeOnDrift:true,smokeOnBrake:true,smokeOnAcceleration:true}, engineAudio:{enabled:true,volume:.28,pitch:1}, dataWidgets:{enabled:true}, driveSetup:{torque:3,horsepower:360,maxSpeed:4,oversteer:1,handbrake:2,steer:2,brake:0,grip:1,reverseDelay:.5,suspension:2,damping:4,travel:0,ride:0,roll:-4,chassisLift:0}, tuning:{horsepower:360,torque:3,maxSpeed:42.8,acceleration:11.252,brake:18,reverseSpeed:12,steer:2.2222,grip:.82836,frontGrip:.83499,rearGrip:.80185,drag:1.8}};
+  g.vehiclePawn = {template:true, schemaVersion:2, cameraDefaultVersion:1, id:'player-car-logic', playerId:1, enabled:true, hidden:false, possessed:true, proceduralFallback:'native-player-visual-v1', modelShading:'original', collision:{mass:1200}, suspension:{stiffness:32,restLength:.34,travel:.28,radius:.38,compression:4.4,relaxation:2.6,rollInfluence:.22}, camera:{mode:'free',distance:9,height:3.1,lag:5.8,fov:70}, lights:{enabled:true,front:{enabled:true},rear:{enabled:true},highBeamsEnabled:true}, effects:{neonEnabled:true,exhaustEnabled:true,skidEnabled:true,smokeIntensity:1,skidLife:12}, skids:{enabled:true,smokeModelVersion:4,smokeEnabled:true,smokeAmount:.28,smokeThreshold:.42,smokeMinHeat:.58,smokeHeatRate:.38,smokeCoolRate:.32,smokeMinSpeedKmh:24,smokeMinSlipAngle:.14,smokeOnDrift:true,smokeOnBrake:true,smokeOnAcceleration:true}, engineAudio:{enabled:true,volume:.28,pitch:1}, radio:{enabled:true}, dataWidgets:{enabled:true}, driveSetup:{torque:3,horsepower:360,maxSpeed:4,oversteer:1,handbrake:2,steer:2,brake:0,grip:1,reverseDelay:.5,suspension:2,damping:4,travel:0,ride:0,roll:-4,chassisLift:0}, tuning:{horsepower:360,torque:3,maxSpeed:42.8,acceleration:11.252,brake:18,reverseSpeed:12,steer:2.2222,grip:.82836,frontGrip:.83499,rearGrip:.80185,drag:1.8}};
   g.playerPawnBlueprint = {template:true, version:2, controllerIndex:0, playerId:1, enabled:true, hidden:false};
   return g;
 }

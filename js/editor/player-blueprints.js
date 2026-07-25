@@ -146,8 +146,9 @@ function create(deps){
     const bp = player && JSON.parse(JSON.stringify(player));
     if(!bp){ status(tr('Invalid player_car Logic', 'player_car Logic non valido')); return; }
     const options = opts || {};
-    if(GAME.player.setEnabled) GAME.player.setEnabled(bp.enabled !== false);
-    if(GAME.player.setHidden) GAME.player.setHidden(bp.hidden === true);
+    const nativePlayerActive = bp.enabled !== false && bp.hidden !== true;
+    if(GAME.player.setEnabled) GAME.player.setEnabled(nativePlayerActive);
+    else { GAME.player.enabled = nativePlayerActive; GAME.player.hidden = !nativePlayerActive; }
     if(GAME.player.setControllerIndex) GAME.player.setControllerIndex(Object.prototype.hasOwnProperty.call(bp, 'controllerIndex') ? bp.controllerIndex : 0);
     if(GAME.player.setModelShading) GAME.player.setModelShading(bp.modelShading || 'original');
     if(bp.tuning && GAME.player.setTuning) GAME.player.setTuning(bp.tuning);

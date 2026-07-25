@@ -33,7 +33,8 @@ function create(deps){
   function ensureRenderer(size){
     const s = size || 96;
     if(!renderer){
-      renderer = new THREE.WebGLRenderer({antialias:true, alpha:true, preserveDrawingBuffer:true});
+      const backend=window.LK_RUNTIME_RENDERING_BACKEND;
+      renderer = backend?backend.createWebGL({antialias:true,alpha:true,preserveDrawingBuffer:true},'asset-thumbnails'):new THREE.WebGLRenderer({antialias:true, alpha:true, preserveDrawingBuffer:true});
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       scene = new THREE.Scene();
       scene.add(new THREE.AmbientLight(0xffffff, .75));

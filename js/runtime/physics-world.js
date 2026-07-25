@@ -173,6 +173,17 @@ function create(options){
     addPlayerBody();
   }
 
+  function setPlayerActive(value){
+    const active = value !== false;
+    if(!state.world) return active;
+    if(active){
+      if(!state.carBody) addPlayerBody();
+    } else {
+      removePlayer();
+    }
+    return active;
+  }
+
   function isDriveSurfaceCollider(col){
     const owner = col && col.owner;
     const ud = owner && owner.userData;
@@ -396,6 +407,7 @@ function create(options){
     rebuildStatics,
     syncPlayer,
     rebuildPlayer,
+    setPlayerActive,
     applySuspension,
     setSurfaceWorldCollision,
     dispose,

@@ -103,7 +103,9 @@ function create(deps){
     const id = o.userData.editorId;
     const div = documentRef.createElement('div');
     const selected = isSelectedItem(o);
-    div.className = 'lk-item' + (selected ? ' sel' : '') + (o.visible ? '' : ' hidden-e');
+    const pawnLogic=!!(o.userData.editorType==='logicElement'&&o.userData.logicGraph&&(o.userData.logicGraph.vehiclePawn||o.userData.logicGraph.characterPawn||o.userData.logicGraph.soccerPawn||o.userData.logicGraph.playerPawnBlueprint));
+    const effectiveVisible=o.visible!==false&&(!pawnLogic||o.userData.logicEnabled!==false);
+    div.className = 'lk-item' + (selected ? ' sel' : '') + (effectiveVisible ? '' : ' hidden-e');
     div.dataset.id = id;
     div.draggable = o && o.__lkSkipControls ? false : true;
     div.style.paddingLeft = ((ED.sceneViewMode === 'list') ? (4 + (depth || 0) * 16) : 4) + 'px';
@@ -138,7 +140,9 @@ function create(deps){
     name.title = (o.userData.builtin ? tr('(original) ', '(originale) ') : tr('(added) ', '(aggiunto) ')) + (o.userData.editorName || id);
 
     const eye = documentRef.createElement('button');
-    eye.className = 'lk-eye'; eye.textContent = o.visible ? '👁' : '—'; eye.title = tr('Show/Hide', 'Mostra/Nascondi');
+    eye.className = 'lk-eye'; eye.textContent = effectiveVisible ? '👁' : '—'; eye.title = tr('Show/Hide', 'Mostra/Nascondi');
+    if(o.userData.editorType === 'player') eye.title = tr('Activate/Deactivate native Player Car', 'Attiva/Disattiva Player Car nativa');
+    else if(pawnLogic)eye.title=tr('Activate/Deactivate Logic Pawn','Attiva/Disattiva Pawn Logic');
     if(!o.__lkSkipControls){
       eye.addEventListener('click', ev => { ev.stopPropagation(); deps.toggleVisible(o); });
     } else {

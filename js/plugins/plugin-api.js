@@ -28,6 +28,18 @@ function createApi(manager, env, plugin){
     assetType(type, config){
       return add('assetType', Object.assign({type}, config || {}));
     },
+    assetImporter(type, config){
+      return add('assetImporter', Object.assign({type}, config || {}));
+    },
+    assetPreviewLoader(type, config){
+      return add('assetPreviewLoader', Object.assign({type}, config || {}));
+    },
+    pawnStudioType(id, config){
+      return add('pawnStudioType', Object.assign({id}, config || {}));
+    },
+    pawnStudioAugment(id, config){
+      return add('pawnStudioAugment', Object.assign({id}, config || {}));
+    },
     inspectorProvider(type, provider){
       return add('inspectorProvider', {type, provider});
     },

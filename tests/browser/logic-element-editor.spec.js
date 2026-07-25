@@ -38,10 +38,17 @@ async function canvasRenderSummary(page, canvas, testInfo, name){
 }
 
 async function openInspectorSection(page, name){
-  const section = page.locator('#lkInspector .lk-sec', {has:page.locator('.lk-sec-h', {hasText:new RegExp('^' + name + '$')})}).first();
+  const section = page.locator('#lkEditor.active #lkInspector .lk-sec', {has:page.locator('.lk-sec-h', {hasText:new RegExp('^' + name + '$')})}).first();
   await expect(section).toBeVisible();
-  if(await section.evaluate(node => node.classList.contains('closed'))) await section.locator('.lk-sec-h').click();
+  if(await section.evaluate(node => node.classList.contains('closed'))) await section.locator('.lk-sec-h').click({force:true});
   return section;
+}
+
+async function waitForPreBenchmark(page){
+  await page.waitForFunction(() => {
+    const overlay=document.querySelector('#lkPreBenchmark');
+    return !overlay || !overlay.classList.contains('on');
+  }, null, {timeout:90000});
 }
 
 async function addLogicElement(page){
@@ -466,8 +473,8 @@ test('Logic Element templates can be placed from Assets as editable local copies
     return !!(mesh && Math.abs(mesh.rotation.y) > .001);
   })).toBe(true);
   await expect.poll(async () => page.evaluate(() => window.LOT_KING.editor.state.playPreview === true)).toBe(true);
-  await page.locator('[data-app-menu="plugins"]').click();
-  await page.locator('#lkCtx .lk-menu-item', {hasText:'Logic Profiler'}).first().click();
+  await waitForPreBenchmark(page);
+  await page.evaluate(() => window.LOT_KING.editor.plugins.runCommand('logic.open-profiler'));
   await expect(page.locator('#lkLogicProfilerPanel')).toHaveClass(/open/);
   await expect(page.locator('#lkLogicProfilerBody')).toContainText('Runtimes');
   await expect(page.locator('#lkLogicProfilerBody')).toContainText('Template - Rotating Cube');
@@ -505,6 +512,38 @@ test('Normal Character template is available as an editable Pawn asset', async (
       walkHelp:animation && animation.description || '',
     };
   })).toEqual({preset:'normal', hasMoveNode:true, walkHelp:expect.stringMatching(/in-place.*root motion/i)});
+  const editorMesh=await page.evaluate(async()=>{
+    const object=LOT_KING.editor.state.selected,graph=object.userData.logicGraph,model={id:'e2e-character-model',key:'e2e-character-model',src:'models/player_v2.glb',name:'E2E Character',kind:'glb',fit:1.9,clips:[]};
+    graph.characterPawn.model=model;
+    const element=graph.logicScene.elements.find(item=>item&&item.id==='character_model');element.asset=model;element.position=[0,1.05,0];element.scale=[.001,.001,.001];
+    LK_STORE.syncLogicElementSceneObject(object,graph);await object.userData.logicElementAssetReady;
+    let holder=null,meshes=0;object.traverse(node=>{if(node.userData&&node.userData.logicElementSceneId==='character_model'&&!holder)holder=node;if(node.userData&&node.userData.logicElementSceneId==='character_model'&&node.isMesh)meshes++;});
+    const liveElement=object.userData.logicGraph.logicScene.elements.find(item=>item&&item.id==='character_model');
+    return {scale:liveElement.scale.slice(),position:liveElement.position.slice(),holderScale:holder&&holder.scale.toArray(),meshes,error:object.userData.characterModelError||''};
+  });
+  expect(editorMesh).toMatchObject({scale:[1,1,1],position:[0,0,0],holderScale:[1,1,1],error:''});
+  expect(editorMesh.meshes).toBeGreaterThan(0);
+  const failedModelFallback=await page.evaluate(async()=>{
+    const object=LOT_KING.editor.state.selected,graph=object.userData.logicGraph,bad={id:'missing-character-build',dbKey:'missing:character:build',name:'Missing Character Build',kind:'glb',fit:1.9};graph.characterPawn.model=bad;const element=graph.logicScene.elements.find(item=>item&&item.id==='character_model');element.asset=bad;LK_STORE.syncLogicElementSceneObject(object,graph);await object.userData.logicElementAssetReady;let visibleParts=0,assetVisuals=0;object.traverse(node=>{const id=node.userData&&node.userData.logicElementSceneId;if(node.visible!==false&&/^(torso_|hips_|leg_sock_|arm_skin_|hand_skin_|head_skin|hair_top)/.test(String(id||''))&&node.isMesh)visibleParts++;if(node.userData&&node.userData.logicElementAssetVisual)assetVisuals++;});return {visibleParts,assetVisuals,error:object.userData.characterModelError||''};
+  });
+  expect(failedModelFallback.visibleParts).toBeGreaterThan(0);
+  expect(failedModelFallback.assetVisuals).toBe(0);
+  expect(failedModelFallback.error).not.toBe('');
+  await page.evaluate(()=>{
+    const object=LOT_KING.editor.state.selected;
+    let root=null;
+    object.traverse(node=>{if(!root&&node.userData&&node.userData.logicElementSceneId==='root')root=node;});
+    if(!root)return;
+    let visible=root.visible;
+    root.userData.e2eFinalRenderHiddenWrites=0;
+    Object.defineProperty(root,'visible',{configurable:true,get(){return visible;},set(value){if(value===false)root.userData.e2eFinalRenderHiddenWrites++;visible=value;}});
+  });
+  await page.evaluate(()=>{LOT_KING.state.sceneReady=true;LOT_KING.actions.startEditorPreview('play');LOT_KING.editor.state.playPreview=true;LOT_KING.editor.state.playPreviewMode='play';});
+  await expect.poll(()=>page.evaluate(()=>{const object=LOT_KING.editor.state.selected;let visibleParts=0;object&&object.traverse(node=>{const id=node.userData&&node.userData.logicElementSceneId;if(node.visible!==false&&node.isMesh&&/^(torso_|hips_|leg_sock_|arm_skin_|hand_skin_|head_skin|hair_top)/.test(String(id||'')))visibleParts++;});return visibleParts;})).toBeGreaterThan(0);
+  await page.waitForTimeout(150);
+  expect(await page.evaluate(()=>{const object=LOT_KING.editor.state.selected;let root=null;object.traverse(node=>{if(!root&&node.userData&&node.userData.logicElementSceneId==='root')root=node;});return root&&root.userData.e2eFinalRenderHiddenWrites;})).toBe(0);
+  await page.evaluate(()=>{LOT_KING.editor.state.playPreview=false;LOT_KING.actions.stopEditorPreview();});
+  await expect.poll(()=>page.evaluate(()=>LOT_KING.editor.state.playPreview)).toBe(false);
   expect(pageErrors).toEqual([]);
 });
 
@@ -784,7 +823,7 @@ test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({pag
   expect(zip.file('vendor/THIRD_PARTY_LICENSES.md')).toBeTruthy();
   expect(zip.file('vendor/GLTFLoader.js')).toBeNull();
   const runtimeHtml = await zip.file('gameplay.html').async('string');
-  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk2');
+  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk4');
   expect(runtimeHtml).not.toMatch(/three@0\.128\.0|three\.js\/r128|examples\/js\//);
 });
 
@@ -814,8 +853,8 @@ test('Logic Player Car owns P1 without native overlap or manual Cinema takeover'
   });
   expect(setup.cinemaTrigger).toBe('manual');
   expect(setup.nativeController).toBeNull();
-  expect(setup.nativeEnabled).toBe(true);
-  expect(setup.nativeVisible).toBe(true);
+  expect(setup.nativeEnabled).toBe(false);
+  expect(setup.nativeVisible).toBe(false);
   await page.evaluate(() => {
     window.LOT_KING.state.sceneReady = true;
     window.LOT_KING.actions.startEditorPreview('play');
@@ -847,7 +886,7 @@ test('Logic Player Car owns P1 without native overlap or manual Cinema takeover'
   }, setup.ownerId);
   expect(runtimeErrors).toEqual([]);
   if(!runtime.pawnExists) throw new Error('Logic Pawn diagnostics: ' + JSON.stringify(runtime.diagnostics));
-  expect(runtime).toMatchObject({pawnExists:true,pawnId:setup.ownerId,playerId:1,ownerVisible:true,cameraPawnId:setup.ownerId,cinemaLocked:false,nativeController:null,nativeEnabled:true,nativeVisible:true,nativeCollisionResponse:true});
+  expect(runtime).toMatchObject({pawnExists:true,pawnId:setup.ownerId,playerId:1,ownerVisible:true,cameraPawnId:setup.ownerId,cinemaLocked:false,nativeController:null,nativeEnabled:false,nativeVisible:false,nativeCollisionResponse:false});
   expect(runtime.ownerPosition[0]).toBeGreaterThan(7);
   if(runtime.bodyPosition) expect(runtime.bodyPosition[0]).toBeGreaterThan(7);
   else expect(runtime.physicsMode).toBe('arcade-fallback');

@@ -111,13 +111,14 @@ function create(deps){
     const mode = owner && owner.userData ? owner.userData.colliderDummyVisibility : null;
     if(mode === 'show') return true;
     if(mode === 'hide') return false;
-    return ED.selected === owner;
+    return true;
   }
 
   function rebuildColliderHelpers(){
     clearColliderHelpers();
     const previewActive = ED.playPreview || ED.simulatePreview;
     if(!ED.active || !helperGroup || (previewActive && ED.forceCollisionDummiesInPreview !== true)) return;
+    if(ED.showCollisionDummies === true && !previewActive) helperGroup.visible = true;
     registry().forEach(o => {
       if(deps.syncCollider && o) deps.syncCollider(o);
       const logicRefs = o && o.userData && Array.isArray(o.userData.logicElementColliderRefs) ? o.userData.logicElementColliderRefs : [];
@@ -125,7 +126,7 @@ function create(deps){
         if(!logicRef || logicRef.enabled === false) return;
         const cfg = logicRef.config || {};
         const mode = cfg.dummyVisibility || (cfg.dummyVisible === true ? 'show' : (cfg.dummyVisible === false ? 'hide' : 'auto'));
-        if(ED.showCollisionDummies !== true || mode === 'hide' || (mode !== 'show' && ED.selected !== o)) return;
+        if(ED.showCollisionDummies !== true || mode === 'hide') return;
         const mat = new THREE.MeshBasicMaterial({color:ED.selected === o ? 0x52b7ff : 0x4be3a0, wireframe:true, transparent:true, opacity:ED.selected === o ? .72 : .48, depthTest:false});
         let helper;
         if(logicRef.kind === 'circle'){

@@ -33,7 +33,8 @@ function create(deps){
     const toolbarH = ED.viewportToolbarCollapsed ? 28 : 36;
     const toolbar = root && root.querySelector ? root.querySelector('#lkViewportToolbar') : null;
     const toolbarRect = toolbar && toolbar.getBoundingClientRect ? toolbar.getBoundingClientRect() : null;
-    const y = Math.round(toolbarRect && toolbarRect.height ? toolbarRect.bottom + 2 : 74 + toolbarH + 2);
+    const chromeTop = parseFloat(getComputedStyle(root).getPropertyValue('--lk-chrome-top')) || 96;
+    const y = Math.round(toolbarRect && toolbarRect.height ? toolbarRect.bottom + 2 : chromeTop + toolbarH + 2);
     const w = Math.max(220, Math.round(innerWidth - panelWidth('left') - panelWidth('right') - 20));
     const timelineH = ED.cinemaTimelineOpen && ED.cinemaTimelineDocked ? (ED.cinemaTimelineH || 136) : 0;
     const h = Math.max(160, Math.round(innerHeight - y - 40 - ED.assetsH - timelineH));

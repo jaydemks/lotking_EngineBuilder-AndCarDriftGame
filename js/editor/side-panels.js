@@ -42,6 +42,12 @@ function create(deps){
     e.target.value = '';
     deps.importAssetFiles(files);
   });
+  const fbxFolderInput = $('#lkFbxFolderInput');
+  if(fbxFolderInput) fbxFolderInput.addEventListener('change', e => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    deps.importAssetFiles(files);
+  });
 
   root.querySelectorAll('[data-asset-filter]').forEach(chk => {
     chk.addEventListener('change', () => {

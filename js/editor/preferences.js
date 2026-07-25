@@ -132,6 +132,15 @@ function create(deps){
     root.querySelectorAll('[data-editor-key]').forEach(input => { input.value = String(prefs.editorKeys[input.dataset.editorKey] || '').toUpperCase(); });
   }
 
+  function setMusicPanelVisible(visible){
+    prefs.musicPanel = visible !== false;
+    save();
+    apply();
+    const input = $('#lkPrefMusicPanel');
+    if(input) input.checked = prefs.musicPanel;
+    return prefs.musicPanel;
+  }
+
   function setTab(tab){
     root.querySelectorAll('[data-prefs-tab]').forEach(b => b.classList.toggle('on', b.dataset.prefsTab === tab));
     root.querySelectorAll('[data-prefs-sec]').forEach(s => s.classList.toggle('on', s.dataset.prefsSec === tab));
@@ -147,9 +156,7 @@ function create(deps){
   $('#lkPrefsOverlay').addEventListener('pointerdown', e => { if(e.target === e.currentTarget) setOpen(false); });
   root.querySelectorAll('[data-prefs-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.prefsTab)));
   $('#lkPrefMusicPanel').addEventListener('change', e => {
-    prefs.musicPanel = e.target.checked;
-    save();
-    apply();
+    setMusicPanelVisible(e.target.checked);
   });
   root.querySelectorAll('[name="lkPrefTheme"]').forEach(r => r.addEventListener('change', () => {
     if(r.checked){ prefs.theme = r.value; save(); apply(); }
@@ -165,9 +172,7 @@ function create(deps){
     save();
   }));
   $('#lkQuickHide').addEventListener('click', () => {
-    prefs.musicPanel = false;
-    save();
-    apply();
+    setMusicPanelVisible(false);
     status(lang() === 'it' ? 'Player nascosto: riattivalo da ⚙ Impostazioni → Interfaccia' : 'Player hidden: re-enable it from ⚙ Settings → Interface');
   });
 
@@ -180,6 +185,7 @@ function create(deps){
     apply,
     setOpen,
     setTab,
+    setMusicPanelVisible,
   });
 }
 

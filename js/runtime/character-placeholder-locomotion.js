@@ -1,0 +1,296 @@
+/* =========================================================
+   LOT KING - Procedural placeholder locomotion
+   Drives the built-in primitive body (torso/hips/legs/arms/
+   head authored by the Character and Soccer templates) with a
+   lightweight procedural walk/run/idle/gesture cycle, so
+   movement and style read clearly before a rigged GLB is ever
+   assigned. Exposes the same public contract as the GLB
+   motion-blend controller (bind/update/playAction/dispose/
+   isBound/...) in soccer-locomotion.js, so Character and Soccer
+   Pawns can use either interchangeably and upgrade from one to
+   the other without special-casing the caller.
+   ========================================================= */
+(function(){
+'use strict';
+
+function finite(value, fallback){ const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
+function normalizeName(name){ return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+
+// Scene element ids authored by the Character/Soccer template placeholder
+// rig (see logic-templates-character.js / logic-templates-soccer.js). Any
+// subset may be present; parts that are missing are simply not animated.
+const PART_IDS = {
+  torso:'torso_shirt', hips:'hips_shorts',
+  legLeft:'leg_sock_left', legRight:'leg_sock_right',
+  armLeft:'arm_skin_left', armRight:'arm_skin_right',
+  head:'head_skin',
+};
+
+// One authoritative T-pose shared by Character/Soccer templates and Pawn
+// Studio. Arms and legs use invisible joint pivots, so procedural motion
+// rotates from shoulders/hips instead of spinning each limb around its centre.
+const T_POSE = Object.freeze([
+  {id:'torso_shirt',name:'Torso Shirt',type:'mesh',primitive:'cube',parentId:'root',position:[0,1.27,0],rotation:[0,0,0],scale:[.52,.62,.31],colorKey:'shirtColor'},
+  {id:'hips_shorts',name:'Hips Shorts',type:'mesh',primitive:'cube',parentId:'root',position:[0,.88,0],rotation:[0,0,0],scale:[.47,.30,.29],colorKey:'shortsColor'},
+  {id:'leg_sock_left',name:'Left Hip Joint',type:'empty',parentId:'root',position:[-.13,.79,0],rotation:[0,0,0],scale:[1,1,1]},
+  {id:'leg_sock_mesh_left',name:'Leg Sock Left',type:'mesh',primitive:'cylinder',parentId:'leg_sock_left',position:[0,-.37,0],rotation:[0,0,0],scale:[.15,.82,.15],colorKey:'socksColor'},
+  {id:'leg_sock_right',name:'Right Hip Joint',type:'empty',parentId:'root',position:[.13,.79,0],rotation:[0,0,0],scale:[1,1,1]},
+  {id:'leg_sock_mesh_right',name:'Leg Sock Right',type:'mesh',primitive:'cylinder',parentId:'leg_sock_right',position:[0,-.37,0],rotation:[0,0,0],scale:[.15,.82,.15],colorKey:'socksColor'},
+  {id:'arm_skin_left',name:'Left Shoulder Joint',type:'empty',parentId:'root',position:[-.24,1.42,0],rotation:[0,0,0],scale:[1,1,1]},
+  {id:'arm_skin_mesh_left',name:'Arm Skin Left',type:'mesh',primitive:'cylinder',parentId:'arm_skin_left',position:[-.38,0,0],rotation:[0,0,90],scale:[.12,.84,.12],colorKey:'skinColor'},
+  {id:'hand_skin_left',name:'Hand Skin Left',type:'mesh',primitive:'sphere',parentId:'arm_skin_left',position:[-.77,0,0],rotation:[0,0,0],scale:[.13,.16,.13],colorKey:'skinColor'},
+  {id:'arm_skin_right',name:'Right Shoulder Joint',type:'empty',parentId:'root',position:[.24,1.42,0],rotation:[0,0,0],scale:[1,1,1]},
+  {id:'arm_skin_mesh_right',name:'Arm Skin Right',type:'mesh',primitive:'cylinder',parentId:'arm_skin_right',position:[.38,0,0],rotation:[0,0,90],scale:[.12,.84,.12],colorKey:'skinColor'},
+  {id:'hand_skin_right',name:'Hand Skin Right',type:'mesh',primitive:'sphere',parentId:'arm_skin_right',position:[.77,0,0],rotation:[0,0,0],scale:[.13,.16,.13],colorKey:'skinColor'},
+  {id:'head_skin',name:'Head Skin',type:'mesh',primitive:'sphere',parentId:'root',position:[0,1.69,0],rotation:[0,0,0],scale:[.31,.34,.31],colorKey:'skinColor'},
+  {id:'hair_top',name:'Hair Top',type:'mesh',primitive:'sphere',parentId:'root',position:[0,1.79,-.015],rotation:[0,0,0],scale:[.32,.19,.32],colorKey:'hairColor'},
+]);
+function paletteColor(palette,key){const defaults={shirtColor:'#4f8fbf',shortsColor:'#263445',socksColor:'#263445',hairColor:'#2b2118',skinColor:'#d8a184'};return palette&&palette[key]||defaults[key]||'#64748b';}
+function sceneElements(palette){return T_POSE.map(part=>({id:part.id,name:part.name,type:part.type,primitive:part.primitive||'sphere',parentId:part.parentId,linked:true,dummyVisible:false,position:part.position.slice(),rotation:part.rotation.slice(),scale:part.scale.slice(),color:paletteColor(palette,part.colorKey)}));}
+function createVisual(THREERef,palette){
+  if(!THREERef)return null;const root=new THREERef.Group();root.name='Character Placeholder · T-Pose';root.userData.characterPlaceholderRig=true;const nodes=new Map([['root',root]]);
+  T_POSE.forEach(part=>{let node;if(part.type==='empty')node=new THREERef.Group();else{let geometry;if(part.primitive==='sphere')geometry=new THREERef.SphereGeometry(.48,24,14);else if(part.primitive==='cylinder')geometry=new THREERef.CylinderGeometry(.42,.42,.9,20);else geometry=new THREERef.BoxGeometry(.8,.8,.8);const material=new THREERef.MeshStandardMaterial({color:paletteColor(palette,part.colorKey),roughness:.72,metalness:0});node=new THREERef.Mesh(geometry,material);node.castShadow=true;node.receiveShadow=true;}node.name=part.name;node.position.fromArray(part.position);node.rotation.set(THREERef.MathUtils.degToRad(part.rotation[0]),THREERef.MathUtils.degToRad(part.rotation[1]),THREERef.MathUtils.degToRad(part.rotation[2]));node.scale.fromArray(part.scale);node.userData.logicElementSceneId=part.id;node.userData.characterPlaceholderPart=true;(nodes.get(part.parentId)||root).add(node);nodes.set(part.id,node);});
+  return root;
+}
+
+// One-shot gestures resolved from the free-text clip name assigned to each
+// action slot, using the same forgiving keyword-matching convention as the
+// GLB clip matcher (soccer-locomotion.js SLOT_HINTS) so "Soccer Strike",
+// "Shoot", "Goalkeeper Dive Left"... all resolve to a sensible built-in pose.
+const GESTURE_HINTS = [
+  ['jump', ['jump']],
+  ['kick', ['shoot', 'kick', 'strike', 'pass', 'cross']],
+  ['dive', ['dive', 'save']],
+  ['celebrate', ['celebrate', 'victory']],
+  ['defeat', ['defeat', 'lose']],
+  ['interact', ['interact', 'talk', 'inspect']],
+];
+function resolveGesture(name){
+  const n = normalizeName(name);
+  if(!n) return 'interact';
+  for(let i = 0; i < GESTURE_HINTS.length; i++){
+    const gesture = GESTURE_HINTS[i][0], hints = GESTURE_HINTS[i][1];
+    if(hints.some(hint => n.indexOf(hint) >= 0)) return gesture;
+  }
+  return 'interact';
+}
+
+function createController(options){
+  const opts = options || {};
+  const state = {
+    owner:null, parts:{}, rest:{}, bound:false,
+    walkSpeed:Math.max(.1, finite(opts.walkSpeed, 1.9)),
+    runSpeed:Math.max(.2, finite(opts.runSpeed, 6)),
+    responsiveness:Math.max(.5, finite(opts.responsiveness, 9)),
+    predictionTime:Math.max(0, finite(opts.predictionTime, .12)),
+    velocity:{x:0, z:0}, predicted:{x:0, z:0},
+    phase:0, idlePhase:0,
+    gesture:null, // {name, elapsed, duration, direction, onDone}
+  };
+
+  function findPart(id){
+    if(!state.owner || !state.owner.traverse) return null;
+    let found = null;
+    state.owner.traverse(child => {
+      if(!found && child.userData && child.userData.logicElementSceneId === id) found = child;
+    });
+    return found;
+  }
+  function snapshotRotation(node){ return {x:node.rotation.x, y:node.rotation.y, z:node.rotation.z}; }
+
+  function bind(owner){
+    dispose();
+    if(!owner) return false;
+    state.owner = owner;
+    let any = false;
+    Object.keys(PART_IDS).forEach(key => {
+      const node = findPart(PART_IDS[key]);
+      if(!node) return;
+      state.parts[key] = node;
+      state.rest[key] = {position:{x:node.position.x, y:node.position.y, z:node.position.z}, rotation:snapshotRotation(node)};
+      any = true;
+    });
+    state.bound = any;
+    return any;
+  }
+
+  function resetPart(key){
+    const node = state.parts[key], rest = state.rest[key];
+    if(!node || !rest) return;
+    node.position.set(rest.position.x, rest.position.y, rest.position.z);
+    node.rotation.set(rest.rotation.x, rest.rotation.y, rest.rotation.z);
+  }
+  function resetAllParts(){ Object.keys(state.parts).forEach(resetPart); }
+  function relaxArms(amount){
+    const t=clamp(finite(amount,1),0,1),left=state.parts.armLeft,right=state.parts.armRight,restLeft=state.rest.armLeft,restRight=state.rest.armRight;
+    if(left&&restLeft)left.rotation.z=restLeft.rotation.z+Math.PI*.46*t;
+    if(right&&restRight)right.rotation.z=restRight.rotation.z-Math.PI*.46*t;
+  }
+
+  function applyIdle(dt){
+    state.idlePhase += dt * 1.6;
+    resetAllParts();
+    relaxArms(1);
+    const torso = state.parts.torso, restTorso = state.rest.torso;
+    if(torso && restTorso) torso.position.y = restTorso.position.y + Math.sin(state.idlePhase) * .012;
+    const head = state.parts.head, restHead = state.rest.head;
+    if(head && restHead) head.rotation.x = restHead.rotation.x + Math.sin(state.idlePhase * .8) * .015;
+  }
+
+  // speedRatio in [0,1] against runSpeed; stride frequency and swing amount
+  // both scale with it so a faster Pawn visibly reads as running, not just
+  // sliding faster on the same walk cycle.
+  function applyLocomotion(speedRatio, sprinting, dt){
+    resetAllParts();
+    relaxArms(1);
+    state.phase += dt * (2.2 + speedRatio * (sprinting ? 7.5 : 5.2));
+    const swing = .34 + speedRatio * (sprinting ? .62 : .46);
+    const armSwing = swing * .8;
+    const s = Math.sin(state.phase);
+    const legL = state.parts.legLeft, restLL = state.rest.legLeft;
+    const legR = state.parts.legRight, restLR = state.rest.legRight;
+    if(legL && restLL) legL.rotation.x = restLL.rotation.x + s * swing;
+    if(legR && restLR) legR.rotation.x = restLR.rotation.x - s * swing;
+    const armL = state.parts.armLeft, restAL = state.rest.armLeft;
+    const armR = state.parts.armRight, restAR = state.rest.armRight;
+    if(armL && restAL) armL.rotation.x = restAL.rotation.x - s * armSwing;
+    if(armR && restAR) armR.rotation.x = restAR.rotation.x + s * armSwing;
+    const torso = state.parts.torso, restTorso = state.rest.torso;
+    if(torso && restTorso){
+      torso.position.y = restTorso.position.y + Math.abs(Math.sin(state.phase * 2)) * .05 * (.5 + speedRatio);
+      torso.rotation.x = restTorso.rotation.x + speedRatio * (sprinting ? .26 : .14);
+    }
+    const hips = state.parts.hips, restHips = state.rest.hips;
+    if(hips && restHips) hips.rotation.z = restHips.rotation.z + s * .05 * speedRatio;
+    const head = state.parts.head, restHead = state.rest.head;
+    if(head && restHead) head.rotation.x = restHead.rotation.x - speedRatio * (sprinting ? .1 : .04);
+  }
+
+  function applyGesture(dt){
+    const g = state.gesture;
+    if(!g.held)g.elapsed += dt;
+    const t = clamp(g.elapsed / g.duration, 0, 1);
+    const swing = Math.sin(t * Math.PI); // 0 -> 1 -> 0 across the gesture
+    resetAllParts();
+    relaxArms(1);
+    if(g.name === 'jump'){
+      const legL = state.parts.legLeft, restLL = state.rest.legLeft;
+      const legR = state.parts.legRight, restLR = state.rest.legRight;
+      if(legL && restLL) legL.rotation.x = restLL.rotation.x + swing * .55;
+      if(legR && restLR) legR.rotation.x = restLR.rotation.x + swing * .55;
+      const armL = state.parts.armLeft, restAL = state.rest.armLeft;
+      const armR = state.parts.armRight, restAR = state.rest.armRight;
+      if(armL && restAL) armL.rotation.x = restAL.rotation.x - swing * .35;
+      if(armR && restAR) armR.rotation.x = restAR.rotation.x - swing * .35;
+    } else if(g.name === 'kick'){
+      const legR = state.parts.legRight, restLR = state.rest.legRight;
+      if(legR && restLR) legR.rotation.x = restLR.rotation.x - swing * 1.1;
+      const torso = state.parts.torso, restTorso = state.rest.torso;
+      if(torso && restTorso) torso.rotation.x = restTorso.rotation.x + swing * .18;
+    } else if(g.name === 'dive'){
+      const dir = g.direction;
+      const torso = state.parts.torso, restTorso = state.rest.torso;
+      if(torso && restTorso) torso.rotation.z = restTorso.rotation.z + dir * swing * .9;
+      const armL = state.parts.armLeft, restAL = state.rest.armLeft;
+      const armR = state.parts.armRight, restAR = state.rest.armRight;
+      if(armL && restAL) armL.rotation.z = restAL.rotation.z - dir * swing * .8;
+      if(armR && restAR) armR.rotation.z = restAR.rotation.z - dir * swing * .8;
+    } else if(g.name === 'celebrate'){
+      const armL = state.parts.armLeft, restAL = state.rest.armLeft;
+      const armR = state.parts.armRight, restAR = state.rest.armRight;
+      if(armL && restAL) armL.rotation.x = restAL.rotation.x - swing * 2.4;
+      if(armR && restAR) armR.rotation.x = restAR.rotation.x - swing * 2.4;
+    } else if(g.name === 'defeat'){
+      const head = state.parts.head, restHead = state.rest.head;
+      const torso = state.parts.torso, restTorso = state.rest.torso;
+      if(head && restHead) head.rotation.x = restHead.rotation.x + swing * .35;
+      if(torso && restTorso) torso.rotation.x = restTorso.rotation.x + swing * .2;
+    } else { // interact / generic one-shot
+      const armR = state.parts.armRight, restAR = state.rest.armRight;
+      if(armR && restAR) armR.rotation.x = restAR.rotation.x - swing * 1.4;
+    }
+    if(t >= 1){
+      const done = g.onDone;
+      state.gesture = null;
+      resetAllParts();
+      if(typeof done === 'function') done(g.name);
+    }
+  }
+
+  // desired: local-space target velocity {x (lateral, +right), z (forward)}
+  // in m/s, matching the GLB controller's update(desired, dt) contract.
+  function update(desired, dt){
+    if(!state.bound) return;
+    const h = Math.max(.0001, finite(dt, .016));
+    const want = desired || {x:0, z:0};
+    const k = 1 - Math.exp(-state.responsiveness * h);
+    state.velocity.x += (finite(want.x, 0) - state.velocity.x) * k;
+    state.velocity.z += (finite(want.z, 0) - state.velocity.z) * k;
+    state.predicted.x = state.velocity.x + (finite(want.x, 0) - state.velocity.x) * state.predictionTime * state.responsiveness;
+    state.predicted.z = state.velocity.z + (finite(want.z, 0) - state.velocity.z) * state.predictionTime * state.responsiveness;
+    if(state.gesture){ applyGesture(h); return; }
+    const speed = Math.sqrt(state.predicted.x * state.predicted.x + state.predicted.z * state.predicted.z);
+    if(speed < .08){ applyIdle(h); return; }
+    const sprinting = speed > state.walkSpeed * 1.05;
+    const speedRatio = clamp(speed / Math.max(.1, state.runSpeed), 0, 1);
+    applyLocomotion(speedRatio, sprinting, h);
+  }
+
+  function playAction(clipName, actionOptions){
+    if(!state.bound) return false;
+    const o = actionOptions || {};
+    const name = resolveGesture(clipName);
+    state.gesture = {
+      name, elapsed:0,
+      duration:clamp(finite(o.duration, name === 'jump' ? .45 : .7), .15, 2.5),
+      direction:/left/i.test(String(clipName || '')) ? -1 : 1,
+      onDone:o.onDone,
+    };
+    return true;
+  }
+  function stopAction(){
+    if(!state.gesture) return;
+    const done = state.gesture.onDone;
+    state.gesture = null;
+    resetAllParts();
+    if(typeof done === 'function') done();
+  }
+  function isActionPlaying(){ return !!state.gesture; }
+  function holdActionAtProgress(progress){
+    if(!state.gesture)return false;
+    state.gesture.elapsed=state.gesture.duration*clamp(finite(progress,.3),0,.94);
+    state.gesture.held=true;
+    applyGesture(0);
+    return true;
+  }
+  function resumeAction(){
+    if(!state.gesture)return false;
+    state.gesture.held=false;
+    return true;
+  }
+  function actionProgress(){return state.gesture?clamp(state.gesture.elapsed/Math.max(.001,state.gesture.duration),0,1):0;}
+  function configure(patch){
+    const p = patch || {};
+    if(p.walkSpeed != null) state.walkSpeed = Math.max(.1, finite(p.walkSpeed, state.walkSpeed));
+    if(p.runSpeed != null) state.runSpeed = Math.max(.2, finite(p.runSpeed, state.runSpeed));
+    if(p.responsiveness != null) state.responsiveness = Math.max(.5, finite(p.responsiveness, state.responsiveness));
+    if(p.predictionTime != null) state.predictionTime = Math.max(0, finite(p.predictionTime, state.predictionTime));
+  }
+  function dispose(){
+    if(state.bound) resetAllParts();
+    state.owner = null; state.parts = {}; state.rest = {}; state.bound = false;
+    state.gesture = null; state.phase = 0; state.idlePhase = 0;
+    state.velocity = {x:0, z:0}; state.predicted = {x:0, z:0};
+  }
+
+  return Object.freeze({
+    bind, update, playAction, stopAction, isActionPlaying, holdActionAtProgress, resumeAction, actionProgress, configure, dispose,
+    isBound:() => state.bound,
+    availableClips:() => Object.keys(PART_IDS).filter(key => state.parts[key]),
+    debugState:() => ({velocity:Object.assign({}, state.velocity), gesture:state.gesture ? state.gesture.name : null}),
+  });
+}
+
+window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION = Object.freeze({createController, resolveGesture, PART_IDS, T_POSE, sceneElements, createVisual});
+})();

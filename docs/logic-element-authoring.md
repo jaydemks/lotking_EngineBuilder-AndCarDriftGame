@@ -10,8 +10,11 @@ This is the short operational guide for extending the current Logic Element syst
 - `js/logic/logic-services.js` is the only bridge from nodes to engine systems.
 - `js/logic/logic-templates.js` contains built-in starter Logic Element templates shown in the Assets panel and exposes `LK_LOGIC_TEMPLATES.register(...)` for external template packs.
 - `js/logic/logic-nodes-soccer.js` and `js/logic/logic-templates-soccer.js` are the soccer game-mode pack (nodes + templates) and the reference for writing feature packs in their own files.
-- `js/logic/logic-nodes-character.js` and `js/logic/logic-templates-character.js` provide the generic on-foot Character Pawn base. See `docs/CHARACTER_MOVEMENT.md` for rig, clip and root-motion requirements.
+- `js/logic/logic-nodes-character.js` and `js/logic/logic-templates-character.js` provide the generic on-foot Character Pawn base. See `docs/CHARACTER_MOVEMENT.md` for rig, clip, root-motion, Sprint and placeholder-animation requirements.
+- `js/runtime/character-placeholder-locomotion.js` is the procedural fallback animator used by Character/Soccer Pawns when no GLB is bound yet; it shares its public contract (`bind/update/playAction/dispose/isBound/...`) with the GLB motion-blend controller in `js/runtime/soccer-locomotion.js` so `character-pawn-base.js` can swap between them transparently.
+- `js/runtime/penalty-shootout-level-template.js` is a worked example of a ready-to-play level built from templates: it places two `logic-template-player-soccer` Pawns plus explicit `logic-template-soccer-ball`, `logic-template-soccer-goal` and `logic-template-penalty-shootout` elements onto a generated `js/runtime/soccer-stadium.js` stadium. Stable Ball/Goal IDs link the independent parts. See `docs/CHARACTER_MOVEMENT.md` for the level-picker entry and the `ControllerPlayerId = -1` convention it uses to avoid a second Pawn auto-possessing Player 1.
 - `js/editor/logic-elements-inspector.js` owns authoring UI only.
+- `js/editor/pawn-studio.js` owns specialist Pawn authoring through category adapters; Character/Soccer motion data should not be duplicated as one-off Inspector controls.
 
 ## Adding A Node
 
@@ -28,9 +31,11 @@ Templates are local editable starters, not linked reusable assets. Placing a tem
 
 The Player Car template is a special Vehicle Pawn definition. Keep its persistent authoring data in `graph.vehiclePawn` (schema v2) and retain `graph.playerPawnBlueprint` only as the lossless migration/reference snapshot. Runtime speed, RPM, gear and temporary control state belong to the Pawn instance and must never be written back into the graph during Play Preview.
 
-The Player Soccer template follows the same contract with `graph.soccerPawn` (schema v1): role, movement, locomotion blending, keeper, animation slots, appearance and camera are persistent authoring data; runtime speed, current action and dive timers live on the Soccer Pawn instance only. Non-vehicle Pawn kinds route exposed-variable bindings through `pawn.applyBinding(path, value)` instead of the vehicle-specific runner dispatch.
+The Player Soccer template follows the same contract with `graph.soccerPawn`: role, movement, locomotion blending, keeper, Motion Animation Set, appearance and camera are persistent authoring data; runtime speed, current action and dive timers live on the Soccer Pawn instance only. Non-vehicle Pawn kinds route exposed-variable bindings through `pawn.applyBinding(path, value)` instead of the vehicle-specific runner dispatch.
 
-The Player Character template uses `graph.characterPawn` (schema v1). `normal`, `civil` and `police` are data presets over the shared character controller; project-specific subtypes should tune or extend a preset rather than duplicate locomotion. Movement clips must be looping and in-place with root motion disabled because runtime owns translation and collision.
+The Player Character template uses `graph.characterPawn`. `normal`, `civil` and `police` are data presets over the shared character controller; project-specific subtypes should tune or extend a preset rather than duplicate locomotion. Main Mesh, skeleton, collision, movement and the per-entry Motion Animation Set are edited in Pawn Studio. Movement clips should normally be in-place because runtime owns translation and collision; imported root/hip movement is scale-normalized during compatible skeleton retargeting.
+
+In the Logic Element Viewport, Graph **Run** and Viewport **Play Isolated** are deliberately different modes. Graph Run executes the authored graph interpreter. Play Isolated creates only the lightweight Character/Vehicle simulation required for input and animation testing, does not start the editor world, and restores the authored root transform on Stop.
 
 Reusable vehicle behavior should be authored as Functions/Subgraphs. The built-in template demonstrates this with `Apply Player Drive`; control and queries must use explicit `vehiclePawn` references through the Vehicle Pawn node category instead of reading or mutating `GAME.player`.
 
@@ -83,8 +88,14 @@ Current editor support:
 - `Template - Toggle Switch`: toggles an exposed boolean with E and swaps material color through a Branch.
 - `Template - Distance Beacon`: compares owner distance from world origin against an exposed radius and swaps material color.
 - `Template - Player Soccer Element` (soccer pack): Soccer Pawn starter with role selection up to goalkeeper, Mixamo animation clip slots per action, motion-blend movement and kit color live edit.
+- `Template - Soccer Ball` (soccer pack): explicit ball spawn with selectable classic-match or locked-penalty behavior.
+- `Template - Soccer Goal Frame` (soccer pack): reusable goal-line scoring sensor, kept independent from the authored posts/net mesh.
 - `Template - Player Character (Normal)` (character pack): generic on-foot starter with normal/civil/police presets, walk/run/sprint/jump/interact graph, camera and documented in-place animation slots.
-- `Template - Penalty Shootout Manager` (soccer pack): registers the goal line, spawns the ball on the penalty spot and runs the alternating penalty shootout with score events.
+- `Template - Penalty Shootout Manager` (soccer pack): referee/coordinator that reuses Ball/Goal IDs, runs the alternating shootout and emits score events. It can still create missing runtime objects for older scenes.
+
+These are local editable starters placed one Logic Element at a time. For a complete, already-playable scene built from them, use **New Level -> Penalty Shootout Stadium (Soccer)** (`docs/CHARACTER_MOVEMENT.md`), which places the five-element kicker, goalkeeper, ball, goal sensor and manager composition onto a generated regulation stadium.
+
+The player template passes Action as continuous input rather than a one-frame key event. Hold `F / X`, use movement axes to aim, optionally hold Sprint for curve, and release to commit the kick at the animation's authored contact phase. The Ball runtime samples compatible foot bones for physical touches; during a penalty, contact before a committed kick is an immediate miss.
 
 Reusable Logic Element assets also store `definitionVersion` and a dependency manifest. Current dependency collection covers internal mesh assets plus texture/audio references used by graph nodes.
 
@@ -104,4 +115,4 @@ Before marking a Logic Element authoring change complete:
 - make sure warnings are visible but do not block runtime unless structural errors exist;
 - verify save/reload for local graph JSON;
 - verify linked-instance behavior only if reusable assets were touched;
-- update `ROADMAP_NODES_BLUEPRINT_JS_PART1.md`, `RELEASE_NOTES_v0.6.5.md`, and this doc when the public authoring surface changes.
+- update the active `RELEASE_NOTES_v*.md`, architecture/runtime docs, applicable roadmap and this guide when the public authoring surface changes.

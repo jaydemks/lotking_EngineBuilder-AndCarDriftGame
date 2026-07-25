@@ -25,6 +25,7 @@ function create(deps){
   const refreshOutliner = deps.refreshOutliner;
   const selectObject = deps.selectObject;
   const focusSelected = deps.focusSelected;
+  const toggleVisible = deps.toggleVisible;
   const activeViewportCamera = deps.activeViewportCamera || function(){ return null; };
   const setCameraViewSlot = deps.setCameraViewSlot || function(){};
   const beginTransformHistory = deps.beginTransformHistory;
@@ -222,7 +223,7 @@ function create(deps){
     box.appendChild(st.root);
 
     const sd = section(tr('VISIBILITY', 'VISIBILITA'));
-    sd.body.appendChild(checkRow(tr('Visible', 'Visibile'), o.visible, v => { o.visible = v; markDirty(); refreshOutliner(); }).root);
+    sd.body.appendChild(checkRow(tr('Visible', 'Visibile'), o.visible, v => { if(toggleVisible&&o.visible!==v)toggleVisible(o);else {o.visible=v;markDirty();refreshOutliner();} }).root);
     if(o.userData.editorType === 'mesh'){
       let anyCast = false;
       o.traverse(n => { if(n.isMesh && n.castShadow) anyCast = true; });
@@ -236,6 +237,93 @@ function create(deps){
       }).root);
     }
     box.appendChild(sd.root);
+
+    if(o.userData.driftTrack && STORE.rebuildDriftTrack){
+      const gen = window.LK_RUNTIME_DRIFT_TRACK;
+      const base = gen ? gen.defaultParams() : {halfW:5.5, wallGap:3.2, treeCount:70, treeSeed:1, points:[], props:{}};
+      const stored = o.userData.driftTrackParams || {};
+      const params = Object.assign({}, base, stored);
+      params.props = Object.assign({}, base.props, stored.props || {});
+      params.points = Array.isArray(stored.points) && stored.points.length >= 4
+        ? stored.points.map(p => [Number(p[0]) || 0, Number(p[1]) || 0])
+        : (base.points || []);
+
+      const dt = section(tr('DRIFT TRACK', 'TRACCIATO DRIFT'));
+      const info = o.userData.driftTrackInfo;
+      const note = el('<div class="lk-hint"></div>');
+      const showInfo = () => {
+        const inf = o.userData.driftTrackInfo;
+        note.innerHTML = tr('Length', 'Lunghezza') + ': ' + (inf ? inf.length : (info ? info.length : '?')) + ' m · ' +
+          (Array.isArray(params.points) ? params.points.length : 0) + ' ' + tr('points', 'punti');
+      };
+      showInfo();
+      dt.body.appendChild(note);
+
+      const apply = () => {
+        STORE.rebuildDriftTrack(GAME, o, params);
+        if(o.userData.addedEntry){
+          try { o.userData.addedEntry.props = JSON.parse(JSON.stringify(o.userData.driftTrackParams)); } catch(err){}
+        }
+        markDirty();
+        requestPhysicsRebuild();
+        requestWarmup('Warm-up track lights...');
+        refreshOutliner();
+        selectObject(o);
+      };
+
+      const seedRow = el('<div class="lk-row"><label>Seed</label><input type="number" step="1" style="width:120px"></div>');
+      const seedInput = seedRow.querySelector('input');
+      seedInput.value = params.treeSeed || 1;
+      seedInput.addEventListener('change', () => { params.treeSeed = (parseInt(seedInput.value, 10) >>> 0) || 1; apply(); });
+      dt.body.appendChild(seedRow);
+
+      dt.body.appendChild(sliderRow(tr('Road half-width', 'Semi-largh. strada'), params.halfW, 2, 12, .1, v => { params.halfW = v; }));
+      dt.body.appendChild(sliderRow(tr('Wall gap', 'Distanza muri'), params.wallGap, 0, 10, .1, v => { params.wallGap = v; }));
+      dt.body.appendChild(sliderRow(tr('Tree count', 'Numero alberi'), params.treeCount, 0, 200, 1, v => { params.treeCount = Math.round(v); }));
+
+      [
+        ['curbs', 'Curbs', 'Cordoli'], ['tireWalls', 'Tire walls', 'Muri gomme'],
+        ['portal', 'Portal', 'Portale'], ['grandstand', 'Grandstand', 'Tribuna'],
+        ['trees', 'Trees', 'Alberi'], ['lightPoles', 'Light poles', 'Pali luce'],
+        ['cones', 'Cones', 'Coni'], ['startLine', 'Start line', 'Linea partenza'], ['grass', 'Grass', 'Erba'],
+      ].forEach(def => {
+        dt.body.appendChild(checkRow(tr(def[1], def[2]), params.props[def[0]] !== false, v => { params.props[def[0]] = v; }).root);
+      });
+      dt.body.appendChild(checkRow(tr('Wall collisions', 'Collisioni muri'), params.props.tireWallColliders !== false, v => { params.props.tireWallColliders = v; }).root);
+      dt.body.appendChild(checkRow(tr('Cone collisions', 'Collisioni coni'), params.props.coneColliders !== false, v => { params.props.coneColliders = v; }).root);
+
+      dt.body.appendChild(btnRow([
+        {label:tr('Apply / Regenerate', 'Applica / Rigenera'), action: apply},
+        {label:tr('Random layout', 'Layout casuale'), action:() => {
+          if(!gen){ apply(); return; }
+          const seed = (Date.now() >>> 0) ^ Math.floor(Math.random() * 0xffffffff);
+          params.points = gen.generatePoints(seed);
+          params.treeSeed = seed >>> 0;
+          apply();
+        }},
+      ]));
+
+      const ptsWrap = el('<div class="lk-row" style="flex-direction:column;align-items:stretch"><label>' + tr('Track points [x,z] (JSON)', 'Punti tracciato [x,z] (JSON)') + '</label><textarea rows="5" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px"></textarea></div>');
+      const ptsArea = ptsWrap.querySelector('textarea');
+      ptsArea.value = JSON.stringify(params.points);
+      ptsArea.addEventListener('change', () => {
+        try {
+          const parsed = JSON.parse(ptsArea.value);
+          if(Array.isArray(parsed) && parsed.length >= 4){
+            params.points = parsed.map(p => [Number(p[0]) || 0, Number(p[1]) || 0]);
+            note.textContent = '';
+            apply();
+          } else {
+            note.textContent = tr('Need at least 4 points', 'Servono almeno 4 punti');
+          }
+        } catch(err){
+          note.textContent = tr('Invalid points JSON', 'JSON punti non valido');
+        }
+      });
+      dt.body.appendChild(ptsWrap);
+
+      box.appendChild(dt.root);
+    }
 
     const sceneCameraOptions = () => {
       const opts = [{value:'', label:'None'}];

@@ -16,18 +16,18 @@ function captureRuntimeFailures(page){
 }
 
 function unexpectedFailures(failures){
-  // The repository intentionally omits the oversized demo models and exercises
-  // their procedural fallbacks. The GLB and alternate scene.gltf 404s are expected.
+  // The repository intentionally omits optional parked-prop models and exercises
+  // their procedural fallbacks. The retired player fallback must never be requested.
   // The generic Playwright static host also intentionally has no local disk
   // project bridge; the editor treats that endpoint's 404 as a browser-cache fallback.
   return failures.filter(message =>
-    !/models\/(?:player|car1|car2|cone)(?:\.glb|\/scene\.gltf)/.test(message) &&
+    !/models\/(?:car1|car2|cone)(?:\.glb|\/scene\.gltf)/.test(message) &&
     !/__lotking\/project-state/.test(message)
   );
 }
 
 async function seedWorkspace(page){
-  await page.route(/\/models\/(?:player|car1|car2|cone)\.glb(?:\?.*)?$/, route => route.fulfill({status:404, body:''}));
+  await page.route(/\/models\/(?:car1|car2|cone)\.glb(?:\?.*)?$/, route => route.fulfill({status:404, body:''}));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('lk.projectWorkspace.v1', JSON.stringify({mode:'browser', onlineEditor:true, workspaceReady:true}));
@@ -41,8 +41,11 @@ test('editor boots on the pinned Three.js r185 bundle', async ({page}, testInfo)
   await page.waitForFunction(() => window.THREE && THREE.REVISION === '185' && window.LOT_KING && LOT_KING.core && LOT_KING.core.renderer);
   await page.waitForFunction(() => LOT_KING.state && LOT_KING.state.sceneReady === true, null, {timeout:30000});
   await page.evaluate(() => { document.querySelector('#lkWorkspaceClose')?.click(); document.querySelector('#lkProjectsClose')?.click(); });
-  const active = await page.evaluate(() => !!(document.querySelector('#lkEditor.active') || LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active));
-  if(!active) await page.locator('#editorBtn').click({force:true});
+  const active = await page.waitForFunction(() => !!(document.querySelector('#lkEditor.active') || LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active), null, {timeout:15000}).then(() => true).catch(() => false);
+  if(!active){
+    await page.locator('#editorBtn').waitFor({state:'visible', timeout:15000});
+    await page.locator('#editorBtn').click({force:true});
+  }
   await page.waitForFunction(() => !!(document.querySelector('#lkEditor.active') || LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active));
   const state = await page.evaluate(() => {
     const gl = LOT_KING.core.renderer.getContext();
@@ -52,7 +55,13 @@ test('editor boots on the pinned Three.js r185 bundle', async ({page}, testInfo)
       outputColorSpace:LOT_KING.core.renderer.outputColorSpace,
       expectedColorSpace:THREE.SRGBColorSpace,
       webgl2:typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext,
-      addons:['GLTFLoader','SkeletonUtils','OrbitControls','TransformControls','EffectComposer','OutputPass','SSRPass','BokehPass','OutlineEffect','FontLoader','TextGeometry','RectAreaLightUniformsLib'].every(key => !!THREE[key]),
+      addons:['GLTFLoader','FBXLoader','TGALoader','GLTFExporter','SkeletonUtils','OrbitControls','TransformControls','EffectComposer','OutputPass','SSRPass','BokehPass','OutlineEffect','FontLoader','TextGeometry','RectAreaLightUniformsLib'].every(key => !!THREE[key]),
+      fbxPlugin:(() => {
+        const plugins = LOT_KING.editor && LOT_KING.editor.plugins;
+        const descriptor = plugins && plugins.list().find(plugin => plugin.id === 'fbx-glb-importer');
+        const importers = plugins && plugins.extensions('assetImporter') || [];
+        return !!(descriptor && descriptor.enabled && descriptor.registered && importers.some(importer => importer.type === 'fbx'));
+      })(),
       neonAreaLights:(() => {
         const lights = [];
         LOT_KING.player.car.traverse(node => { if(node.userData && node.userData.vehicleNeonAreaLight) lights.push(node); });
@@ -68,6 +77,7 @@ test('editor boots on the pinned Three.js r185 bundle', async ({page}, testInfo)
     expectedColorSpace:state.expectedColorSpace,
     webgl2:true,
     addons:true,
+    fbxPlugin:true,
     neonAreaLights:true,
     transformHelper:true,
   });
@@ -106,6 +116,18 @@ test('editor boots on the pinned Three.js r185 bundle', async ({page}, testInfo)
     } : null;
   });
   expect(poleDuplicate).toEqual({count:1, colliderKind:'circle', independentCollider:true, offsetX:3});
+  const restoredPoleClone = await page.evaluate(async () => {
+    const source = LOT_KING.world.registry.find(object => object.userData && /^Light Pole /.test(object.userData.editorName || ''));
+    if(!source) return null;
+    const originalUserData = source.userData;
+    const clone = await LK_STORE.createFromEntry({kind:'clone', srcId:source.userData.editorId}, LOT_KING);
+    return {
+      created:!!clone,
+      sourceUserDataRestored:source.userData === originalUserData,
+      rootUserDataEmpty:Object.keys(clone.userData || {}).length === 0,
+    };
+  });
+  expect(restoredPoleClone).toEqual({created:true, sourceUserDataRestored:true, rootUserDataEmpty:true});
   await page.screenshot({path:testInfo.outputPath('editor-r185.png')});
   expect(unexpectedFailures(failures)).toEqual([]);
 });
@@ -126,6 +148,31 @@ test('gameplay boots on the same Three.js r185 bundle', async ({page}, testInfo)
   expect(state).toEqual({revision:'185', version:'0.185.1', outputColorSpace:state.expectedColorSpace, expectedColorSpace:state.expectedColorSpace, postReady:true});
   await page.screenshot({path:testInfo.outputPath('gameplay-r185.png')});
   expect(unexpectedFailures(failures)).toEqual([]);
+});
+
+test('r185 GLTFExporter preserves normal maps, multiple scenes and animation clips', async ({page}) => {
+  await seedWorkspace(page);
+  await page.goto('/gameplay.html?three-r185-exporter=1', {waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => window.THREE && THREE.REVISION === '185');
+  const result=await page.evaluate(async()=>{
+    const normalCanvas=document.createElement('canvas');normalCanvas.width=2;normalCanvas.height=2;const normalContext=normalCanvas.getContext('2d');normalContext.fillStyle='rgb(128,128,255)';normalContext.fillRect(0,0,2,2);const normal=new THREE.CanvasTexture(normalCanvas);normal.needsUpdate=true;normal.name='UnitNormal';
+    const material=new THREE.MeshStandardMaterial({color:0x88aaff,normalMap:normal,normalScale:new THREE.Vector2(.7,.8)});
+    const animated=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),material);animated.name='AnimatedMesh';
+    const second=new THREE.Mesh(new THREE.SphereGeometry(.5,8,6),new THREE.MeshStandardMaterial());second.name='SecondMesh';
+    const sceneA=new THREE.Scene(),sceneB=new THREE.Scene();sceneA.name='SceneA';sceneB.name='SceneB';sceneA.add(animated);sceneB.add(second);
+    const clip=new THREE.AnimationClip('MoveX',1,[new THREE.NumberKeyframeTrack('AnimatedMesh.position[x]',[0,1],[0,2])]);
+    const buffer=await new THREE.GLTFExporter().parseAsync([sceneA,sceneB],{binary:true,animations:[[clip],[]],onlyVisible:false});
+    const gltf=await new THREE.GLTFLoader().parseAsync(buffer,'');let exportedMaterial=null;gltf.scenes.forEach(scene=>scene.traverse(node=>{if(node.isMesh&&node.material&&node.material.normalMap)exportedMaterial=node.material;}));
+    normal.dispose();material.dispose();animated.geometry.dispose();second.geometry.dispose();second.material.dispose();
+    return {binary:buffer instanceof ArrayBuffer,scenes:gltf.scenes.map(scene=>scene.name),animations:gltf.animations.map(item=>item.name),hasNormalMap:!!exportedMaterial,normalScale:exportedMaterial&&exportedMaterial.normalScale?exportedMaterial.normalScale.toArray():null};
+  });
+  expect(result.binary).toBe(true);
+  expect(result.scenes).toEqual(['SceneA','SceneB']);
+  expect(result.animations).toContain('MoveX');
+  expect(result.hasNormalMap).toBe(true);
+  // r185 bakes a non-uniform Y normal scale into the exported texture and
+  // retains the canonical glTF scalar strength on the loaded material.
+  expect(result.normalScale).toEqual([.7,-.7]);
 });
 
 test('standalone editor harness uses the same pinned renderer', async ({page}) => {

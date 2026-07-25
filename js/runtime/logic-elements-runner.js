@@ -30,9 +30,10 @@ function create(GAME, STORE){
       : [];
   }
   function logicObjectSignature(){
-    return logicObjects().map(owner => {
+    const mode=GAME&&GAME.state&&GAME.state.editorPreview?'editor-preview':'play';
+    return mode+'|'+logicObjects().map(owner => {
       const graph = owner.userData.logicGraph || {};
-      return [owner.userData.editorId || owner.uuid, owner.userData.logicEnabled !== false ? 1 : 0, (graph.nodes || []).length, (graph.edges || []).length].join(':');
+      return [owner.userData.editorId || owner.uuid, owner.userData.logicEnabled !== false ? 1 : 0, graph.runtimeRevision||owner.userData.logicRevision||0, (graph.nodes || []).length, (graph.edges || []).length].join(':');
     }).sort().join('|');
   }
 
@@ -136,6 +137,7 @@ function create(GAME, STORE){
         pawn.setLights(patch);
       }
       else if(path.indexOf('engineAudio.') === 0) pawn.setEngineAudio({[path.slice(12)]:value});
+      else if(path.indexOf('radio.') === 0 && pawn.setRadio) pawn.setRadio({[path.slice(6)]:value});
       else if(path === 'dataWidgets.enabled') pawn.setDataWidgets({enabled:value !== false});
     });
     // driveSetup is the authoritative per-instance handling profile. Older graphs
@@ -281,6 +283,12 @@ function create(GAME, STORE){
     window.addEventListener('lk-pawn-event', e => {
       const detail = e && e.detail || {};
       if(detail.type) triggerRuntimeEvent(detail.type, detail);
+    });
+    window.addEventListener('lotking:p2p-message',e=>{
+      const detail=e&&e.detail||{};
+      if(detail.type!=='logic.event')return;
+      const message=detail.payload||{};
+      triggerRuntimeEvent('OnNetworkMessage',{channel:String(message.channel||''),payload:message.payload,peerId:detail.peerId||'',peerName:detail.peerName||''});
     });
   }
 

@@ -240,6 +240,10 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   setLevelLoading, setEditorLoading,
   requestWarmup: requestEditorWarmup,
   developerDebugger,
+  showQuickAudio: () => {
+    if(preferences && preferences.setMusicPanelVisible) preferences.setMusicPanelVisible(true);
+    if(quickAudio && quickAudio.show) quickAudio.show();
+  },
 });
 sidePanels = window.LK_EDITOR_SIDE_PANELS && window.LK_EDITOR_SIDE_PANELS.create({
   root, ED, $, status, refreshOutliner, refreshAssetsPanel,
@@ -255,6 +259,9 @@ preferences = window.LK_EDITOR_PREFERENCES && window.LK_EDITOR_PREFERENCES.creat
 const welcomeOverlay = window.LK_EDITOR_WELCOME && window.LK_EDITOR_WELCOME.create({root, preferences});
 quickAudio = window.LK_EDITOR_QUICK_AUDIO && window.LK_EDITOR_QUICK_AUDIO.create({
   GAME, ED, $,
+  setPanelVisible: visible => preferences && preferences.setMusicPanelVisible
+    ? preferences.setMusicPanelVisible(visible)
+    : visible,
 });
 
 statusUi = window.LK_EDITOR_STATUS_UI && window.LK_EDITOR_STATUS_UI.create({root});
@@ -265,12 +272,17 @@ pluginManager = window.LK_PLUGIN_MANAGER && window.LK_PLUGIN_MANAGER.create({
   GAME,
   STORE,
   ED,
+  THREE,
+  root,
   status,
   buildInspector,
 });
 if(pluginManager && window.LK_LOGIC_ELEMENT_PLUGIN) pluginManager.register(window.LK_LOGIC_ELEMENT_PLUGIN);
+if(pluginManager && window.LK_FBX_IMPORT_PLUGIN) pluginManager.register(window.LK_FBX_IMPORT_PLUGIN);
+if(pluginManager && window.LK_CLOTH_AUTHORING_PLUGIN) pluginManager.register(window.LK_CLOTH_AUTHORING_PLUGIN);
+if(pluginManager && window.LK_P2P_COLLABORATION_PLUGIN) pluginManager.register(window.LK_P2P_COLLABORATION_PLUGIN);
 lockEditorTrackSelector();
-assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status});
+assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status, pluginManager});
 thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({
   THREE,
   active:() => ED.active && !ED.playPreview,
@@ -641,13 +653,30 @@ assetImports = window.LK_EDITOR_ASSET_IMPORTS && window.LK_EDITOR_ASSET_IMPORTS.
   spawnPointAhead, performDeleteEntity, selected: () => ED.selected,
   assetLibraryLoad, assetLibrarySave, supportedAssetFiles, assetKeyFromFile, assetDbKeyFromFile,
   resolveImportedAssetUrl, upsertImportedAsset, createGlbEntryFromAsset, createTextureEntryFromAsset,
+  assetImporters:() => pluginManager && pluginManager.extensions ? pluginManager.extensions('assetImporter') : [],
+  onImportedAssetsDeleted:assets=>{
+    const refs=new Set((assets||[]).map(asset=>'imported:'+asset.id));
+    if(refs.has(ED.selectedAsset))ED.selectedAsset=null;
+    if(Array.isArray(ED.selectedAssets))ED.selectedAssets=ED.selectedAssets.filter(ref=>!refs.has(ref));
+    if(ED.selectedAssets&&ED.selectedAssets.length===1){ED.selectedAsset=ED.selectedAssets[0];ED.selectedAssets=null;}
+    if(ED.selectedAssets&&!ED.selectedAssets.length)ED.selectedAssets=null;
+    const assignments=folderAssignments('assets');refs.forEach(ref=>delete assignments[ref]);writeFolderState();
+  },
 });
 function readFileAsDataURL(f){ return assetImports ? assetImports.readFileAsDataURL(f) : Promise.reject(new Error('asset imports unavailable')); }
 function hasExternalFileDrag(e){ return assetImports ? assetImports.hasExternalFileDrag(e) : false; }
 function importAssetFiles(files, opts){ return assetImports ? assetImports.importAssetFiles(files, opts) : Promise.resolve([]); }
+function rebuildImportedAsset(asset){ return assetImports ? assetImports.rebuildImportedAsset(asset) : Promise.reject(new Error('asset imports unavailable')); }
+function refreshFbxSource(asset,file){ return assetImports ? assetImports.refreshFbxSource(asset,file) : Promise.reject(new Error('asset imports unavailable')); }
 function importTextureFile(file, opts){ return assetImports ? assetImports.importTextureFile(file, opts) : Promise.resolve(null); }
 function placeImportedAsset(asset, at){ return assetImports ? assetImports.placeImportedAsset(asset, at) : Promise.reject(new Error('asset imports unavailable')); }
-function deleteImportedAsset(asset){ if(assetImports) assetImports.deleteImportedAsset(asset); }
+function deleteImportedAsset(asset){ return assetImports ? assetImports.deleteImportedAsset(asset) : Promise.resolve(false); }
+function deleteImportedAssets(assets){ return assetImports ? assetImports.deleteImportedAssets(assets) : Promise.resolve(false); }
+function selectedImportedAssets(){
+  const refs=Array.isArray(ED.selectedAssets)&&ED.selectedAssets.length?ED.selectedAssets:(ED.selectedAsset?[ED.selectedAsset]:[]);
+  return refs.map(ref=>getAssetByRef(ref)).filter(item=>item&&(item.kind==='imported-glb'||item.kind==='imported-texture')&&item.raw).map(item=>item.raw);
+}
+function requestDeleteSelectedAssets(){const assets=selectedImportedAssets();if(!assets.length)return false;deleteImportedAssets(assets);return true;}
 function replaceSelectedWithAsset(asset, target){ if(assetImports) assetImports.replaceSelectedWithAsset(asset, target); }
 function replaceObjectWithFile(target, file){ if(assetImports) assetImports.replaceObjectWithFile(target, file); }
 function replaceTextureObjectWithAsset(asset, target){ if(assetImports) assetImports.replaceTextureObjectWithAsset(asset, target); }
@@ -787,6 +816,7 @@ keyboardShortcuts = window.LK_EDITOR_KEYBOARD_SHORTCUTS && window.LK_EDITOR_KEYB
   ED, fly, GAME, closeMenu, setPrefsOpen, setLevelsOverlayOpen, setProjectsOverlayOpen, stopPlayPreview,
   saveAsTrack, saveScene, newTrack, duplicateEntity, undo, redo, applyLastTransform,
   setTool, focusSelected, setGrid, requestDeleteEntity, requestDeleteSelection,
+  requestDeleteSelectedAssets,
   getEditorKeymap:() => preferences && preferences.prefs && preferences.prefs.editorKeys,
 });
 
@@ -898,6 +928,7 @@ projectIo = window.LK_EDITOR_PROJECT_IO && window.LK_EDITOR_PROJECT_IO.create({
     }
   },
 });
+window.LK_EDITOR_PROJECT_IO_INSTANCE = projectIo;
 const editorWM = window.LK_RUNTIME_WINDOW_MANAGER && window.LK_RUNTIME_WINDOW_MANAGER.create({storageKey: 'lotking.windows.editor.v1'});
 if(editorWM){
   const prefsPanel = root.querySelector('.lk-prefs-panel');
@@ -1144,6 +1175,9 @@ function refreshAssetsPanel(){ return assetCatalog && assetCatalog.refreshAssets
 assetProperties = window.LK_EDITOR_ASSET_PROPERTIES && window.LK_EDITOR_ASSET_PROPERTIES.create({
   THREE,
   resolveImportedAssetUrl,
+  pluginManager,
+  rebuildImportedAsset,
+  refreshFbxSource,
 });
 function openAssetProperties(item){ return assetProperties ? assetProperties.open(item) : false; }
 
@@ -1170,6 +1204,7 @@ editorMenus = window.LK_EDITOR_MENUS && window.LK_EDITOR_MENUS.create({
   replaceSelectedWithAsset,
   openAssetProperties,
   deleteImportedAsset,
+  deleteImportedAssets,
   selectObject,
   setLeftMode,
   focusSelected,
@@ -1213,6 +1248,7 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   placeAssetRef,
   spawnPointAhead,
   deleteImportedAsset,
+  deleteImportedAssets,
   levelsApi,
   loadLevel,
   renameLevel,
@@ -1668,6 +1704,7 @@ sceneMenuActions = window.LK_EDITOR_SCENE_MENU_ACTIONS && window.LK_EDITOR_SCENE
   addCinemaStudio,
   addLogicElement,
   addSoccerStadium,
+  addDriftTrack,
   openGlbImportAt,
   setTool,
   selectObject,
@@ -1740,6 +1777,7 @@ function addCamera(at){ return addActions.addCamera(at); }
 function addCinemaStudio(at){ return addActions.addCinemaStudio(at); }
 function addLogicElement(at, asset){ return addActions.addLogicElement(at, asset); }
 function addSoccerStadium(at){ return addActions.addSoccerStadium(at); }
+function addDriftTrack(at, props){ return addActions.addDriftTrack(at, props); }
 function finishAdd(obj){ return addActions.finishAdd(obj); }
 function openGlbImportAt(point){ return addActions.openGlbImportAt(point); }
 function beginReplaceObject(target){ return addActions.beginReplaceObject(target); }
@@ -1769,6 +1807,7 @@ musicLibraryPanel = window.LK_EDITOR_MUSIC_LIBRARY_PANEL && window.LK_EDITOR_MUS
   section,
   selectRow,
   el,
+  getQuickAudio: () => quickAudio,
   confirmEditorAction, promptEditorAction,
 });
 materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_EDITOR.create({
@@ -1848,6 +1887,7 @@ objectInspector = window.LK_EDITOR_OBJECT_INSPECTOR && window.LK_EDITOR_OBJECT_I
   entityIcon,
   markDirty,
   refreshOutliner,
+  toggleVisible,
   selectObject,
   focusSelected,
   activeViewportCamera,
@@ -1955,9 +1995,11 @@ playerSetupInspector = window.LK_EDITOR_PLAYER_SETUP_INSPECTOR && window.LK_EDIT
 });
 hudInspector = window.LK_EDITOR_HUD_INSPECTOR && window.LK_EDITOR_HUD_INSPECTOR.create({
   GAME,
+  ED,
   markDirty,
   musicLibrarySection,
   section,
+  selectRow,
   sliderRow,
   checkRow,
   btnRow,
@@ -1978,6 +2020,7 @@ environmentInspector = window.LK_EDITOR_ENVIRONMENT_INSPECTOR && window.LK_EDITO
 });
 renderingInspector = window.LK_EDITOR_RENDERING_INSPECTOR && window.LK_EDITOR_RENDERING_INSPECTOR.create({
   GAME,
+  status,
   markDirty,
   section,
   selectRow,
@@ -2013,6 +2056,7 @@ logicInspector = window.LK_EDITOR_LOGIC_ELEMENTS_INSPECTOR && window.LK_EDITOR_L
   assetLibraryLoad,
   assetLibrarySave,
   importAssetFiles,
+  pluginManager,
   beginTransformHistory,
   commitTransformHistory,
 });
@@ -2184,6 +2228,7 @@ GAME.editor = {
   viewportRect: editorViewportRect,
   setLeftMode,
   refreshAssetsPanel,
+  plugins:pluginManager,
   getPlayableExport:() => playableExport,
 };
 })();

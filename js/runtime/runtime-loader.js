@@ -23,6 +23,18 @@ function create(options){
   let assetsReady = false;
   let assetsLoading = null;
   let loadingMode = null;
+  const preBenchmark = window.LK_RUNTIME_PRE_BENCHMARK && window.LK_RUNTIME_PRE_BENCHMARK.create({
+    renderer:opts.renderer,
+    scene:opts.scene,
+    camera:opts.camera,
+    render:opts.renderGameplayCamera,
+    warmPhysics:opts.warmPhysics,
+    runHooks:opts.runWarmupHooks,
+    setVideoWarmProfile:opts.setVideoWarmProfile,
+    applyAdaptiveLow:opts.applyAdaptiveLow,
+    gameState,
+    onProgress:(value, label) => setLoadingPart('warmup', .4 + Math.max(0, Math.min(1, value || 0)) * .6, label),
+  });
 
   function setLoadingPart(part, value, label){
     if(loading) loading.setPart(part, value, label);
@@ -65,8 +77,12 @@ function create(options){
   }
 
   function loadLocalModels(){
+    // The legacy player GLB fallback was retired in v0.7.1. The procedural
+    // vehicle remains visible until a project/imported player model is set;
+    // do not probe models/player.glb or models/player/scene.gltf on every boot.
+    loadProgress.set(0, 1);
     const jobs = [
-      trackedModel('player', 0).then(scene => { if(scene && opts.setPlayerModel) opts.setPlayerModel(scene); }),
+      Promise.resolve(null),
       trackedModel('car1', 1),
       trackedModel('car2', 2),
       trackedModel('cone', 3),
@@ -107,7 +123,6 @@ function create(options){
 
   function renderWarmFrame(){
     if(!(opts.renderer && opts.scene && opts.camera)) return;
-    opts.renderer.compile(opts.scene, opts.camera);
     if(opts.renderGameplayCamera) opts.renderGameplayCamera();
     else opts.renderer.render(opts.scene, opts.camera);
   }
@@ -157,38 +172,38 @@ function create(options){
         });
       }
       engine.reverseActive = false;
-      warmRenderStep('warming camera and front lights', .18);
+      warmRenderStep('warming camera and front lights', .10);
       return nextFrame()
         .then(() => {
           keys.s = true;
-          warmRenderStep('warming brake lights and HUD', .36);
+          warmRenderStep('warming brake lights and HUD', .17);
           return nextFrame();
         })
         .then(() => {
           keys.s = false;
           engine.reverseActive = true;
-          warmRenderStep('warming reverse lights', .54);
+          warmRenderStep('warming reverse lights', .24);
           return nextFrame();
         })
         .then(() => {
           engine.reverseActive = false;
           keys.a = true;
           keys.d = true;
-          warmRenderStep('warming auxiliary lights and neon', .72);
+          warmRenderStep('warming auxiliary lights and neon', .30);
           return nextFrame();
         })
         .then(() => {
           if(opts.setHighBeams) opts.setHighBeams(true);
-          warmRenderStep('warming high beams and shaders', .88);
+          warmRenderStep('warming high beams and shaders', .35);
           return nextFrame();
         })
         .then(() => {
           if(opts.setHighBeams) opts.setHighBeams(false);
           if(opts.warmupHook) opts.warmupHook({render: renderWarmFrame, setStage: setLoadingPart});
-          warmRenderStep('final render pipeline check', .96);
+          warmRenderStep('preparing full scene benchmark', .39);
         })
         .then(() => { restoreWarmupState(); }, err => { restoreWarmupState(); throw err; });
-    }).then(() => {
+    }).then(() => preBenchmark ? preBenchmark.run({mode:loadingMode || 'game'}) : null).then(() => {
       setLoadingPart('warmup', 1, 'runtime warmed');
     });
   }
@@ -213,6 +228,9 @@ function create(options){
       return null;
     }).then(() => warmRuntimeAssets()).then(() => {
       gameState.sceneReady = true;
+      // preBenchmark already performs the complete scene compilation. Starting
+      // a second idle compile here used to overlap the first gameplay frames.
+      if(opts.schedulePipelineWarmup && !(preBenchmark && preBenchmark.report())) opts.schedulePipelineWarmup();
       if(loadingMode === 'editor'){
         setLoadingPart('editor', .35, 'loading editor UI');
         return;
@@ -249,6 +267,7 @@ function create(options){
     getMode: () => loadingMode,
     loadLocalModels,
     warmRuntimeAssets,
+    benchmark:preBenchmark,
   };
 }
 

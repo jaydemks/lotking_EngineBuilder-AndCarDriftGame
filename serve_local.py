@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import shutil
+import socket
 import tempfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +20,31 @@ MAX_STATE_BYTES = 512 * 1024 * 1024
 PERFORMANCE_URL = "/__lotking/developer-performance"
 PERFORMANCE_FILE = "developer-performance-latest.md"
 MAX_PERFORMANCE_BYTES = 2 * 1024 * 1024
+DEMO_PUBLISH_URL = "/__lotking/publish-demo"
+DEMO_DIR = "demo"
+DEMO_FILE = "demo-project.lkep.json"
+DEMO_BACKUP_FILE = "demo-project.previous.lkep.json"
+
+
+def local_ips() -> list[str]:
+    """Return usable IPv4 addresses without depending on external packages."""
+    addresses: set[str] = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if address and not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            address = probe.getsockname()[0]
+            if address and not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+    return sorted(addresses)
 
 
 def _markdown_value(value: object) -> str:
@@ -113,13 +140,65 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
     def performance_path(self) -> Path:
         return self.root / STATE_DIR / PERFORMANCE_FILE
 
+    @property
+    def demo_path(self) -> Path:
+        return self.root / DEMO_DIR / DEMO_FILE
+
+    @staticmethod
+    def file_etag(path: Path) -> str:
+        stat = path.stat()
+        return f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+
+    def is_loopback_client(self) -> bool:
+        """Disk bridges are host-private even when static files are LAN-visible."""
+        try:
+            address = ipaddress.ip_address(self.client_address[0].split("%", 1)[0])
+            return address.is_loopback
+        except (ValueError, IndexError):
+            return False
+
+    def require_loopback_bridge(self) -> bool:
+        if self.is_loopback_client():
+            return True
+        self.send_error(403, "Lot King disk bridge is available only to the host computer")
+        return False
+
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def do_GET(self) -> None:
         request_path = self.path.split("?", 1)[0]
+        if request_path == DEMO_PUBLISH_URL:
+            if not self.require_loopback_bridge():
+                return
+            path = self.demo_path
+            if not path.is_file():
+                self.send_error(404, "No published demo")
+                return
+            try:
+                project = json.loads(path.read_text(encoding="utf-8"))
+                meta = project.get("meta") if isinstance(project.get("meta"), dict) else {}
+                response = json.dumps({
+                    "ok": True,
+                    "file": f"{DEMO_DIR}/{DEMO_FILE}",
+                    "bytes": path.stat().st_size,
+                    "savedAt": project.get("savedAt"),
+                    "trackId": meta.get("trackId"),
+                    "trackName": meta.get("trackName") or meta.get("levelName"),
+                }).encode("utf-8")
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                self.send_error(500, f"Published demo is invalid: {exc}")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            return
         if request_path == PERFORMANCE_URL:
+            if not self.require_loopback_bridge():
+                return
             path = self.performance_path
             if not path.is_file():
                 self.send_error(404, "No developer performance snapshot")
@@ -134,25 +213,43 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
         if request_path != STATE_URL:
             super().do_GET()
             return
+        if not self.require_loopback_bridge():
+            return
         path = self.state_path
         if not path.is_file():
             self.send_error(404, "No local project backup")
+            return
+        etag = self.file_etag(path)
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.end_headers()
             return
         length = path.stat().st_size
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(length))
+        self.send_header("ETag", etag)
         self.end_headers()
         with path.open("rb") as handle:
             shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
 
     def do_PUT(self) -> None:
         request_path = self.path.split("?", 1)[0]
+        if request_path == DEMO_PUBLISH_URL:
+            if not self.require_loopback_bridge():
+                return
+            self._publish_demo_project()
+            return
         if request_path == PERFORMANCE_URL:
+            if not self.require_loopback_bridge():
+                return
             self._write_performance_snapshot()
             return
         if request_path != STATE_URL:
             self.send_error(404)
+            return
+        if not self.require_loopback_bridge():
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -178,6 +275,50 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             shutil.copy2(path, path.with_name(STATE_BACKUP_FILE))
         os.replace(temp_path, path)
         response = json.dumps({"ok": True, "file": f"{STATE_DIR}/{STATE_FILE}"}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.send_header("ETag", self.file_etag(path))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def _publish_demo_project(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_STATE_BYTES:
+            self.send_error(413, "Invalid demo project size")
+            return
+        payload = self.rfile.read(length)
+        try:
+            project = json.loads(payload.decode("utf-8"))
+            scene = project.get("scene") if isinstance(project, dict) else None
+            meta = project.get("meta") if isinstance(project, dict) else None
+            if project.get("format") != "LKEP" or not isinstance(scene, dict) or not isinstance(meta, dict):
+                raise ValueError("not a complete LKEP project")
+            if not (meta.get("trackName") or meta.get("levelName")):
+                raise ValueError("project has no level name")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, AttributeError) as exc:
+            self.send_error(400, f"Invalid demo project: {exc}")
+            return
+        path = self.demo_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix="demo-project-", suffix=".tmp") as handle:
+            handle.write(payload)
+            temp_path = Path(handle.name)
+        if path.is_file():
+            shutil.copy2(path, path.with_name(DEMO_BACKUP_FILE))
+        os.replace(temp_path, path)
+        response = json.dumps({
+            "ok": True,
+            "file": f"{DEMO_DIR}/{DEMO_FILE}",
+            "backup": f"{DEMO_DIR}/{DEMO_BACKUP_FILE}",
+            "bytes": len(payload),
+            "savedAt": project.get("savedAt"),
+            "trackId": meta.get("trackId"),
+            "trackName": meta.get("trackName") or meta.get("levelName"),
+        }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))
@@ -225,6 +366,12 @@ def main() -> None:
     LocalEditorHandler.root = root
     server = ThreadingHTTPServer((args.bind, args.port), handler)
     print(f"LOT KING local editor: http://localhost:{args.port}/engine_editor.html")
+    if args.bind not in {"127.0.0.1", "localhost", "::1"}:
+        print("LAN browser instances:")
+        for address in local_ips():
+            print(f"  http://{address}:{args.port}/")
+            print(f"  http://{address}:{args.port}/engine_editor.html")
+        print("Each device keeps an independent browser database; only localhost uses the disk bridge.")
     print(f"Project backup: {root / STATE_DIR / STATE_FILE}")
     print(f"Performance snapshot: {root / STATE_DIR / PERFORMANCE_FILE}")
     try:

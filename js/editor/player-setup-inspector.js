@@ -29,14 +29,14 @@ function create(deps){
   function buildPawnInput(box, player){
     const input = section(tr('PAWN / LOCAL PLAYER', 'PAWN / GIOCATORE LOCALE'), false);
     const index = player.controllerIndex == null ? null : Math.max(0, Math.min(3, Number(player.controllerIndex) | 0));
-    input.body.appendChild(checkRow(tr('Pawn enabled', 'Pawn attivo'), player.enabled !== false, value => {
-      if(player.setEnabled) player.setEnabled(value); else player.enabled = value;
+    input.body.appendChild(checkRow(tr('Native Player Car active', 'Player Car nativa attiva'), player.enabled !== false && player.hidden !== true, value => {
+      if(player.setEnabled) player.setEnabled(value); else { player.enabled = value; player.hidden = !value; if(player.car) player.car.visible = value; }
       markDirty();
     }).root);
-    input.body.appendChild(checkRow(tr('Hidden in scene/runtime', 'Nascosto in scena/runtime'), player.hidden === true, value => {
-      if(player.setHidden) player.setHidden(value); else { player.hidden = value; if(player.car) player.car.visible = !value; }
-      markDirty();
-    }).root);
+    input.body.appendChild(el('<div class="lk-hint">' + tr(
+      'Inactive removes the native compatibility car from rendering, physics, input, camera, audio and effects. The Scene sidebar eye uses the same activation state.',
+      'Disattivata rimuove l’auto nativa di compatibilità da rendering, fisica, input, camera, audio ed effetti. L’occhio nella sidebar Scene usa lo stesso stato.'
+    ) + '</div>'));
     input.body.appendChild(selectRow(tr('Controlled by', 'Controllato da'), index == null ? 'none' : String(index), [
       {value:'none', label:tr('None (external possession)', 'None (possesso esterno)')},
       {value:'0', label:'Player 1'}, {value:'1', label:'Player 2'},

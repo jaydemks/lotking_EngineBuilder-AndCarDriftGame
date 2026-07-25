@@ -183,7 +183,7 @@ function create(deps){
   function finishPanel(box, counts){
     counts = counts || {};
     if(!counts.blueprints && !counts.logicBlueprints && !counts.levels && !counts.imported && !counts.projectAssets && !counts.scene){
-      box.appendChild(deps.el('<div class="lk-empty">No assets visible.<br>Change filters or import GLB/GLTF files.</div>'));
+      box.appendChild(deps.el('<div class="lk-empty">No assets visible.<br>Change filters or import FBX/GLB/GLTF files.</div>'));
     }
     deps.setStatusRight(
       (counts.blueprints ? counts.blueprints + ' car logic · ' : '') +
@@ -204,7 +204,7 @@ function create(deps){
         ref:'imported:' + asset.id,
         id:asset.id,
         name:asset.source || asset.name || 'Imported Asset',
-        sub:(isTexture ? 'texture/decal' : 'imported glb') + ' · ' + (asset.source || asset.key) + mb,
+        sub:(isTexture ? 'texture/decal' : (asset.sourceFormat === 'fbx' ? 'FBX source · GLB runtime build' : 'imported glb')) + ' · ' + (asset.source || asset.key) + mb,
         source:asset.source || asset.key,
         icon:isTexture ? '▧' : '📦',
         thumbUrl:isTexture ? (asset.src || null) : null,
@@ -214,13 +214,19 @@ function create(deps){
         filterType:isTexture ? 'texture' : 'glb',
         draggable:true,
         raw:asset,
-        badges: asset.rigged ? [{label:'Rigged', type:'rigged'}] : [],
+        badges: (asset.rigged ? [{label:'Rigged', type:'rigged'}] : [])
+          .concat(asset.sourceFormat === 'fbx' ? [{label:asset.sourceDbKey||asset.sourceSrc?'FBX SOURCE':'FBX→GLB', type:'converted'}] : [])
+          .concat(Array.isArray(asset.conversionWarnings) && asset.conversionWarnings.length ? [{label:'Warnings', type:'warning'}] : []),
       };
       const refItem = () => ({kind:item.kind, ref:item.ref, id:asset.id, name:asset.name, raw:asset});
       item.defaultAction = () => deps.placeAssetRef(refItem(), deps.spawnPointAhead());
       item.actions = [
         {label:isTexture ? 'Add' : 'Place', title:'Place this asset in front of the editor camera', fn:() => deps.placeAssetRef(refItem(), deps.spawnPointAhead())},
-        {label:'×', title:'Remove from imported asset library', fn:() => deps.deleteImportedAsset(asset)},
+        {label:'×', title:tr('Remove selected assets from imported library','Rimuovi gli asset selezionati dalla libreria importati'), fn:() => {
+          const refs=selectedAssetRefs();
+          const selected=refs.includes(item.ref)?refs.map(ref=>deps.getAssetByRef(ref)).filter(entry=>entry&&(entry.kind==='imported-glb'||entry.kind==='imported-texture')).map(entry=>entry.raw):[];
+          deps.deleteImportedAssets(selected.length>1?selected:[asset]);
+        }},
       ];
       return item;
     }).filter(item => visible(item, q));

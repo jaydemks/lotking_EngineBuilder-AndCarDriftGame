@@ -200,6 +200,7 @@ function create(deps){
 
   function addLogicElement(at, reusableAsset){
     const id = STORE.nextId();
+    const groundY = Number.isFinite(Number(at && at.y)) ? Number(at.y) : 0;
     const template = reusableAsset && reusableAsset.template === true && reusableAsset.graph ? reusableAsset : null;
     const asset = !template && reusableAsset && reusableAsset.graph ? reusableAsset : null;
     const graph = asset ? window.LK_LOGIC_GRAPH.clone(asset.graph) : template ? window.LK_LOGIC_GRAPH.clone(template.graph) : window.LK_LOGIC_GRAPH
@@ -209,7 +210,7 @@ function create(deps){
     const variableOverrides = {};
     (graph.variables || []).forEach(variable => {
       if(variable.binding === 'spawn.x') variableOverrides[variable.name] = Number(at.x) || 0;
-      else if(variable.binding === 'spawn.y') variableOverrides[variable.name] = Number(at.y) || .15;
+      else if(variable.binding === 'spawn.y') variableOverrides[variable.name] = groundY;
       else if(variable.binding === 'spawn.z') variableOverrides[variable.name] = Number(at.z) || 0;
       else if(variable.binding === 'spawn.heading') variableOverrides[variable.name] = 0;
     });
@@ -225,8 +226,9 @@ function create(deps){
       graph,
       enabled:true,
       runInEditorPreview:true,
+      logicGroundPlacementVersion:2,
       asset:{key:asset ? ('logic:asset:' + asset.id) : template ? ('logic:template:' + template.id) : ('logic:element:' + id), name, source:asset ? 'Reusable Logic Element' : template ? 'Logic Element template' : 'Editor logic'},
-      t:{p:[at.x, .15, at.z], r:[0,0,0], s:[1,1,1], v:true}};
+      t:{p:[at.x, groundY, at.z], r:[0,0,0], s:[1,1,1], v:true}};
     if(asset){
       entry.logicAssetId = asset.id;
       entry.logicLinked = true;
@@ -239,6 +241,32 @@ function create(deps){
     obj.userData.assetName = entry.asset.name;
     obj.userData.assetSource = entry.asset.source;
     finishAdd(obj);
+    return obj;
+  }
+
+  function addDriftTrack(at, props){
+    const gen = window.LK_RUNTIME_DRIFT_TRACK;
+    if(!gen || !STORE.createDriftTrack){
+      status(tr('Drift Track generator unavailable', 'Generatore Drift Track non disponibile'));
+      return null;
+    }
+    const id = STORE.nextId();
+    const params = props || gen.defaultParams();
+    const obj = STORE.createDriftTrack(params);
+    let serializedProps = params;
+    try { serializedProps = JSON.parse(JSON.stringify(obj.userData.driftTrackParams || params)); } catch(err){}
+    const entry = {id, kind:'driftTrack', name:tr('Drift Track', 'Tracciato Drift'), collide:false, physics:false,
+      props:serializedProps,
+      asset:{key:'level:driftTrack', name:'Drift Track', source:'Drift Track generator'},
+      t:{p:[at.x || 0, 0, at.z || 0], r:[0,0,0], s:[1,1,1], v:true}};
+    STORE.registerAdded(GAME, obj, entry);
+    obj.userData.assetKey = entry.asset.key;
+    obj.userData.assetName = entry.asset.name;
+    obj.userData.assetSource = entry.asset.source;
+    finishAdd(obj);
+    requestWarmup(tr('Warm-up track lights...', 'Riscaldamento luci tracciato...'));
+    const info = obj.userData.driftTrackInfo;
+    status(tr('Added: Drift Track', 'Aggiunto: Tracciato Drift') + (info ? ' (' + info.length + ' m)' : ''));
     return obj;
   }
 
@@ -358,7 +386,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, addSoccerStadium, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, addSoccerStadium, addDriftTrack, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

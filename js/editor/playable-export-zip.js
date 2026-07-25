@@ -28,7 +28,6 @@ function create(deps){
     'models/car1.glb',
     'models/car2.glb',
     'models/cone.glb',
-    'models/player.glb',
     'musics/02 - Num0 - Getting serious.mp3',
     'musics/01 - Num0 - Block Road.mp3',
     'musics/03 - Num0 - Look into the mirror.mp3',

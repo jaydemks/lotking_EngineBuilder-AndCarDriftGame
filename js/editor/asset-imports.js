@@ -27,6 +27,7 @@ function create(deps){
   const upsertImportedAsset = deps.upsertImportedAsset || function(){ return null; };
   const createGlbEntryFromAsset = deps.createGlbEntryFromAsset || function(){ return {}; };
   const createTextureEntryFromAsset = deps.createTextureEntryFromAsset || function(){ return {}; };
+  const assetImporters = deps.assetImporters || function(){ return []; };
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   function entityPhysicsMass(target){
     const stored = target && target.userData ? Number(target.userData.physicsMass) : NaN;
@@ -146,22 +147,39 @@ function create(deps){
       .then(src => STORE.loadGlb(src, asset.fit || 5))
       .then(obj => registerImportedObject(asset, obj, at));
   }
-  function deleteImportedAsset(asset){
-    if(!asset) return;
-    confirmEditorAction({
-      title: tr('Delete imported asset?', 'Eliminare asset importato?'),
-      message: tr('Remove "', 'Rimuovere "') + asset.name + tr('" from the imported asset library? Scene instances already placed will stay.', '" dalla libreria asset importati? Le istanze gia piazzate nella scena resteranno.'),
-      okText: tr('Delete asset', 'Elimina asset'),
-    }).then(ok => {
-      if(!ok) return;
-      const next = assetLibraryLoad().filter(a => a.id !== asset.id);
-      if(assetLibrarySave(next)){
-        if(asset.dbKey && window.LK_ASSET_BLOBS) window.LK_ASSET_BLOBS.remove(asset.dbKey).catch(()=>{});
+  function deleteImportedAssets(assets){
+    const unique=[];
+    (assets||[]).forEach(asset=>{
+      if(asset&&asset.id&&!unique.some(item=>item.id===asset.id))unique.push(asset);
+    });
+    if(!unique.length)return Promise.resolve(false);
+    const count=unique.length,names=unique.slice(0,3).map(asset=>asset.name||asset.source||asset.id).join(', '),more=count>3?' +'+(count-3):'';
+    return confirmEditorAction({
+      title:count===1?tr('Delete imported asset?','Eliminare asset importato?'):tr('Delete selected imported assets?','Eliminare gli asset importati selezionati?'),
+      message:count===1
+        ?tr('Remove "','Rimuovere "')+names+tr('" and its stored source? Existing Pawn/project references may become unavailable after reload.','" e la relativa sorgente memorizzata? I riferimenti Pawn/progetto esistenti potrebbero non essere più disponibili dopo il reload.')
+        :tr('Remove ','Rimuovere ')+count+tr(' assets and their stored sources? ',' asset e le relative sorgenti memorizzate? ')+names+more+tr('. Existing Pawn/project references may become unavailable after reload.','. I riferimenti Pawn/progetto esistenti potrebbero non essere più disponibili dopo il reload.'),
+      okText:count===1?tr('Delete asset','Elimina asset'):tr('Delete selected','Elimina selezionati'),
+    }).then(ok=>{
+      if(!ok)return false;
+      const ids=new Set(unique.map(asset=>asset.id));
+      if(!assetLibrarySave(assetLibraryLoad().filter(asset=>!ids.has(asset.id))))return false;
+      const blobKeys=new Set();
+      unique.forEach(asset=>{
+        if(asset.dbKey)blobKeys.add(asset.dbKey);
+        if(asset.sourceDbKey)blobKeys.add(asset.sourceDbKey);
+        (asset.sourceDependencies||[]).forEach(dependency=>{if(dependency&&dependency.dbKey)blobKeys.add(dependency.dbKey);});
+      });
+      const removals=window.LK_ASSET_BLOBS?Array.from(blobKeys).map(key=>window.LK_ASSET_BLOBS.remove(key)):[];
+      return Promise.allSettled(removals).then(()=>{
+        if(typeof deps.onImportedAssetsDeleted==='function')deps.onImportedAssetsDeleted(unique);
         refreshAssetsPanel();
-        status(tr('Asset removed from library', 'Asset rimosso dalla libreria'));
-      }
+        status(count===1?tr('Asset removed from library','Asset rimosso dalla libreria'):count+tr(' assets removed from library',' asset rimossi dalla libreria'));
+        return true;
+      });
     });
   }
+  function deleteImportedAsset(asset){return deleteImportedAssets(asset?[asset]:[]);}
   function markImportedAssetRigged(asset){
     if(!asset || !asset.id) return;
     const list = assetLibraryLoad();
@@ -174,11 +192,11 @@ function create(deps){
   }
   function glbMetadataFromObject(obj){
     const clips = (obj && obj.animations || []).filter(Boolean).map(clip => clip.name || 'Animation');
-    let meshCount = 0, skinnedMeshCount = 0, boneCount = 0;
+    let meshCount = 0, skinnedMeshCount = 0, boneCount = 0;const boneNames=[];
     if(obj && obj.traverse) obj.traverse(node => {
       if(node && node.isMesh) meshCount++;
       if(node && node.isSkinnedMesh) skinnedMeshCount++;
-      if(node && node.isBone) boneCount++;
+      if(node && node.isBone){boneCount++;if(node.name)boneNames.push(String(node.name));}
     });
     return {
       clips,
@@ -187,6 +205,8 @@ function create(deps){
       meshCount,
       skinnedMeshCount,
       boneCount,
+      boneNames:Array.from(new Set(boneNames)).sort(),
+      skeletonSignature:Array.from(new Set(boneNames)).sort().join('|'),
       rigged:skinnedMeshCount > 0 || boneCount > 8 || clips.length > 0,
     };
   }
@@ -199,6 +219,31 @@ function create(deps){
       : (file && file.size > 12 * 1024 * 1024
         ? Promise.reject(new Error(tr('IndexedDB asset storage is unavailable; large GLB base64 fallback was stopped to protect page memory.', 'Lo storage asset IndexedDB non è disponibile; il fallback base64 del GLB grande è stato fermato per proteggere la memoria della pagina.')))
         : readFileAsDataURL(file).then(src => ({src})));
+  }
+  function sourceBlobKey(file,prefix){
+    const name=String(file&&file.webkitRelativePath||file&&file.name||'source').toLowerCase().replace(/[^a-z0-9._/-]+/g,'-');
+    return String(prefix||'source')+':'+name+':'+(file&&file.size||0)+':'+(file&&file.lastModified||0);
+  }
+  function saveImportProvenance(file){
+    const source=file&&file.__lkSourceFile;
+    if(!source)return Promise.resolve({});
+    const dependencies=Array.from(file.__lkSourceDependencies||[]);
+    return saveImportedBlob(source,sourceBlobKey(source,'source:fbx')).then(sourceInfo=>{
+      return Promise.all(dependencies.map(dependency=>saveImportedBlob(dependency,sourceBlobKey(dependency,'source:dependency')).then(info=>({
+        name:dependency.name||'dependency',
+        path:dependency.webkitRelativePath||dependency.name||'dependency',
+        dbKey:info.dbKey||null,
+        src:info.src||null,
+      })))).then(savedDependencies=>({
+        sourceDbKey:sourceInfo.dbKey||null,
+        sourceSrc:sourceInfo.src||null,
+        sourceName:source.name||null,
+        sourceSize:Number(source.size)||0,
+        sourceLastModified:Number(source.lastModified)||0,
+        sourceCheckedAt:new Date().toISOString(),
+        sourceDependencies:savedDependencies,
+      }));
+    });
   }
   function importTextureFile(file, opts){
     const options = opts || {};
@@ -213,9 +258,42 @@ function create(deps){
     });
   }
   function importAssetFiles(files, opts){
-    const list = supportedAssetFiles(files);
     const options = opts || {};
-    if(!list.length){ status('Drop GLB/GLTF or image files to import assets'); return Promise.resolve([]); }
+    const rawList = Array.from(files || []);
+    if(!options.__pluginPrepared){
+      const importers = assetImporters().filter(importer => importer && typeof importer.prepare === 'function' &&
+        rawList.some(file => typeof importer.accepts === 'function' && importer.accepts(file)));
+      if(importers.length){
+        const warnings = [];
+        setAssetLoading(true, rawList.length === 1 ? rawList[0].name : rawList.length + ' source files', 2, 'Preparing plugin import');
+        const context = {
+          THREE,
+          options,
+          progress:(name, pct, step) => setAssetLoading(true, name, pct, step),
+          warn:message => { if(message) warnings.push(message); },
+        };
+        let prepare = Promise.resolve(rawList);
+        importers.forEach(importer => {
+          prepare = prepare.then(current => importer.prepare(current, context));
+        });
+        return prepare.then(prepared => importAssetFiles(prepared, Object.assign({}, options, {__pluginPrepared:true})))
+          .then(imported => {
+            if(warnings.length) status(tr('Imported with warnings: ', 'Importato con avvisi: ') + warnings.join(' · '));
+            return imported;
+          })
+          .catch(err => {
+            setAssetLoading(false);
+            status(tr('Plugin import failed: ', 'Import plugin fallito: ') + (err && err.message || err));
+            return [];
+          });
+      }
+      if(rawList.some(file => /\.fbx$/i.test(file && file.name || ''))){
+        status(tr('Enable the FBX → GLB Importer plugin to import this source.', 'Attiva il plugin FBX → GLB Importer per importare questa sorgente.'));
+        return Promise.resolve([]);
+      }
+    }
+    const list = supportedAssetFiles(rawList);
+    if(!list.length){ status('Drop FBX, GLB/GLTF or image files to import assets'); return Promise.resolve([]); }
     if(options.placePoint && list.length !== 1){
       status('Viewport drop accepts one asset at a time');
       return Promise.resolve([]);
@@ -246,8 +324,9 @@ function create(deps){
         const objectUrl = URL.createObjectURL(file);
         return STORE.loadGlb(objectUrl, 5).then(obj => {
           setAssetLoading(true, file.name, basePct + Math.round(42 / total), 'Saving asset blob');
-          return saveImportedBlob(file, dbKey).then(sourceInfo => {
-            const asset = upsertImportedAsset(file, Object.assign({}, sourceInfo, glbMetadataFromObject(obj)));
+          return Promise.all([saveImportedBlob(file, dbKey),saveImportProvenance(file)]).then(saved => {
+            const sourceInfo=saved[0]||{},provenance=saved[1]||{};
+            const asset = upsertImportedAsset(file, Object.assign({}, sourceInfo, provenance, glbMetadataFromObject(obj)));
             if(asset) imported.push(asset);
             setAssetLoading(true, file.name, Math.round((index + .75) / total * 100), 'Registering asset');
             if(options.placePoint && asset){
@@ -278,6 +357,53 @@ function create(deps){
       setAssetLoading(false);
       status('Asset import failed: ' + err.message);
       return imported;
+    });
+  }
+  function setCompileState(asset,state,message){
+    const list=assetLibraryLoad(),found=list.find(item=>item&&(item.id===asset.id||item.key===asset.key));
+    if(!found)return;
+    found.compileState=state;
+    if(state==='ready')found.compiledAt=new Date().toISOString();
+    if(message)found.conversionWarnings=[message];
+    assetLibrarySave(list);
+    Object.assign(asset,found);
+    refreshAssetsPanel();
+  }
+  function rebuildImportedAsset(asset){
+    if(!asset||asset.sourceFormat!=='fbx')return Promise.reject(new Error(tr('This asset has no rebuildable FBX source.','Questo asset non possiede una sorgente FBX ricompilabile.')));
+    const importer=assetImporters().find(item=>item&&item.type==='fbx'&&typeof item.rebuild==='function');
+    if(!importer)return Promise.reject(new Error(tr('Enable the FBX plugin to rebuild this asset.','Attiva il plugin FBX per ricompilare questo asset.')));
+    setCompileState(asset,'building');
+    setAssetLoading(true,asset.name||asset.source||'FBX',5,'Preparing FBX rebuild');
+    const context={THREE,assetBlobs:window.LK_ASSET_BLOBS,progress:(name,pct,step)=>setAssetLoading(true,name,pct,step),warn:()=>{}};
+    return Promise.resolve(importer.rebuild(asset,context)).then(file=>importAssetFiles([file],{__pluginPrepared:true})).then(imported=>{
+      const result=(imported||[])[0];
+      if(!result)throw new Error(tr('GLB build produced no asset.','La build GLB non ha prodotto alcun asset.'));
+      setCompileState(result,'ready');
+      status(tr('FBX runtime build ready: ','Build runtime FBX pronta: ')+(result.name||asset.name));
+      return result;
+    }).catch(error=>{
+      setAssetLoading(false);setCompileState(asset,'failed',String(error&&error.message||error));
+      status(tr('FBX rebuild failed: ','Ricompilazione FBX fallita: ')+String(error&&error.message||error));
+      throw error;
+    });
+  }
+  function refreshFbxSource(asset,file){
+    if(!asset||asset.sourceFormat!=='fbx')return Promise.reject(new Error(tr('This asset has no linked FBX source.','Questo asset non possiede una sorgente FBX collegata.')));
+    if(!file||!/\.fbx$/i.test(file.name||''))return Promise.reject(new Error(tr('Choose an FBX source file.','Scegli un file sorgente FBX.')));
+    const oldSize=Number(asset.sourceSize)||0,oldModified=Number(asset.sourceLastModified)||0;
+    const oldName=String(asset.sourceName||asset.source||'').toLowerCase();
+    const changed=!oldSize||!oldModified||oldSize!==Number(file.size)||oldModified!==Number(file.lastModified)||oldName!==String(file.name||'').toLowerCase();
+    return saveImportedBlob(file,sourceBlobKey(file,'source:fbx')).then(sourceInfo=>{
+      const list=assetLibraryLoad(),found=list.find(item=>item&&(item.id===asset.id||item.key===asset.key));
+      if(!found)throw new Error(tr('Asset library entry is missing.','La voce della libreria asset non è disponibile.'));
+      found.source=file.name||found.source;found.sourceName=file.name||null;found.sourceSize=Number(file.size)||0;
+      found.sourceLastModified=Number(file.lastModified)||0;found.sourceCheckedAt=new Date().toISOString();
+      found.sourceDbKey=sourceInfo.dbKey||null;found.sourceSrc=sourceInfo.src||null;
+      if(changed){found.compileState='stale';found.sourceChangedAt=found.sourceCheckedAt;}
+      assetLibrarySave(list);Object.assign(asset,found);refreshAssetsPanel();
+      status(changed?tr('FBX source changed. Rebuild the runtime GLB.','Sorgente FBX modificata. Ricostruisci il GLB runtime.'):tr('FBX source is unchanged.','La sorgente FBX non è cambiata.'));
+      return {asset,changed};
     });
   }
   function replaceSelectedWithAsset(asset, targetOverride){
@@ -429,8 +555,11 @@ function create(deps){
     registerImportedTexture,
     placeImportedAsset,
     deleteImportedAsset,
+    deleteImportedAssets,
     importTextureFile,
     importAssetFiles,
+    rebuildImportedAsset,
+    refreshFbxSource,
     replaceSelectedWithAsset,
     replaceObjectWithFile,
     replaceTextureObjectWithAsset,
