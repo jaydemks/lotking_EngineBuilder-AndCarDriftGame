@@ -24,6 +24,7 @@ test('published editor-menu background is ready on a cold first load', async ({p
   }));
   expect(frameState.role).toBe('editor-menu');
   expect(frameState.registry).toBeGreaterThan(0);
+  expect(await page.evaluate(() => localStorage.getItem('lk.projectWorkspace.v1'))).toBeNull();
 });
 
 test('published gameplay snapshot is complete on its first cold application', async ({page}) => {

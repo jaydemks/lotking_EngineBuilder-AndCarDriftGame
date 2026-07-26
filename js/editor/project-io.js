@@ -47,6 +47,9 @@ function create(deps){
   let projectImportTarget = 'project';
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   const isOnlineDemo = () => window.LK_PROJECT_WORKSPACE && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
+  const canPublishAuthorDemo = () => !window.LK_PROJECT_WORKSPACE
+    || !window.LK_PROJECT_WORKSPACE.canPublishAuthorDemo
+    || window.LK_PROJECT_WORKSPACE.canPublishAuthorDemo();
   function blockOnlineDemoAction(){
     status(tr('Online demo only. Run the project locally to import, save or edit assets.', 'Demo online: avvia il progetto in locale per importare, salvare o modificare asset.'));
     return true;
@@ -179,6 +182,9 @@ function create(deps){
   }
 
   function localBridgeEligible(){
+    if(window.LK_PROJECT_WORKSPACE
+      && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo
+      && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo()) return false;
     return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   }
 
@@ -618,6 +624,25 @@ function create(deps){
 
   function ensureBrowserProjectSeed(project){
     if(isOnlineDemo()) return;
+    const workspace = window.LK_PROJECT_WORKSPACE;
+    const seedPrivateDemo = !!(project && workspace && workspace.consumeDemoSeedPending && workspace.consumeDemoSeedPending());
+    if(seedPrivateDemo){
+      try {
+        const copy = JSON.parse(JSON.stringify(project));
+        copy.meta = Object.assign({}, copy.meta || {}, {onlineDemo:false});
+        writeBrowserProject(copy, {
+          name:tr('Author DEMO · Private Copy', 'DEMO autore · Copia privata'),
+          newProject:true,
+        });
+        status(tr(
+          'Private DEMO ready · Save stays in this browser. Use a folder or Export LKEP for a portable copy.',
+          'DEMO privato pronto · Salva resta in questo browser. Usa una cartella o Esporta LKEP per una copia portabile.'
+        ));
+      } catch(err){
+        console.warn('LotKing private DEMO project seed failed', err);
+      }
+      return;
+    }
     const idx = browserProjectIndex();
     if(idx.projects && idx.projects.length){
       activeBrowserProjectId = idx.activeId || (getBrowserMarker() && getBrowserMarker().id) || null;
@@ -1076,7 +1101,9 @@ function create(deps){
       if(!project.active) actions.appendChild(mkBtn(tr('▶ Load', '▶ Carica'), tr('Open this project', 'Apri questo progetto'), () => loadBrowserProject(project.id, project.name), 'lk-level-load'));
       actions.appendChild(mkBtn('✎', tr('Rename', 'Rinomina'), () => renameBrowserProject(project.id, project.name)));
       actions.appendChild(mkBtn('⇩', tr('Export LKEP', 'Esporta LKEP'), () => exportBrowserProject(project.id), 'lk-level-export'));
-      actions.appendChild(mkBtn('★ DEMO', tr('Publish this project as the root Author DEMO', 'Pubblica questo progetto come DEMO autore principale'), () => publishProjectAsDemo(project.id), 'lk-level-export'));
+      if(canPublishAuthorDemo()){
+        actions.appendChild(mkBtn('★ DEMO', tr('Publish this project as the root Author DEMO', 'Pubblica questo progetto come DEMO autore principale'), () => publishProjectAsDemo(project.id), 'lk-level-export'));
+      }
       actions.appendChild(mkBtn('🗑', tr('Delete', 'Elimina'), () => deleteBrowserProject(project.id, project.name), 'lk-level-del'));
       row.append(meta, actions);
       box.appendChild(row);
@@ -1208,6 +1235,13 @@ function create(deps){
 
   async function publishProjectAsDemo(projectId){
     if(isOnlineDemo()){ blockOnlineDemoAction(); return false; }
+    if(!canPublishAuthorDemo()){
+      status(tr(
+        'Publishing the shared Author DEMO is available only from the local author installation. Your browser project remains private.',
+        'La pubblicazione del DEMO autore condiviso è disponibile solo dall’installazione locale dell’autore. Il tuo progetto browser resta privato.'
+      ));
+      return false;
+    }
     const idx=browserProjectIndex();
     const activeId=String(idx.activeId||activeBrowserProjectId||'');
     const selectedId=String(projectId||activeId);

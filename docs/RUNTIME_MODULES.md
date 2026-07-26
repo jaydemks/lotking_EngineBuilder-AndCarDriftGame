@@ -53,6 +53,9 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 
 ## Assets, Loading, and Session Flow
 
+- `js/runtime/project-workspace.js`
+  Owns browser, linked-file and folder workspace selection. The hosted Author DEMO is migrated into a private writable browser workspace backed by origin-scoped LocalStorage and IndexedDB; optional folder mirroring never grants the static site or another visitor access to that data. Legacy read-only DEMO state is upgraded automatically, while shared Author DEMO publishing remains restricted to the local installation.
+
 - `js/runtime/assets.js`
   Central asset directories, path builders, local `file://` detection, and shared asset constants.
 
@@ -264,7 +267,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 ## Runtime UI Helpers
 
 - `js/runtime/project-workspace.js`
-  Editor-only workspace overlay and hosted-origin gate. It detects hosted versus local execution automatically, then offers Author DEMO or Clean Project. Author DEMO is an explicit read-only session: Play remains available, while Save opens a guided handoff that copies the complete current project into a user-authorized writable folder before enabling normal persistence. Unsupported folder APIs keep portable LKEP export available. No hosted project/FTP write endpoint is used.
+  Editor-only workspace overlay and hosted-origin gate. It detects hosted versus local execution automatically, then offers Author DEMO or Clean Project. Author DEMO creates an origin-scoped private browser project with normal editor persistence. Folder mirroring and portable LKEP export are optional, and no hosted project/FTP write endpoint is used.
 
 - `js/runtime/ui/window-manager.js`
   Shared floating-window manager for runtime/editor overlays. Supports centered windows, drag, resize, persisted geometry, viewport clamping, magnetic snapping, z-ordering, and attaching to existing panels.

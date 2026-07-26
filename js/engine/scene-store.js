@@ -1803,8 +1803,8 @@ function isPublishedGameplayRuntime(){
   return shouldUseBundledDemoProject() && !window.__LK_STANDALONE_EDITOR && !window.__LK_MENU_PREVIEW;
 }
 
-function resetPublishedDemoLibrary(){
-  if(!isPublishedGameplayRuntime()) return;
+function resetPublishedDemoLibrary(force){
+  if(!force && !isPublishedGameplayRuntime()) return;
   const keys = [];
   try {
     for(let i = 0; i < localStorage.length; i++){
@@ -1864,7 +1864,12 @@ async function installBundledDemoProject(project){
   await hydrateBundledProjectAssets(parsed, 'gameplay');
   // A hosted/static playable is a published snapshot: levels left in this
   // origin by an older FTP upload must not leak into the current catalog.
-  resetPublishedDemoLibrary();
+  // Reaching this installer means the bundled author snapshot was explicitly
+  // requested (first hosted visit or "Open author DEMO"). Replace only the
+  // origin-scoped level library; browser project copies remain private and
+  // independent. The workspace state may already have switched to writable
+  // browser mode by this point, so this reset must not depend on that state.
+  resetPublishedDemoLibrary(true);
   installEmbeddedProjectLevels(parsed);
   try {
     await installMenuRoleSidecars(parsed);
@@ -1913,12 +1918,6 @@ function ensureBundledDemoProject(){
       project.savedAt = savedAt;
       bundledDemoProjectCache = project;
       reportBundledDemoProgress({progress:60, step:'demo project ready in memory', url});
-      if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.markDemoSession){
-        LK_PROJECT_WORKSPACE.markDemoSession();
-      }
-      if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.consumeStartupTemplate){
-        LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
-      }
       const isMenuPreviewFrame = !!(window.__LK_MENU_PREVIEW && window.parent && window.parent !== window);
       if(isMenuPreviewFrame){
         // The landing background runs in an isolated iframe and intentionally
@@ -1934,6 +1933,12 @@ function ensureBundledDemoProject(){
         await hydrateBundledProjectAssets(project, 'role menu');
         reportBundledDemoProgress({progress:64, step:'role menu assets ready', url});
       } else {
+        if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.markDemoSession){
+          LK_PROJECT_WORKSPACE.markDemoSession();
+        }
+        if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.consumeStartupTemplate){
+          LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
+        }
         await installBundledDemoProject(cloneData(project));
       }
       const scene = sceneFromProject(project);

@@ -1,6 +1,6 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture through the active v0.7.2 work: the editor/runtime split, atomic hosted-DEMO loading, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
+This document describes the current project architecture through the active v0.7.3 work: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
@@ -17,7 +17,7 @@ The project is still intentionally simple at the platform level: plain JavaScrip
 - `js/runtime/input/` contains the multi-device input stack introduced in v0.5.2: action schema, physical device sources, per-player assignment, in-game controls menu, visual mapping overlay, and touch controls.
 - `js/runtime/ui/` contains runtime/editor-shared UI utilities, currently the floating window manager used by the mapping overlay and movable editor settings panels.
 - `js/engine/scene-store.js` is the persistence and project-application layer. It owns LKEP import/export, local level/project storage, asset blob storage, project application at boot, and shared scene factories.
-- `demo/demo-project.lkep.json` is the bundled online template. On hosted origins, `scene-store.js` loads it when DEMO is explicitly selected and preserves an explicit read-only DEMO marker. Play does not save; the first Save request can promote the exact open snapshot into a user-selected local folder.
+- `demo/demo-project.lkep.json` is the bundled online template. On hosted origins, `scene-store.js` loads it when DEMO is explicitly selected, installs an origin-scoped level snapshot and seeds a private browser project. Subsequent Save and reload operations use that visitor's copy; selecting a folder is an optional mirror rather than a write prerequisite.
 - `js/editor/loader.js` remains available for editor dependency ordering, while `engine_editor.html` is now the primary editor surface. Direct editor pages and the lazy loader must keep the same module order.
 - `js/plugins/` contains the plugin host API, plugin manager and plugin descriptors. Logic Element is mandatory; the FBX importer and P2P Sessions & Coworking are default-enabled, user-toggleable reference plugins.
 - `js/editor/` contains the modular Engine Editor: core state, layout, application menu bar, toolbar, side panels, asset dock, outliner, inspectors, selection, history, project IO, viewport layout, Cinema Studio, playable export, Sound Designer, input settings, and preview/runtime handoff.
@@ -355,7 +355,7 @@ Every split part and every material group entering a join receives its own clone
 
 Play Preview uses the normal runtime pause/settings overlay. `Esc` opens/closes that menu, temporarily restores the mouse cursor when the menu was opened by keyboard/mouse, and returns focus to the canvas after closing so runtime shortcuts continue without requiring an extra click. Stopping preview remains separate through `F8` or `Shift+Esc`.
 
-Before a hosted workspace is authorized, editor Play Preview uses the bundled LKEP as read-only state and deliberately bypasses editor persistence. Save presents a local-folder explanation and picker; only after the complete snapshot has been written successfully does the session become a normal folder workspace. Server files remain immutable throughout.
+The hosted Author DEMO is writable only inside the visitor's browser profile. Editor Save updates the private project/level records and IndexedDB assets, while Play Preview and Simulate use the same private state. A folder link can mirror the complete snapshot, but server files and the shared GitHub project remain immutable throughout.
 
 `cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. It is browser-only and intentionally does not depend on external render/export tooling. Advanced curve editing, blend modes, more camera/lens parameters, and full track controls remain future work.
 

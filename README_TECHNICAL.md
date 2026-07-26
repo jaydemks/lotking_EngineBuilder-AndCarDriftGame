@@ -6,7 +6,7 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The active `v0.7.2` milestone hardens the editor/runtime boundary established in v0.7.1: atomic first-load DEMO hydration, independent Character and Vehicle input contexts, reliable multi-player device reservation and a guided online-DEMO handoff to a writable local workspace. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
+The active `v0.7.3` milestone builds on the atomic DEMO loading and player-input work from v0.7.2. The hosted author DEMO is now cloned into a private, writable browser workspace: normal editing, imports, levels, Save, Play, Simulate and export remain available without granting folder access. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
 
 Editor startup and every Play/Simulate session now include a visible, reversible runtime pre-benchmark. It prepares real project render/physics paths and measures sustained frames; devices remaining below 25 FPS receive a conservative Low video profile. This is a recommendation, not a lock: any explicit change in Video settings becomes the user's persistent override.
 
@@ -59,7 +59,7 @@ Useful URLs:
 
 See [HOW_TO_START.md](HOW_TO_START.md) for the full startup, LAN and troubleshooting guide.
 
-On hosted deployments, visitors can inspect and play the bundled author DEMO without write access to the host. DEMO Play Preview never attempts an editor save. Pressing Save opens a guided local-workspace handoff: Chromium users select a writable folder and the complete current project is copied there before normal authoring saves are enabled. Browsers without direct folder access can still export a portable LKEP file.
+On hosted deployments, the bundled author DEMO is installed as a private copy in the visitor's origin-scoped LocalStorage and IndexedDB. The visitor can use the normal editor and save/reopen work in that browser profile; one visitor cannot see another visitor's database, and static hosting exposes no path that writes those changes back to GitHub. Folder mirroring and portable LKEP export are optional durability/portability choices rather than prerequisites. Publishing the shared Author DEMO remains available only from the local author installation.
 
 ## Assets and FBX workflow
 

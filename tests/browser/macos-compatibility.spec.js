@@ -55,22 +55,30 @@ test('Apple GPU compatibility profile avoids unstable screen-space passes',async
   expect(profile).toMatchObject({appleGpu:true,conservativePost:true,gtao:false,ssr:false,maxPixelRatio:2});
 });
 
-test('online DEMO keeps Play available and explains local persistence on Save',async({page})=>{
+test('online DEMO becomes a complete private browser workspace',async({page})=>{
   test.setTimeout(300000);
   const pageErrors=[];
+  const sharedProjectWrites=[];
   page.on('pageerror',error=>pageErrors.push(String(error&&error.message||error)));
+  page.on('request',request=>{
+    if(!/^(POST|PUT|PATCH|DELETE)$/i.test(request.method()))return;
+    if(/__lotking\/(?:project-state|publish-demo)|api\.github\.com/i.test(request.url()))sharedProjectWrites.push(request.method()+' '+request.url());
+  });
   await page.addInitScript(()=>{
-    localStorage.clear();
-    localStorage.setItem('lk.projectWorkspace.v1',JSON.stringify({
-      mode:'demo',
-      onlineEditor:false,
-      workspaceReady:true,
-      startupTemplate:'demo',
-    }));
+    if(!sessionStorage.getItem('lk.test.privateDemoInitialized')){
+      localStorage.clear();
+      localStorage.setItem('lk.projectWorkspace.v1',JSON.stringify({
+        mode:'demo',
+        onlineEditor:false,
+        workspaceReady:true,
+        startupTemplate:'demo',
+      }));
+      sessionStorage.setItem('lk.test.privateDemoInitialized','1');
+    }
     try{Object.defineProperty(window,'showDirectoryPicker',{value:undefined,configurable:true});}catch(error){}
   });
   await page.goto('/engine_editor.html?online-demo-save-regression=1',{waitUntil:'domcontentloaded'});
-  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:60000});
+  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:120000});
   await page.evaluate(()=>{
     document.querySelector('#lkProjectsClose')?.click();
     document.querySelector('#lkWorkspaceClose')?.click();
@@ -78,15 +86,26 @@ test('online DEMO keeps Play available and explains local persistence on Save',a
 
   await expect(page.locator('#lkSave')).toBeEnabled();
   await expect(page.locator('#lkPlay')).toBeEnabled();
-  await expect(page.locator('#lkSaveAsTrack')).toBeDisabled();
+  await expect(page.locator('#lkSaveAsTrack')).toBeEnabled();
+  await expect(page.locator('#lkAssetImport')).toBeEnabled();
+  await expect.poll(()=>page.evaluate(()=>LK_PROJECT_WORKSPACE.state())).toMatchObject({
+    mode:'browser',
+    onlineEditor:true,
+    workspaceReady:true,
+    sourceTemplate:'demo',
+  });
+  expect(await page.evaluate(()=>LK_PROJECT_WORKSPACE.isOnlineDemoMode())).toBe(false);
+  expect(await page.evaluate(()=>LK_PROJECT_WORKSPACE.isPrivateBrowserDemo())).toBe(true);
+  await page.locator('#lkTrackName').fill('Private Browser DEMO');
   await page.locator('#lkSave').click();
-  await expect(page.locator('#lkDemoSaveOverlay')).toHaveClass(/open/);
-  await expect(page.locator('#lkDemoSaveTitle')).toHaveText(/Save your project|Salva il progetto/);
-  await expect(page.locator('#lkDemoSelectFolder')).toBeDisabled();
-  await expect(page.locator('#lkDemoSaveStatus')).toContainText(/Chrome or Edge|Chrome o Edge/);
-  await page.locator('#lkDemoSaveCancel').click();
   await expect(page.locator('#lkDemoSaveOverlay')).toHaveCount(0);
-  expect(await page.evaluate(()=>LK_PROJECT_WORKSPACE.isOnlineDemoMode())).toBe(true);
+  expect(sharedProjectWrites).toEqual([]);
+  await expect.poll(()=>page.evaluate(()=>{
+    const index=JSON.parse(localStorage.getItem('lk.editor.projects.v1')||'null');
+    const record=index&&index.projects&&index.projects.find(item=>item.id===index.activeId);
+    const project=record&&JSON.parse(localStorage.getItem('lk.editor.project.'+record.id)||'null');
+    return {count:index&&index.projects&&index.projects.length||0,name:project&&project.meta&&project.meta.trackName};
+  })).toMatchObject({count:1,name:'Private Browser DEMO'});
   await page.locator('#lkPlay').click();
   await page.waitForFunction(()=>LOT_KING.editor.state.playPreview===true,null,{timeout:120000});
   await expect(page.locator('#lkDemoSaveOverlay')).toHaveCount(0);
@@ -102,11 +121,31 @@ test('online DEMO keeps Play available and explains local persistence on Save',a
   await expect(page.locator('#lkEditor')).toHaveClass(/simulate-preview/);
   await page.locator('#lkSimulate').click();
   await expect.poll(()=>page.evaluate(()=>LOT_KING.editor.state.simulatePreview)).toBe(false);
+  await expect.poll(()=>page.evaluate(()=>{
+    const index=JSON.parse(localStorage.getItem('lotking.levels.v1')||'null');
+    const activeId=index&&index.activeId;
+    const active=activeId&&JSON.parse(localStorage.getItem('lotking.level.'+activeId)||'null');
+    const slot=JSON.parse(localStorage.getItem('lotking.scene.v1')||'null');
+    return {
+      activeId,
+      catalogName:index&&index.levels&&index.levels.find(item=>item.id===activeId)?.name,
+      levelName:active&&active.meta&&active.meta.trackName,
+      slotName:slot&&slot.meta&&slot.meta.trackName,
+    };
+  })).toMatchObject({
+    catalogName:'Private Browser DEMO',
+    levelName:'Private Browser DEMO',
+    slotName:'Private Browser DEMO',
+  });
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:120000});
+  await expect(page.locator('#lkTrackName')).toHaveValue('Private Browser DEMO');
+  expect(await page.evaluate(()=>LK_PROJECT_WORKSPACE.isPrivateBrowserDemo())).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
-test('online DEMO Save promotes the exact session to a writable local folder',async({page})=>{
-  test.setTimeout(120000);
+test('private DEMO can optionally mirror the exact session to a local folder',async({page})=>{
+  test.setTimeout(240000);
   await page.addInitScript(()=>{
     localStorage.clear();
     localStorage.setItem('lk.projectWorkspace.v1',JSON.stringify({
@@ -135,20 +174,20 @@ test('online DEMO Save promotes the exact session to a writable local folder',as
     window.showDirectoryPicker=async()=>directory('','LotKing Test Workspace');
   });
   await page.goto('/engine_editor.html?online-demo-folder-save-regression=1',{waitUntil:'domcontentloaded'});
-  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:60000});
+  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:120000});
   await page.evaluate(()=>{
     document.querySelector('#lkProjectsClose')?.click();
     document.querySelector('#lkWorkspaceClose')?.click();
   });
-  await page.locator('#lkSave').click();
-  await expect(page.locator('#lkDemoSelectFolder')).toBeEnabled();
-  await page.locator('#lkDemoSelectFolder').click();
+  await page.evaluate(()=>LK_PROJECT_WORKSPACE.connectFolder({initialize:false}));
   await expect.poll(()=>page.evaluate(()=>LK_PROJECT_WORKSPACE.state())).toMatchObject({
     mode:'folder',
     onlineEditor:true,
     workspaceReady:true,
     folderName:'LotKing Test Workspace',
   });
+  await page.locator('#lkSave').click();
+  await expect.poll(()=>page.evaluate(()=>Array.from(window.__lkTestWorkspaceFiles.keys()).some(path=>/^lotking-workspace\/projects\/.+\.lkep\.json$/.test(path)))).toBe(true);
   const saved=await page.evaluate(()=>({
     paths:Array.from(window.__lkTestWorkspaceFiles.keys()).sort(),
     project:JSON.parse(window.__lkTestWorkspaceFiles.get('lotking-workspace/active-project.lkep.json')),

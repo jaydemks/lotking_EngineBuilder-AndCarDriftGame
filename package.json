@@ -1,6 +1,6 @@
 {
   "name": "lot-king-engine",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "private": true,
   "scripts": {
     "build:three": "esbuild js/vendor/three-r185-compat.entry.js --bundle --format=iife --platform=browser --target=es2020 --minify --legal-comments=none --outfile=vendor/three-r185-compat.min.js",
