@@ -1,0 +1,19 @@
+{
+  "name": "Lot King — Browser-Native 3D Game Engine & Editor",
+  "short_name": "Lot King",
+  "description": "Build, test and export multi-level 3D browser games and interactive experiences.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#090b12",
+  "theme_color": "#090b12",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

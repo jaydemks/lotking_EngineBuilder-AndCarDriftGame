@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/sitemap.xml

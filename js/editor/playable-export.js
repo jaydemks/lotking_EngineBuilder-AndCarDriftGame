@@ -48,7 +48,7 @@ function create(deps){
     return {
       format: 'LKEP',
       version: src.version || 1,
-      game: src.game || 'LOT KING ENGINE EDITOR & Car Drift Game',
+      game: src.game || 'Lot King Browser-Native 3D Engine & Editor',
       name: src.name || 'LOT KING ENGINE EDITOR Project',
       savedAt: src.savedAt || new Date().toISOString(),
       meta: Object.assign({}, meta, {trackId, trackName}),
@@ -170,7 +170,7 @@ function create(deps){
     return {
       format: 'LKPKG',
       version: 1,
-      game: 'LOT KING ENGINE EDITOR & Car Drift Game',
+      game: 'Lot King Browser-Native 3D Engine & Editor',
       createdAt: now,
       exportMode: 'playable-track',
       runtime: runtimePath || 'gameplay.html',

@@ -12,7 +12,7 @@ Editor startup and every Play/Simulate session now include a visible, reversible
 
 Car racing and drifting remain the most complete gameplay path. Character Pawns can already use a custom rigged Main Mesh and independent Mixamo/FBX/GLB motion sources, but character authoring, retargeting and gameplay integration remain strongly experimental. More gameplay categories and reusable game rules will be added incrementally instead of presenting every current template as equally mature.
 
-It is not yet a finished general-purpose engine or a photoreal renderer. Reusable editor-authored objectives, broader game rules and several high-level Logic Element workflows are still being built. Experimental features can change and some combinations still need browser and device hardening.
+It is not yet a finished general-purpose engine, a photoreal renderer or a replacement for dedicated DCC modelling software. Complex vehicle, character and environment meshes are authored externally and imported; the editor can place them and modify supported transform, mesh-part, material, texture and animation properties. Reusable editor-authored objectives, broader game rules, simple project-specific UI authoring and several high-level Logic Element workflows are still being built. Experimental features can change and some combinations still need browser and device hardening.
 
 ## Main pages
 
@@ -23,7 +23,7 @@ It is not yet a finished general-purpose engine or a photoreal renderer. Reusabl
 
 ## Editor and gameplay
 
-The playable foundation is an arcade drift game. You can drive, drift, build score, hit props, use the gearbox and handbrake, listen to the radio and tune the handling. The goal is responsive, cinematic driving rather than strict simulation.
+The most mature playable foundation is currently an arcade drift game. It demonstrates driving, scoring, props, gearbox and handbrake behavior, radio, handling authoring and the portable runtime, while the engine itself is designed to support additional gameplay categories. The vehicle goal is responsive, cinematic driving rather than strict simulation.
 
 The editor runs entirely in the browser and includes projects, levels, an outliner, inspector, transform gizmos, undo/redo, context menus, snapping, multi-selection, collision editing, asset placement and level save/load.
 
@@ -70,6 +70,8 @@ The asset browser manages GLB/GLTF models, FBX authoring sources with linked run
 The default-enabled **FBX → GLB Importer** plugin preserves the original FBX and the texture sidecars it consumes. FBXLoader provides source preview, while GLTFExporter creates the canonical GLB used by gameplay and portable exports. Sources can be checked, relinked and rebuilt when they change.
 
 Models, materials, mesh parts, transforms, lights, primitives, text, effects and collision setups can be edited in the scene. Large imported data stays in IndexedDB so it can survive reloads without overflowing LocalStorage.
+
+This is an assembly and gameplay-authoring workflow, not full mesh creation. Complex topology, sculpting, rig creation and complete texture authoring remain tasks for Blender or another dedicated content tool.
 
 ## Pawn Studio and characters
 
@@ -228,6 +230,6 @@ Community contributions can be useful beyond code. Focused bug reports, reusable
 
 ## License
 
-Lot King Engine Editor & Car Drift Game uses the custom **Lot King Engine Builder & Car Drift Game Source License 0.1**.
+Lot King uses the custom **Lot King Engine Builder & Car Drift Game Source License 0.1**, whose historical name is retained as the legal license title.
 
 Project-authored parts can be read, learned from, modified, forked, shared and used commercially, but public uses must credit **Lot King Engine Builder & Car Drift Game by jaydemks** and preserve the license notice. This is source-available rather than OSI-approved open source. Read [LICENSE](LICENSE) for the exact terms.

@@ -1,4 +1,4 @@
-# LOT KING ENGINE EDITOR & Car Drift Game Architecture
+# Lot King Browser-Native 3D Engine & Editor Architecture
 
 This document describes the current project architecture through the active v0.7.4 work: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 

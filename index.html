@@ -3,10 +3,87 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LOT KING ENGINE EDITOR</title>
+  <title>Lot King — Browser-Native 3D Game Engine &amp; Editor</title>
+  <meta name="description" content="Build, test and export multi-level 3D browser games and interactive experiences with vehicles, characters, visual JavaScript logic and cinematics.">
+  <meta name="author" content="Giò / Jaydem">
+  <meta name="application-name" content="Lot King">
+  <meta name="theme-color" content="#090b12">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+  <link rel="canonical" href="https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/">
+  <link rel="manifest" href="site.webmanifest">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lot King">
+  <meta property="og:title" content="Lot King — Browser-Native 3D Game Engine &amp; Editor">
+  <meta property="og:description" content="Build, test and export multi-level 3D browser games and interactive experiences with reusable visual logic, vehicles, characters and cinematics.">
+  <meta property="og:url" content="https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/">
+  <meta property="og:image" content="https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/docs/media/LKE_YT_Thumb_A.png">
+  <meta property="og:image:width" content="1672">
+  <meta property="og:image:height" content="941">
+  <meta property="og:image:alt" content="Lot King browser-native 3D game engine and editor">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Lot King — Browser-Native 3D Game Engine &amp; Editor">
+  <meta name="twitter:description" content="Build, test and export multi-level 3D browser games and interactive experiences.">
+  <meta name="twitter:image" content="https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/docs/media/LKE_YT_Thumb_A.png">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/lot-king.css?v=0.7.4-settings-scrollbar-1">
   <script src="js/runtime/console-policy.js?v=0.7.4-extension-channel-2"></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/#website",
+        "url": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/",
+        "name": "Lot King",
+        "description": "Browser-native 3D game engine and visual editor.",
+        "publisher": { "@id": "https://github.com/jaydemks#person" }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/#software",
+        "name": "Lot King",
+        "alternateName": "Lot King Engine",
+        "url": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/",
+        "image": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/docs/media/LKE_YT_Thumb_A.png",
+        "description": "A local-first, browser-native 3D game engine and editor for building, testing and exporting multi-level games and interactive experiences.",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Game engine and 3D level editor",
+        "operatingSystem": "Any operating system with a supported web browser",
+        "softwareVersion": "0.7.4",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "EUR",
+          "availability": "https://schema.org/InStock"
+        },
+        "codeRepository": "https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame",
+        "license": "https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame/blob/main/LICENSE",
+        "author": { "@id": "https://github.com/jaydemks#person" },
+        "featureList": [
+          "Browser-native 3D level editor",
+          "Visual JavaScript logic",
+          "Multi-level projects",
+          "Vehicle and character pawns",
+          "Cinema and audio authoring",
+          "Portable web game export"
+        ]
+      },
+      {
+        "@type": "Person",
+        "@id": "https://github.com/jaydemks#person",
+        "name": "Giò / Jaydem",
+        "url": "https://github.com/jaydemks",
+        "sameAs": [
+          "https://github.com/jaydemks",
+          "https://x.com/jaydem_world",
+          "https://www.linkedin.com/in/giodemiccoli/"
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <audio id="menuMusicAudio" preload="auto" loop data-loading-src="musics/menu/Num0%20%20JustWait.mp3">
@@ -46,13 +123,13 @@
   </script>
 
   <div id="menuBgHost" aria-hidden="true">
-    <iframe id="menuBgFrame" title="LOT KING menu level background" src="gameplay.html?embedded=1&amp;menuPreview=editor" data-loaded="1"></iframe>
+    <iframe id="menuBgFrame" title="Lot King interactive 3D menu background" src="gameplay.html?embedded=1&amp;menuPreview=editor" data-loaded="1"></iframe>
   </div>
 
   <div id="menuLayer">
     <div id="overlay" class="menu-preloading">
       <h1>LOT KING ENGINE EDITOR</h1>
-      <div class="sub">Parking-lot drift challenge</div>
+      <div class="sub">Browser-native 3D game engine &amp; editor</div>
       <div id="menuMain" class="menu-main">
         <button id="playBtn" type="button">▶ PLAY GAME</button>
         <button id="editorBtn" title="Open the engine editor" type="button">⚙ ENGINE EDITOR</button>

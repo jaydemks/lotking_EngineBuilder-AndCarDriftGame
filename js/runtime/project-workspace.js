@@ -393,9 +393,9 @@ function blankWorkspaceProject(name){
   const projectName = name || 'New Project';
   return {
     format:'LKEP',
-    name:'Lot King Engine Builder Editor Project',
+    name:'Lot King Engine Project',
     version:1,
-    game:'Lot King Engine Builder & Car Drift Game',
+    game:'Lot King Browser-Native 3D Engine & Editor',
     savedAt:new Date().toISOString(),
     meta:{
       trackId:'new-project',

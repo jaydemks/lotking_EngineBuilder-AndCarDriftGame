@@ -1,4 +1,4 @@
-# LOT KING ENGINE EDITOR & Car Drift Game Runtime Modules
+# Lot King Browser-Native 3D Engine Runtime Modules
 
 This document maps the current runtime and runtime-adjacent modules. It is meant to stay version-neutral; release-specific details belong in `docs/releases/` and active `RELEASE_NOTES_v*.md` files.
 

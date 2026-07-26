@@ -9,7 +9,7 @@
 
 const KEY = 'lotking.scene.v1';
 const PROJECT_FORMAT = 'LKEP';
-const PROJECT_NAME = 'Lot King Engine Builder Editor Project';
+const PROJECT_NAME = 'Lot King Engine Project';
 const PROJECT_VERSION = 1;
 const HUD_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level Test';
 const PLAYER_TEMPLATE_LEVEL_NAME = 'Parking Lot First Ever Level';
@@ -1132,7 +1132,7 @@ function projectFromScene(scene, meta){
     format: PROJECT_FORMAT,
     name: PROJECT_NAME,
     version: PROJECT_VERSION,
-    game: 'Lot King Engine Builder & Car Drift Game',
+    game: 'Lot King Browser-Native 3D Engine & Editor',
     savedAt: new Date().toISOString(),
     meta: Object.assign({trackId:'parking-lot', trackName:'Parking Lot'}, meta || {}),
     scene: scene || blank(),

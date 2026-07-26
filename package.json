@@ -1,6 +1,22 @@
 {
   "name": "lot-king-engine",
   "version": "0.7.4",
+  "description": "Browser-native 3D game engine and editor for building, testing and exporting multi-level games and interactive experiences.",
+  "homepage": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame.git"
+  },
+  "keywords": [
+    "3d-engine",
+    "game-engine",
+    "threejs",
+    "level-editor",
+    "visual-scripting",
+    "browser-games"
+  ],
+  "author": "Giò / Jaydem",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "scripts": {
     "build:three": "esbuild js/vendor/three-r185-compat.entry.js --bundle --format=iife --platform=browser --target=es2020 --minify --legal-comments=none --outfile=vendor/three-r185-compat.min.js",
