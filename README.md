@@ -36,11 +36,11 @@ Lot King is not intended to replace established engines. It is an ongoing attemp
 
 ### v0.7.1 editor and gameplay preview
 
-[▶ Watch the v0.7.1 preview](docs/media/Lotkinged%20071_LQ.MP4)
+https://github.com/user-attachments/assets/9c1c8dc2-2d93-4434-958f-23d9f546ac55
 
 ### Earlier v0.6.x preview
 
-[▶ Watch the earlier v0.6.x preview](docs/media/Lotkinged%20062_LQ.mp4)
+https://github.com/user-attachments/assets/c481af98-95d2-46b7-aac4-99a6be812e85
 
 The current `v0.7.4` contains additional systems and fixes that are not shown in these videos yet.
 
