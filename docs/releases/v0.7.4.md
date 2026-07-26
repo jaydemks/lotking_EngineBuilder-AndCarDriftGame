@@ -4,7 +4,7 @@
 
 ### Release status
 
-- Status: release checkpoint.
+- Status: released.
 - Tag: `v0.7.4`.
 - Three.js baseline: pinned local r185 compatibility bundle.
 
