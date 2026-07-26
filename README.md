@@ -160,7 +160,7 @@ Feedback, testing, documentation, example projects, reusable logic and other for
 
 - [Technical README](README_TECHNICAL.md)
 - [Startup guide](HOW_TO_START.md)
-- [Latest release notes](RELEASE_NOTES_v0.7.4.md)
+- [Current v0.7.5 development notes](RELEASE_NOTES_v0.7.5.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Runtime modules](docs/RUNTIME_MODULES.md)
 - [Release history](docs/releases/)
