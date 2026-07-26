@@ -56,6 +56,9 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 - `js/runtime/project-workspace.js`
   Owns browser, linked-file and folder workspace selection. The hosted Author DEMO is migrated into a private writable browser workspace backed by origin-scoped LocalStorage and IndexedDB; optional folder mirroring never grants the static site or another visitor access to that data. Legacy read-only DEMO state is upgraded automatically, while shared Author DEMO publishing remains restricted to the local installation.
 
+- `js/editor/storage-manager.js`
+  Provides the Editor Settings inventory and Cleanup Assistant for Lot King-owned LocalStorage, SessionStorage, IndexedDB stores, Cache Storage and same-origin service workers. It derives active/catalogued/review states from the real project and level indexes, reports available embedded save dates, explains schema-version suffixes, reports asset-blob discrepancies, supports LocalStorage backup/restore and inventory reports, and applies stronger confirmation rules to destructive project, level and asset operations. Normal HTTP cache remains under browser site-data controls.
+
 - `js/runtime/assets.js`
   Central asset directories, path builders, local `file://` detection, and shared asset constants.
 

@@ -32,6 +32,7 @@ It is still experimental and it is not trying to replace Unreal Engine. The idea
 - Build visual JavaScript logic with reusable Logic Elements, variables, Functions and Subgraphs.
 - Make cinematics, engine sound sets, HUD layouts and interactive scenes.
 - Test everything with Play Preview or Simulate.
+- Inspect, back up and selectively clean Lot King browser storage from Editor Settings.
 - Export portable `.lkep.json` projects or standalone playable ZIP files ready for your website.
 - Connect two browser sessions with the P2P plugin for multiplayer logic and experimental coworking.
 
@@ -68,7 +69,8 @@ Opening the project through `file://` is not supported. Use the local server so 
 - [Technical README](README_TECHNICAL.md) — editor systems, architecture, storage, export and project structure.
 - [How to start](HOW_TO_START.md) — complete local and network startup guide.
 - [P2P sessions and coworking](docs/P2P_SESSIONS_AND_COWORKING.md) — connect two editors and test authority, transforms and reviewed snapshots.
-- [v0.7.3 release notes](RELEASE_NOTES_v0.7.3.md) — current private browser DEMO workspace release.
+- [v0.7.4 release notes](RELEASE_NOTES_v0.7.4.md) — current browser storage control release.
+- [v0.7.3 release notes](docs/releases/v0.7.3.md) — private browser DEMO workspace release.
 - [v0.7.2 release notes](docs/releases/v0.7.2.md) — atomic loading, input and safe online-workspace foundations.
 - [v0.7.1 release notes](docs/releases/v0.7.1.md) — Pawn Studio, soccer gameplay and cross-platform authoring.
 - [Documentation](docs/) — architecture, runtime modules, Pawn Studio, Logic Elements and Three.js maintenance.
@@ -77,7 +79,7 @@ Opening the project through `file://` is not supported. Use the local server so 
 
 Lot King has been public and versioned since the `v0.5.0-beta` Git-ready baseline. Every release since then has preserved a recoverable stage of the editor and runtime while the project continues moving toward a future stable beta.
 
-The `v0.7.0` milestone completed the main migration from the old Three.js r128 runtime to the pinned r185 generation. The `v0.7.1` cycle built Pawn Studio, FBX/Mixamo authoring, soccer gameplay, LAN/P2P experiments and broader cross-platform support. Version `v0.7.2` concentrated on deterministic first loading and independent Character/Vehicle input contexts. Version `v0.7.3` turns the hosted author DEMO into a complete, isolated browser workspace instead of requiring a folder before normal saving and editing.
+The `v0.7.0` milestone completed the main migration from the old Three.js r128 runtime to the pinned r185 generation. The `v0.7.1` cycle built Pawn Studio, FBX/Mixamo authoring, soccer gameplay, LAN/P2P experiments and broader cross-platform support. Version `v0.7.2` concentrated on deterministic first loading and independent Character/Vehicle input contexts. Version `v0.7.3` turned the hosted author DEMO into a complete, isolated browser workspace instead of requiring a folder before normal saving and editing. Version `v0.7.4` adds a professional browser-storage inventory so those local projects, levels, assets and preferences can be diagnosed, backed up and cleaned selectively from inside the editor.
 
 Recent testing exposed important macOS, Safari and Apple WebGL differences that were not visible on the main Windows development setup. Startup, storage, DEMO loading and conservative rendering fallbacks have been improved, but browser, operating-system and GPU coverage remains an ongoing part of every release.
 

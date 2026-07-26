@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.7.3',
+  version: '0.7.4',
   assets: null,
   core: {},
   world: {},

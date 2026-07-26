@@ -6,7 +6,7 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The active `v0.7.3` milestone builds on the atomic DEMO loading and player-input work from v0.7.2. The hosted author DEMO is now cloned into a private, writable browser workspace: normal editing, imports, levels, Save, Play, Simulate and export remain available without granting folder access. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
+The active `v0.7.4` milestone adds granular browser-storage inspection and recovery controls to the private workspace introduced in v0.7.3. Projects, levels, preferences, imported asset blobs, workspace handles, explicit caches and Lot King service workers can be audited from Editor Settings without exposing unrelated origin data. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
 
 Editor startup and every Play/Simulate session now include a visible, reversible runtime pre-benchmark. It prepares real project render/physics paths and measures sustained frames; devices remaining below 25 FPS receive a conservative Low video profile. This is a recommendation, not a lock: any explicit change in Video settings becomes the user's persistent override.
 
@@ -36,6 +36,8 @@ The r185 WebGL post-processing path keeps screen-space depth effects separate fr
 ## Project workspace, storage and LAN access
 
 Projects are stored in LocalStorage, while larger imported files use IndexedDB. Browser storage is origin-scoped, so `localhost`, a LAN IP and an online host normally have separate browser databases.
+
+Editor Settings → Storage provides an origin-scoped inventory of Lot King LocalStorage, SessionStorage, IndexedDB asset/workspace stores, Cache Storage and service-worker registrations. The Cleanup Assistant marks the currently active project/level, other catalogued saves, current preferences/system records, out-of-catalog review candidates and safely rebuildable temporary/cache data. Embedded save dates are shown when available; the interface explicitly explains that suffixes such as `.v1` identify a data schema rather than an older chronological copy. Filters and assisted selection keep active/valid records separate from review candidates. Individual entries can then be removed without exposing or deleting unrelated application keys. The same panel reports catalog/blob discrepancies, exports a metadata-only inventory, backs up and restores Lot King LocalStorage, requests persistent browser storage and links to the normal portable LKEP export. High-impact project, level and asset cleanup requires an explicit backup acknowledgement and typed confirmation. Regular browser HTTP cache cannot be enumerated selectively by a web page, so the panel explains when browser site-data controls or a hard reload are required.
 
 On `localhost`, `serve_local.py` also keeps the complete authoritative project under `.lotking-local/`. This disk bridge can restore levels and embedded assets when the local port changes. Disk backup, DEMO publishing and performance endpoints are restricted to the host loopback address; LAN browsers cannot overwrite them.
 

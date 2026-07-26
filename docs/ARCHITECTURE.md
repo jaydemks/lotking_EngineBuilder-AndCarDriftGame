@@ -1,6 +1,6 @@
 # LOT KING ENGINE EDITOR & Car Drift Game Architecture
 
-This document describes the current project architecture through the active v0.7.3 work: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
+This document describes the current project architecture through the active v0.7.4 work: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
@@ -301,6 +301,8 @@ Pointer ownership is Player-frame aware. The runtime records rendered rectangles
 
 Project General Settings are shared state, not editor preferences. Video, Audio, gameplay input and gameplay settings belong to the project/runtime surface. The viewport toolbar Quick Video gear and the Engine Editor `Project General` entry both open the same runtime settings overlay and mutate the same `GAME.settings.video` object persisted in LKEP. Editor theme, interface behavior and authoring keys remain under local Editor Preferences and are not exported as game controls. Core Select/Move/Rotate/Scale/Focus keys are read dynamically from `lotking.editorPrefs.v1`.
 
+`js/editor/storage-manager.js` provides the Editor Settings storage inventory and Cleanup Assistant. Its ownership boundary is limited to `lotking.*` / `lk.*` keys, the known Lot King IndexedDB databases, named Cache Storage entries and same-origin service workers. Project/level indexes and the active-project marker classify records as active, catalogued or out-of-catalog; embedded timestamps are used only when the stored schema actually contains one. Schema suffixes are never interpreted as chronological copies. It never treats the browser's opaque HTTP cache as enumerable. Destructive actions are granular, high-impact records require a typed confirmation, and LocalStorage backup is explicitly separated from portable LKEP export because only the latter carries imported asset blobs.
+
 For normal Lit viewport rendering, `post.js` can temporarily bind an editor/scene camera to the shared composer. `videoOnly` rendering enables the project quality, ray/SSR and volumetric passes but suppresses Player Camera DOF and grade, preserving an accurate project render preview without applying shot-specific lens treatment to the authoring camera. Debug render modes remain direct diagnostic renders.
 
 ## Engine Editor Architecture
@@ -310,7 +312,7 @@ For normal Lit viewport rendering, `post.js` can temporarily bind an editor/scen
 Major editor areas:
 
 - Core and chrome: `editor-core.js`, `editor-template.js`, `editor-layout.js`, `floating-layout.js`.
-- Toolbar and preferences: `toolbar.js`, `preferences.js`, `quick-audio.js`, `side-panels.js`.
+- Toolbar and preferences: `toolbar.js`, `preferences.js`, `storage-manager.js`, `quick-audio.js`, `side-panels.js`.
 - Viewport: `viewport-layout.js`, `viewport-picking.js`, `viewport-events.js`, `fly-camera.js`, `gizmo-controls.js`, `visual-helpers.js`.
 - Selection/history: `selection-manager.js`, `history-manager.js`, `keyboard-shortcuts.js`.
 - Assets: `asset-library.js`, `asset-imports.js`, `asset-panel.js`, `asset-properties.js`, `asset-catalog.js`, `asset-dnd.js`, `folder-manager.js`, `thumbnail-manager.js`.

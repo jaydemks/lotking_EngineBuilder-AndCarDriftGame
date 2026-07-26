@@ -34,6 +34,7 @@ function create(deps){
     tabControls:    {en:'Game Input', it:'Input gioco'},
     tabEditorKeys:  {en:'Editor Keys', it:'Tasti editor'},
     tabViewport:    {en:'Viewport', it:'Viewport'},
+    tabStorage:     {en:'Storage', it:'Archiviazione'},
     letterboxName:  {en:'Frame background', it:'Sfondo fuori dal frame'},
     letterboxDesc:  {en:'Colour outside the player-camera frame (letterbox / crop). Saved with the level.', it:'Colore fuori dal frame della camera del player (letterbox / crop). Salvato col livello.'},
     musicPanelName: {en:'Menu music player', it:'Player musica del menu'},
@@ -100,6 +101,7 @@ function create(deps){
       if(prop === 'placeholder') n.placeholder = texts[L];
       else n.textContent = texts[L];
     }
+    if(storageManager && storageManager.setLanguage) storageManager.setLanguage();
   }
 
   function apply(){
@@ -130,6 +132,8 @@ function create(deps){
     root.querySelectorAll('[name="lkPrefTheme"]').forEach(r => { r.checked = r.value === prefs.theme; });
     root.querySelectorAll('[name="lkPrefLang"]').forEach(r => { r.checked = r.value === lang(); });
     root.querySelectorAll('[data-editor-key]').forEach(input => { input.value = String(prefs.editorKeys[input.dataset.editorKey] || '').toUpperCase(); });
+    const activeTab = root.querySelector('[data-prefs-tab].on');
+    if(activeTab && activeTab.dataset.prefsTab === 'storage' && storageManager) storageManager.refresh();
   }
 
   function setMusicPanelVisible(visible){
@@ -144,7 +148,22 @@ function create(deps){
   function setTab(tab){
     root.querySelectorAll('[data-prefs-tab]').forEach(b => b.classList.toggle('on', b.dataset.prefsTab === tab));
     root.querySelectorAll('[data-prefs-sec]').forEach(s => s.classList.toggle('on', s.dataset.prefsSec === tab));
+    const panel = root.querySelector('.lk-prefs-panel');
+    if(panel) panel.classList.toggle('storage-open', tab === 'storage');
+    if(panel && tab === 'storage') requestAnimationFrame(() => {
+      const rect = panel.getBoundingClientRect();
+      const margin = 8;
+      if(rect.bottom > innerHeight - margin) panel.style.top = Math.max(margin, innerHeight - rect.height - margin) + 'px';
+      if(rect.right > innerWidth - margin) panel.style.left = Math.max(margin, innerWidth - rect.width - margin) + 'px';
+      if(rect.top < margin) panel.style.top = margin + 'px';
+      if(rect.left < margin) panel.style.left = margin + 'px';
+    });
+    if(tab === 'storage' && storageManager) storageManager.refresh();
   }
+
+  const storageManager = window.LK_EDITOR_STORAGE_MANAGER && window.LK_EDITOR_STORAGE_MANAGER.create
+    ? window.LK_EDITOR_STORAGE_MANAGER.create({root, status, lang})
+    : null;
 
   $('#lkLogoBtn').addEventListener('click', () => setOpen(!ED.prefsOpen));
   const projectGeneral = $('#lkOpenProjectGeneral');
