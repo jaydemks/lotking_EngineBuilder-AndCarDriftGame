@@ -1,5 +1,8 @@
 # Lot King — Browser-Native 3D Game Engine & Editor
 
+[![Try on GitHub Pages](https://img.shields.io/badge/TRY_IT_LIVE-GitHub_Pages-2ea44f?style=for-the-badge&logo=github)](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/)
+[![Sponsor on GitHub](https://img.shields.io/badge/SPONSOR-jaydemks-ea4aaa?style=for-the-badge&logo=githubsponsors)](https://github.com/sponsors/jaydemks)
+
 > It started as a parking-lot drift prototype.<br>
 > Now it is growing into a browser-native engine for building many kinds of games and interactive 3D experiences.
 
@@ -50,11 +53,14 @@ The current `v0.7.4` contains additional systems and fixes that are not shown in
 
 - Build projects with multiple levels and custom 3D menu scenes.
 - Import GLB, GLTF and FBX-based assets, then place, transform and configure their supported properties.
+- Search free online models and PBR textures with Asset Scout and import them without leaving the editor.
 - Build simple playable browser projects and interactive 3D visuals.
 - Create custom interactions and reusable gameplay behavior with Logic Elements.
 - Create and tune Race or Drift vehicle gameplay.
 - Edit collision, physics, cameras, lights, effects, sound and the currently supported HUD systems.
 - Configure Vehicle, Character and Soccer Pawns around imported assets or placeholders.
+- Build first-person gameplay with an eye camera, aim down sights and a configurable hitscan weapon.
+- Design on-foot audio in the Character Sound Designer: footsteps that change with the surface underfoot, weapon fire per weapon class, jump, landing and breathing. Every sound is synthesised procedurally by default, so a project has full character audio with no media files; any slot can be replaced with your own sample.
 - Assign rigged characters and Mixamo animations through Pawn Studio.
 - Create camera sequences with Cinema Studio.
 - Test projects through Play Preview or Simulate.
