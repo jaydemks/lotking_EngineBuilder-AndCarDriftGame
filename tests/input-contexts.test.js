@@ -34,7 +34,7 @@ require('../js/runtime/input/input-devices.js');
 require('../js/runtime/input/input-manager.js');
 
 const ACT = global.LK_RUNTIME_INPUT_ACTIONS;
-assert.equal(ACT.CONFIG_VERSION, 4);
+assert.equal(ACT.CONFIG_VERSION, 13);
 const defaults = ACT.defaultConfig();
 assert.ok(defaults.contexts.vehicle, 'Vehicle context must remain available');
 assert.ok(defaults.contexts.character, 'Character context must be available by default');

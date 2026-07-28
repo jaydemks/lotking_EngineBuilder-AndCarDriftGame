@@ -1,6 +1,6 @@
 {
   "name": "lot-king-engine",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Browser-native 3D game engine and editor for building, testing and exporting multi-level games and interactive experiences.",
   "homepage": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/",
   "repository": {
@@ -25,18 +25,24 @@
     "test:soccer": "node tests/soccer-core.test.js",
     "test:difficulty": "node tests/gameplay-difficulty.test.js",
     "test:character": "node tests/character-core.test.js",
+    "test:first-person": "node tests/first-person-core.test.js",
+    "test:surfaces": "node tests/procedural-surfaces.test.js",
+    "test:asset-scout": "node tests/asset-scout.test.js",
+    "test:character-audio": "node tests/character-audio.test.js",
+    "test:traversal": "node tests/character-traversal.test.js",
     "test:input": "node tests/input-contexts.test.js",
     "test:pawn-studio": "node tests/pawn-studio.test.js",
     "test:cloth": "node tests/cloth-system.test.js",
     "test:fbx": "node tests/fbx-plugin.test.js && node tests/asset-imports-fbx-source.test.js && node tests/playable-animation-assets.test.js",
     "test:video": "node tests/video-settings.test.js",
+    "test:texture-budget": "node tests/texture-budget.test.js",
     "test:benchmark": "node tests/pre-benchmark.test.js",
     "test:music": "node tests/music-library.test.js && node tests/menu-role-music.test.js",
     "test:post": "node tests/post-processing.test.js",
     "test:rendering": "node tests/rendering-backend.test.js",
     "test:p2p": "node tests/p2p-logic.test.js && playwright test tests/browser/p2p-session.spec.js",
     "test:browser": "playwright test",
-    "test": "npm run verify:three && npm run test:logic && npm run test:soccer && npm run test:difficulty && npm run test:character && npm run test:input && npm run test:pawn-studio && npm run test:cloth && npm run test:fbx && npm run test:video && npm run test:benchmark && npm run test:music && npm run test:post && npm run test:rendering && node tests/p2p-logic.test.js && npm run test:browser"
+    "test": "npm run verify:three && npm run test:logic && npm run test:soccer && npm run test:difficulty && npm run test:character && npm run test:first-person && npm run test:surfaces && npm run test:traversal && npm run test:character-audio && npm run test:asset-scout && npm run test:input && npm run test:pawn-studio && npm run test:cloth && npm run test:fbx && npm run test:video && npm run test:texture-budget && npm run test:benchmark && npm run test:music && npm run test:post && npm run test:rendering && node tests/p2p-logic.test.js && npm run test:browser"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

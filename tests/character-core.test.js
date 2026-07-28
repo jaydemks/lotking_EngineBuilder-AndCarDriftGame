@@ -313,6 +313,28 @@ test('normal, civil and police presets normalize independently', () => {
   assert.equal(characters.normalizePreset('unknown'), 'normal');
 });
 
+test('graph-driven movement keeps the device look and combat channels', () => {
+  // Every character template drives its Pawn from its own graph each frame, and
+  // the movement node has no pins for firing or aiming. Replacing the whole
+  // command with a movement-only object silently disabled the weapon.
+  const drive = {steer:0, throttle:1, brake:0, sprint:false, reset:false, highBeams:false,
+    cameraLookX:.4, cameraLookY:0, fire:true, aim:true, reload:false};
+  const GAME = {systems:{}, input:{player:() => ({drive:() => drive, device:() => 'keyboard-1'})}};
+  global.LK_RUNTIME_VEHICLE_PAWNS.install(GAME);
+  const owner = {position:{x:0,y:0,z:0,set(x,y,z){this.x=x;this.y=y;this.z=z;}},rotation:{y:0},visible:true,userData:{},traverse(){}};
+  const pawn = global.LK_RUNTIME_CHARACTER_PAWNS.createLogic(GAME, owner, {preset:'normal',playerId:1}, {});
+  pawn.start();
+
+  const authored = pawn.setMoveInput({x:0, z:1, sprint:false});
+  assert.equal(authored.z, 1, 'the authored movement is used');
+  assert.equal(authored.fire, true, 'the trigger survives a graph-authored move');
+  assert.equal(authored.aim, true, 'aim down sights survives a graph-authored move');
+  assert.equal(authored.lookX, .4, 'stick look survives a graph-authored move');
+  // An explicit value still wins, so a graph can hold fire on purpose.
+  assert.equal(pawn.setMoveInput({z:1, fire:false}).fire, false, 'an explicit channel is honoured');
+  pawn.dispose();
+});
+
 test('generic Character Pawn moves, jumps and changes preset', () => {
   const GAME = {systems:{}};
   const pawns = global.LK_RUNTIME_VEHICLE_PAWNS.install(GAME);

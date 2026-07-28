@@ -33,6 +33,26 @@ Both the native **player_car (Logic)** and **Player Car Logic Element** expose *
 
 Shading is stored with the player blueprint or Vehicle Pawn graph and is reapplied after model replacement and mesh edits.
 
+## Render resolution and texture budget
+
+**Rendering / Video → Render resolution** sets how many pixels the engine shades, as a share of the
+window (50%–200%). There is one renderer behind the editor viewport, the editor Play preview and the
+standalone game, so this value governs all three. The row prints the buffer that was actually
+allocated, in pixels and megapixels.
+
+The effective pixel ratio is the product of four multipliers — device DPR, quality preset,
+supersampling ratio and this control — and it is clamped by three ceilings: an effective ratio of
+`2`, a 4K buffer budget on the long axis and in total, and a floor of `0.5`. Without them, `High` +
+SSAA 2× on a 2× DPR panel asks for eight times the pixels of the window, and `Extreme` + SSAA 4×
+asked for sixteen. Supersampling still helps on a low-DPR display; on a high-DPR one those samples
+are already there.
+
+**Rendering / Video → Texture budget** caps the largest texture the engine uploads, from `256 px` to
+`4096 px`, defaulting to `1024 px`. Imported images, decals and GLB-embedded maps are downscaled as
+they load; the source files are never modified, so raising the cap restores full detail on the next
+load. Data, compressed and video textures are left untouched. A 4K PBR map is 67 MB before mipmaps,
+which is why the default is deliberately modest.
+
 ## Reflections and artifact control
 
 **Rendering / Video → Screen-Space Reflections** provides two independent controls when Ray lighting is selected:

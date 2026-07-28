@@ -363,6 +363,9 @@ function create(deps){
       {label:'Level Logic', icon:'◇', action:command('logic.open-level-logic')},
       {label:'Logic Profiler', icon:'▧', action:command('logic.open-profiler', openProfilerPanel)},
       {label:'Cinema Studio', icon:'▤', action:() => deps.openCinemaTimeline && deps.openCinemaTimeline(deps.ED && deps.ED.selected)},
+      {label:'Asset Scout', icon:'⌕', action:() => deps.openAssetScout && deps.openAssetScout()},
+      {label:tr('Character Sound Designer', 'Character Sound Designer'), icon:'👣',
+        action:() => deps.openCharacterSoundDesigner && deps.openCharacterSoundDesigner()},
       {label:tr('Editor Settings', 'Impostazioni editor'), icon:'⚙', action:deps.openSettings},
     ];
   }

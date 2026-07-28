@@ -1,6 +1,6 @@
 # Lot King Browser-Native 3D Engine & Editor Architecture
 
-This document describes the current project architecture through the active v0.7.4 work: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
+This document describes the current project architecture through the v0.7.5 release: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 

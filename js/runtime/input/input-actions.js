@@ -19,21 +19,29 @@
 (function(){
 'use strict';
 
-const CONFIG_VERSION = 4;
+const CONFIG_VERSION = 13;
 const DEVICE_TYPES = ['keyboard', 'gamepad', 'touch'];
 const SINGLE_INSTANCE = {touch: true};   // types that cannot be split
 
+// Combat actions are shared schema, not a separate context: only on-foot
+// Pawns read them, and every non-character scheme leaves them unbound so
+// vehicle input resolves exactly as before.
+const COMBAT_ACTIONS = ['fire', 'aim', 'reload'];
+// On-foot traversal and world verbs. Same rule as combat: shared schema, left
+// unbound for every non-character context, so vehicle input is untouched.
+const ONFOOT_ACTIONS = ['crouch', 'slowWalk', 'interact', 'pickup', 'dropItem', 'nextWeapon', 'useItem', 'dodge', 'swapShoulder', 'leanLeft', 'leanRight',
+  'slot1', 'slot2', 'slot3', 'slot4', 'slot5', 'slot6', 'slot7', 'inventory'];
 const KEYBOARD_ACTIONS = [
   'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'sprint', 'reset',
   'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
   'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
-];
+].concat(COMBAT_ACTIONS).concat(ONFOOT_ACTIONS);
 const GAMEPAD_ACTIONS = [
   'steer', 'throttle', 'brake', 'handbrake', 'sprint', 'reset',
   'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
   'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
   'cameraLookX', 'cameraLookY',
-];
+].concat(COMBAT_ACTIONS).concat(ONFOOT_ACTIONS);
 
 function clone(v){ return v == null ? v : JSON.parse(JSON.stringify(v)); }
 function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
@@ -61,6 +69,22 @@ function defaultKeyboardScheme(){
     tuningMenu: ['KeyU'],
     mute:       ['KeyM'],
     legend:     ['KeyH'],
+    fire:       [],
+    aim:        [],
+    reload:     [],
+    crouch:     [],
+    slowWalk:   [],
+    interact:   [],
+    pickup:     [],
+    dropItem:   [],
+    nextWeapon: [],
+    useItem:    [],
+    dodge:      [],
+    swapShoulder: [],
+    leanLeft:   [],
+    leanRight:  [],
+    slot1:[], slot2:[], slot3:[], slot4:[], slot5:[], slot6:[], slot7:[],
+    inventory:  [],
   };
 }
 function defaultGamepadScheme(){
@@ -84,18 +108,83 @@ function defaultGamepadScheme(){
     legend:    {type: 'button', index: 14},
     cameraLookX:{type: 'axis', index: 2, scale: -1, deadzone: 0.16},
     cameraLookY:{type: 'axis', index: 3, scale: 1, deadzone: 0.16},
+    fire:      null,
+    aim:       null,
+    reload:    null,
+    crouch:    null,
+    slowWalk:  null,
+    interact:  null,
+    pickup:    null,
+    dropItem:  null,
+    nextWeapon:null,
+    useItem:   null,
+    dodge:     null,
+    swapShoulder: null,
+    leanLeft:  null,
+    leanRight: null,
+    slot1:null, slot2:null, slot3:null, slot4:null, slot5:null, slot6:null, slot7:null,
+    inventory: null,
   };
 }
 function defaultCharacterKeyboardScheme(){
   const scheme = defaultKeyboardScheme();
-  scheme.handbrake = ['ControlLeft', 'ControlRight'];
+  scheme.handbrake = [];
   scheme.reset = ['Space'];
-  scheme.highBeams = ['KeyE', 'KeyF'];
+  // E / F / G are the world verbs on foot, so the vehicle's headlight flash
+  // gives its keys up rather than fighting them.
+  scheme.highBeams = [];
   scheme.radioToggle = [];
   scheme.radioPlay = [];
   scheme.radioNext = [];
   scheme.radioPrev = [];
   scheme.tuningMenu = [];
+  // On-foot combat. Mouse buttons are tracked as synthetic codes by the
+  // keyboard source, so they rebind through the same UI as physical keys.
+  scheme.fire = ['Mouse0'];
+  scheme.aim = ['Mouse2'];
+  scheme.reload = ['KeyR'];
+  // C is crouch now, so the first/third person toggle moves to B. Neither is a
+  // browser shortcut and both stay on the movement hand.
+  scheme.cameraMode = ['KeyB'];
+  // Traversal and world verbs.
+  //
+  // NO MODIFIERS. Ctrl and Alt are the natural FPS choices on a desktop game,
+  // but this runs in a browser: Ctrl+W closes the tab, Ctrl+T opens one and
+  // Alt focuses the menu bar — and none of them can be cancelled from script,
+  // because the browser handles them above the page. Crouch on Ctrl therefore
+  // means "crouch and walk forward" closes the game. Z and X sit under the same
+  // fingers as WASD and are safe.
+  scheme.crouch = ['KeyC'];
+  scheme.slowWalk = ['KeyX'];
+  // ONE key for the world. A tap uses whatever is in front — a door, a ladder,
+  // a crate — and a HOLD picks an item up. Two verbs on one key, told apart by
+  // how long it is held, so the player never has to remember which is which.
+  scheme.interact = ['KeyF'];
+  // Unbound on purpose: picking up is the hold on Interact. The action still
+  // exists so a project that wants a separate instant-pickup key can bind one.
+  scheme.pickup = [];
+  scheme.dropItem = ['KeyG'];
+  // Q and E are the lean, which every cover shooter binds there, so the weapon
+  // swap moves to Z and the mouse wheel.
+  scheme.nextWeapon = ['KeyZ'];
+  scheme.leanLeft = ['KeyQ'];
+  scheme.leanRight = ['KeyE'];
+  // The seven roles on the number row, in the order the loadout is laid out:
+  // fists, sidearm, primary, melee, bonus, flashbang, grenade.
+  for(let i = 1; i <= 7; i++) scheme['slot' + i] = ['Digit' + i];
+  // Tap for the weapon wheel, hold for the backpack. One key, two views, told
+  // apart by how long it is held — the same rule Use already follows.
+  scheme.inventory = ['KeyI'];
+  // Only a backpack inventory has anything to use; the other modes leave it inert.
+  scheme.useItem = ['KeyT'];
+  // Double-tapped, not held: at speed it slides, at a walk it rolls. Alt on its
+  // own is safe (it is the browser's menu key only in combination), and the
+  // keyboard source cancels the menu focus while the game holds pointer lock.
+  scheme.dodge = ['AltLeft', 'AltRight'];
+  // On foot there is nothing behind you worth a dedicated Look Back, so V is
+  // free for the shoulder swap every third-person shooter binds.
+  scheme.lookBack = [];
+  scheme.swapShoulder = ['KeyV'];
   return scheme;
 }
 function defaultCharacterGamepadScheme(){
@@ -116,6 +205,22 @@ function defaultCharacterGamepadScheme(){
   scheme.radioNext = null;
   scheme.radioPrev = null;
   scheme.tuningMenu = null;
+  scheme.fire = {type:'button', index:7};    // right trigger (standard mapping)
+  scheme.aim = {type:'button', index:6};     // left trigger (standard mapping)
+  scheme.reload = {type:'button', index:3};  // Y/Triangle
+  scheme.crouch = {type:'button', index:1};  // B/Circle
+  scheme.slowWalk = null;                    // analog stick already walks
+  scheme.interact = {type:'button', index:2};// X/Square
+  scheme.pickup = {type:'button', index:2};  // shares X: context decides
+  scheme.dropItem = {type:'button', index:14};
+  scheme.nextWeapon = {type:'button', index:15};
+  scheme.useItem = {type:'button', index:13};
+  scheme.dodge = {type:'button', index:5};   // RB, double-tapped
+  scheme.lookBack = null;
+  scheme.swapShoulder = {type:'button', index:11};
+  scheme.leanLeft = {type:'button', index:4};    // LB
+  scheme.leanRight = {type:'button', index:5};   // RB
+  scheme.inventory = {type:'button', index:8};   // View / Back
   return scheme;
 }
 function defaultContext(id){
@@ -156,12 +261,26 @@ function defaultConfig(){
 }
 
 // ------------------------------------------------ normalize / migrate
+// Ctrl cannot be used by a browser game, and no amount of care changes that:
+// Ctrl+W closes the tab, Ctrl+T opens one, Ctrl+N opens a window, and the page
+// never sees any of them — the browser handles them above it. A binding on Ctrl
+// is therefore not a control, it is a way to lose the session mid-fight. It is
+// stripped from every scheme, including one restored from a project saved
+// before this rule existed.
+//
+// Alt survives because it CAN be cancelled: it only steals focus on its own,
+// and the keyboard source suppresses that while the game holds pointer lock.
+const UNSAFE_CODES = {ControlLeft:true, ControlRight:true, MetaLeft:true, MetaRight:true};
+function stripUnsafe(codes){
+  return (codes || []).filter(code => !UNSAFE_CODES[code]);
+}
+
 function normalizeScheme(type, raw, base){
   const out = clone(base);
   if(!raw || typeof raw !== 'object') return out;
   if(type === 'keyboard'){
     for(const a of KEYBOARD_ACTIONS){
-      if(Array.isArray(raw[a])) out[a] = raw[a].filter(k => typeof k === 'string' && k).slice(0, 4);
+      if(Array.isArray(raw[a])) out[a] = stripUnsafe(raw[a].filter(k => typeof k === 'string' && k)).slice(0, 4);
     }
   } else if(type === 'gamepad'){
     for(const a of GAMEPAD_ACTIONS){
@@ -253,7 +372,60 @@ function normalizeConfig(raw){
     }));
   }
   migrateV2GamepadDefaults(cfg, rawVersion);
+  migrateV4OnFoot(cfg, rawVersion);
+  migrateV5Modifiers(cfg, rawVersion);
+  migrateV10Controls(cfg, rawVersion);
   return cfg;
+}
+
+// v11 reshuffles the on-foot layout: C becomes crouch (so the view toggle moves
+// to B), Q and E become the lean (so the weapon swap moves to Z), and picking up
+// becomes a hold on Interact rather than its own key. A binding still sitting on
+// the old default is moved; anything the player chose themselves is left alone.
+function migrateV10Controls(cfg, rawVersion){
+  if(rawVersion >= 11) return;
+  const keyboard = cfg.contexts && cfg.contexts.character && cfg.contexts.character.schemes
+    && cfg.contexts.character.schemes.keyboard;
+  if(!keyboard) return;
+  const defaults = defaultCharacterKeyboardScheme();
+  const was = (action, previous) => Array.isArray(keyboard[action]) && keyboard[action].join(',') === previous;
+  if(was('crouch', 'KeyZ')) keyboard.crouch = defaults.crouch.slice();
+  if(was('cameraMode', 'KeyC')) keyboard.cameraMode = defaults.cameraMode.slice();
+  if(was('nextWeapon', 'KeyQ')) keyboard.nextWeapon = defaults.nextWeapon.slice();
+  if(was('pickup', 'KeyE')) keyboard.pickup = [];
+  ['leanLeft', 'leanRight'].forEach(action => {
+    if(!Array.isArray(keyboard[action]) || !keyboard[action].length) keyboard[action] = defaults[action].slice();
+  });
+}
+
+// v5 shipped Crouch on Ctrl and Slow Walk on Alt, which are browser shortcuts
+// the page cannot intercept. Any config still holding them is moved onto the
+// safe keys; a player who deliberately rebound them to something else keeps it.
+function migrateV5Modifiers(cfg, rawVersion){
+  if(rawVersion >= 6) return;
+  const keyboard = cfg.contexts && cfg.contexts.character && cfg.contexts.character.schemes
+    && cfg.contexts.character.schemes.keyboard;
+  if(!keyboard) return;
+  const defaults = defaultCharacterKeyboardScheme();
+  const wasDefault = (action, previous) => Array.isArray(keyboard[action]) && keyboard[action].join(',') === previous;
+  if(wasDefault('crouch', 'ControlLeft,ControlRight')) keyboard.crouch = defaults.crouch.slice();
+  if(wasDefault('slowWalk', 'AltLeft,AltRight')) keyboard.slowWalk = defaults.slowWalk.slice();
+}
+
+// v4 bound E and F to the vehicle headlight flash in the character context.
+// v5 gives those keys to the world verbs, so a config saved before the change
+// must release them or Interact and Pick Up would arrive already taken.
+function migrateV4OnFoot(cfg, rawVersion){
+  if(rawVersion >= 5) return;
+  const scheme = cfg.contexts && cfg.contexts.character && cfg.contexts.character.schemes;
+  const keyboard = scheme && scheme.keyboard;
+  if(!keyboard) return;
+  const stale = Array.isArray(keyboard.highBeams) && keyboard.highBeams.join(',') === 'KeyE,KeyF';
+  if(stale) keyboard.highBeams = [];
+  const defaults = defaultCharacterKeyboardScheme();
+  ONFOOT_ACTIONS.forEach(action => {
+    if(!Array.isArray(keyboard[action]) || !keyboard[action].length) keyboard[action] = defaults[action].slice();
+  });
 }
 
 function sameButtonBinding(bind, index){
@@ -366,6 +538,9 @@ function effectiveScheme(config, contextId, type, deviceId){
 // write a binding for an action, targeting the base scheme (instance #1) or an
 // instance override (instance #2+) so splitting is transparent to callers.
 function setBinding(config, contextId, deviceId, action, binding){
+  // Rebinding cannot reintroduce what normalization strips, or the rule would
+  // only hold until the next visit to the input settings.
+  if(Array.isArray(binding)) binding = stripUnsafe(binding);
   const inst = deviceInstance(config, deviceId);
   const type = inst ? inst.type : 'keyboard';
   const ctx = config.contexts[contextId];
@@ -407,6 +582,11 @@ function neutralDrive(){
     pauseMenu: false, highBeams: false, radioToggle: false, radioPlay: false,
     radioNext: false, radioPrev: false, cameraMode: false, lookBack: false,
     tuningMenu: false, mute: false, legend: false, cameraLookX: 0, cameraLookY: 0,
+    fire: false, aim: false, reload: false,
+    crouch: false, slowWalk: false, interact: false, pickup: false,
+    dropItem: false, nextWeapon: false, useItem: false, dodge: false, swapShoulder: false, leanLeft: false, leanRight: false,
+    slot1:false, slot2:false, slot3:false, slot4:false, slot5:false, slot6:false, slot7:false,
+    inventory:false,
   };
 }
 // combine two drive commands (keep the stronger analog signal, OR the buttons)
@@ -433,6 +613,23 @@ function mergeDrive(a, b){
     legend: a.legend || b.legend,
     cameraLookX: Math.abs(b.cameraLookX || 0) > Math.abs(a.cameraLookX || 0) ? b.cameraLookX : a.cameraLookX,
     cameraLookY: Math.abs(b.cameraLookY || 0) > Math.abs(a.cameraLookY || 0) ? b.cameraLookY : a.cameraLookY,
+    fire: a.fire || b.fire,
+    aim: a.aim || b.aim,
+    reload: a.reload || b.reload,
+    crouch: a.crouch || b.crouch,
+    slowWalk: a.slowWalk || b.slowWalk,
+    interact: a.interact || b.interact,
+    pickup: a.pickup || b.pickup,
+    dropItem: a.dropItem || b.dropItem,
+    nextWeapon: a.nextWeapon || b.nextWeapon,
+    useItem: a.useItem || b.useItem,
+    dodge: a.dodge || b.dodge,
+    swapShoulder: a.swapShoulder || b.swapShoulder,
+    leanLeft: a.leanLeft || b.leanLeft,
+    leanRight: a.leanRight || b.leanRight,
+    slot1:a.slot1||b.slot1, slot2:a.slot2||b.slot2, slot3:a.slot3||b.slot3, slot4:a.slot4||b.slot4,
+    slot5:a.slot5||b.slot5, slot6:a.slot6||b.slot6, slot7:a.slot7||b.slot7,
+    inventory:a.inventory||b.inventory,
   };
 }
 
@@ -459,6 +656,24 @@ function resolveKeyboard(scheme, kb){
     legend: anyDown(scheme.legend),
     cameraLookX: 0,
     cameraLookY: 0,
+    fire: anyDown(scheme.fire),
+    aim: anyDown(scheme.aim),
+    reload: anyDown(scheme.reload),
+    crouch: anyDown(scheme.crouch),
+    slowWalk: anyDown(scheme.slowWalk),
+    interact: anyDown(scheme.interact),
+    pickup: anyDown(scheme.pickup),
+    dropItem: anyDown(scheme.dropItem),
+    nextWeapon: anyDown(scheme.nextWeapon),
+    useItem: anyDown(scheme.useItem),
+    dodge: anyDown(scheme.dodge),
+    swapShoulder: anyDown(scheme.swapShoulder),
+    leanLeft: anyDown(scheme.leanLeft),
+    leanRight: anyDown(scheme.leanRight),
+    slot1:anyDown(scheme.slot1), slot2:anyDown(scheme.slot2), slot3:anyDown(scheme.slot3),
+    slot4:anyDown(scheme.slot4), slot5:anyDown(scheme.slot5), slot6:anyDown(scheme.slot6),
+    slot7:anyDown(scheme.slot7),
+    inventory:anyDown(scheme.inventory),
   };
 }
 function readGamepadValue(bind, gp){
@@ -493,6 +708,25 @@ function resolveGamepad(scheme, gp){
     legend: readGamepadPressed(scheme.legend, gp),
     cameraLookX: clampAxis(readGamepadValue(scheme.cameraLookX, gp)),
     cameraLookY: clampAxis(readGamepadValue(scheme.cameraLookY, gp)),
+    fire: readGamepadPressed(scheme.fire, gp),
+    aim: readGamepadPressed(scheme.aim, gp),
+    reload: readGamepadPressed(scheme.reload, gp),
+    crouch: readGamepadPressed(scheme.crouch, gp),
+    slowWalk: readGamepadPressed(scheme.slowWalk, gp),
+    interact: readGamepadPressed(scheme.interact, gp),
+    pickup: readGamepadPressed(scheme.pickup, gp),
+    dropItem: readGamepadPressed(scheme.dropItem, gp),
+    nextWeapon: readGamepadPressed(scheme.nextWeapon, gp),
+    useItem: readGamepadPressed(scheme.useItem, gp),
+    dodge: readGamepadPressed(scheme.dodge, gp),
+    swapShoulder: readGamepadPressed(scheme.swapShoulder, gp),
+    leanLeft: readGamepadPressed(scheme.leanLeft, gp),
+    leanRight: readGamepadPressed(scheme.leanRight, gp),
+    slot1:readGamepadPressed(scheme.slot1, gp), slot2:readGamepadPressed(scheme.slot2, gp),
+    slot3:readGamepadPressed(scheme.slot3, gp), slot4:readGamepadPressed(scheme.slot4, gp),
+    slot5:readGamepadPressed(scheme.slot5, gp), slot6:readGamepadPressed(scheme.slot6, gp),
+    slot7:readGamepadPressed(scheme.slot7, gp),
+    inventory:readGamepadPressed(scheme.inventory, gp),
   };
 }
 function resolveTouch(touch){
@@ -520,14 +754,35 @@ function resolveTouch(touch){
     legend: !!a.legend,
     cameraLookX: clampAxis(a.cameraLookX || 0),
     cameraLookY: clampAxis(a.cameraLookY || 0),
+    fire: !!a.fire,
+    aim: !!a.aim,
+    reload: !!a.reload,
+    crouch: !!a.crouch,
+    slowWalk: !!a.slowWalk,
+    interact: !!a.interact,
+    pickup: !!a.pickup,
+    dropItem: !!a.dropItem,
+    nextWeapon: !!a.nextWeapon,
+    useItem: !!a.useItem,
+    dodge: !!a.dodge,
+    swapShoulder: !!a.swapShoulder,
+    leanLeft: !!a.leanLeft,
+    leanRight: !!a.leanRight,
+    slot1:!!a.slot1, slot2:!!a.slot2, slot3:!!a.slot3, slot4:!!a.slot4,
+    slot5:!!a.slot5, slot6:!!a.slot6, slot7:!!a.slot7,
+    inventory:!!a.inventory,
   };
 }
 
 // ------------------------------------------------ labels
+// Mouse buttons travel through the keyboard scheme as synthetic codes so they
+// share the existing rebinding UI instead of needing a parallel device type.
+const MOUSE_CODE_LABELS = {Mouse0: 'Mouse L', Mouse1: 'Mouse M', Mouse2: 'Mouse R', Mouse3: 'Mouse 4', Mouse4: 'Mouse 5'};
 function keyLabel(code){
   if(!code) return '—';
   if(code.indexOf('Key') === 0) return code.slice(3);
   if(code.indexOf('Digit') === 0) return code.slice(5);
+  if(code.indexOf('Mouse') === 0) return MOUSE_CODE_LABELS[code] || ('Mouse ' + code.slice(5));
   const map = {
     ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
     Space: 'Space', ShiftLeft: '⇧L', ShiftRight: '⇧R',
@@ -564,6 +819,29 @@ const ACTION_LABELS = {
   legend: {en: 'Help panel', it: 'Pannello aiuto'},
   cameraLookX: {en: 'Camera look X', it: 'Camera look X'},
   cameraLookY: {en: 'Camera look Y', it: 'Camera look Y'},
+  fire: {en: 'Fire weapon', it: 'Spara'},
+  aim: {en: 'Aim down sights', it: 'Mira'},
+  reload: {en: 'Reload', it: 'Ricarica'},
+  crouch: {en: 'Crouch / slide', it: 'Abbassati / scivolata'},
+  slowWalk: {en: 'Walk slowly', it: 'Cammina piano'},
+  interact: {en: 'Interact (doors, ladders, objects)', it: 'Interagisci (porte, scale, oggetti)'},
+  pickup: {en: 'Pick up item', it: 'Raccogli oggetto'},
+  dropItem: {en: 'Drop / throw weapon', it: 'Lascia / lancia arma'},
+  nextWeapon: {en: 'Next weapon', it: 'Arma successiva'},
+  useItem: {en: 'Use item from backpack', it: 'Usa oggetto dallo zaino'},
+  dodge: {en: 'Slide / roll (double tap)', it: 'Scivolata / capriola (doppio tap)'},
+  swapShoulder: {en: 'Swap weapon shoulder', it: 'Cambia spalla arma'},
+  leanLeft: {en: 'Lean left', it: 'Sporgiti a sinistra'},
+  leanRight: {en: 'Lean right', it: 'Sporgiti a destra'},
+  slot1: {en: 'Slot 1 - Fists', it: 'Slot 1 - Mani nude'},
+  slot2: {en: 'Slot 2 - Sidearm', it: 'Slot 2 - Arma leggera'},
+  slot3: {en: 'Slot 3 - Primary', it: 'Slot 3 - Arma pesante'},
+  slot4: {en: 'Slot 4 - Melee', it: 'Slot 4 - Arma bianca'},
+  slot5: {en: 'Slot 5 - Bonus', it: 'Slot 5 - Bonus'},
+  slot6: {en: 'Slot 6 - Flashbang', it: 'Slot 6 - Flashbang'},
+  slot7: {en: 'Slot 7 - Grenade', it: 'Slot 7 - Granata'},
+  inventory: {en: 'Weapon wheel (tap) / backpack (hold)', it: 'Ruota armi (tap) / zaino (tieni premuto)'},
+  interact: {en: 'Use (tap) / pick up (hold)', it: 'Usa (tap) / raccogli (tieni premuto)'},
 };
 
 window.LK_RUNTIME_INPUT_ACTIONS = Object.freeze({
@@ -572,9 +850,13 @@ window.LK_RUNTIME_INPUT_ACTIONS = Object.freeze({
   SINGLE_INSTANCE,
   KEYBOARD_ACTIONS,
   GAMEPAD_ACTIONS,
+  COMBAT_ACTIONS,
+  ONFOOT_ACTIONS,
   ACTION_LABELS,
   GAMEPAD_BUTTON_LABELS,
   clone,
+  UNSAFE_CODES,
+  stripUnsafe,
   defaultConfig,
   normalizeConfig,
   mergeConfig,

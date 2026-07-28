@@ -684,6 +684,41 @@ function replaceTextureObjectWithFile(target, file){ if(assetImports) assetImpor
 function replacePlayerModelWithAsset(asset){ return assetImports ? assetImports.replacePlayerModelWithAsset(asset) : Promise.resolve(false); }
 function replacePlayerModelWithFile(file){ return assetImports ? assetImports.replacePlayerModelWithFile(file) : Promise.resolve(false); }
 
+// Asset Scout: optional online free-asset search. It feeds the same
+// importAssetFiles pipeline as a local drag-and-drop, so removing the two
+// scripts leaves every other import path untouched.
+const assetScout = window.LK_EDITOR_ASSET_SCOUT ? window.LK_EDITOR_ASSET_SCOUT.create({
+  GAME, THREE, status, setAssetLoading, confirmEditorAction, importAssetFiles, refreshAssetsPanel,
+}) : null;
+function openAssetScout(){ if(assetScout) assetScout.open(); }
+// The designer was reachable only from Tools, three levels down a menu, which
+// is the same as not existing. It gets a toolbar button next to Add. The
+// listener is delegated because the editor markup is injected after load, so
+// binding the element directly races the template.
+addEventListener('click', event => {
+  const button = event.target && event.target.closest && event.target.closest('#lkSoundDesigner');
+  if(button) openCharacterSoundDesigner();
+}, true);
+function toggleAssetScout(){ if(assetScout) assetScout.toggle(); }
+
+// Character Sound Designer: loaded on demand, like the engine one, so the
+// editor does not pay for a panel most sessions never open.
+function openCharacterSoundDesigner(setId){
+  const failed = () => status(editorLang() === 'it'
+    ? '⚠ Character Sound Designer non caricato'
+    : '⚠ Character Sound Designer not loaded');
+  const show = () => {
+    if(window.LK_CHARACTER_SOUND_DESIGNER) window.LK_CHARACTER_SOUND_DESIGNER.open(setId);
+    else failed();
+  };
+  if(window.LK_CHARACTER_SOUND_DESIGNER) return show();
+  const script = document.createElement('script');
+  script.src = 'js/editor/character-sound-designer.js?v=' + Date.now();
+  script.onload = show;
+  script.onerror = failed;
+  document.body.appendChild(script);
+}
+
 levelManager = window.LK_EDITOR_LEVEL_MANAGER && window.LK_EDITOR_LEVEL_MANAGER.create({
   GAME, STORE, ED, $, status, promptEditorAction, confirmEditorAction, beginStatusWork, updateStatusWork,
   finishStatusWork, setLevelLoading, flushHudHistory, setTrackMeta, refreshAssetsPanel, projectFilename, el,
@@ -972,6 +1007,8 @@ appMenuBar = window.LK_EDITOR_MENU_BAR && window.LK_EDITOR_MENU_BAR.create({
   pluginManager,
   openMenu,
   status,
+  openAssetScout,
+  openCharacterSoundDesigner,
   newTrack,
   saveScene,
   saveAsTrack,
@@ -2222,6 +2259,10 @@ addEventListener('lotking:radiohudchange', e => {
 GAME.editor = {
   enter: enterEditor,
   exit: exitEditor,
+  assetScout,
+  openAssetScout,
+  toggleAssetScout,
+  openCharacterSoundDesigner,
   state: ED,
   requestWarmup: requestEditorWarmup,
   markDirty,

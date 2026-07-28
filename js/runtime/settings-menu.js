@@ -21,13 +21,14 @@ const SHADOW_PRESETS = Object.freeze({
   high:   Object.freeze({label:'High',   mapSize:2048, radius:1.75}),
   ultra:  Object.freeze({label:'Ultra',  mapSize:4096, radius:2.25}),
 });
-const VIDEO_SETTING_KEYS = Object.freeze(['quality','antialiasing','rendererMode','exposure','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting']);
+const VIDEO_SETTING_KEYS = Object.freeze(['quality','renderResolution','textureSize','antialiasing','rendererMode','exposure','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting']);
 const VIDEO_DEFAULTS = Object.freeze({
-  quality:'high', antialiasing:'ssaa2x', rendererMode:'webgl', exposure:1.12,
+  quality:'high', renderResolution:1, textureSize:1024, antialiasing:'ssaa2x', rendererMode:'webgl', exposure:1.12,
   shadows:true, shadowQuality:'auto', shadowDistance:55, shadowBias:-0.00035, shadowNormalBias:0.035, shadowSoftness:1,
   ambientOcclusion:true, aoQuality:'medium',
   reflections:true, reflectionQuality:'high', reflectionDistance:35, volumetricLighting:false,
 });
+const TEXTURE_SIZES = Object.freeze([256, 512, 1024, 2048, 4096]);
 const VIDEO_BENCHMARK_PREF_KEY = 'lotking.videoBenchmark.v1';
 
 function adaptiveLowValues(input){
@@ -42,7 +43,76 @@ function adaptiveLowValues(input){
     reflections:false,
     reflectionQuality:'low',
     volumetricLighting:false,
+    textureSize:Math.min(512, normalizeVideoValues(input).textureSize),
   });
+}
+
+// The drawing buffer is `size x pixelRatio`, and that pixel ratio multiplies
+// FOUR things together: the device DPR, the quality preset, the supersampling
+// ratio and the session render scale. Unclamped they compound - `high` + SSAA
+// 2x on a 2x-DPR panel asks for 2.83x per axis, which is EIGHT times the pixels
+// of the window, and `extreme` + SSAA 4x was allowed up to 4x per axis, or
+// sixteen times. A 2560 px viewport was rendering past 8000 px wide and then
+// being downscaled onto the panel: all of the fill rate, none of the
+// resolution. Three ceilings keep it honest:
+//
+//   1. The effective ratio never exceeds 2. Past that, supersampling buys
+//      detail the display cannot show - on a 2x DPR panel those samples are
+//      already there.
+//   2. An absolute buffer budget: 4K on the long axis, and 4K worth of pixels
+//      overall, so a very large window cannot climb out through sheer size.
+//   3. A floor of 0.5, so a downgrade can never make the image unreadable.
+//
+// Pure and exported so the policy is testable without a GPU, and so the
+// Rendering inspector and the video menu cannot drift apart from it.
+const RENDER_RATIO_CEILING = 2;
+const RENDER_BUFFER_LONG_EDGE = 3840;
+const RENDER_BUFFER_PIXELS = 3840 * 2160;
+
+function resolvePixelRatio(input){
+  const src = input || {};
+  const size = src.size || {};
+  const width = Math.max(1, Number(size.width) || 1);
+  const height = Math.max(1, Number(size.height) || 1);
+  const positive = (value, fallback) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+  };
+  const ceiling = Math.min(RENDER_RATIO_CEILING, positive(src.maxPixelRatio, RENDER_RATIO_CEILING));
+  let ratio = positive(src.dpr, 1)
+    * positive(src.presetRatio, 1)
+    * positive(src.aaRatio, 1)
+    * positive(src.rayRatio, 1)
+    * positive(src.sessionScale, 1)
+    * positive(src.resolutionScale, 1);
+  ratio = Math.min(ratio, ceiling);
+  ratio = Math.min(ratio, RENDER_BUFFER_LONG_EDGE / Math.max(width, height));
+  ratio = Math.min(ratio, Math.sqrt(RENDER_BUFFER_PIXELS / (width * height)));
+  return Math.max(.5, ratio);
+}
+
+// What the slider asks for is not always what the budget allows, so the row
+// reports the buffer the renderer ACTUALLY got, in pixels. A resolution control
+// that hides its own result is how the 8000 px viewport went unnoticed.
+function formatRenderResolution(size, pixelRatio){
+  const width = Math.round(Math.max(1, Number(size && size.width) || 1) * pixelRatio);
+  const height = Math.round(Math.max(1, Number(size && size.height) || 1) * pixelRatio);
+  return {width, height, megapixels:width * height / 1e6,
+    label:width + ' × ' + height + ' px'};
+}
+
+function reportRenderResolution(size, pixelRatio){
+  if(typeof document === 'undefined') return null;
+  const report = formatRenderResolution(size, pixelRatio);
+  const out = document.querySelector('output[for="videoResolution"]');
+  if(out) out.value = report.label;
+  const note = document.getElementById('videoResolutionNote');
+  if(note){
+    note.textContent = tr(
+      'Rendering at ' + report.label + ' (' + report.megapixels.toFixed(1) + ' MP).',
+      'Rendering a ' + report.label + ' (' + report.megapixels.toFixed(1) + ' MP).');
+  }
+  return report;
 }
 
 function clampNumber(value, fallback, min, max){
@@ -58,6 +128,14 @@ function normalizeVideoValues(input){
   const antialiasing = aaAliases[src.antialiasing] || String(src.antialiasing || VIDEO_DEFAULTS.antialiasing).toLowerCase();
   return {
     quality: VIDEO_PRESETS[quality] ? quality : VIDEO_DEFAULTS.quality,
+    // Manual render resolution, as a fraction of the window. Independent of the
+    // quality preset on purpose: the preset is a bundle of choices, this is the
+    // one knob that decides how many pixels get shaded.
+    renderResolution: clampNumber(src.renderResolution, VIDEO_DEFAULTS.renderResolution, .5, 2),
+    // Largest texture the engine will upload, in pixels on the long edge. An
+    // imported 4K PBR set is 67 MB per map before mipmaps, so the default is
+    // deliberately modest and raising it is an explicit choice.
+    textureSize: TEXTURE_SIZES.includes(Math.round(Number(src.textureSize))) ? Math.round(Number(src.textureSize)) : VIDEO_DEFAULTS.textureSize,
     antialiasing: ['off','fxaa','ssaa2x','ssaa4x'].includes(antialiasing) ? antialiasing : VIDEO_DEFAULTS.antialiasing,
     rendererMode: src.rendererMode === 'raytracing' ? 'raytracing' : 'webgl',
     exposure: clampNumber(src.exposure, VIDEO_DEFAULTS.exposure, .7, 1.6),
@@ -132,8 +210,21 @@ function createVideo(options){
     const maxPixelRatio = mobile ? 2 : (compat?compat.maxPixelRatio:4);
     const effectiveAaRatio=compat&&compat.conservativePost&&values.antialiasing.indexOf('ssaa')===0?1:aaRatio;
     const sessionScale=backend&&backend.sessionOverrides?backend.sessionOverrides().renderScale:1;
-    renderer.setPixelRatio(Math.max(.5, Math.min(maxPixelRatio, dpr * preset.pixelRatio * effectiveAaRatio * rayRatio * sessionScale)));
+    const pixelRatio = resolvePixelRatio({
+      dpr, size, maxPixelRatio,
+      presetRatio:preset.pixelRatio,
+      aaRatio:effectiveAaRatio,
+      rayRatio,
+      sessionScale,
+      resolutionScale:values.renderResolution,
+    });
+    renderer.setPixelRatio(pixelRatio);
     renderer.setSize(size.width, size.height);
+    reportRenderResolution(size, pixelRatio);
+    // The budget applies to textures loaded from here on; anything already on
+    // the GPU keeps the size it was uploaded at until the project reloads.
+    const budget = window.LK_ENGINE_TEXTURE_BUDGET;
+    if(budget) budget.setMaxSize(values.textureSize);
     renderer.shadowMap.enabled = !!values.shadows;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     const primaryShadow = opts.scene && opts.scene.children && opts.scene.children.find(node => node && node.isDirectionalLight && node.castShadow && node.shadow);
@@ -280,7 +371,7 @@ function createVideo(options){
 function syncVideoControls(project, values){
   const config = normalizeVideoProject(project);
   const selectors = {
-    quality:'#videoQuality', antialiasing:'#videoAA', rendererMode:'#videoRenderer',
+    quality:'#videoQuality', renderResolution:'#videoResolution', textureSize:'#videoTextureSize', antialiasing:'#videoAA', rendererMode:'#videoRenderer',
     exposure:'#videoExposure', shadows:'#videoShadows', shadowQuality:'#videoShadowQuality',
     ambientOcclusion:'#videoAmbientOcclusion',aoQuality:'#videoAoQuality',
     reflections:'#videoReflections', reflectionQuality:'#videoReflectionQuality', reflectionDistance:'#videoReflectionDistance',
@@ -351,6 +442,8 @@ function createMenu(options){
     const tuneOpen = document.getElementById('openGameplayTune');
     const gameplayDifficulty = document.getElementById('gameplayDifficulty');
     const quality = document.getElementById('videoQuality');
+    const resolution = document.getElementById('videoResolution');
+    const textureSize = document.getElementById('videoTextureSize');
     const aa = document.getElementById('videoAA');
     const rendererMode = document.getElementById('videoRenderer');
     const exposure = document.getElementById('videoExposure');
@@ -572,6 +665,30 @@ function createMenu(options){
       if(video) video.quality = VIDEO_PRESETS[quality.value] ? quality.value : 'high';
       applyVideo({heavy:true, message:tr('Adjusting render quality…', 'Regolazione qualità rendering…')});
     });
+    if(resolution){
+      // The slider is a fraction of the window; `applyCore` writes the resulting
+      // buffer back into the row, so the number the user reads is the number the
+      // GPU is actually shading - including when the budget clamps the request.
+      resolution.value = video && video.renderResolution != null ? video.renderResolution : VIDEO_DEFAULTS.renderResolution;
+      const syncResolutionLabel = () => {
+        const percent = document.querySelector('output[for="videoResolutionScale"]');
+        if(percent) percent.value = Math.round(Number(resolution.value) * 100) + '%';
+      };
+      syncResolutionLabel();
+      resolution.addEventListener('input', () => {
+        if(video) video.renderResolution = clampNumber(resolution.value, VIDEO_DEFAULTS.renderResolution, .5, 2);
+        syncResolutionLabel();
+        applyVideo({heavy:true, message:tr('Resizing the render surface…', 'Ridimensionamento superficie di rendering…')});
+      });
+    }
+    if(textureSize){
+      textureSize.value = String(video && video.textureSize || VIDEO_DEFAULTS.textureSize);
+      textureSize.addEventListener('change', () => {
+        const wanted = Math.round(Number(textureSize.value));
+        if(video) video.textureSize = TEXTURE_SIZES.includes(wanted) ? wanted : VIDEO_DEFAULTS.textureSize;
+        applyVideo({heavy:true, message:tr('Applying the texture budget…', 'Applicazione budget texture…')});
+      });
+    }
     if(aa) aa.addEventListener('change', () => {
       if(video) video.antialiasing = aa.value;
       applyVideo({heavy:true, message:tr('Rebuilding the render surface…', 'Ricostruzione superficie di rendering…')});
@@ -688,5 +805,7 @@ function createMenu(options){
 window.LK_RUNTIME_SETTINGS_MENU = Object.freeze({
   createVideo, createMenu, presets:VIDEO_PRESETS, shadowPresets:SHADOW_PRESETS, defaults:VIDEO_DEFAULTS,
   normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, adaptiveLowValues, syncControls:syncVideoControls,
+  resolvePixelRatio, formatRenderResolution, textureSizes:TEXTURE_SIZES,
+  renderBudget:Object.freeze({ratioCeiling:RENDER_RATIO_CEILING, longEdge:RENDER_BUFFER_LONG_EDGE, pixels:RENDER_BUFFER_PIXELS}),
 });
 })();

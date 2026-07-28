@@ -132,6 +132,10 @@ const RUNTIME_DOM_I18N = [
   ['.settingsRow[data-audio-row="music"]', 'desc', 'Loading, menu and vehicle-radio music volume.', 'Volume musica di caricamento, menu e radio del veicolo.'],
   ['#videoQuality', 'row-label', 'Render quality', 'Qualita render'],
   ['#videoQuality', 'row-desc', 'Visual profile for the engine editor and viewport.', 'Profilo visivo dell\'engine editor e del viewport.'],
+  ['#videoResolution', 'row-label', 'Render resolution', 'Risoluzione di rendering'],
+  ['#videoResolution', 'row-desc', 'Pixels the engine actually shades, as a share of the window. Lower it for performance, raise it for sharper edges.', 'Pixel realmente calcolati dal motore, in rapporto alla finestra. Abbassala per le prestazioni, alzala per bordi più nitidi.'],
+  ['#videoTextureSize', 'row-label', 'Texture budget', 'Budget texture'],
+  ['#videoTextureSize', 'row-desc', 'Largest texture the engine uploads. Imported maps are downscaled to fit; the source files are never changed.', 'Texture piu grande caricata dal motore. Le mappe importate vengono ridotte per rientrare; i file originali non vengono mai modificati.'],
   ['#videoAA', 'row-label', 'Antialiasing', 'Antialiasing'],
   ['#videoAA', 'row-desc', 'FXAA is mobile-friendly; 2× and 4× supersampling increase internal edge resolution.', 'FXAA è adatto al mobile; il supersampling 2× e 4× aumenta la risoluzione interna dei bordi.'],
   ['#videoRenderer', 'row-label', 'Renderer', 'Renderer'],
@@ -1902,6 +1906,37 @@ function handleCollisions(){
 // ------------------------------------------------ scoring
 let totalScore = 0, driftScore = 0, driftMult = 1, driftTime = 0, driftEndTimer = 0;
 const HUD = window.LK_RUNTIME_GAME_HUD.create();
+// Optional overlay: absent script means no first-person HUD, no other effect.
+const FPS_HUD = window.LK_RUNTIME_FPS_HUD ? window.LK_RUNTIME_FPS_HUD.create(GAME) : null;
+const FPS_VIEW_MODEL = window.LK_RUNTIME_FPS_VIEW_MODEL ? window.LK_RUNTIME_FPS_VIEW_MODEL.create(GAME) : null;
+// World verbs and pickups. Both are Pawn-agnostic: they read the scene through
+// userData contracts, so a level authored in the editor drives them with no
+// code. Absent scripts simply leave the systems null.
+const WORLD_INTERACTIONS = window.LK_RUNTIME_INTERACTIONS ? window.LK_RUNTIME_INTERACTIONS.install(GAME) : null;
+const WORLD_ITEMS = window.LK_RUNTIME_ITEMS ? window.LK_RUNTIME_ITEMS.install(GAME) : null;
+// Visible rounds. Purely cosmetic: the hit is already resolved when the event
+// that drives them is emitted, so they can never change where a bullet lands.
+const WEAPON_TRACERS = window.LK_RUNTIME_WEAPON_TRACERS ? window.LK_RUNTIME_WEAPON_TRACERS.install(GAME) : null;
+// Weapon wheel and backpack. It steers on mouse movement WITHOUT releasing
+// pointer lock, which is why the look path below hands it the delta instead.
+const INVENTORY_UI = window.LK_RUNTIME_INVENTORY_UI ? window.LK_RUNTIME_INVENTORY_UI.install(GAME) : null;
+// Doors keep animating and thrown weapons keep falling whether or not anyone is
+// looking, so both systems step once per frame from the shared runtime clock.
+function stepWorldSystems(dt){
+  syncCharacterSoundSet();
+  const scale = Number(GAME.state.timeScale);
+  const sdt = Number.isFinite(scale) && scale > 0 ? dt * scale : dt;
+  if(!WORLD_INTERACTIONS && !WORLD_ITEMS) return;
+  const pawns = GAME.pawns && GAME.pawns.list ? GAME.pawns.list().filter(pawn => pawn && pawn.possessed && pawn.owner) : [];
+  if(WORLD_INTERACTIONS) WORLD_INTERACTIONS.update(sdt, pawns);
+  if(WORLD_ITEMS) WORLD_ITEMS.update(sdt);
+  if(WEAPON_TRACERS) WEAPON_TRACERS.update(sdt);
+  if(INVENTORY_UI) INVENTORY_UI.update(dt);
+  // The first-person weapon is placed by updateFirstPersonCameraOverride, which
+  // only runs while the eye owns the camera. Switching to third person stops
+  // that path, so the model is put away here rather than left floating.
+  if(FPS_VIEW_MODEL && !activeFirstPersonCameraRig()) FPS_VIEW_MODEL.hide();
+}
 
 function popup(txt, color, duration){
   HUD.popup(txt, color, duration);
@@ -2267,6 +2302,29 @@ GAME.hooks.warmup.push(context=>{
   }
 });
 
+// Spawnable gameplay objects exist only once the player picks something up,
+// drops a weapon or switches view, so the benchmark's scene snapshot never sees
+// them and their shaders compile mid-fight instead. This builds one of each up
+// front, lets the benchmark render them, and throws them away again — the same
+// contract the exhaust pool above uses for its hidden flame cones.
+GAME.hooks.warmup.push(context => {
+  const warmed = [];
+  if(FPS_VIEW_MODEL && window.LK_RUNTIME_FPS_VIEW_MODEL && window.LK_RUNTIME_FPS_VIEW_MODEL.warmup){
+    warmed.push(window.LK_RUNTIME_FPS_VIEW_MODEL.warmup(THREE, scene));
+  }
+  if(WORLD_ITEMS && WORLD_ITEMS.warmup) warmed.push(WORLD_ITEMS.warmup());
+  if(WEAPON_TRACERS && WEAPON_TRACERS.warmup) warmed.push(WEAPON_TRACERS.warmup());
+  if(FPS_HUD && FPS_HUD.prewarm) FPS_HUD.prewarm();
+  const count = warmed.reduce((total, entry) => total + (entry.objects ? entry.objects.length : 0), 0);
+  if(!count) return;
+  if(context && context.progress){
+    context.progress(.63, 'Preparing spawnable gameplay objects',
+      count + ' weapon and pickup render paths compiled before they are needed in play');
+  }
+  if(context && context.render) context.render();
+  warmed.forEach(entry => entry.dispose());
+});
+
 // ------------------------------------------------ skid marks
 const SKID_N = 700;
 const skidGeo = new THREE.PlaneGeometry(.24, .7);
@@ -2611,6 +2669,15 @@ function resetCameraState(preserveRuntimeMode){
   camSnapNext = true;
 }
 function cycleGameplayCameraMode(){
+  // Free/arcade/cinematic are follow-camera modes. A character rig owns its own
+  // view instead, and toggles it from the same key inside its own frame step, so
+  // this only reports the result rather than cycling anything.
+  const rig = activeFirstPersonRig();
+  if(rig){
+    const view = rig.viewMode ? rig.viewMode() : 'first';
+    popup(view === 'first' ? 'FIRST PERSON' : 'THIRD PERSON', '#9db4ff');
+    return view;
+  }
   const modes = ['free', 'arcade', 'cinematic'];
   const current = activeCameraMode();
   runtimeCameraMode = modes[(Math.max(0, modes.indexOf(current)) + 1) % modes.length];
@@ -2788,11 +2855,16 @@ function syncHudRect(css){
 function shouldHideForFinalGameplayRender(node){
   const ud = node && node.userData || {};
   const renderableHelper = !!(node && (node.isMesh || node.isLine || node.isPoints || node.isSprite || node.isLight));
+  // `runtimeVisual` marks the opposite of a helper: an object that exists only
+  // while the game runs and must therefore survive this pass, even though it is
+  // never part of the saved or exported scene. The first-person weapon is the
+  // first of these — flagged as a helper it was hidden on every gameplay frame,
+  // which is exactly the frames it exists for.
   return !!(
     ud.helperOnly ||
     ud.colliderPreview ||
     ud.editorOnly ||
-    (ud.nonExportable && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false) && renderableHelper) ||
+    (ud.nonExportable && !ud.runtimeVisual && (!ud.logicElementInternal || ud.logicElementRuntimeVisual === false) && renderableHelper) ||
     ud.editorCameraHelper ||
     ud.editorCameraHelperPick ||
     ud.editorLightHandle
@@ -2952,7 +3024,9 @@ function runtimePointerLookUiTarget(target){
 function canStartRuntimeCameraLook(e){
   if(isEditorSimulationPreview()) return false;
   if(e.button > 0) return false;
-  if(activeCameraMode() !== 'free') return false;
+  // First-person Pawns always want pointer lock, whatever the vehicle camera
+  // mode happens to be, because they never use the follow camera.
+  if(activeCameraMode() !== 'free' && !activeFirstPersonRig()) return false;
   if(!((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview)) return false;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return false;
   if(shouldShowRuntimeCursor()) return false;
@@ -2986,7 +3060,16 @@ canvas.addEventListener('pointerup', e => {
 });
 canvas.addEventListener('pointercancel', () => dragging = false);
 addEventListener('pointerup', () => dragging = false);
+// Pointer lock hands over a fresh coordinate space, and browsers routinely
+// report one enormous movementX/Y on the first event after the transition —
+// the distance from where the cursor WAS to the centre of the screen. Fed
+// straight into the view that reads as the camera snapping round at random.
+// Two frames of warm-up plus a per-event sanity limit remove it without adding
+// any smoothing lag to normal movement.
+let pointerLookWarmup = 0;
+const POINTER_LOOK_MAX_DELTA = 320;      // px in a single event; a real mouse never does this
 addEventListener('pointerlockchange', () => {
+  pointerLookWarmup = 2;
   if(document.pointerLockElement !== canvas){
     dragging = false;
     runtimePointerLockArmed = false;
@@ -3075,16 +3158,42 @@ addEventListener('pointermove', e => {
   if(isEditorSimulationPreview()) return;
   const aimingPawn=GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(activeRuntimePlayerId()):null;
   const shotAiming=!!(aimingPawn&&aimingPawn.pawnType==='soccer'&&aimingPawn.adjustShotAim&&((aimingPawn.wantsShotAimInput&&aimingPawn.wantsShotAimInput())||aimingPawn.state&&aimingPawn.state.shotCharge));
-  const freeMouseLook = !dragging && activeCameraMode() === 'free' && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
+  const firstPersonRig = activeFirstPersonRig();
+  const freeMouseLook = !dragging && (activeCameraMode() === 'free' || !!firstPersonRig) && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
     !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e);
   const locked = document.pointerLockElement === canvas;
   if(locked && runtimePointerPlayerId !== activeRuntimePlayerId()) return;
   if((!dragging && !freeMouseLook && !locked&&!shotAiming) || (GAME.state.editorActive && !GAME.state.editorPreview)) return;
-  const dx = locked ? (e.movementX || 0) : (dragging ? (e.clientX-lastMX) : (e.movementX || 0));
-  const dy = locked ? (e.movementY || 0) : (dragging ? (e.clientY-lastMY) : (e.movementY || 0));
+  let dx = locked ? (e.movementX || 0) : (dragging ? (e.clientX-lastMX) : (e.movementX || 0));
+  let dy = locked ? (e.movementY || 0) : (dragging ? (e.clientY-lastMY) : (e.movementY || 0));
+  if(pointerLookWarmup > 0){
+    // Swallow the transition events, but keep the reference point current so
+    // the first real drag delta is measured from where the cursor actually is.
+    pointerLookWarmup--;
+    lastMX = e.clientX; lastMY = e.clientY;
+    return;
+  }
+  if(Math.abs(dx) > POINTER_LOOK_MAX_DELTA || Math.abs(dy) > POINTER_LOOK_MAX_DELTA){
+    lastMX = e.clientX; lastMY = e.clientY;
+    return;
+  }
   if(shotAiming){
     aimingPawn.adjustShotAim(dx,dy);
     lastMX=e.clientX;lastMY=e.clientY;
+    return;
+  }
+  // The weapon wheel claims the pointer while it is open: flicking toward a
+  // weapon must not also turn the character, and releasing pointer lock to
+  // show a cursor would stop the game being a game.
+  if(INVENTORY_UI && INVENTORY_UI.isOpen() && INVENTORY_UI.steer(dx, dy)){
+    lastMX = e.clientX; lastMY = e.clientY;
+    return;
+  }
+  // A first-person Pawn consumes the delta itself; the orbit camera state must
+  // stay untouched so switching back to a vehicle keeps its framing.
+  if(firstPersonRig){
+    firstPersonRig.applyLookDelta(dx, dy);
+    lastMX = e.clientX; lastMY = e.clientY;
     return;
   }
   camYaw   -= dx*.005;
@@ -3093,21 +3202,80 @@ addEventListener('pointermove', e => {
   lastMX = e.clientX; lastMY = e.clientY;
 });
 addEventListener('wheel', e => {
+  // A telescopic sight cycles its magnification on the wheel, the way every
+  // shooter does. It only claims the wheel while the eye is actually behind the
+  // glass, so nothing else that scrolls is affected.
+  const scopedRig = activeFirstPersonRig();
+  if(scopedRig && scopedRig.isScoped && scopedRig.isScoped() && !runtimeWheelBelongsToUi(e.target)){
+    scopedRig.cycleZoom(e.deltaY < 0 ? 1 : -1);
+    e.preventDefault();
+    return;
+  }
   if(isEditorSimulationPreview()) return;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;
   if(runtimeWheelBelongsToUi(e.target)) return;
   camDist = Math.max(CAM_CFG.minDist, Math.min(CAM_CFG.maxDist, camDist + Math.sign(e.deltaY)*1.1));
-}, {passive:true});
+// Not passive: the scope branch above cancels the page scroll when it claims
+// the wheel. Every other path returns without touching the event, so ordinary
+// scrolling behaves exactly as before.
+}, {passive:false});
 
 const logicPawnCameraPosition = new THREE.Vector3();
 const logicPawnCameraQuaternion = new THREE.Quaternion();
 const logicPawnCameraForward = new THREE.Vector3();
 let runtimeCameraInputPlayerId = null;
+// A first-person Pawn owns the eye transform completely: the follow-camera
+// blending below would fight its yaw/pitch, so that path is bypassed rather
+// than reconfigured. Everything else keeps the pre-existing behaviour.
+function updateFirstPersonCameraOverride(dt, pawn){
+  const rig = pawn && pawn.firstPerson;
+  const transform = rig && rig.cameraTransform();
+  if(!transform) return false;
+  const cursorVisible = shouldShowRuntimeCursor();
+  const runtimeCameraActive = !isEditorSimulationPreview() && runtimeSessionActive() && !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
+  if(runtimeCameraActive) runtimePointerLockArmed = false;
+  document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
+  syncRuntimeCursorState();
+  if(!runtimeCameraActive && !runtimePointerLockArmed && document.pointerLockElement === canvas && document.exitPointerLock){
+    try { document.exitPointerLock(); } catch(err){}
+  }
+  camPos.copy(transform.position);
+  camFocus.copy(transform.position);
+  camera.position.copy(transform.position);
+  camera.quaternion.copy(transform.quaternion);
+  camLook.copy(transform.position).addScaledVector(transform.forward, 10);
+  // Impact shake is shared with the vehicle path, so a collision still reads
+  // in first person instead of leaving a decaying value nothing consumes.
+  camShake = Math.max(0, camShake - dt * 2.5);
+  if(camShake > 0){
+    const shake = camShake * .18 * (Number(CAM_CFG.shake) || 1);
+    camera.position.x += (Math.random() - .5) * shake;
+    camera.position.y += (Math.random() - .5) * shake;
+    camera.position.z += (Math.random() - .5) * shake;
+  }
+  camera.fov += (transform.fov - camera.fov) * (camSnapNext ? 1 : dampAlpha(14, dt));
+  camera.far = Math.max(20, Number(CAM_CFG.far) || 500);
+  camera.updateProjectionMatrix();
+  camSnapNext = false;
+  if(FPS_VIEW_MODEL) FPS_VIEW_MODEL.update(dt);
+  return true;
+}
+// The character rig that owns the camera and the look input. It is the same rig
+// in BOTH views: switching to third person hands the camera to the rig's own
+// over-the-shoulder transform, not to the vehicle follow camera. Mouse look,
+// pointer lock, the crosshair and the weapon therefore behave identically, and
+// only the transform the rig hands back changes.
+function activeFirstPersonRig(playerId){
+  const api = window.LK_RUNTIME_FIRST_PERSON;
+  return api ? api.activeController(GAME, playerId || activeRuntimePlayerId()) : null;
+}
+const activeFirstPersonCameraRig = activeFirstPersonRig;
 function updateLogicPawnCameraOverride(dt, pawnRef){
   const cameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
   const pawnId = pawnRef && pawnRef.id || pawnRef || cameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
   const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
   if(!pawn || !pawn.owner || !pawn.possessed || pawn.hidden === true) return false;
+  if(pawn.firstPerson && pawn.firstPerson.enabled() && updateFirstPersonCameraOverride(dt, pawn)) return true;
   const owner = pawn.owner;
   owner.updateMatrixWorld(true);
   owner.getWorldPosition(logicPawnCameraPosition);
@@ -3268,6 +3436,47 @@ const ENGINE_AUDIO = window.LK_RUNTIME_ENGINE_AUDIO.create({
     return Promise.resolve(src);
   },
 });
+// On-foot audio: footsteps by surface, weapon fire by class, body foley. It is
+// procedural by default, so it works with no media files; a Character Sound Set
+// can point any slot at a sample. Weapon events arrive on the shared Pawn event
+// channel, so the weapon here is only resolved to pick the right profile.
+const CHARACTER_AUDIO = window.LK_RUNTIME_CHARACTER_AUDIO ? window.LK_RUNTIME_CHARACTER_AUDIO.install(GAME, {
+  audio: SFX,
+  activeWeapon: pawnId => {
+    const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
+    const rig = pawn && pawn.firstPerson;
+    return rig && rig.config ? rig.config().weapon : null;
+  },
+  resolveSrc: src => {
+    if(src && src.indexOf('blob:') === 0 && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(src.slice(5));
+    return Promise.resolve(src);
+  },
+  // A Pawn can name its own Character Sound Set, the way a vehicle names its
+  // engine set. This is the only place the audio module touches the store.
+  lookupSet: id => {
+    const store = window.LK_STORE;
+    return id && store && store.characterSoundSets ? store.characterSoundSets.get(id) : null;
+  },
+  pawnById: pawnId => (pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null),
+}) : null;
+function setCharacterSoundSet(setId){
+  const store = window.LK_STORE;
+  const set = setId && store && store.characterSoundSets ? store.characterSoundSets.get(setId) : null;
+  if(CHARACTER_AUDIO) CHARACTER_AUDIO.setSet(set);
+  appliedCharacterSoundSetId = setId || null;
+  return set;
+}
+// The level records WHICH Character Sound Set it plays; the set itself lives in
+// the shared library. Applying it on a scene-apply hook would miss the editor's
+// live save/duplicate/switch paths, so the id is reconciled from the frame loop
+// instead: one string comparison, and the set is fetched only when it changes.
+let appliedCharacterSoundSetId = null;
+function syncCharacterSoundSet(){
+  const wanted = (GAME.world && GAME.world.characterSoundSetId) || null;
+  if(wanted === appliedCharacterSoundSetId) return false;
+  setCharacterSoundSet(wanted);
+  return true;
+}
 const PLAYER_ENGINE_AUDIO_CFG = {setId: null, set: null};
 function setPlayerEngineSound(setId){
   PLAYER_ENGINE_AUDIO_CFG.setId = setId || null;
@@ -3320,13 +3529,17 @@ addEventListener('keydown', e => {
   keys[key] = true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) e.preventDefault();
   if(key === 'r' && !isEditorSimulationPreview()) resetCar();
-  if(key === 'c'){
+  // The camera-mode key is CONTEXT DEPENDENT: a vehicle keeps C, and on foot it
+  // moved to B because C became crouch. This handler read the raw key and so
+  // bypassed the binding entirely — C still popped the view message while
+  // walking around, and B did nothing.
+  if(key === (activeFirstPersonRig() ? 'b' : 'c')){
     e.preventDefault();
-    if(e.repeat) return;
-    cycleGameplayCameraMode();
+    if(!e.repeat) cycleGameplayCameraMode();
   }
   if(key === 'm'){ const m = SFX.toggleMute(); popup(m?'MUTED':'SOUND ON','#9aa3b8'); }
-  if(key === 'f' && !isEditorSimulationPreview()){
+  // F is the Use key on foot, so it must not also flash a vehicle's headlights.
+  if(key === 'f' && !isEditorSimulationPreview() && !activeFirstPersonRig()){
     PLAYER_LIGHT_RIG.setHighBeams(true);
   }
   if(e.key === 'Tab'){ e.preventDefault(); RADIO.toggleOpen(); }
@@ -4524,6 +4737,10 @@ function stepGameplayFrame(dt, shouldRender){
 
   // super slow-motion while the radio is open (smooth in/out)
   TS.cur += (TS.target - TS.cur) * Math.min(1, dt*4);
+  // Published so systems stepped outside this function — world items, tracers —
+  // slow down with everything else. A bullet that keeps full speed through a
+  // slow-motion moment is the one thing you were slowing down to look at.
+  GAME.state.timeScale = TS.cur;
   const sdt = dt * TS.cur;
   const nativePlayerActive = !!(GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true);
 
@@ -4719,6 +4936,8 @@ function stepGameplayFrame(dt, shouldRender){
     HUD.setVehicleData(hudPlayerId, {speedKmh:hudSpeedKmh, gearLabel, rpm:hudRpm, rpm01:clamp((hudRpm || 0) / GEARBOX.limiter, 0, 1), mode:modeLabel});
   }
   if(RADIO.setActivePlayer) RADIO.setActivePlayer(hudPlayerId);
+  stepWorldSystems(dt);
+  if(FPS_HUD) FPS_HUD.update(dt);
   RADIO.updateHUD(dt, rpm01, throttle, playerTelemetry);
   if(shouldRender && !renderLocalMultiplayer(dt)) renderPlayerCamera();
 }

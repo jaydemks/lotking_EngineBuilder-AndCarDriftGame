@@ -3587,3 +3587,240 @@ body.lk-standalone-editor #levelSelect {
 #lkEditor.lk-light .lk-welcome-card{background:#fff;color:#1c2636;border-color:#aab8ca}
 #lkEditor.lk-light .lk-welcome-head h2{color:#172033}
 #lkEditor.lk-light .lk-welcome-card p{color:#526071}
+
+/* ================================================================
+   ASSET SCOUT
+   Floating viewport button and search panel for free online assets.
+   Owned by js/editor/asset-scout.js + asset-scout-providers.js;
+   removing those scripts and the markup block in editor-template.js
+   removes every rule below.
+   ================================================================ */
+.lk-scout-dock-btn {
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  margin:8px 10px 10px;
+  padding:10px 14px;
+  border:1px solid var(--lk-accent-border, rgba(120, 170, 255, .38));
+  border-radius:9px;
+  background:linear-gradient(135deg, rgba(46, 108, 190, .9), rgba(28, 62, 118, .9));
+  color:#eaf2ff;
+  font:600 11.5px/1 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  letter-spacing:1.5px;
+  cursor:pointer;
+  transition:filter .14s ease;
+}
+.lk-scout-dock-btn:hover { filter:brightness(1.15); }
+.lk-scout-dock-btn:focus-visible { outline:2px solid #9ec7ff; outline-offset:2px; }
+.lk-scout-dock-btn.on { filter:brightness(1.2); box-shadow:inset 0 0 0 1px rgba(158, 199, 255, .5); }
+.lk-scout-dock-btn[hidden] { display:none; }
+.lk-scout-fab-icon { font-size:15px; line-height:1; }
+
+/* The inspector column scrolls its contents; the dock button must stay put. */
+#lkRight { display:flex; flex-direction:column; }
+#lkRight #lkInspector { flex:1 1 auto; min-height:0; }
+
+.lk-scout-panel {
+  position:fixed;
+  right:calc(var(--lk-right-w, 300px) + 14px);
+  bottom:24px;
+  z-index:65;
+  /* #lkEditor is pointer-events:none so the viewport stays clickable through
+     the chrome; every panel inside it has to opt back in, or the mouse goes
+     straight through it into the scene. */
+  pointer-events:auto;
+  display:none;
+  flex-direction:column;
+  width:min(760px, calc(100vw - 44px));
+  max-height:min(74vh, 760px);
+  border:1px solid var(--lk-panel-border, rgba(120, 140, 175, .24));
+  border-radius:14px;
+  background:var(--lk-panel-bg, rgba(16, 19, 26, .97));
+  color:var(--lk-text, #dbe3ef);
+  box-shadow:0 22px 60px rgba(2, 6, 14, .6);
+  overflow:hidden;
+}
+.lk-scout-panel.on { display:flex; }
+
+.lk-scout-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:13px 16px;
+  border-bottom:1px solid var(--lk-panel-border, rgba(120, 140, 175, .18));
+}
+.lk-scout-head b { display:block; font-size:13px; letter-spacing:1.6px; }
+.lk-scout-head span { display:block; margin-top:3px; font-size:11px; opacity:.62; }
+.lk-scout-head button {
+  border:1px solid transparent;
+  border-radius:7px;
+  background:transparent;
+  color:inherit;
+  font-size:19px;
+  line-height:1;
+  padding:3px 9px;
+  cursor:pointer;
+}
+.lk-scout-head button:hover { background:rgba(255, 255, 255, .08); }
+
+.lk-scout-controls { padding:12px 16px 10px; display:flex; flex-direction:column; gap:9px; }
+.lk-scout-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.lk-scout-chip {
+  border:1px solid var(--lk-panel-border, rgba(120, 140, 175, .26));
+  border-radius:999px;
+  background:transparent;
+  color:inherit;
+  padding:5px 13px;
+  font-size:11.5px;
+  letter-spacing:.4px;
+  cursor:pointer;
+}
+.lk-scout-chip:hover { background:rgba(255, 255, 255, .06); }
+.lk-scout-chip.on { background:rgba(78, 140, 230, .26); border-color:rgba(120, 175, 255, .55); }
+
+.lk-scout-searchrow { display:flex; gap:8px; }
+.lk-scout-searchrow input {
+  flex:1;
+  min-width:0;
+  padding:8px 12px;
+  border:1px solid var(--lk-panel-border, rgba(120, 140, 175, .26));
+  border-radius:8px;
+  background:rgba(255, 255, 255, .04);
+  color:inherit;
+  font-size:13px;
+}
+.lk-scout-searchrow button {
+  padding:8px 18px;
+  border:1px solid rgba(120, 175, 255, .45);
+  border-radius:8px;
+  background:rgba(78, 140, 230, .22);
+  color:inherit;
+  font-size:12px;
+  letter-spacing:1px;
+  cursor:pointer;
+}
+.lk-scout-searchrow button:hover { background:rgba(78, 140, 230, .34); }
+
+.lk-scout-options { display:flex; flex-wrap:wrap; gap:12px; }
+.lk-scout-option { display:flex; align-items:center; gap:7px; font-size:11.5px; opacity:.9; }
+.lk-scout-option select {
+  padding:5px 8px;
+  border:1px solid var(--lk-panel-border, rgba(120, 140, 175, .26));
+  border-radius:6px;
+  background:rgba(255, 255, 255, .04);
+  color:inherit;
+  font-size:11.5px;
+}
+
+.lk-scout-note { margin:0; font-size:11px; line-height:1.5; opacity:.66; }
+.lk-scout-note a { color:#8fbcff; }
+
+.lk-scout-state { padding:0 16px 8px; font-size:11.5px; opacity:.7; }
+.lk-scout-state.error { color:#ff9b8f; opacity:1; }
+
+.lk-scout-results {
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(214px, 1fr));
+  /* Auto rows stretch to fill a grid container that has a definite height, so
+     a short result set stretched the cards and a long one squeezed them. */
+  align-content:start;
+  gap:11px;
+  padding:2px 16px 16px;
+}
+
+.lk-scout-card {
+  display:flex;
+  flex-direction:column;
+  border:1px solid var(--lk-panel-border, rgba(120, 140, 175, .2));
+  border-radius:10px;
+  background:rgba(255, 255, 255, .035);
+  overflow:hidden;
+}
+.lk-scout-card.restricted { border-color:rgba(230, 176, 90, .42); }
+
+/* A fixed, non-shrinkable preview box. An aspect-ratio box whose child sized
+   itself with height:100% depended on the card's own height resolving first,
+   which it does not inside a stretched grid row — the previews came out as
+   flattened strips. */
+.lk-scout-preview {
+  position:relative;
+  flex:0 0 auto;
+  height:150px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  background:rgba(0, 0, 0, .3);
+}
+.lk-scout-preview img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+.lk-scout-preview-fallback { font-size:11px; opacity:.45; letter-spacing:.6px; }
+
+.lk-scout-body { flex:1; display:flex; flex-direction:column; gap:3px; padding:9px 11px 8px; }
+.lk-scout-body h4 { margin:0; font-size:12.5px; font-weight:600; line-height:1.3; }
+.lk-scout-author { font-size:10.5px; opacity:.62; }
+.lk-scout-info { font-size:10.5px; opacity:.55; }
+.lk-scout-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; }
+.lk-scout-tags span {
+  padding:1px 7px;
+  border-radius:999px;
+  background:rgba(255, 255, 255, .07);
+  font-size:9.5px;
+  letter-spacing:.3px;
+  opacity:.8;
+}
+
+.lk-scout-license { margin-top:6px; font-size:10.5px; }
+.lk-scout-license b { font-weight:600; }
+.lk-scout-license.free b { color:#7fd8a4; }
+.lk-scout-license.restricted b { color:#ffc978; }
+
+.lk-scout-actions {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 11px 10px;
+  border-top:1px solid var(--lk-panel-border, rgba(120, 140, 175, .14));
+}
+.lk-scout-import {
+  flex:1;
+  padding:6px 10px;
+  border:1px solid rgba(120, 175, 255, .42);
+  border-radius:7px;
+  background:rgba(78, 140, 230, .2);
+  color:inherit;
+  font-size:11.5px;
+  letter-spacing:.7px;
+  cursor:pointer;
+}
+.lk-scout-import:hover:not(:disabled) { background:rgba(78, 140, 230, .32); }
+.lk-scout-import:disabled { opacity:.45; cursor:progress; }
+.lk-scout-source { font-size:10.5px; color:#8fbcff; text-decoration:none; }
+.lk-scout-source:hover { text-decoration:underline; }
+
+#lkEditor.lk-light .lk-scout-panel { background:rgba(248, 250, 253, .98); color:#1d2430; }
+#lkEditor.lk-light .lk-scout-card { background:rgba(15, 25, 45, .04); }
+#lkEditor.lk-light .lk-scout-searchrow input,
+#lkEditor.lk-light .lk-scout-option select { background:rgba(15, 25, 45, .05); }
+#lkEditor.lk-light .lk-scout-note a,
+#lkEditor.lk-light .lk-scout-source { color:#1f5fbf; }
+
+/* Play/Simulate Preview hands the viewport to the running game: the Scout
+   would sit on top of it and steal clicks. */
+#lkEditor.play-preview .lk-scout-dock-btn,
+#lkEditor.play-preview .lk-scout-panel,
+#lkEditor.simulate-preview .lk-scout-dock-btn,
+#lkEditor.simulate-preview .lk-scout-panel { display:none; }
+
+@media (max-width: 900px){
+  .lk-scout-panel { right:10px; left:10px; bottom:14px; width:auto; max-height:70vh; }
+  .lk-scout-results { grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce){
+  .lk-scout-dock-btn { transition:none; }
+}

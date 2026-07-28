@@ -6,7 +6,9 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The active `v0.7.4` milestone adds granular browser-storage inspection and recovery controls to the private workspace introduced in v0.7.3. Projects, levels, preferences, imported asset blobs, workspace handles, explicit caches and Lot King service workers can be audited from Editor Settings without exposing unrelated origin data. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
+The released `v0.7.5` milestone adds **Asset Scout** (free online model and texture search imported straight into the project) and a **first-person Pawn** with its own FPS Shooter Test level. Both are additive: the existing import paths and the third-person character path are unchanged.
+
+The released `v0.7.4` milestone adds granular browser-storage inspection and recovery controls to the private workspace introduced in v0.7.3. Projects, levels, preferences, imported asset blobs, workspace handles, explicit caches and Lot King service workers can be audited from Editor Settings without exposing unrelated origin data. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
 
 Editor startup and every Play/Simulate session now include a visible, reversible runtime pre-benchmark. It prepares real project render/physics paths and measures sustained frames; devices remaining below 25 FPS receive a conservative Low video profile. This is a recommendation, not a lock: any explicit change in Video settings becomes the user's persistent override.
 
@@ -73,6 +75,10 @@ Models, materials, mesh parts, transforms, lights, primitives, text, effects and
 
 This is an assembly and gameplay-authoring workflow, not full mesh creation. Complex topology, sculpting, rig creation and complete texture authoring remain tasks for Blender or another dedicated content tool.
 
+**Asset Scout** searches free online catalogues from inside the editor and imports results through the same pipeline as a local drag-and-drop. It ships two vetted sources: Poly Haven (models and PBR textures, entire catalogue CC0) and the Khronos glTF Sample Assets (reference models, per-model licenses). A downloaded glTF bundle is re-linked and re-exported as a single canonical GLB; an FBX source goes through the FBX importer plugin and keeps its source; texture sets import their individual PBR maps.
+
+Every result card states its license, author, triangle count, real-world dimensions and source link. Anything that is not public domain, or whose license cannot be resolved, requires an explicit confirmation of the terms before it is imported, and an asset carrying several licenses reports the strictest one. Sources are a plain registry of self-contained descriptors, so one can be added or removed without touching anything else. See [Asset Scout](docs/ASSET_SCOUT.md).
+
 ## Pawn Studio and characters
 
 Character, Soccer and Vehicle Logic Elements open in Pawn Studio, a reusable three-pane authoring overlay:
@@ -92,6 +98,16 @@ Gameplay settings include a persistent Easy/Medium/Hard difficulty contract inte
 The same Pawn Studio shell can be extended through plugins for future Animal, Aircraft, Boat and other Pawn categories.
 
 The default-enabled **Cloth Studio** plugin extends Character and Soccer Pawns with separated-garment discovery, pin-mask painting, wind/gravity/quality settings, mesh diagnostics and per-bone collision spheres. Its saved component behaves identically in the isolated viewport, Play Preview and exported gameplay through a portable CPU solver; its backend boundary is ready for the official Three.js WebGPU compute approach once engine-wide WebGPU parity is complete. See [Cloth Studio](docs/CLOTH_STUDIO.md).
+
+## First Person Pawns
+
+A generic Character Pawn becomes a first-person Pawn by carrying a `firstPerson` block. The rig owns the eye camera, mouse and stick look with pitch clamping, aim down sights, view bob, recoil, and a configurable hitscan weapon with magazine, reload, reserve ammo and optional multi-pellet spread. Anything shootable carries `userData.damageable`, and a child mesh can be tagged as a head hit zone.
+
+The addition is additive rather than a fork: a Character Pawn without that block keeps the untouched third-person path, the rig composes onto the existing movement hooks instead of replacing them, and the follow-camera path is bypassed only while a first-person Pawn owns camera output. Recoil is applied to the view angles rather than as a separate camera offset, so aim and crosshair cannot disagree.
+
+`fire`, `aim` and `reload` are input actions on the Character context, rebindable like any other; mouse buttons travel through the keyboard scheme as synthetic `Mouse0`/`Mouse1`/`Mouse2` codes. They stay unbound in the Vehicle context.
+
+The **FPS Shooter Test** level template provides a full editable range — covered firing bay, four marked lanes with distance bands, cover, an overwatch platform and twelve damageable targets from 10 m to 65 m. Player and targets are ordinary Logic Elements. See [First Person Pawn](docs/FIRST_PERSON_PAWN.md), which also lists the current limits: no first-person view model, no muzzle-flash or impact effects, and no weapon audio yet.
 
 ## Player Car and Vehicle Pawns
 
@@ -125,7 +141,7 @@ Current functionality includes:
 - Runtime execution without `eval`.
 - Breakpoints, stepping, timeline filtering and Logic Profiler diagnostics.
 - JS/TS graph export and an early imperative compiler for a safe node subset.
-- Vehicle, Character, Soccer and networking node categories.
+- Vehicle, Character, Soccer, First Person and networking node categories.
 
 The graph editor makes JavaScript-backed behavior accessible visually, while exported JS/TS and the plugin/node registries keep the system understandable and extensible to web developers. The built-in `player_car (Logic)` remains the recommended vehicle implementation while the newer reusable Vehicle Logic Element path completes specialist feature parity.
 
@@ -150,7 +166,18 @@ Timelines are saved as scene assets and can be previewed manually or started at 
 
 ## Sound Designer, radio and HUD
 
-Engine Sound Sets can use ON/OFF throttle samples, RPM layers, turbo, blow-off, backfire, limiter, shift and ignition sounds. Every slot has a synthesized fallback, so a vehicle remains testable before real samples are assigned.
+Audio is authored as **sound sets**: small JSON documents holding parameters and optional sample paths, saved in their own library and referenced by id. Two families exist, sharing one storage layer and one rule — *every slot has a procedural fallback, so nothing is ever silent because a sample is missing or a path is wrong.*
+
+**Engine Sound Sets** (vehicles) can use ON/OFF throttle samples, RPM layers, turbo, blow-off, backfire, limiter, shift and ignition sounds, so a vehicle remains testable before real samples are assigned.
+
+**Character Sound Sets** (on foot) cover footsteps, weapons and body foley, and are edited in the **Character Sound Designer**. They are procedural *by default* rather than as a fallback: the shipped set contains no media files at all and is a complete, playable soundscape.
+
+- **Footsteps follow the surface underfoot.** A slot per material — concrete, marble/tile, wood, metal, gravel, dirt, grass, sand, snow, water, carpet — each a distinct synthesis recipe rather than one sound retuned: metal rings, gravel is several grains, water has a pitched splash. The material comes from the collider the character stands on, tagged with a `surface` property on the collider or its scene object; untagged geometry uses the set's default. Surface names are free-form, so a project can invent its own and add matching slots.
+- **Steps are spaced by distance walked, not by a timer**, with a separate stride for walking and running, so cadence follows speed at every gait without a case per animation state.
+- **Weapons have a profile per class** — rifle, marksman, shotgun, pistol, SMG — each with shot, tail, action, casing, dry fire and the two halves of a reload. A Pawn picks its class from the weapon preset, or from behaviour when the loadout is fully custom (pellets make a shotgun, long range a marksman); never from the weapon's display name. Weapon audio is driven by the events already on the shared Pawn event channel, so it needs no wiring per project.
+- **Body foley** covers jump, landing (scaled by impact speed) and sprint breathing.
+
+The system is attached to the Character Pawn rather than to a camera mode, so first-person and third-person characters are audible through the same path. Only a possessed Pawn is audible today; remote and AI characters would need spatialisation, which the set does not model yet. Vehicles keep their own designer: the two families describe genuinely different signal chains, and merging them would produce a panel that serves neither.
 
 The Radio/HUD authoring tools control frame and screen placement, buttons, volume and bass behavior, responsive camera framing, vehicle telemetry and 3D data widgets. Radio ownership defaults to the vehicle possessed by Player 1, covering both the native `player_car (Logic)` adapter and Vehicle Logic Elements. Projects can explicitly override it to a selected actor or global gameplay.
 

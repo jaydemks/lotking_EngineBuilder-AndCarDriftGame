@@ -24,6 +24,8 @@ function create(deps){
     'css/lot-king.css',
     'js/lot-king.js',
     'js/runtime/player-light-rig.js',
+    'js/engine/procedural-surfaces.js',
+    'js/engine/texture-budget.js',
     'js/engine/scene-store.js',
     'models/car1.glb',
     'models/car2.glb',

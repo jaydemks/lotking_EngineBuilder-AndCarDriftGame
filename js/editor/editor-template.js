@@ -45,6 +45,7 @@
     <button id="lkCamHelper" class="on" type="button" title="Toggle camera helpers">🎥 Cam</button>
     <button id="lkPipToggle" class="on" type="button" title="Toggle player camera preview">❐ Preview</button>
     <button id="lkAddMenu" type="button" title="Add object">+ Add ▾</button>
+    <button id="lkSoundDesigner" type="button" title="Character Sound Designer: footsteps, weapons, body foley">👣 Sounds</button>
     </div>
     <div class="lk-preview-tools" role="group" aria-label="Preview controls">
       <button id="lkPlay" type="button">▶ PREVIEW</button>
@@ -130,6 +131,9 @@
     <div id="lkRightResize" class="lk-resize-handle"></div>
     <div class="lk-panelhead">INSPECTOR</div>
     <div id="lkInspector"></div>
+    <button id="lkAssetScoutFab" class="lk-scout-dock-btn" type="button" title="Search free online assets (models and textures) and import them into the project">
+      <span class="lk-scout-fab-icon">⌕</span><span class="lk-scout-fab-label">ASSET SCOUT</span>
+    </button>
   </aside>
   <section id="lkAssetsDock">
     <div id="lkAssetsResize" class="lk-assets-resize"></div>
@@ -347,6 +351,24 @@
 	      <button id="lkWelcomeContinue" class="lk-welcome-continue" type="button"></button>
 	    </div>
 	  </div>
+	  <section id="lkAssetScoutPanel" class="lk-scout-panel" aria-hidden="true" aria-label="Asset Scout">
+	    <header class="lk-scout-head">
+	      <div><b>ASSET SCOUT</b><span>Free online models and textures, imported into this project</span></div>
+	      <button id="lkAssetScoutClose" type="button" title="Close">×</button>
+	    </header>
+	    <div class="lk-scout-controls">
+	      <div id="lkAssetScoutProviders" class="lk-scout-chips" role="group" aria-label="Source"></div>
+	      <div id="lkAssetScoutCategories" class="lk-scout-chips" role="group" aria-label="Category"></div>
+	      <div class="lk-scout-searchrow">
+	        <input id="lkAssetScoutQuery" type="search" placeholder="Search: crate, barrel, brick wall, rifle…" autocomplete="off">
+	        <button id="lkAssetScoutSearch" type="button">Search</button>
+	      </div>
+	      <div id="lkAssetScoutOptions" class="lk-scout-options"></div>
+	      <p id="lkAssetScoutNote" class="lk-scout-note"></p>
+	    </div>
+	    <div id="lkAssetScoutState" class="lk-scout-state"></div>
+	    <div id="lkAssetScoutResults" class="lk-scout-results"></div>
+	  </section>
 	  <div id="lkCtx"></div>
 	  <div id="lkPluginPanel" class="lk-plugin-panel" aria-hidden="true">
 	    <div class="lk-plugin-head">

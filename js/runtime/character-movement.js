@@ -13,6 +13,8 @@
 function finite(value, fallback){ const n = Number(value); return Number.isFinite(n) ? n : fallback; }
 function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
 
+const STEP_TOLERANCE = .06;   // slack that keeps standing-on-a-surface stable
+
 function normalizeOptions(options){
   const o = options || {};
   return {
@@ -25,13 +27,36 @@ function normalizeOptions(options){
     jumpHeight:clamp(finite(o.jumpHeight, 1.1), 0, 5),
     airControl:clamp(finite(o.airControl, .35), 0, 1),
     radius:clamp(finite(o.radius, .35), .1, 2),
+    // Body height, used to decide whether the character passes under a box
+    // instead of being blocked by it.
+    height:clamp(finite(o.height, 1.8), .3, 6),
+    // Maximum rise the character climbs without jumping: stair treads, kerbs
+    // and low platform edges. Anything taller still blocks.
+    stepHeight:clamp(finite(o.stepHeight, .55), 0, 3),
+    // Whether solid box colliders act as standable surfaces. Off keeps the
+    // pre-existing flat/slope-only behaviour for levels that expect it.
+    walkOnColliders:o.walkOnColliders !== false,
     // 'camera': input is relative to the active camera yaw (three-player-
     // controller style). 'heading': input is relative to the character facing.
     inputMode:o.inputMode === 'heading' ? 'heading' : 'camera',
     // `movement` turns toward velocity (generic third-person character).
     // `heading` preserves authored facing so X becomes a real lateral strafe.
     facingMode:o.facingMode === 'heading' ? 'heading' : 'movement',
+    // Material the character is assumed to be walking on when the surface it
+    // stands on does not declare one. Footstep audio reads it from the frame
+    // snapshot; nothing in the movement itself depends on it.
+    defaultSurface:typeof o.defaultSurface === 'string' && o.defaultSurface ? o.defaultSurface : 'concrete',
   };
+}
+
+// A collider declares its material either on the record itself or on the scene
+// object that owns it, so a level can tag geometry without the movement code
+// knowing anything about materials.
+function colliderSurface(col){
+  if(!col) return null;
+  if(typeof col.surface === 'string' && col.surface) return col.surface;
+  const data = col.owner && col.owner.userData;
+  return data && typeof data.surface === 'string' && data.surface ? data.surface : null;
 }
 
 function create(GAME, options){
@@ -41,6 +66,10 @@ function create(GAME, options){
     grounded:true,
     jumpQueued:false,
     groundY:0,
+    // Terrain height with no surface stacked on it. Kept separate from
+    // `groundY` so stepping off a platform falls back to the real floor
+    // instead of latching onto the height the character last stood at.
+    baseGroundY:0,
   };
 
   function configure(patch){
@@ -65,13 +94,45 @@ function create(GAME, options){
     return true;
   }
 
-  function worldGround(position, fallback){
+  // Base terrain height, before any solid surface stacked on top of it.
+  function terrainGround(position, fallback){
     const world = GAME && GAME.world;
     if(world && typeof world.characterGroundHeight === 'function') return finite(world.characterGroundHeight(position.x, position.z), fallback);
     const profile = world && world.characterGround;
     if(!profile || profile.type !== 'slope-z') return fallback;
     const start = finite(profile.slopeStart, -2), crest = finite(profile.crestZ, -30), slope = finite(profile.slope, .26);
     return position.z < start ? Math.min((start - position.z) * slope, (start - crest) * slope) : finite(profile.baseY, fallback);
+  }
+
+  // Highest box collider the character can be standing on at this XZ position.
+  // A surface counts when its top is at or below the feet (already on it) or
+  // within step height above them (a stair tread, a kerb, a low platform edge),
+  // which is what makes stairs climb without any dedicated stair logic.
+  function surfaceGround(position, owner, base){
+    state.groundSurface = null;
+    if(!state.options.walkOnColliders) return base;
+    const colliders = GAME && GAME.world && GAME.world.colliders;
+    if(!colliders || !colliders.box) return base;
+    const feet = position.y;
+    const reach = feet + state.options.stepHeight;
+    let best = base;
+    colliders.box.forEach(col => {
+      if(!col || col.enabled === false || col.walkable === false) return;
+      if(belongsToOwner(col, owner)) return;
+      const top = boxTop(col);
+      if(top == null || top <= best || top > reach) return;
+      // Slightly tighter than the lateral radius so the character does not
+      // float while merely brushing an edge.
+      if(Math.abs(position.x - col.x) > col.hx + state.options.radius * .5) return;
+      if(Math.abs(position.z - col.z) > col.hz + state.options.radius * .5) return;
+      best = top;
+      state.groundSurface = colliderSurface(col);
+    });
+    return best;
+  }
+
+  function worldGround(position, fallback, owner){
+    return surfaceGround(position, owner, terrainGround(position, fallback));
   }
 
   // Push the character out of the arcade world colliders (walls, pillars,
@@ -86,6 +147,20 @@ function create(GAME, options){
     }
     return false;
   }
+  // Vertical span of a box collider, when it declares one.
+  function boxTop(col){ return col.hy != null && col.y != null ? col.y + col.hy : null; }
+  function boxBottom(col){ return col.hy != null && col.y != null ? col.y - col.hy : null; }
+
+  // True when the character's body does not overlap the box vertically, so it
+  // must not push laterally. Without the ceiling half of this test any roof or
+  // walkway deck behaved as a full-height wall down at ground level.
+  function clearsVertically(col, feetY){
+    const top = boxTop(col);
+    if(top == null) return false;
+    if(feetY >= top - STEP_TOLERANCE) return true;                       // standing on or above it
+    return feetY + state.options.height <= boxBottom(col) + STEP_TOLERANCE;  // passing underneath
+  }
+
   function resolveColliders(position, owner){
     const colliders = GAME && GAME.world && GAME.world.colliders;
     if(!colliders) return;
@@ -93,10 +168,14 @@ function create(GAME, options){
     (colliders.box || []).forEach(col => {
       if(!col || col.enabled === false) return;
       if(belongsToOwner(col, owner)) return;
-      if(col.hy != null && col.y != null && position.y > col.y + col.hy) return;
+      if(clearsVertically(col, position.y)) return;
       const dx = position.x - col.x, dz = position.z - col.z;
       const px = col.hx + r - Math.abs(dx), pz = col.hz + r - Math.abs(dz);
       if(px <= 0 || pz <= 0) return;
+      // A surface within step height is climbed by the ground solver rather
+      // than blocked, so stairs and kerbs do not stop the character dead.
+      const top = boxTop(col);
+      if(top != null && top - position.y > 0 && top - position.y <= state.options.stepHeight) return;
       if(px < pz) position.x += (dx >= 0 ? 1 : -1) * px;
       else position.z += (dz >= 0 ? 1 : -1) * pz;
     });
@@ -118,6 +197,7 @@ function create(GAME, options){
   function step(owner, input, dt, groundY){
     const h = clamp(finite(dt, .016), .0001, .1);
     const opts = state.options;
+    state.baseGroundY = finite(groundY, state.baseGroundY);
     state.groundY = finite(groundY, state.groundY);
     const move = input || {};
     const inputX = clamp(finite(move.x, 0), -1, 1);
@@ -163,7 +243,7 @@ function create(GAME, options){
         if(profile.minZ != null) owner.position.z = Math.max(Number(profile.minZ), owner.position.z);
         if(profile.maxZ != null) owner.position.z = Math.min(Number(profile.maxZ), owner.position.z);
       }
-      state.groundY = worldGround(owner.position, state.groundY);
+      state.groundY = worldGround(owner.position, state.baseGroundY, owner);
       owner.position.y += state.velocityY * h;
       if(owner.position.y <= state.groundY){
         owner.position.y = state.groundY;
@@ -194,6 +274,8 @@ function create(GAME, options){
       grounded:state.grounded,
       airborne:!state.grounded,
       justLanded:state.justLanded === true,
+      // Material under the feet this frame, for footstep audio and effects.
+      surface:state.groundSurface || state.options.defaultSurface,
       velocityX:state.velocityX,
       velocityY:state.velocityY,
       velocityZ:state.velocityZ,

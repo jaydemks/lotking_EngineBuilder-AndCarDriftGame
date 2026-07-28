@@ -25,6 +25,112 @@ const MENU_ROLE_MANIFEST_URL = 'demo/menu-roles.json';
 const BUNDLED_DEMO_LEVEL_ID = 'online-demo';
 const assetUrlCache = new Map();
 const logicElementAssetCache = new Map();
+
+// ------------------------------------------------ procedural surfaces
+// Optional engine module (js/engine/procedural-surfaces.js). It is read lazily
+// and every call site degrades to "no surface" when the script is absent, so a
+// trimmed playable export still boots.
+function surfaces(){
+  return typeof window !== 'undefined' && window.LK_ENGINE_PROCEDURAL_SURFACES ? window.LK_ENGINE_PROCEDURAL_SURFACES : null;
+}
+// Optional engine module (js/engine/texture-budget.js): one ceiling on texture
+// size, applied wherever a texture enters. Absent, textures load at their
+// native size exactly as they used to.
+function textureBudget(){
+  return typeof window !== 'undefined' && window.LK_ENGINE_TEXTURE_BUDGET ? window.LK_ENGINE_TEXTURE_BUDGET : null;
+}
+function budgetTexture(texture){
+  const api = textureBudget();
+  if(api && texture) api.fitWhenReady(texture);
+  return texture;
+}
+function budgetObjectTextures(root){
+  const api = textureBudget();
+  if(api && root) api.fitObject(root);
+  return root;
+}
+// A procedural map is owned by that module's cache and is SHARED: every object
+// using the same kind renders from the same canvas `source`, and a duplicated
+// object even shares the very same texture instance with the object it was
+// copied from. Disposing one on delete therefore blanked the others, so the
+// disposal paths below skip these and the cache keeps the lifetime.
+function isSharedSurfaceTexture(texture){
+  return !!(texture && texture.userData && texture.userData.lkSurface);
+}
+function forEachMaterial(root, fn){
+  if(!root || !root.traverse) return;
+  root.traverse(node => {
+    if(!node.isMesh || !node.material) return;
+    const list = Array.isArray(node.material) ? node.material : [node.material];
+    list.forEach(material => { if(material) fn(material, node); });
+  });
+}
+// The world size a surface tiles against only exists once the group scale is
+// applied, and the editor keeps changing it. Both applyT and syncCollider call
+// this so a scaled object re-tiles instead of stretching its texels.
+// A dressed material has to be recompiled ONCE after the scene has actually
+// rendered a frame. Attaching the maps inside createPrimitive is not enough:
+// the program the renderer ends up using does not agree with the samplers it
+// binds, WebGL reports
+//   glDrawElements: Mismatch between texture format and sampler type
+// and the affected objects - in the FPS level that was the range floor, the
+// boundary walls, the bay roof and every other large surface - draw nothing at
+// all. Ruled out as causes, each by isolating it: the texture format/type/size
+// (RGBA UnsignedByte 256px Uint8Array, verified per kind), the colour spaces
+// and `source` sharing between slots (all correct and distinct), the shadow
+// samplers (disabling shadows changes nothing) and the pre-benchmark warm-up
+// (neutralising renderer.compile changes nothing). Marking the materials dirty
+// once, a couple of frames in, fixes it completely and permanently.
+//
+// Programs are deduplicated by cache key, so a thousand dressed objects still
+// compile a few dozen, and this runs once per level load.
+let surfaceWarmupFrames = -1;
+function scheduleSurfaceWarmup(){ surfaceWarmupFrames = 2; }
+function runSurfaceWarmup(GAME){
+  if(surfaceWarmupFrames < 0) return;
+  if(surfaceWarmupFrames-- > 0) return;
+  const registry = GAME && GAME.world ? GAME.world.registry : null;
+  if(!registry) return;
+  for(const object of registry){
+    if(!object || !object.userData || !object.userData.lkSurface) continue;
+    forEachMaterial(object, material => { material.needsUpdate = true; });
+  }
+}
+// The world size a surface tiles against only exists once the group scale is
+// applied, and the editor keeps changing it. Both applyT and syncCollider call
+// this so a scaled object re-tiles instead of stretching its texels.
+function refreshSurfaceTiling(obj){
+  const surface = obj && obj.userData && obj.userData.lkSurface;
+  const api = surface && surfaces();
+  if(!api) return false;
+  const scale = [obj.scale.x, obj.scale.y, obj.scale.z];
+  let changed = false;
+  forEachMaterial(obj, material => {
+    if(api.retile(material, {prim:surface.prim, scale})) changed = true;
+  });
+  scheduleSurfaceWarmup();
+  return changed;
+}
+// Applies (or clears) the procedural surface authored in `props.surfaceTexture`.
+// `root` owns the scale, `material` is the slot being dressed.
+function applySurfaceTexture(root, material, value, prim){
+  const api = surfaces();
+  if(!api) return null;
+  const spec = api.normalize(value);
+  if(!spec){
+    if(value === null || value === false || value === '') api.clear(material);
+    return null;
+  }
+  const kind = prim || root && root.userData && root.userData.lkSurface && root.userData.lkSurface.prim
+    || root && root.userData && root.userData.addedEntry && root.userData.addedEntry.prim || 'box';
+  const scale = root && root.scale ? [root.scale.x, root.scale.y, root.scale.z] : [1, 1, 1];
+  const applied = api.apply(material, spec, {prim:kind, scale});
+  if(applied && root){
+    root.userData = root.userData || {};
+    root.userData.lkSurface = {spec:applied, prim:kind};
+  }
+  return applied;
+}
 let bundledDemoReady = null;
 let bundledDemoProjectCache = null;
 let bundledDemoRequestedLevelId = null;
@@ -358,7 +464,7 @@ function disposeObject3D(node){
     if(child.material){
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       mats.forEach(mat => {
-        if(mat && mat.map && mat.map.dispose) mat.map.dispose();
+        if(mat && mat.map && mat.map.dispose && !isSharedSurfaceTexture(mat.map)) mat.map.dispose();
         if(mat && mat.dispose) mat.dispose();
       });
     }
@@ -1119,7 +1225,7 @@ function syncLogicElementSceneObject(object, graph, opts){
   return object;
 }
 function blank(){
-  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, characterGround:null, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
+  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, characterGround:null, characterSoundSetId:null, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
 }
 function sceneFromProject(data){
   if(!data) return null;
@@ -2216,105 +2322,127 @@ function logicElementAssetsApi(){
 }
 // ------------------------------------------------ engine sound sets (asset audio veicolo)
 // Set piccoli (solo JSON: path dei sample + parametri) salvati inline nell'indice.
-const SOUNDSETS_KEY = 'lotking.soundsets.v1';
+// La libreria e' identica per i set motore (veicoli) e per i Character Sound
+// Set (passi, armi, foley): stesso CRUD, stesso storage, solo chiave e default
+// diversi. Una fabbrica sola evita due copie che divergono.
+function createSoundSetLibrary(options){
+  const storageKey = options.key;
+  const slugBase = options.slug || 'sound-set';
+  const label = options.label || 'Sound Set';
+  const defaults = options.defaults || (() => null);
 
-function readSoundSets(){
-  try {
-    const raw = localStorage.getItem(SOUNDSETS_KEY);
-    if(raw){
-      const data = JSON.parse(raw);
-      if(data && Array.isArray(data.sets)) return data;
+  function read(){
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if(raw){
+        const data = JSON.parse(raw);
+        if(data && Array.isArray(data.sets)) return data;
+      }
+    } catch(err){ console.warn('LotKing store: ' + label + ' corrotti, rigenerati', err); }
+    return {sets: []};
+  }
+  function write(data){
+    try { localStorage.setItem(storageKey, JSON.stringify(data)); return true; }
+    catch(err){ console.warn('LotKing store: ' + label + ' non salvati', err); return false; }
+  }
+  function uniqueId(data, name){
+    const base = slugifyLevel(name || slugBase);
+    let id = base, n = 2;
+    while(data.sets.some(s => s.id === id)) id = base + '-' + (n++);
+    return id;
+  }
+  function ensure(){
+    const data = read();
+    if(!data.sets.length){
+      const def = defaults();
+      if(def){
+        def.savedAt = new Date().toISOString();
+        data.sets.push(def);
+        write(data);
+      }
     }
-  } catch(err){ console.warn('LotKing store: sound sets corrotti, rigenerati', err); }
-  return {sets: []};
+    return data;
+  }
+  const api = {
+    list(){
+      return ensure().sets.map(s => ({id: s.id, name: s.name, savedAt: s.savedAt}));
+    },
+    get(id){
+      const s = ensure().sets.find(x => x.id === id);
+      return s ? cloneData(s) : null;
+    },
+    save(set){
+      if(!set || !set.id) return false;
+      const data = ensure();
+      const copy = cloneData(set);
+      copy.savedAt = new Date().toISOString();
+      const i = data.sets.findIndex(x => x.id === copy.id);
+      if(i >= 0) data.sets[i] = copy;
+      else data.sets.push(copy);
+      return write(data);
+    },
+    create(name, base){
+      const data = ensure();
+      const src = cloneData(base || defaults() || {});
+      src.id = uniqueId(data, name);
+      src.name = (name || label).trim();
+      src.savedAt = new Date().toISOString();
+      data.sets.push(src);
+      return write(data) ? src.id : null;
+    },
+    duplicate(id, name){
+      const src = api.get(id);
+      if(!src) return null;
+      return api.create((name || (src.name + ' Copy')).trim(), src);
+    },
+    rename(id, name){
+      if(!name || !name.trim()) return false;
+      const data = ensure();
+      const s = data.sets.find(x => x.id === id);
+      if(!s) return false;
+      s.name = name.trim();
+      s.savedAt = new Date().toISOString();
+      return write(data);
+    },
+    remove(id){
+      const data = ensure();
+      const i = data.sets.findIndex(x => x.id === id);
+      if(i < 0) return false;
+      data.sets.splice(i, 1);
+      return write(data);
+    },
+    upsertImported(set){
+      // set arrivato da un LKEP importato: entra in libreria mantenendo l'id
+      if(!set || !set.id) return null;
+      const data = ensure();
+      const copy = cloneData(set);
+      copy.savedAt = copy.savedAt || new Date().toISOString();
+      const i = data.sets.findIndex(x => x.id === set.id);
+      if(i >= 0) data.sets[i] = copy;
+      else data.sets.push(copy);
+      write(data);
+      return set.id;
+    },
+    defaults,
+  };
+  return api;
 }
-function writeSoundSets(data){
-  try { localStorage.setItem(SOUNDSETS_KEY, JSON.stringify(data)); return true; }
-  catch(err){ console.warn('LotKing store: sound sets non salvati', err); return false; }
-}
-function uniqueSoundSetId(data, name){
-  const base = slugifyLevel(name || 'sound-set');
-  let id = base, n = 2;
-  while(data.sets.some(s => s.id === id)) id = base + '-' + (n++);
-  return id;
-}
+
 function engineAudioDefaults(){
   const mod = window.LK_RUNTIME_ENGINE_AUDIO;
   return mod && mod.defaultSet ? mod.defaultSet() : null;
 }
-function ensureSoundSets(){
-  const data = readSoundSets();
-  if(!data.sets.length){
-    const def = engineAudioDefaults();
-    if(def){
-      def.savedAt = new Date().toISOString();
-      data.sets.push(def);
-      writeSoundSets(data);
-    }
-  }
-  return data;
+function characterAudioDefaults(){
+  const mod = window.LK_RUNTIME_CHARACTER_AUDIO;
+  return mod && mod.defaultSet ? mod.defaultSet() : null;
 }
-const SOUND_SETS = {
-  list(){
-    return ensureSoundSets().sets.map(s => ({id: s.id, name: s.name, savedAt: s.savedAt}));
-  },
-  get(id){
-    const s = ensureSoundSets().sets.find(x => x.id === id);
-    return s ? cloneData(s) : null;
-  },
-  save(set){
-    if(!set || !set.id) return false;
-    const data = ensureSoundSets();
-    const copy = cloneData(set);
-    copy.savedAt = new Date().toISOString();
-    const i = data.sets.findIndex(x => x.id === copy.id);
-    if(i >= 0) data.sets[i] = copy;
-    else data.sets.push(copy);
-    return writeSoundSets(data);
-  },
-  create(name, base){
-    const data = ensureSoundSets();
-    const src = cloneData(base || engineAudioDefaults() || {});
-    src.id = uniqueSoundSetId(data, name);
-    src.name = (name || 'Sound Set').trim();
-    src.savedAt = new Date().toISOString();
-    data.sets.push(src);
-    return writeSoundSets(data) ? src.id : null;
-  },
-  duplicate(id, name){
-    const src = SOUND_SETS.get(id);
-    if(!src) return null;
-    return SOUND_SETS.create((name || (src.name + ' Copy')).trim(), src);
-  },
-  rename(id, name){
-    if(!name || !name.trim()) return false;
-    const data = ensureSoundSets();
-    const s = data.sets.find(x => x.id === id);
-    if(!s) return false;
-    s.name = name.trim();
-    s.savedAt = new Date().toISOString();
-    return writeSoundSets(data);
-  },
-  remove(id){
-    const data = ensureSoundSets();
-    const i = data.sets.findIndex(x => x.id === id);
-    if(i < 0) return false;
-    data.sets.splice(i, 1);
-    return writeSoundSets(data);
-  },
-  upsertImported(set){
-    // set arrivato da un LKEP importato: entra in libreria mantenendo l'id
-    if(!set || !set.id) return null;
-    const data = ensureSoundSets();
-    const copy = cloneData(set);
-    copy.savedAt = copy.savedAt || new Date().toISOString();
-    const i = data.sets.findIndex(x => x.id === set.id);
-    if(i >= 0) data.sets[i] = copy;
-    else data.sets.push(copy);
-    writeSoundSets(data);
-    return set.id;
-  },
-};
+
+const SOUND_SETS = createSoundSetLibrary({
+  key: 'lotking.soundsets.v1', slug: 'sound-set', label: 'sound sets', defaults: engineAudioDefaults,
+});
+const CHARACTER_SOUND_SETS = createSoundSetLibrary({
+  key: 'lotking.charactersoundsets.v1', slug: 'character-sound-set', label: 'character sound sets', defaults: characterAudioDefaults,
+});
 
 function collectPlayerBlueprint(GAME){
   if(!GAME || !GAME.player) return null;
@@ -2704,6 +2832,7 @@ const LEVELS = {
     const characterTemplate = templateId === 'character-movement-playground';
     const penaltyTemplate = templateId === 'penalty-shootout-stadium';
     const driftTemplate = templateId === 'drift-track-minami';
+    const fpsTemplate = templateId === 'fps-shooter-test';
     const seen = new Set();
     if(GAME && GAME.world && GAME.world.registry){
       for(const o of GAME.world.registry){
@@ -2711,7 +2840,7 @@ const LEVELS = {
         seen.add(o.userData.editorId);
         if(o.isLight || o.userData.light) continue;
         const type = o.userData.editorType || '';
-        if(!characterTemplate && !penaltyTemplate && (type === 'player' || type.indexOf('player') === 0)) continue;
+        if(!characterTemplate && !penaltyTemplate && !fpsTemplate && (type === 'player' || type.indexOf('player') === 0)) continue;
         d.deleted.push(o.userData.editorId);
       }
     }
@@ -2748,6 +2877,9 @@ const LEVELS = {
     }
     if(penaltyTemplate && window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE){
       return window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE.buildScene(d);
+    }
+    if(fpsTemplate && window.LK_RUNTIME_FPS_ARENA_LEVEL_TEMPLATE){
+      return window.LK_RUNTIME_FPS_ARENA_LEVEL_TEMPLATE.buildScene(d);
     }
     if(driftTemplate && window.LK_RUNTIME_DRIFT_TRACK){
       const gen = window.LK_RUNTIME_DRIFT_TRACK;
@@ -2853,6 +2985,7 @@ function applyT(obj, t){
   if(t.v != null) obj.visible = t.v;
   if(t.name) obj.userData.editorName = t.name;
   if(t.parent) obj.userData.linkParentId = t.parent;
+  if(t.s) refreshSurfaceTiling(obj);
 }
 function applyParentLink(obj, GAME){
   const pid = obj && obj.userData.linkParentId;
@@ -2863,6 +2996,10 @@ function applyParentLink(obj, GAME){
 
 // keep the arcade collider (axis-aligned box / circle) in sync with the object
 function syncCollider(obj){
+  // syncCollider is this codebase's "the transform changed" notification (the
+  // gizmo, the inspector fields and the loader all call it), which makes it the
+  // one place a procedural surface can re-tile after a resize.
+  refreshSurfaceTiling(obj);
   updateLogicElementColliderRefs(obj);
   updateDriftTrackColliderRefs(obj);
   const col = obj.userData.collider;
@@ -3212,7 +3349,7 @@ function applyMatProps(obj, p){
     const tx = new THREE.TextureLoader().load(src);
     if(colorData) tx.colorSpace = THREE.SRGBColorSpace;
     tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
-    return tx;
+    return budgetTexture(tx);
   };
   const resolveTextureUrl = (src, dbKey) => {
     if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey);
@@ -3372,6 +3509,10 @@ function applyMatProps(obj, p){
         applyTextureTransform(m.metalnessMap, patch);
         applyTextureTransform(m.alphaMap, patch);
         applyTextureTransform(m.emissiveMap, patch);
+        // Last, so the per-kind roughness/metalness hints win over the authored
+        // scalars in both directions of the round trip and the result is stable
+        // no matter how many times the same props are re-applied.
+        if(Object.prototype.hasOwnProperty.call(patch, 'surfaceTexture')) applySurfaceTexture(obj, m, patch.surfaceTexture, null);
         m.needsUpdate = true;
       });
       if(patch.castShadow != null) o.castShadow = patch.castShadow;
@@ -3417,8 +3558,25 @@ const PRIM_DEFS = {
     return g;
   },
 };
+// Material props travel in two shapes. Templates and the editor hand them over
+// FLAT ({color, roughness, centered, ...}); a saved project stores whatever
+// `normalizeStoredMatProps` produced, which nests everything under `global` so
+// per-material-slot overrides have somewhere to live.
+//
+// createPrimitive reads GEOMETRY keys out of that same bag — `centered` above
+// all — so reading the nested shape raw silently lost them on the round trip.
+// A centered box reloaded as an uncentered one, which moves its mesh a full
+// local unit up and, once the group scale is applied, leaves the object sitting
+// exactly half its own height too high. Flattening accepts both shapes and
+// repairs projects already saved with the nested one.
+function flatPrimitiveProps(props){
+  if(!props || typeof props !== 'object') return {};
+  if(!props.global && !props.slots) return props;
+  return Object.assign({}, props, props.global || {});
+}
+
 function createPrimitive(prim, props){
-  props = props || {};
+  props = flatPrimitiveProps(props);
   if(prim === 'goalNet'){
     const width=7.32,height=2.44,depth=1.8,backHeight=1.72,half=width/2,vertices=[];
     const segment=(ax,ay,az,bx,by,bz)=>vertices.push(ax,ay,az,bx,by,bz);
@@ -3470,10 +3628,23 @@ function createPrimitive(prim, props){
   }
   const m = new THREE.Mesh(geo, mat);
   m.castShadow = m.receiveShadow = true;
+  // Opt-out for geometry that cannot contribute a visible shadow: a decal lying
+  // flat on the ground casts onto the ground it is touching, and a silhouette
+  // 100 m outside the play area casts outside the shadow camera. Every caster
+  // is redrawn into the shadow map each frame, so this is draw calls, not just
+  // fill rate. Default stays on - a level opts a specific object out.
+  if(props.castShadow === false) m.castShadow = false;
+  if(props.receiveShadow === false) m.receiveShadow = false;
   if(prim === 'plane' || prim === 'arc') m.rotation.x = -Math.PI/2;
   const gp = new THREE.Group();
   m.position.y = props.centered === true ? 0 : (prim === 'plane' || prim === 'arc' ? 0.01 : (prim === 'ramp' ? 0 : 1));
   gp.add(m);
+  // A procedural surface turns the flat authored colour into a real material.
+  // `materialModel:'unlit'` is excluded on purpose: glow panels (lamp lenses,
+  // lit signs, windows) must stay flat and unlit.
+  if(props.surfaceTexture != null && props.materialModel !== 'unlit'){
+    applySurfaceTexture(gp, mat, props.surfaceTexture, prim);
+  }
   if(prim === 'cone'){
     gp.userData.isCone = true;
     gp.userData.coneResetRotation = [0, 0, 0];
@@ -4008,11 +4179,11 @@ function applyTextureMapFromSource(gp, mat, props){
     if(isAnimatedTextureProps(props)){
       applyAnimatedGifTexture(gp, mat, src, isCurrentLoad, configure).catch(err => {
         console.warn('LotKing store: GIF decoder fallback', err);
-        new THREE.TextureLoader().load(src, apply, undefined, loadErr => console.warn('LotKing store: texture/decal non caricata', loadErr));
+        budgetTexture(new THREE.TextureLoader().load(src, apply, undefined, loadErr => console.warn('LotKing store: texture/decal non caricata', loadErr)));
       });
       return;
     }
-    new THREE.TextureLoader().load(src, apply, undefined, err => console.warn('LotKing store: texture/decal non caricata', err));
+    budgetTexture(new THREE.TextureLoader().load(src, apply, undefined, err => console.warn('LotKing store: texture/decal non caricata', err)));
   }).catch(err => console.warn('LotKing store: texture/decal non caricata', err));
 }
 
@@ -4624,7 +4795,10 @@ function applyMeshEdits(root, value){
         materials.forEach(material => {
           if(!material) return;
           ['map','normalMap','roughnessMap','metalnessMap','alphaMap','emissiveMap','aoMap','lightMap','bumpMap','displacementMap'].forEach(key => {
-            if(material[key] && material[key].dispose) material[key].dispose();
+            // Shared procedural surface maps are owned by the surface cache; see
+            // isSharedSurfaceTexture. Disposing them here blanks every other
+            // object that shows the same kind.
+            if(material[key] && material[key].dispose && !isSharedSurfaceTexture(material[key])) material[key].dispose();
           });
           if(material.dispose) material.dispose();
         });
@@ -4697,7 +4871,7 @@ function applyMeshEdits(root, value){
 function loadGlbRaw(src){
   return new Promise((resolve, reject) => {
     if(typeof THREE.GLTFLoader === 'undefined'){ reject(new Error('GLTFLoader non disponibile')); return; }
-    new THREE.GLTFLoader().load(src, g => resolve(g.scene), undefined, err => reject(err));
+    new THREE.GLTFLoader().load(src, g => resolve(budgetObjectTextures(g.scene)), undefined, err => reject(err));
   });
 }
 function vehicleLikeGlbEntry(entry){
@@ -4727,6 +4901,10 @@ function loadGlb(src, fit, opts){
     const loader = new THREE.GLTFLoader();
     loader.load(src, g => {
       const root = g.scene;
+      // An imported model brings its own maps, and a 4K PBR set is 67 MB per
+      // map before mipmaps. The cap applies here, once, rather than being
+      // rediscovered as a stutter later.
+      budgetObjectTextures(root);
       root.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
       if(opts.suppressEmbeddedLights){
         const embedded = [];
@@ -4891,7 +5069,15 @@ function createFromEntry(entry, GAME, restoreSources){
       if(node.geometry && node.geometry.clone) node.geometry = node.geometry.clone();
       if(Array.isArray(node.material)) node.material = node.material.map(material => material && material.clone ? material.clone() : material);
       else if(node.material && node.material.clone) node.material = node.material.clone();
+      // Material.clone() copies texture REFERENCES, so without this the copy
+      // would share one texture - and therefore one repeat - with its source and
+      // rescaling either one would re-tile both.
+      if(surfaces()){
+        const list = Array.isArray(node.material) ? node.material : [node.material];
+        list.forEach(material => { if(material) surfaces().adopt(material); });
+      }
     });
+    if(src.userData && src.userData.lkSurface) c.userData.lkSurface = cloneData(src.userData.lkSurface);
     return Promise.resolve(c);
   }
   const gp = createPrimitive(entry.prim, entry.props);
@@ -4971,6 +5157,16 @@ function registerAdded(GAME, obj, entry){
   obj.userData.physicsMass = defaultMass;
   obj.userData.physicsImpact = defaultImpact;
   if(entry && entry.driveSurface != null) obj.userData.driveSurface = !!entry.driveSurface;
+  // Material tag read by character audio (footsteps) through the collider that
+  // owns this object. Free-form on purpose: a project can invent its own names
+  // and add matching slots to its Character Sound Set.
+  if(entry && typeof entry.surface === 'string' && entry.surface) obj.userData.surface = entry.surface;
+  // Gameplay contracts authored on an ordinary scene object: `interact` makes it
+  // a door / ladder / carryable, `item` makes it a pickup. Both are read by the
+  // runtime systems straight off userData, so a level template or the inspector
+  // can turn ANY primitive or imported model into one without a special kind.
+  if(entry && entry.interact && typeof entry.interact === 'object') obj.userData.interact = cloneData(entry.interact);
+  if(entry && entry.item && typeof entry.item === 'object') obj.userData.item = cloneData(entry.item);
   if(entry && entry.colliderShape) obj.userData.colliderShape = cloneData(entry.colliderShape);
   if(entry && (entry.colliderDummyVisibility === 'show' || entry.colliderDummyVisibility === 'hide')) obj.userData.colliderDummyVisibility = entry.colliderDummyVisibility;
   if(entry && entry.colliderOnly){
@@ -5013,6 +5209,14 @@ function registerAdded(GAME, obj, entry){
   return obj;
 }
 
+// Strips the runtime-only bookkeeping a gameplay contract accumulates while it
+// plays, so saving a level never persists "this door is halfway open".
+function cleanContract(source, transient){
+  const out = cloneData(source) || {};
+  transient.forEach(key => { delete out[key]; });
+  return out;
+}
+
 // Build a serializable snapshot from the object as it exists right now in the
 // editor. Duplication must copy this state, not the possibly stale placement
 // recipe kept in userData.addedEntry.
@@ -5042,6 +5246,14 @@ function snapshotAddedEntry(obj, baseEntry){
   if(ud.colliderOnly) entry.colliderOnly = true;
   if(ud.colliderOnly && ud.cinemaTrigger) entry.cinemaTrigger = cloneData(ud.cinemaTrigger);
   if(ud.driveSurface != null) entry.driveSurface = !!ud.driveSurface;
+  if(typeof ud.surface === 'string' && ud.surface) entry.surface = ud.surface;
+  else delete entry.surface;
+  // Round-trip the gameplay contracts. The runtime adds its own bookkeeping
+  // fields to the live descriptor, so only the authored subset is written back.
+  if(ud.interact) entry.interact = cleanContract(ud.interact, ['progress', 'fired', 'closeTimer', 'basis', '__normalized', '__colliderWasEnabled']);
+  else delete entry.interact;
+  if(ud.item) entry.item = cleanContract(ud.item, ['consumed', 'respawnTimer', '__normalized']);
+  else delete entry.item;
   if(ud.meshEdits) entry.meshEdits = normalizeMeshEdits(ud.meshEdits);
   else delete entry.meshEdits;
 
@@ -5101,6 +5313,7 @@ function ensureEffectHook(GAME){
       if(o.userData.effectUpdate) o.userData.effectUpdate(dt);
       if(o.userData.logicAnimationUpdate) o.userData.logicAnimationUpdate(dt);
     }
+    runSurfaceWarmup(GAME);
   });
 }
 
@@ -5239,6 +5452,11 @@ function apply(GAME, sceneOverride, options){
     }
   }
   GAME.world.characterGround = cloneData(data.characterGround || null);
+  // Which Character Sound Set this level plays. The set itself lives in the
+  // shared library; the level only records the choice, so two levels can use the
+  // same footstep and weapon audio without duplicating it.
+  GAME.world.characterSoundSetId = typeof data.characterSoundSetId === 'string' && data.characterSoundSetId
+    ? data.characterSoundSetId : null;
   const pending = [];
 
   // Vehicle light config can create extra built-in light anchors; do it before
@@ -5617,6 +5835,10 @@ function collect(GAME){
   }
   d.player = collectPlayerBlueprint(GAME) || {};
   d.characterGround = cloneData(old && old.characterGround || GAME && GAME.world && GAME.world.characterGround || null);
+  const soundSetId = GAME && GAME.world && GAME.world.characterSoundSetId;
+  d.characterSoundSetId = (typeof soundSetId === 'string' && soundSetId)
+    ? soundSetId
+    : (old && typeof old.characterSoundSetId === 'string' && old.characterSoundSetId) || null;
   d.logic = old && old.logic ? cloneData(old.logic) : {};
   d.logic.levelGraph = normalizeLogicGraph(d.logic.levelGraph, 'Level Logic', 'level');
   return d;
@@ -5770,10 +5992,12 @@ window.LK_STORE = {
 	  playerBlueprints: playerBlueprintApi(),
 	  logicElementAssets: logicElementAssetsApi(),
   soundSets: SOUND_SETS,
+  characterSoundSets: CHARACTER_SOUND_SETS,
   isApplied: () => applied,
   appliedInfo: () => ({applied, mode: appliedMode, levelId: appliedLevelId}),
   load, loadProject, save, clear, blank, projectFromScene, sceneFromProject, parseProject, exportProject, exportProjectWithLevels, importProject, localizePortableProjectAssets, getLevelLogicGraph, setLevelLogicGraph,
   tOf, applyT, syncCollider, applyEnvironment, collectEnvironment,
+  refreshSurfaceTiling, applySurfaceTexture, isSharedSurfaceTexture,
   lightProps, applyLightProps, applyMatProps, stageMatProps, snapshotAddedEntry,
   verifyPersistenceRoundTrip, persistenceDifferences,
 	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createDriftTrack, rebuildDriftTrack, syncDriftTrackColliders, removeDriftTrackColliders, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,

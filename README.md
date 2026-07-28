@@ -6,7 +6,7 @@
 > It started as a parking-lot drift prototype.<br>
 > Now it is growing into a browser-native engine for building many kinds of games and interactive 3D experiences.
 
-**Current version: `v0.7.4` · Experimental Alpha**
+**Current version: `v0.7.5` · Experimental Alpha**
 
 [Open Lot King Online](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/) ·
 [Technical README](README_TECHNICAL.md) ·
@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/9c1c8dc2-2d93-4434-958f-23d9f546ac55
 
 https://github.com/user-attachments/assets/c481af98-95d2-46b7-aac4-99a6be812e85
 
-The current `v0.7.4` contains additional systems and fixes that are not shown in these videos yet.
+The current `v0.7.5` contains additional systems and fixes that are not shown in these videos yet.
 
 ---
 
@@ -59,7 +59,13 @@ The current `v0.7.4` contains additional systems and fixes that are not shown in
 - Create and tune Race or Drift vehicle gameplay.
 - Edit collision, physics, cameras, lights, effects, sound and the currently supported HUD systems.
 - Configure Vehicle, Character and Soccer Pawns around imported assets or placeholders.
-- Build first-person gameplay with an eye camera, aim down sights and a configurable hitscan weapon.
+- Build first- **and** third-person shooter gameplay from one rig: eye camera or over-the-shoulder camera, aim down sights, telescopic sights with real magnification, configurable hitscan weapons, arms and a visible weapon.
+- Give characters a full traversal move set — crouch, slow walk, slide, roll, vault, mantle, ladders, climbable walls and ledge hanging with pull-up — shared by both camera views.
+- Author doors, ladders, carryable crates, delivery pads, buttons and pickups as plain data on any object, so a primitive or an imported model becomes interactive without a second code path.
+- Choose the shape of the inventory per project — no inventory, weapon slots, or a backpack that stores consumables — and drop, throw, swap and pick weapons back up off the ground.
+- Give characters health, armour, stamina and respawn through the same damage contract that makes props shootable.
+- See the rounds fly: tracers shaped by the weapon calibre and impact flashes, drawn from a fixed pool so sustained fire never costs more than the first shot.
+- Drop, throw and shoot loose objects and watch them fall, bounce and settle according to their mass.
 - Design on-foot audio in the Character Sound Designer: footsteps that change with the surface underfoot, weapon fire per weapon class, jump, landing and breathing. Every sound is synthesised procedurally by default, so a project has full character audio with no media files; any slot can be replaced with your own sample.
 - Assign rigged characters and Mixamo animations through Pawn Studio.
 - Create camera sequences with Cinema Studio.
@@ -87,11 +93,11 @@ Important projects should still be backed up as `.lkep.json` files or stored in 
 
 ---
 
-## From v0.0.1 to v0.7.4
+## From v0.0.1 to v0.7.5
 
 The first version, `v0.0.1`, was a small drift prototype created from one prompt.
 
-The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **25 public versioned milestones**, reaching `v0.7.4`.
+The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **26 public versioned milestones**, reaching `v0.7.5`.
 
 Each milestone preserves a real stage of the project rather than hiding the development history behind one final upload.
 
@@ -154,7 +160,9 @@ There is no mandatory framework, bundler or cloud backend.
 
 Lot King is usable, but still experimental.
 
-The vehicle and drift workflow is the strongest part today. Character animation, visual logic, Cinema Studio, P2P systems, browser compatibility and larger project round trips still need more testing and refinement. Faster authoring for common objectives, game rules and project-specific UI is also still missing.
+The vehicle and drift workflow is the strongest part today, and on-foot shooter gameplay is the fastest moving. Character animation, visual logic, Cinema Studio, P2P systems, browser compatibility and larger project round trips still need more testing and refinement. Faster authoring for common objectives, game rules and project-specific UI is also still missing.
+
+The FPS layer is playable end to end but not finished: item contacts are spheres against boxes rather than a rigid-body solver, hits leave a flash rather than a decal, and traversal is animated procedurally until real clips are bound. The current limits are listed in full in [First Person Pawn](docs/FIRST_PERSON_PAWN.md).
 
 Bugs and incomplete systems should be expected while development continues.
 
@@ -166,9 +174,10 @@ Feedback, testing, documentation, example projects, reusable logic and other for
 
 - [Technical README](README_TECHNICAL.md)
 - [Startup guide](HOW_TO_START.md)
-- [Current v0.7.5 development notes](RELEASE_NOTES_v0.7.5.md)
+- [Current v0.7.5 release notes](RELEASE_NOTES_v0.7.5.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Runtime modules](docs/RUNTIME_MODULES.md)
+- [First Person Pawn](docs/FIRST_PERSON_PAWN.md) — the shooter layer: rig, traversal, items, interactions, vitals and inventory
 - [Release history](docs/releases/)
 
 A screenshot-based manual may be added later, when the interface is stable enough that hundreds of screenshots will not immediately become outdated.
