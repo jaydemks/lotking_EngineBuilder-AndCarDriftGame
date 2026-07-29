@@ -90,9 +90,15 @@ function createSfx(deps){
   let engineSynthEnabled = true;
   function setEngineSynthEnabled(v){ engineSynthEnabled = !!v; }
   function stopEngineSynth(){
-    if(!ctx || !engineGain) return;
-    engineGain.gain.cancelScheduledValues(ctx.currentTime);
-    engineGain.gain.setTargetAtTime(0, ctx.currentTime, .025);
+    if(!ctx) return;
+    if(engineGain){
+      engineGain.gain.cancelScheduledValues(ctx.currentTime);
+      engineGain.gain.setTargetAtTime(0, ctx.currentTime, .025);
+    }
+    if(screechGain){
+      screechGain.gain.cancelScheduledValues(ctx.currentTime);
+      screechGain.gain.setTargetAtTime(0, ctx.currentTime, .025);
+    }
   }
 
   function update(rpm01, throttle, screech01){

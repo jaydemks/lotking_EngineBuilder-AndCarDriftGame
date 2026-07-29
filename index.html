@@ -25,7 +25,7 @@
   <meta name="twitter:description" content="Build, test and export multi-level 3D browser games and interactive experiences.">
   <meta name="twitter:image" content="https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/docs/media/LKE_YT_Thumb_A.png">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/lot-king.css?v=0.7.4-settings-scrollbar-1">
+  <link rel="stylesheet" href="css/lot-king.css?v=0.7.6-menu-options-1">
   <script src="js/runtime/console-policy.js?v=0.7.4-extension-channel-2"></script>
   <script type="application/ld+json">
   {
@@ -50,7 +50,7 @@
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "Game engine and 3D level editor",
         "operatingSystem": "Any operating system with a supported web browser",
-        "softwareVersion": "0.7.5",
+        "softwareVersion": "0.7.6",
         "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
@@ -112,6 +112,11 @@
         window.dispatchEvent(new CustomEvent('lot-king:index-menu-background-progress', {detail:event.data}));
         return;
       }
+      if(event.data.type === 'lot-king:menu-options-state'){
+        if(!menuFrame || event.source !== menuFrame.contentWindow) return;
+        document.body.classList.toggle('landing-options-open', !!event.data.open);
+        return;
+      }
       if(event.data.type !== 'lot-king:menu-background') return;
       window.__LK_MENU_BACKGROUND_READY = !!event.data.ready;
       window.__LK_MENU_BACKGROUND_LEVEL = event.data.level || null;
@@ -125,6 +130,7 @@
   <div id="menuBgHost" aria-hidden="true">
     <iframe id="menuBgFrame" title="Lot King interactive 3D menu background" src="gameplay.html?embedded=1&amp;menuPreview=editor" data-loaded="1"></iframe>
   </div>
+  <button id="landingSettingsBtn" type="button" title="Options" aria-label="Open audio and video options">⚙</button>
 
   <div id="menuLayer">
     <div id="overlay" class="menu-preloading">
@@ -180,7 +186,7 @@
   <footer id="landingSignature" aria-label="Project signature">
     <div class="landing-signature-main">
       <span>LOT KING ENGINE EDITOR</span>
-      <span class="landing-version">v0.7.5</span>
+      <span class="landing-version">v0.7.6</span>
       <a href="https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame" target="_blank" rel="noopener noreferrer" title="Open public GitHub repository">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path fill="currentColor" d="M8 0C3.58 0 0 3.67 0 8.2c0 3.62 2.29 6.69 5.47 7.77.4.08.55-.18.55-.4v-1.4c-2.23.5-2.7-1.1-2.7-1.1-.36-.95-.89-1.2-.89-1.2-.73-.51.06-.5.06-.5.8.06 1.23.85 1.23.85.72 1.27 1.89.9 2.35.69.07-.53.28-.9.51-1.1-1.78-.21-3.64-.91-3.64-4.04 0-.9.31-1.63.82-2.2-.08-.21-.36-1.05.08-2.18 0 0 .67-.22 2.2.84A7.48 7.48 0 0 1 8 3.96c.68 0 1.36.09 2 .28 1.53-1.06 2.2-.84 2.2-.84.44 1.13.16 1.97.08 2.18.51.57.82 1.3.82 2.2 0 3.14-1.87 3.83-3.65 4.03.29.26.54.76.54 1.53v2.27c0 .22.15.48.55.4A8.18 8.18 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z"/>
@@ -201,6 +207,7 @@
       var menuBgFrame = document.getElementById('menuBgFrame');
       var menuMusic = document.getElementById('menuMusicAudio');
       var musicMuteBtn = document.getElementById('landingMusicMute');
+      var landingSettingsBtn = document.getElementById('landingSettingsBtn');
       var started = false;
       var activeMenuMusicRole = 'editor-menu';
       var pendingRoleMenuSelection = null;
@@ -222,11 +229,18 @@
       var landingWelcomeLang = 'en';
       var landingWelcomeScheduled = false;
       var LANDING_WELCOME_HIDDEN_KEY = 'lotking.index.welcome.hidden.v1';
+      if(landingSettingsBtn){
+        landingSettingsBtn.addEventListener('click', function(){
+          if(!menuBgFrame || !menuBgFrame.contentWindow) return;
+          document.body.classList.add('landing-options-open');
+          menuBgFrame.contentWindow.postMessage({type:'lot-king:open-menu-options'}, '*');
+        });
+      }
       var LANDING_WELCOME_LANG_KEY = 'lotking.index.welcome.lang.v1';
       var LANDING_WELCOME_COPY = {
         en: {
           title: 'Welcome to Lot King Engine',
-          intro: 'This landing bridges the playable build and the engine editor. Version 0.7.5 adds Asset Scout, first-person gameplay and expanded character systems.',
+          intro: 'This landing bridges the playable build and the engine editor. Version 0.7.6 stabilizes first-person gameplay, third-person camera switching and explosive eliminations.',
           features: [
             'Asset Scout searches free online models and PBR textures directly from the editor',
             'New first-person Pawn, FPS Shooter Test level and configurable weapon systems',
@@ -239,7 +253,7 @@
         },
         it: {
           title: 'Benvenuto in Lot King Engine',
-          intro: 'Questa landing collega la build giocabile e l’editor del motore. La versione 0.7.5 aggiunge Asset Scout, il gameplay in prima persona e sistemi dei personaggi ampliati.',
+          intro: 'Questa landing collega la build giocabile e l’editor del motore. La versione 0.7.6 rende più stabile il gameplay in prima persona, il passaggio alla terza persona e le eliminazioni con esplosivi.',
           features: [
             'Asset Scout cerca modelli gratuiti e texture PBR online direttamente dall’editor',
             'Nuovo Pawn in prima persona, livello FPS Shooter Test e sistemi d’arma configurabili',

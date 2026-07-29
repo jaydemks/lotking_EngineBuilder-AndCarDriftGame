@@ -387,7 +387,7 @@ function registerFirstPersonNodes(registry){
   });
   registry.register({
     type:'event.onTargetDown', title:'On Target Down', category:'First Person Events',
-    description:'Runs when a shot reduces a damageable target to zero health.',
+    description:'Runs when weapon damage, including an explosion, reduces a damageable target to zero health.',
     event:'OnTargetDown',
     outputs:[thenOut, dataOut('damage', 'number'), dataOut('distance', 'number'), dataOut('headshot', 'boolean')],
   });

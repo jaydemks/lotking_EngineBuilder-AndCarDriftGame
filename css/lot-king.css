@@ -19,6 +19,24 @@ html,body {
     width:100%; height:100%; border:0; display:block;
     background:#000;
   }
+  #landingSettingsBtn {
+    position:fixed; top:18px; right:22px; z-index:72; width:52px; height:52px;
+    border-radius:8px; border:1px solid rgba(255,255,255,.22);
+    background:linear-gradient(180deg, rgba(78,84,96,.95), rgba(34,38,46,.95));
+    color:#e8ecf5; font-size:26px; font-weight:800; line-height:1; cursor:pointer;
+    box-shadow:0 8px 22px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.12);
+    transition:transform .28s cubic-bezier(.2,.9,.25,1), border-color .18s, color .18s, opacity .18s;
+  }
+  #landingSettingsBtn:hover,
+  body.landing-options-open #landingSettingsBtn {
+    transform:rotate(120deg) scale(1.04);
+    border-color:#ffd166;
+    color:#ffd166;
+  }
+  body.landing-options-open #menuBgHost { z-index:71; pointer-events:auto; }
+  body.showing-gameplay #landingSettingsBtn,
+  body.showing-editor #landingSettingsBtn,
+  body.menu-leaving #landingSettingsBtn { opacity:0; pointer-events:none; }
   body.lk-editor-ui-open #menuBgHost {
     opacity:0;
     visibility:hidden;
@@ -1083,7 +1101,7 @@ html,body {
 
   /* ---------- driving setup ---------- */
   #tuneDock {
-    position:absolute; top:18px; right:22px; width:min(360px, calc(100vw - 28px));
+    position:absolute; top:18px; right:84px; width:min(360px, calc(100vw - 28px));
     display:flex; justify-content:flex-end; pointer-events:auto;
   }
   #tuneBtn {
@@ -1181,7 +1199,7 @@ html,body {
   .tuneCurveSliders input { width:100%; accent-color:#4be3a0; }
   .tuneCurveSliders output { color:#4be3a0; font-weight:900; text-align:right; font-variant-numeric:tabular-nums; }
   #settingsBtn {
-    position:absolute; top:18px; right:84px; width:52px; height:52px; z-index:2;
+    position:absolute; top:18px; right:22px; width:52px; height:52px; z-index:2;
     border-radius:8px; border:1px solid rgba(255,255,255,.22);
     background:linear-gradient(180deg, rgba(78,84,96,.95), rgba(34,38,46,.95));
     color:#e8ecf5; font-size:26px; font-weight:800; line-height:1; cursor:pointer;
@@ -1292,6 +1310,20 @@ html,body {
   #settingsOverlay.editor [data-audio-row="car"],
   #settingsOverlay.editor [data-audio-row="sfx"] { display:none; }
   #settingsOverlay.editor .settingsTabs { grid-template-columns:1fr 1fr; }
+  #settingsOverlay.options-only .pauseActions,
+  #settingsOverlay.options-only [data-settings-tab="controls"],
+  #settingsOverlay.options-only [data-settings-tab="gameplay"],
+  #settingsOverlay.options-only [data-settings-section="controls"],
+  #settingsOverlay.options-only [data-settings-section="gameplay"] { display:none!important; }
+  #settingsOverlay.options-only .settingsTabs { max-width:340px; margin-inline:auto; }
+  body.lk-menu-presentation #hud {
+    display:block!important;
+    clip-path:none;
+    -webkit-clip-path:none;
+    overflow:visible;
+  }
+  body.lk-menu-presentation #hud > :not(#settingsBtn) { display:none!important; }
+  body.lk-menu-presentation #settingsBtn { display:block!important; pointer-events:auto; }
 
   /* ---------- preload bar ---------- */
   #loadBarWrap { width:280px; height:6px; background:rgba(255,255,255,.1); border-radius:3px; overflow:hidden; opacity:1; transition:opacity .18s ease; }
@@ -1959,8 +1991,9 @@ html,body {
 /* ---------------------------------------------- radar */
 .lk-fps-radar {
   position:absolute;
-  right:calc(22px + env(safe-area-inset-right, 0px));
-  top:calc(22px + env(safe-area-inset-top, 0px));
+  left:calc(22px + env(safe-area-inset-left, 0px));
+  top:50%;
+  transform:translateY(-50%);
   width:130px;
   height:130px;
   border-radius:50%;
@@ -2197,7 +2230,7 @@ html,body {
   .lk-fps-ammo b { font-size:22px; }
   .lk-fps-ammo em { display:none; }
   .lk-fps-vitals { left:14px; top:14px; width:150px; }
-  .lk-fps-radar { width:92px; height:92px; right:14px; top:14px; }
+  .lk-fps-radar { width:92px; height:92px; left:14px; top:50%; }
   .lk-fps-loadout { display:none; }
 }
 @media (prefers-reduced-motion: reduce){

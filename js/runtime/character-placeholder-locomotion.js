@@ -16,6 +16,13 @@
 function finite(value, fallback){ const n = Number(value); return Number.isFinite(n) ? n : fallback; }
 function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
 function normalizeName(name){ return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+function vectorLength(value){
+  return Math.hypot(
+    finite(value && value.x, 0),
+    finite(value && value.y, 0),
+    finite(value && value.z, 0)
+  );
+}
 
 // Scene element ids authored by the Character/Soccer template placeholder
 // rig (see logic-templates-character.js / logic-templates-soccer.js). Any
@@ -251,8 +258,13 @@ function createController(options){
     const parent = arm.shoulder.parent;
     if(!parent) return false;
 
-    const L1 = arm.restElbow.position.length();
-    const L2 = arm.hand.position.length();
+    // Rest poses are deliberately stored as serializable {x,y,z} snapshots,
+    // not live THREE.Vector3 instances. Treat both snapshot and runtime
+    // positions through the same structural contract: calling `.length()` on
+    // the snapshot threw once per frame as soon as third person enabled the
+    // support-hand IK, freezing play and flooding the console.
+    const L1 = vectorLength(arm.restElbow.position);
+    const L2 = vectorLength(arm.hand.position);
     if(L1 < 1e-4 || L2 < 1e-4) return false;
 
     parent.updateMatrixWorld(true);

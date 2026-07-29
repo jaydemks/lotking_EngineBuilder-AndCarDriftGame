@@ -27,6 +27,31 @@
 
 function finite(value, fallback){ const n = Number(value); return Number.isFinite(n) ? n : fallback; }
 function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
+function swingDoorPose(basis, angle, halfWidth, hinge, hingeAxis){
+  const start = basis || {x:0, z:0, rotY:0};
+  const width = Math.max(.001, Math.abs(finite(halfWidth, .5)));
+  const side = hinge === 'right' ? 1 : -1;
+  const offset = width * side;
+  const startYaw = finite(start.rotY, 0);
+  const yaw = startYaw + finite(angle, 0);
+  const axis = hingeAxis === 'z' || start.hingeAxis === 'z' ? 'z' : 'x';
+  // THREE local +X under yaw is (cos,-sin), local +Z is (sin,cos). Use the
+  // widest horizontal leaf axis, so doors authored across either X or Z hinge
+  // at a true outer edge.
+  const startAxisX = axis === 'z' ? Math.sin(startYaw) : Math.cos(startYaw);
+  const startAxisZ = axis === 'z' ? Math.cos(startYaw) : -Math.sin(startYaw);
+  const axisX = axis === 'z' ? Math.sin(yaw) : Math.cos(yaw);
+  const axisZ = axis === 'z' ? Math.cos(yaw) : -Math.sin(yaw);
+  const hingeX = finite(start.x, 0) + startAxisX * offset;
+  const hingeZ = finite(start.z, 0) + startAxisZ * offset;
+  return {
+    x:hingeX - axisX * offset,
+    z:hingeZ - axisZ * offset,
+    rotY:yaw,
+    hingeX,
+    hingeZ,
+  };
+}
 
 const TYPES = Object.freeze(['door', 'ladder', 'carry', 'dropZone', 'button', 'climb']);
 // Authored data is case-insensitive, but the canonical names are camelCase, so
@@ -58,6 +83,8 @@ function normalizeInteract(source){
     locked:src.locked === true,
     // door
     mode:src.mode === 'slide' ? 'slide' : 'swing',
+    hinge:src.hinge === 'right' ? 'right' : 'left',
+    hingeAxis:src.hingeAxis === 'x' || src.hingeAxis === 'z' ? src.hingeAxis : 'auto',
     openAngle:finite(src.openAngle, Math.PI / 2 * (src.hinge === 'right' ? -1 : 1)),
     slide:Array.isArray(src.slide) ? src.slide.slice(0, 3).map(v => finite(v, 0)) : [0, 0, 2.1],
     speed:clamp(finite(src.speed, 2.6), .1, 20),
@@ -158,11 +185,37 @@ function create(GAME){
 
   function captureBasis(object, record){
     if(record.basis) return record.basis;
+    const collider = object.userData && object.userData.collider && object.userData.collider.ref;
+    const scaleX = object.scale && Math.abs(finite(object.scale.x, 0));
+    const scaleZ = object.scale && Math.abs(finite(object.scale.z, 0));
+    const colliderHx = collider && collider.hx > 0 ? collider.hx : (scaleX || .5);
+    const colliderHz = collider && collider.hz > 0 ? collider.hz : (scaleZ || .1);
+    const hingeAxis = record.hingeAxis === 'x' || record.hingeAxis === 'z'
+      ? record.hingeAxis
+      : (colliderHz > colliderHx ? 'z' : 'x');
+    const halfWidth = hingeAxis === 'z' ? colliderHz : colliderHx;
     record.basis = {
       x:object.position.x, y:object.position.y, z:object.position.z,
       rotY:object.rotation ? object.rotation.y : 0,
+      halfWidth,
+      hingeAxis,
+      colliderHx,
+      colliderHz,
     };
     return record.basis;
+  }
+
+  // Arcade box colliders are AABBs. After the store synchronises the animated
+  // leaf, fit that AABB to its rotated width/depth so an open door no longer
+  // leaves the original invisible wall across the doorway.
+  function fitSwingCollider(object, basis, angle){
+    const collider = object.userData && object.userData.collider && object.userData.collider.ref;
+    if(!collider) return;
+    const cos = Math.abs(Math.cos(angle)), sin = Math.abs(Math.sin(angle));
+    collider.x = object.position.x;
+    collider.z = object.position.z;
+    collider.hx = basis.colliderHx * cos + basis.colliderHz * sin;
+    collider.hz = basis.colliderHx * sin + basis.colliderHz * cos;
   }
 
   // --- focus ---------------------------------------------------------------
@@ -409,9 +462,14 @@ function create(GAME){
           basis.y + record.slide[1] * record.progress,
           basis.z + record.slide[2] * record.progress);
       } else if(object.rotation){
-        object.rotation.y = basis.rotY + record.openAngle * record.progress;
+        const angle = record.openAngle * record.progress;
+        const pose = swingDoorPose(basis, angle, basis.halfWidth, record.hinge, basis.hingeAxis);
+        object.position.x = pose.x;
+        object.position.z = pose.z;
+        object.rotation.y = pose.rotY;
       }
       syncCollider(object);
+      if(record.mode === 'swing') fitSwingCollider(object, basis, record.openAngle * record.progress);
     });
 
     // Carried objects ride in front of the character, at the height a person
@@ -449,5 +507,5 @@ function install(GAME){
   return GAME.systems.interactions;
 }
 
-window.LK_RUNTIME_INTERACTIONS = Object.freeze({TYPES, PROMPTS, normalizeInteract, create, install});
+window.LK_RUNTIME_INTERACTIONS = Object.freeze({TYPES, PROMPTS, normalizeInteract, swingDoorPose, create, install});
 })();

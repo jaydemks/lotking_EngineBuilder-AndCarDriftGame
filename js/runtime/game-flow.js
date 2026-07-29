@@ -35,6 +35,7 @@ function create(options){
     if(!overlay) return;
     overlay.classList.remove('hidden');
     overlay.classList.remove('choosing-level');
+    call('setMenuPresentation', 'menu-overlay', true);
     call('refreshTouchControls');
   }
 
@@ -113,6 +114,8 @@ function create(options){
     call('resetGameplayCamera');
     const levelRole = call('currentLevelRole') || 'gameplay';
     const menuSession = levelRole === 'editor-menu' || levelRole === 'game-menu';
+    call('setMenuPresentation', 'menu-overlay', false);
+    call('setMenuPresentation', 'menu-session', menuSession);
     call('initGameplayPhysics', {levelRole, menuSession});
     setHudVisible(!menuSession);
     session.markStarted(editorPreview, editorPreviewMode);
@@ -148,6 +151,7 @@ function create(options){
     call('disposePhysicsWorld');
     call('disposeRenderLists');
     if(gameState.editorActive){
+      call('setMenuPresentation', 'menu-session', false);
       if(overlay){
         overlay.classList.remove('menu-preloading');
         overlay.classList.remove('choosing-level');
@@ -207,6 +211,7 @@ function create(options){
       showLevelSelect();
       return Promise.resolve(false);
     }
+    call('setMenuPresentation', 'menu-overlay', true);
     // Preserve the Play click's user activation across asynchronous runtime
     // preparation so free-look starts with a real pointer lock.
     call('armFreeCamera');

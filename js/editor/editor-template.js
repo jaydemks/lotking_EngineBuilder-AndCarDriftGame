@@ -45,7 +45,7 @@
     <button id="lkCamHelper" class="on" type="button" title="Toggle camera helpers">🎥 Cam</button>
     <button id="lkPipToggle" class="on" type="button" title="Toggle player camera preview">❐ Preview</button>
     <button id="lkAddMenu" type="button" title="Add object">+ Add ▾</button>
-    <button id="lkSoundDesigner" type="button" title="Character Sound Designer: footsteps, weapons, body foley">👣 Sounds</button>
+    <button id="lkSoundDesigner" type="button" title="Character Sound Designer: footsteps, weapons, explosions and body foley">🎚 Sound Lab</button>
     </div>
     <div class="lk-preview-tools" role="group" aria-label="Preview controls">
       <button id="lkPlay" type="button">▶ PREVIEW</button>

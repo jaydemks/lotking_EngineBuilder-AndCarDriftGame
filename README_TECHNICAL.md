@@ -6,6 +6,8 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
+The current `v0.7.6` cycle stabilizes the FPS layer, including first/third-person camera switching and lethal explosive damage.
+
 The released `v0.7.5` milestone adds **Asset Scout** (free online model and texture search imported straight into the project) and a **first-person Pawn** with its own FPS Shooter Test level. Both are additive: the existing import paths and the third-person character path are unchanged.
 
 The released `v0.7.4` milestone adds granular browser-storage inspection and recovery controls to the private workspace introduced in v0.7.3. Projects, levels, preferences, imported asset blobs, workspace handles, explicit caches and Lot King service workers can be audited from Editor Settings without exposing unrelated origin data. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.

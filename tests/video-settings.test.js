@@ -31,6 +31,20 @@ const adaptiveLow = api.adaptiveLowValues({quality:'extreme', antialiasing:'ssaa
 assert(adaptiveLow.quality === 'low' && adaptiveLow.antialiasing === 'off', 'adaptive fallback selects Low with antialiasing disabled');
 assert(adaptiveLow.shadows === false && adaptiveLow.ambientOcclusion === false, 'adaptive fallback disables dynamic shadows and ambient occlusion');
 assert(adaptiveLow.reflections === false && adaptiveLow.volumetricLighting === false, 'adaptive fallback disables reflections and volumetric light');
+const menuProfile = api.menuRenderValues({
+  quality:'extreme', renderResolution:2, textureSize:4096, antialiasing:'ssaa4x',
+  rendererMode:'raytracing', shadowQuality:'ultra', shadowDistance:180,
+  ambientOcclusion:true, reflections:true, volumetricLighting:true,
+});
+assert(menuProfile.quality === 'medium' && menuProfile.renderResolution === 1,
+  'menu presentation is capped at a bounded Medium / 100% manual-resolution profile');
+assert(menuProfile.textureSize === 1024 && menuProfile.antialiasing === 'fxaa',
+  'menu presentation cannot upload 4K textures or supersample');
+assert(menuProfile.rendererMode === 'webgl' && menuProfile.shadowQuality === 'low',
+  'menu presentation avoids the maximum renderer and shadow path');
+assert(menuProfile.ambientOcclusion === false && menuProfile.reflections === false && menuProfile.volumetricLighting === false,
+  'menu presentation disables heavyweight post effects');
+assert(api.menuRenderProfile.maxPixelRatio === 1, 'menu drawing buffers are capped at one pixel per CSS pixel');
 assert(Object.keys(api.shadowPresets).join(',') === 'low,medium,high,ultra', 'four explicit shadow-map profiles are available');
 assert(source.includes('mat.roughness = mat.userData.lkVideoBaseRoughness'), 'video settings restore authored PBR roughness');
 assert(source.includes('mat.metalness = mat.userData.lkVideoBaseMetalness'), 'video settings restore authored PBR metalness');

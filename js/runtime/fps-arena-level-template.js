@@ -974,7 +974,7 @@ function buildScene(baseScene){
     box('Yard Door Frame West', [-14.4, GROUND_Y + 1.4, 12], [.3, 2.8, 1.2], 'concreteWorn', true, {group:g});
     box('Yard Door Frame East', [-11.6, GROUND_Y + 1.4, 12], [.3, 2.8, 1.2], 'concreteWorn', true, {group:g});
     box('Yard Door (F)', [-13, GROUND_Y + 1.3, 12], [2.4, 2.6, .22], 'steel', true, {
-      group:g, interact:{type:'door', mode:'swing', openAngle:-1.5, speed:2.8, autoClose:8, range:3, label:'Open door'},
+      group:g, interact:{type:'door', mode:'swing', hinge:'left', openAngle:-1.5, speed:2.8, autoClose:8, range:3, label:'Open door'},
     });
 
     // --- ledge hang: 2.9 m, too tall to mantle from the ground -------------
@@ -1054,7 +1054,7 @@ function buildScene(baseScene){
     // A swing door back into the range proper, so the course is a loop rather
     // than a dead end.
     box('Range Access Door', [baseX - 2.5, GROUND_Y + 1.3, -48], [.28, 2.6, 2.4], 'steel', true, {
-      group:g, interact:{type:'door', mode:'swing', openAngle:-1.4, speed:2.6, autoClose:6},
+      group:g, interact:{type:'door', mode:'swing', hinge:'left', openAngle:-1.4, speed:2.6, autoClose:6},
     });
   }
 
@@ -1276,6 +1276,11 @@ function buildScene(baseScene){
   // density, and the grade is what carries the cool-shadow, warm-highlight
   // look the palette is mixed for.
   scene.player = Object.assign({}, scene.player || {}, {
+    // This level is owned by the Character Logic Pawn. The native singleton
+    // must not keep physics, engine audio or exhaust alive at its old spawn.
+    enabled:false,
+    hidden:true,
+    controllerIndex:null,
     cam:Object.assign({}, (scene.player || {}).cam || {}, {
       fogDensity:.0115,
       grade:{enabled:true, exposure:1.04, brightness:0, contrast:1.12, saturation:.97, gamma:1},
@@ -1284,7 +1289,7 @@ function buildScene(baseScene){
   scene.template = {
     id:'fps-shooter-test',
     name:'FPS Shooter Test',
-    version:3,
+    version:5,
     nativeEditable:true,
     setting:'Blackpine Urban Training Facility',
     zones:Object.keys(GROUP).map(key => GROUP[key]),

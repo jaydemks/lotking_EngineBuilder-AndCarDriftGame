@@ -1,6 +1,6 @@
 {
   "name": "lot-king-engine",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Browser-native 3D game engine and editor for building, testing and exporting multi-level games and interactive experiences.",
   "homepage": "https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/",
   "repository": {

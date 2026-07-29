@@ -18,6 +18,7 @@
      footsteps.stride*               how far the character walks per step
      weapons[<class>].{fire,tail,mech,dry,reloadOut,reloadIn,shell}
      body.{jump,land,breath}
+     effects.explosion                  world / weapon FX shared by every class
 
    The material under the feet comes from the movement snapshot, which reads it
    from the collider the character is standing on (`surface` on the collider or
@@ -119,10 +120,34 @@ const WEAPON_CLASSES = Object.freeze(WEAPON_DEFS.map(w => Object.freeze({id:w.id
 const MECH = voice(noiseVoice('bandpass', 3200, 5, .028, .55), null, ringVoice(2100, 12, .05, .2));
 const SHELL = voice(noiseVoice('highpass', 4200, 2, .05, .35), null, ringVoice(4600, 16, .19, .22), 3);
 
+// World/weapon effects are not tied to one firearm class. The shipped
+// explosion is an "808 impact": a fast low-frequency transient falling into a
+// long sine sub, with a filtered debris burst and a short body resonance.
+const EFFECT_DEFS = [
+  {id:'explosion', label:'808 Explosion',
+    recipe:voice(
+      noiseVoice('lowpass', 780, .7, .52, .92, -620),
+      toneVoice(86, 24, 1.08, 1.12, 'sine'),
+      ringVoice(128, 2.4, .62, .3),
+      3
+    ),
+    volume:1.18,
+    pitchRandom:.035,
+  },
+];
+const EFFECTS = Object.freeze(EFFECT_DEFS.map(effect => Object.freeze({id:effect.id, label:effect.label})));
+
 // ------------------------------------------------ default set
 
 function slot(recipe, volume, pitchRandom){
-  return {src:'', enabled:true, volume:finite(volume, 1), pitch:1, pitchRandom:finite(pitchRandom, .08), recipe:recipe};
+  return {
+    src:'',
+    enabled:true,
+    volume:finite(volume, 1),
+    pitch:1,
+    pitchRandom:finite(pitchRandom, .08),
+    recipe:normalizeRecipe(recipe),
+  };
 }
 
 function defaultSet(){
@@ -139,6 +164,10 @@ function defaultSet(){
       reloadIn:slot(MECH, .7, .1),
       shell:slot(SHELL, .5, .18),
     };
+  });
+  const effects = {};
+  EFFECT_DEFS.forEach(def => {
+    effects[def.id] = slot(def.recipe, def.volume, def.pitchRandom);
   });
   return {
     id:'default-foley',
@@ -168,10 +197,50 @@ function defaultSet(){
       breathInterval:1.6,
     },
     weapons:weapons,
+    effects,
   };
 }
 
 // ------------------------------------------------ normalization
+
+function normalizeRecipe(raw){
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const out = {grains:clamp(Math.round(finite(source.grains, 0)), 0, 8)};
+  if(source.noise && typeof source.noise === 'object'){
+    const n = source.noise;
+    out.noise = {
+      type:['lowpass','bandpass','highpass'].includes(n.type) ? n.type : 'bandpass',
+      freq:clamp(finite(n.freq, 900), 30, 18000),
+      q:clamp(finite(n.q, 1), .0001, 30),
+      decay:clamp(finite(n.decay, .1), .01, 4),
+      level:clamp(finite(n.level, .7), 0, 4),
+      sweep:clamp(finite(n.sweep, 0), -16000, 16000),
+    };
+    if(n.enabled === false) out.noise.enabled = false;
+  }
+  if(source.tone && typeof source.tone === 'object'){
+    const t = source.tone;
+    out.tone = {
+      freq:clamp(finite(t.freq, 90), 20, 8000),
+      freqEnd:clamp(finite(t.freqEnd, 45), 20, 8000),
+      decay:clamp(finite(t.decay, .2), .01, 4),
+      level:clamp(finite(t.level, .5), 0, 4),
+      wave:['sine','triangle','sawtooth','square'].includes(t.wave) ? t.wave : 'sine',
+    };
+    if(t.enabled === false) out.tone.enabled = false;
+  }
+  if(source.ring && typeof source.ring === 'object'){
+    const r = source.ring;
+    out.ring = {
+      freq:clamp(finite(r.freq, 900), 40, 16000),
+      q:clamp(finite(r.q, 6), 1, 30),
+      decay:clamp(finite(r.decay, .2), .01, 4),
+      level:clamp(finite(r.level, .25), 0, 4),
+    };
+    if(r.enabled === false) out.ring.enabled = false;
+  }
+  return out;
+}
 
 function normalizeSlot(raw, base){
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -181,9 +250,10 @@ function normalizeSlot(raw, base){
     volume:clamp(finite(src.volume, base.volume), 0, 4),
     pitch:clamp(finite(src.pitch, base.pitch), .25, 4),
     pitchRandom:clamp(finite(src.pitchRandom, base.pitchRandom), 0, 1),
-    // Recipes are authored data too, but the editor only exposes the numbers
-    // it knows; anything missing falls back to the shipped recipe.
-    recipe:src.recipe && typeof src.recipe === 'object' ? src.recipe : base.recipe,
+    // Each recipe is cloned into independent, validated module data. Besides
+    // protecting the shipped defaults from live editor mutation, this lets
+    // hand-authored/older partial modules degrade to a valid sound.
+    recipe:normalizeRecipe(src.recipe && typeof src.recipe === 'object' ? src.recipe : base.recipe),
   };
 }
 
@@ -218,6 +288,10 @@ function normalizeSet(raw){
     Object.keys(out.weapons[def.id]).forEach(key => {
       out.weapons[def.id][key] = normalizeSlot(src[key], out.weapons[def.id][key]);
     });
+  });
+  const effects = raw.effects || {};
+  EFFECT_DEFS.forEach(def => {
+    out.effects[def.id] = normalizeSlot(effects[def.id], out.effects[def.id]);
   });
   return out;
 }
@@ -327,7 +401,7 @@ function create(deps){
   function playRecipe(context, dest, recipe, at, gain, pitch){
     if(!recipe) return;
     const n = recipe.noise;
-    if(n){
+    if(n && n.enabled !== false){
       const grains = Math.max(1, finite(recipe.grains, 0) || 1);
       for(let g = 0; g < grains; g++){
         const jitter = g === 0 ? 0 : Math.random() * .035;
@@ -351,7 +425,7 @@ function create(deps){
       }
     }
     const t = recipe.tone;
-    if(t){
+    if(t && t.enabled !== false){
       const osc = context.createOscillator();
       osc.type = t.wave;
       osc.frequency.setValueAtTime(clamp(t.freq * pitch, 20, 8000), at);
@@ -365,7 +439,7 @@ function create(deps){
       osc.stop(at + t.decay + .05);
     }
     const r = recipe.ring;
-    if(r){
+    if(r && r.enabled !== false){
       // The material's own resonance: noise through a very narrow band reads as
       // the surface ringing, which is what separates tile from carpet.
       const source = context.createBufferSource();
@@ -476,10 +550,22 @@ function create(deps){
     return false;
   }
 
+  function effectEvent(key, pawn){
+    const active = setFor(pawn);
+    return active.effects && active.effects[key]
+      ? playSlot(active.effects[key], 1, 1, active)
+      : false;
+  }
+
   // The weapon events already travel on the shared Pawn event channel, so
   // hooking them needs no changes anywhere else.
   function onPawnEvent(event){
     const detail = event && event.detail || {};
+    if(detail.type === 'OnExplosion'){
+      const pawn = options.pawnById ? options.pawnById(detail.pawnId) : null;
+      effectEvent('explosion', pawn);
+      return;
+    }
     if(String(detail.type || '').indexOf('OnWeapon') !== 0) return;
     const rig = options.activeWeapon ? options.activeWeapon(detail.pawnId) : null;
     const pawn = options.pawnById ? options.pawnById(detail.pawnId) : null;
@@ -498,6 +584,7 @@ function create(deps){
     footstep,
     jump,
     weaponEvent,
+    effectEvent,
     // Single-slot playback, used by the editor to audition one sound at a time
     // through the same path the game uses.
     playBody(key){ return playSlot(set.body[key], 1, 1); },
@@ -505,6 +592,7 @@ function create(deps){
       const slots = set.weapons[weaponClass];
       return slots ? playSlot(slots[key], 1, 1) : false;
     },
+    playEffect(key){ return set.effects && set.effects[key] ? playSlot(set.effects[key], 1, 1) : false; },
     surfaces:() => SURFACES,
     weaponClasses:() => WEAPON_CLASSES,
     dispose(){
@@ -526,10 +614,12 @@ function install(GAME, deps){
 window.LK_RUNTIME_CHARACTER_AUDIO = Object.freeze({
   SURFACES,
   WEAPON_CLASSES,
+  EFFECTS,
   DEFAULT_SURFACE,
   defaultSet,
   normalizeSet,
   normalizeSlot,
+  normalizeRecipe,
   weaponClassFor,
   createGait,
   create,

@@ -41,6 +41,16 @@ function el(tag, className, text){
 }
 function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
 function finite(value, fallback){ const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+function projectRadarOffset(dx, dz, yaw){
+  const angle = finite(yaw, 0);
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  // Engine heading faces (sin yaw, cos yaw). Character input inherits the
+  // vehicle steering sign (D/right is negative local X), so screen-right is
+  // (-cos yaw, sin yaw). Canvas Y grows downward, so forward is negated too.
+  const x = -finite(dx, 0) * cos + finite(dz, 0) * sin;
+  const y = -(finite(dx, 0) * sin + finite(dz, 0) * cos);
+  return {x:x === 0 ? 0 : x, y:y === 0 ? 0 : y};
+}
 
 function create(GAME){
   let root = null;
@@ -294,14 +304,9 @@ function create(GAME){
     const scale = half / RADAR_RANGE;
     const origin = pawn.owner.position;
     const yaw = rig ? rig.viewAngles().yaw : finite(pawn.owner.rotation && pawn.owner.rotation.y, 0);
-    // World heading `yaw` faces (sin, cos); rotating by -yaw puts it at the top.
-    const cos = Math.cos(-yaw), sin = Math.sin(-yaw);
     const project = (x, z) => {
-      const dx = x - origin.x, dz = z - origin.z;
-      // Screen X is world right, screen Y is negative world forward.
-      const rx = dx * cos - dz * sin;
-      const rz = dx * sin + dz * cos;
-      return [half + rx * scale, half + rz * scale];
+      const offset = projectRadarOffset(x - origin.x, z - origin.z, yaw);
+      return [half + offset.x * scale, half + offset.y * scale];
     };
 
     ctx.clearRect(0, 0, size, size);
@@ -324,7 +329,9 @@ function create(GAME){
       ctx.save();
       const [px, py] = project(col.x, col.z);
       ctx.translate(px, py);
-      ctx.rotate(-yaw);
+      // The lateral projection above is mirrored to match player-right, so the
+      // world rectangle rotates with +yaw in canvas space.
+      ctx.rotate(yaw);
       ctx.fillRect(-col.hx * scale, -col.hz * scale, col.hx * 2 * scale, col.hz * 2 * scale);
       ctx.restore();
     }
@@ -489,5 +496,5 @@ function create(GAME){
   return Object.freeze({update, prewarm, dispose, toast, isVisible:() => visible});
 }
 
-window.LK_RUNTIME_FPS_HUD = Object.freeze({create});
+window.LK_RUNTIME_FPS_HUD = Object.freeze({create, projectRadarOffset});
 })();

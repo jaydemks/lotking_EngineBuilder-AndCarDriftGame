@@ -75,7 +75,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Gameplay/editor session state for launched tracks, editor preview, pending loads, selected project, and loaded-level flags.
 
 - `js/runtime/game-flow.js`
-  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, pre-benchmark gating, play-state orchestration, and cleanup of session-only camera overrides. Browser gameplay, Play Preview and playable exports use the same flow.
+  Track launch, editor preview/simulate launch, unload/back-to-menu behavior, HUD visibility, session transitions, menu-presentation profile ownership, pre-benchmark gating, play-state orchestration, and cleanup of session-only camera overrides. Browser gameplay, Play Preview and playable exports use the same flow.
 
 - Runtime scene/cinema camera override
   `lot-king.js` applies the exclusive active Scene Camera for non-Pawn levels and evaluates Cinema Studio Movie Track camera cuts after the normal Player Camera update, ensuring the selected scene/timeline camera owns the final Player 1 render. Logic services dispatch the same start/stop contract to editor preview and standalone gameplay.
@@ -126,7 +126,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Generic humanoid ground-movement controller (design adapted from three-player-controller, dependency-free): camera-relative or heading-relative input, walk/run/sprint smoothing, gravity + jump with air control, ground detection, height-aware collision with automatic step-up onto walkable colliders, the material underfoot reported in the frame snapshot, pushback against the arcade collider lists and camera view presets (third / close / first-person lite). Consumed by the Soccer Pawn and reusable by future human-type Pawns.
 
 - `js/runtime/character-audio.js`
-  Character Sound Sets: on-foot audio for footsteps, weapons and body foley, procedural by default. Each slot is a synthesis recipe (filtered noise burst, pitched sweep, high-Q material ring, optional grains) plus an optional sample that wins when it loads, so an empty or broken path degrades to sound rather than to silence. Footsteps are spaced by distance walked with separate walk/run strides and pick their recipe from the surface in the movement snapshot; weapon audio is classified per weapon class and driven by the weapon events already on the Pawn event channel. The decision layer (`defaultSet`, `normalizeSet`, `weaponClassFor`, `createGait`) is DOM-free and node-testable; only the Web Audio graph needs a browser.
+  Character Sound Sets: on-foot audio for footsteps, weapons, explosive FX and body foley, procedural by default. Each slot is a modular synthesis recipe (filtered noise burst, pitched/sub sweep, high-Q material ring, optional grains) plus an optional sample that wins when it loads, so an empty or broken path degrades to sound rather than to silence. Footsteps are spaced by distance walked with separate walk/run strides and pick their recipe from the surface in the movement snapshot; weapon and explosion audio is driven by the Pawn event channel. The shipped explosion layers a debris transient, resonant body and 808-style sub drop. The decision layer (`defaultSet`, `normalizeSet`, `weaponClassFor`, `createGait`) is DOM-free and node-testable; only the Web Audio graph needs a browser.
 
 - `js/runtime/soccer-locomotion.js`
   Legacy filename for the shared Character locomotion module. It exports the generic `LK_RUNTIME_CHARACTER_LOCOMOTION` contract (and the older Soccer alias): velocity damping, metadata-driven Motion Set selection, weighted direction/speed blends, stride matching, one-shot actions and per-bone Edit Rig pose-layer blending. It canonicalizes Mixamo/Blender track names and uses r185 `SkeletonUtils.retargetClip()` for real source/target skeletons, including armature-span compensation for hip translation.
@@ -309,7 +309,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Soundhud/radio UI, TAB interactions, editor HUD handles, player radio volume, bass boost, imported tracks, and possessed-vehicle/specific-actor/global ownership gating.
 
 - `js/runtime/settings-menu.js`
-  Settings and pause-menu DOM bindings, audio sliders, video quality controls, persistent gameplay difficulty selection, editor/game menu mode handling, source-aware cursor behavior, gamepad menu navigation, and focus restoration after closing the menu. Keyboard/mouse-opened menus release pointer lock and show the UI cursor; gamepad/touch-opened menus keep cursor-hidden navigation semantics.
+  Settings and pause-menu DOM bindings, audio sliders, video quality controls, persistent gameplay difficulty selection, editor/game/options-only modes, source-aware cursor behavior, gamepad menu navigation, and focus restoration after closing the menu. It derives a transient bounded render profile while any menu reason is active, leaving authored/player gameplay values unchanged. `GAME.ui.menuActions.run('options')` and `GAME.actions.openMenuOptions()` expose the Audio/Video-only view to built-in and future editor-authored menu UI. Keyboard/mouse-opened menus release pointer lock and show the UI cursor; gamepad/touch-opened menus keep cursor-hidden navigation semantics.
 
 ## Audio and Music
 

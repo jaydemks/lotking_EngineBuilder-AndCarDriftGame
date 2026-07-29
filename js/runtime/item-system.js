@@ -808,13 +808,43 @@ function create(GAME){
       const dx = target.position.x - at.x, dy = target.position.y - at.y, dz = target.position.z - at.z;
       const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if(distance > fuse.radius) return;
-      const falloff = 1 - distance / fuse.radius;
+      // `radius` is the authored damage area: every damageable target inside it
+      // receives the configured grenade damage. Only the physical push falls
+      // off with distance. The old shared linear falloff made the first/nearest
+      // target die while the rest of the same group were merely launched.
+      const impulseFalloff = clamp(1 - distance / Math.max(.001, fuse.radius), 0, 1);
       if(target.userData && target.userData.damageable && runtime && runtime.applyDamage){
-        runtime.applyDamage(target, fuse.damage * falloff);
+        const applied = runtime.applyDamage(target, fuse.damage);
+        // Hitscan publishes the lethal result after applying damage; explosions
+        // must cross the same event boundary. Without it the health reached
+        // zero and the blast impulse launched the target, but its Logic graph
+        // never entered the down/score/respawn chain.
+        if(applied && applied.killed){
+          emit('OnTargetDown', {
+            pawnId:fuse.pawnId,
+            object:target,
+            holder:target,
+            point:{x:target.position.x, y:target.position.y, z:target.position.z},
+            origin:{x:at.x, y:at.y, z:at.z},
+            distance,
+            damage:applied.damage,
+            health:applied.health,
+            killed:true,
+            headshot:false,
+            explosion:true,
+            preset:fuse.preset,
+          });
+        }
       }
-      impulse(target, {x:dx, y:dy + distance * .4, z:dz}, fuse.damage * falloff * .25);
+      impulse(target, {x:dx, y:dy + distance * .4, z:dz}, fuse.damage * impulseFalloff * .25);
     });
-    emit('OnExplosion', {at:{x:at.x, y:at.y, z:at.z}, damage:fuse.damage, radius:fuse.radius, preset:fuse.preset});
+    emit('OnExplosion', {
+      pawnId:fuse.pawnId,
+      at:{x:at.x, y:at.y, z:at.z},
+      damage:fuse.damage,
+      radius:fuse.radius,
+      preset:fuse.preset,
+    });
     removeItem(object);
     return true;
   }

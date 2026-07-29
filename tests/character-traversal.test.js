@@ -400,6 +400,40 @@ test('a target absorbs shots while it stands and only falls once it is down', ()
   assert.ok(board.position.z !== before, 'a killing shot knocks it over');
 });
 
+test('a grenade has a lethal inner blast and eliminates every nearby target', () => {
+  const GAME = fakeGame();
+  const items = ITEMS.create(GAME);
+  // Under the old origin-to-edge linear falloff, only the first target took
+  // the 100 damage required to die; its neighbours were merely launched.
+  const targets=[.2,3.5,6.5].map((x,index)=>({
+    name:'Grenade Target '+(index+1),
+    visible:true,
+    parent:{},
+    position:{x,y:0,z:0},
+    rotation:{x:0,y:0,z:0},
+    userData:{damageable:{health:100,maxHealth:100}},
+  }));
+  GAME.world.registry.push(...targets);
+  const grenade = {
+    position:{x:0,y:0,z:0},
+    parent:{remove(){}},
+    userData:{thrown:{damage:110,radius:7,pawnId:'thrower',preset:'grenade'}},
+  };
+
+  assert.equal(items.detonate(grenade),true);
+  targets.forEach(target=>assert.equal(target.userData.damageable.health,0,target.name+' must be eliminated'));
+  const downs=events.filter(detail=>detail&&detail.type==='OnTargetDown');
+  assert.equal(downs.length,targets.length,'one blast must publish one elimination per killed target');
+  assert.deepEqual(downs.map(detail=>detail.holder),targets);
+  downs.forEach(detail=>{
+    assert.equal(detail.pawnId,'thrower');
+    assert.equal(detail.explosion,true);
+    assert.equal(detail.killed,true);
+  });
+  const explosion=events.find(detail=>detail&&detail.type==='OnExplosion');
+  assert.equal(explosion.pawnId,'thrower','explosion audio and Logic receive the throwing Pawn');
+});
+
 test('the seven roles fill from the first empty one, not by displacement', () => {
   const GAME = fakeGame();
   const pawn = fakePawn(GAME);
@@ -751,6 +785,7 @@ test('interaction descriptors normalize type, range and door mode', () => {
   assert.equal(door.type, 'door');
   assert.equal(door.mode, 'slide');
   assert.equal(door.range, 14, 'range clamps');
+  assert.equal(INTERACT.normalizeInteract({type:'door', hinge:'right'}).hinge, 'right');
   assert.equal(INTERACT.normalizeInteract({type:'nope'}).type, 'button', 'an unknown type is a plain button');
 });
 
@@ -777,6 +812,35 @@ test('a door animates its transform and drives its collider with it', () => {
   assert.ok(door.position.x > 3.9, 'the door reaches its open offset');
   pawn.owner.position.x = 3.5;   // follow the leaf, which slid out of reach
   assert.equal(system.focus(pawn).prompt, 'Close', 'the prompt now offers the opposite verb');
+});
+
+test('a swing door rotates around its hinge and clears the doorway collider', () => {
+  const GAME = fakeGame();
+  const collider = boxCollider(0, 1.3, 3, 1.2, 1.3, .11);
+  const door = {
+    name:'Swing Door',
+    position:{x:0, y:1.3, z:3},
+    rotation:{x:0, y:0, z:0},
+    userData:{interact:{type:'door', mode:'swing', hinge:'left', openAngle:-Math.PI/2, speed:5, range:4},
+      collider:{ref:collider}},
+  };
+  GAME.world.registry.push(door);
+  const system = INTERACT.create(GAME);
+  const pawn = fakePawn(GAME);
+  pawn.owner.position.z = 2;
+
+  assert.equal(system.trigger(pawn).open,true);
+  for(let i=0;i<20;i++) system.update(.05,[pawn]);
+
+  assert.ok(Math.abs(door.position.x+1.2)<1e-6,'the centre moves around the left leaf edge');
+  assert.ok(Math.abs(door.position.z-4.2)<1e-6,'the leaf ends perpendicular to the doorway');
+  assert.ok(collider.hx<.12,'the open leaf collider becomes thin across the doorway');
+  assert.ok(Math.abs(collider.x)>collider.hx,'the original centre of the doorway is no longer blocked');
+  const pose=INTERACT.swingDoorPose({x:0,z:3,rotY:0},-Math.PI/2,1.2,'left');
+  assert.ok(Math.abs(pose.hingeX+1.2)<1e-9&&Math.abs(pose.hingeZ-3)<1e-9,'the hinge remains fixed');
+  const zPose=INTERACT.swingDoorPose({x:5,z:0,rotY:0,hingeAxis:'z'},Math.PI/2,1.2,'left','z');
+  assert.ok(Math.abs(zPose.hingeX-5)<1e-9&&Math.abs(zPose.hingeZ+1.2)<1e-9,
+    'a leaf authored across Z selects its Z edge as the hinge');
 });
 
 test('carrying an object disables its collider and delivering it re-enables it', () => {

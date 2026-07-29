@@ -181,6 +181,34 @@ test('character placeholder is a symmetric jointed T-pose', () => {
   assert.ok(bounds.max.y>1.8&&bounds.min.y>=0,'placeholder must have coherent humanoid height');
 });
 
+test('FPS third-person support-hand IK accepts serialized rest-pose positions', () => {
+  const THREE=require('three');
+  const runtime=global.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION;
+  const rig=runtime.createVisual(THREE,{});
+  const controller=runtime.createController({});
+  const previousThree=global.THREE;
+  global.THREE=THREE;
+  try{
+    assert.equal(controller.bind(rig),true);
+    const frame={
+      x:0,z:0,speed:0,grounded:true,
+      weapon:{
+        carry:1,aim:1,pitch:0,side:1,twoHanded:true,
+        // The third-person weapon view model publishes this as plain world-space
+        // coordinates on the frame after the camera changes view.
+        supportTarget:{x:-.18,y:1.28,z:.34},
+      },
+    };
+    assert.doesNotThrow(() => {
+      for(let i=0;i<3;i++) controller.update(frame,1/60);
+    },'switching an armed procedural character to third person must not break the frame loop');
+  }finally{
+    controller.dispose();
+    if(previousThree===undefined)delete global.THREE;
+    else global.THREE=previousThree;
+  }
+});
+
 test('motion database selects by phase direction and speed', () => {
   const motion=global.LK_RUNTIME_CHARACTER_ANIMATION_SET;
   const set=motion.normalize([

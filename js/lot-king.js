@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.7.4',
+  version: '0.7.6',
   assets: null,
   core: {},
   world: {},
@@ -227,6 +227,9 @@ const VIDEO_SETTINGS = window.LK_RUNTIME_SETTINGS_MENU.createVideo({
   scene,
   pixelRatio: () => devicePixelRatio,
   size: () => ({width: innerWidth, height: innerHeight}),
+  initialPresentation: window.__LK_MENU_PREVIEW
+    ? 'menu-preview'
+    : (!window.__LK_STANDALONE_EDITOR && !window.__LK_AUTOLAUNCH_LEVEL ? 'menu-overlay' : ''),
 });
 const VIDEO = VIDEO_SETTINGS.values;
 function applyVideoSettings(options){
@@ -537,9 +540,21 @@ function cleanupDetachedPlayerEntities(prefix){
 function removePlayerAuxLight(index){ const result = PLAYER_LIGHT_RIG.removeAux(index); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
 function duplicatePlayerAuxLight(index){ const result = PLAYER_LIGHT_RIG.duplicateAux(index); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
 function movePlayerAuxLight(index, direction){ const result = PLAYER_LIGHT_RIG.moveAux(index, direction); cleanupDetachedPlayerEntities('player_aux_light_'); return result; }
+function nativePlayerRuntimeActive(){
+  const player = GAME && GAME.player;
+  if(!player || player.enabled === false || player.hidden === true) return false;
+  if(player.car && player.car.visible === false) return false;
+  // Possession is the runtime authority. A Character/Vehicle Logic Pawn that
+  // owns P1 must silence the native singleton even if an old level snapshot
+  // left that singleton enabled: otherwise its engine and exhaust keep running
+  // invisibly at the native spawn.
+  const owner = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+  return !(owner && owner.id !== 'native-player-car' && owner.possessed !== false &&
+    owner.enabled !== false && owner.hidden !== true);
+}
 function applyPlayerExhaustConfig(){
   ensureExhaustRigs();
-  const nativeActive=!!(GAME.player&&GAME.player.enabled!==false&&GAME.player.hidden!==true);
+  const nativeActive=nativePlayerRuntimeActive();
   const show = nativeActive && !!PLAYER_EXHAUST_CFG.dummyVisible && !!GAME.state.editorActive;
   for(const rig of playerExhaustRig.sources) if(rig && rig.helper) rig.helper.visible = show;
 }
@@ -1062,6 +1077,13 @@ function initSettingsMenu(){
     shouldShowMenuCursor: shouldShowMenuCursorForSource,
     applyRuntimeCursor: syncRuntimeCursorState,
     restoreRuntimeFocus: restoreRuntimeFocusAfterMenuClose,
+    resolveButtonMode: () => VIDEO_SETTINGS.isMenuPresentation() ? 'options' : (GAME.state.editorActive ? 'editor' : 'game'),
+    onPresentationChange: open => VIDEO_SETTINGS.setPresentationReason('settings-overlay', open),
+    onOpenChange: (open, mode) => {
+      if(IS_EMBEDDED_GAMEPLAY && MENU_PREVIEW_MODE && window.parent && window.parent !== window){
+        window.parent.postMessage({type:'lot-king:menu-options-state', open:!!open, mode}, '*');
+      }
+    },
     onEditorExit: () => {
       if(GAME.editor) GAME.editor.exit(false);
     },
@@ -1072,6 +1094,7 @@ function initSettingsMenu(){
   setSettingsOpen = SETTINGS_MENU.setOpen;
   toggleSettingsMenu = SETTINGS_MENU.toggle;
   GAME.actions.openSettingsTab = (tab, mode) => SETTINGS_MENU.openTab(tab, mode || (GAME.state.editorActive ? 'editor' : 'game'), {source:'mouse'});
+  GAME.actions.openMenuOptions = options => SETTINGS_MENU.openOptions(options);
 }
 let handbrake = false, driftAngle = 0, speedKmh = 0, isDrifting = false, lastLatG = 0;
 let axPrev = 0;                 // longitudinal accel of the previous step (weight transfer)
@@ -1650,6 +1673,10 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
 }
 
 function updateCar(dt){
+  if(!nativePlayerRuntimeActive()){
+    P.vF = 0; P.vR = 0; P.yawRate = 0; P.steer = 0;
+    return {vF:0, vR:0, drifting:false};
+  }
   const cannonState = updateCarCannon(dt);
   if(cannonState) return cannonState;
   if(GAME.player && GAME.player.enabled === false){
@@ -2169,7 +2196,7 @@ function spawnExhaustParticle(anchor, fire, intensity, sourceVelocity, configOve
 function updatePlayerExhaust(dt){
   applyPlayerExhaustConfig();
   const cfg = PLAYER_EXHAUST_CFG;
-  if(GAME.player && (GAME.player.enabled === false || GAME.player.hidden === true)){
+  if(!nativePlayerRuntimeActive()){
     exhaustSmokeAcc = 0;
     exhaustFireAcc = 0;
     exhaustTestPulse = 0;
@@ -2674,9 +2701,12 @@ function cycleGameplayCameraMode(){
   // this only reports the result rather than cycling anything.
   const rig = activeFirstPersonRig();
   if(rig){
-    const view = rig.viewMode ? rig.viewMode() : 'first';
-    popup(view === 'first' ? 'FIRST PERSON' : 'THIRD PERSON', '#9db4ff');
-    return view;
+    // This callback runs before the Character Pawn consumes the same input
+    // edge. Report the destination, not the still-current view.
+    const current = rig.viewMode ? rig.viewMode() : 'first';
+    const next = current === 'first' ? 'third' : 'first';
+    popup(next === 'first' ? 'FIRST PERSON' : 'THIRD PERSON', '#9db4ff');
+    return next;
   }
   const modes = ['free', 'arcade', 'cinematic'];
   const current = activeCameraMode();
@@ -3436,10 +3466,11 @@ const ENGINE_AUDIO = window.LK_RUNTIME_ENGINE_AUDIO.create({
     return Promise.resolve(src);
   },
 });
-// On-foot audio: footsteps by surface, weapon fire by class, body foley. It is
-// procedural by default, so it works with no media files; a Character Sound Set
-// can point any slot at a sample. Weapon events arrive on the shared Pawn event
-// channel, so the weapon here is only resolved to pick the right profile.
+// On-foot audio: footsteps by surface, weapon fire by class, explosive FX and
+// body foley. It is procedural by default, so it works with no media files; a
+// Character Sound Set can point any slot at a sample. Weapon/explosion events
+// arrive on the shared Pawn event channel, so the weapon here is only resolved
+// to pick the right profile.
 const CHARACTER_AUDIO = window.LK_RUNTIME_CHARACTER_AUDIO ? window.LK_RUNTIME_CHARACTER_AUDIO.install(GAME, {
   audio: SFX,
   activeWeapon: pawnId => {
@@ -4340,7 +4371,7 @@ RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
   warmPhysics:() => {
     if(!initPhysicsWorld()) return false;
     rebuildPhysicsStatics();
-    setPhysicsPlayerActive(!GAME.player || GAME.player.enabled !== false);
+    setPhysicsPlayerActive(nativePlayerRuntimeActive());
     if(PHYS.carBody) syncCarBodyToPlayer();
     return true;
   },
@@ -4412,16 +4443,17 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   resetGameplayCamera: resetCameraState,
   refreshTouchControls,
   setSettingsOpen,
+  setMenuPresentation: (reason, active) => VIDEO_SETTINGS.setPresentationReason(reason, active),
   setTuneOpen,
   initGameplayPhysics: context => {
     const menuSession = !!(context && context.menuSession);
     if(initPhysicsWorld()){
       rebuildPhysicsStatics();
-      setPhysicsPlayerActive(!menuSession && (!GAME.player || GAME.player.enabled !== false));
+      setPhysicsPlayerActive(!menuSession && nativePlayerRuntimeActive());
       if(PHYS.carBody) syncCarBodyToPlayer();
     }
     SFX.init();
-    if(!menuSession && GAME.player && GAME.player.enabled !== false) ENGINE_AUDIO.start();   // sample engine + accensione (fallback synth se set assente)
+    if(!menuSession && nativePlayerRuntimeActive()) ENGINE_AUDIO.start();   // sample engine + accensione (fallback synth se set assente)
     else ENGINE_AUDIO.stop();
   },
   beginLogicRuntime: () => { if(GAME.systems && GAME.systems.logic && GAME.systems.logic.rebuild) GAME.systems.logic.rebuild(); },
@@ -4536,7 +4568,7 @@ Object.assign(GAME.player, {
     this.hidden = !this.enabled;
     car.visible = this.enabled && !this.hidden;
     if(PHYS.world && setPhysicsPlayerActive){
-      setPhysicsPlayerActive(this.enabled);
+      setPhysicsPlayerActive(nativePlayerRuntimeActive());
       if(this.enabled && PHYS.carBody) syncCarBodyToPlayer();
     }
     if(!this.enabled){
@@ -4555,7 +4587,7 @@ Object.assign(GAME.player, {
       for(const p of exhaustPool){p.life=p.max;p.s.visible=false;p.flame.visible=false;p.smokeMaterial.opacity=0;p.fireMaterial.opacity=0;}
       for(const rig of playerExhaustRig.sources)if(rig&&rig.helper)rig.helper.visible=false;
       for(const rig of playerSkidRig.sources)if(rig&&rig.helper)rig.helper.visible=false;
-    } else if((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview){
+    } else if(nativePlayerRuntimeActive() && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview)){
       ENGINE_AUDIO.start();
     }
     if(typeof window!=='undefined'&&window.dispatchEvent&&window.CustomEvent){
@@ -4695,6 +4727,24 @@ Object.assign(GAME.actions, {
   togglePause: (mode, options) => toggleSettingsMenu(mode, options),
   toggleMenuMusic: MENU_MUSIC.toggle,
 });
+const MENU_ACTIONS = Object.freeze({
+  has: action => String(action || '').toLowerCase() === 'options',
+  run: (action, payload) => {
+    if(String(action || '').toLowerCase() !== 'options' || !SETTINGS_MENU) return false;
+    SETTINGS_MENU.openOptions(payload || {});
+    return true;
+  },
+  options: payload => SETTINGS_MENU ? (SETTINGS_MENU.openOptions(payload || {}), true) : false,
+});
+GAME.ui.menuActions = MENU_ACTIONS;
+window.addEventListener('lotking:menu-action', event => {
+  const detail = event && event.detail || {};
+  MENU_ACTIONS.run(detail.action, detail);
+});
+window.addEventListener('message', event => {
+  if(!IS_EMBEDDED_GAMEPLAY || event.source !== window.parent || !event.data) return;
+  if(event.data.type === 'lot-king:open-menu-options') MENU_ACTIONS.options({tab:event.data.tab, source:'mouse'});
+});
 Object.assign(GAME.ui, {
   popup,
   radioHud: RADIO.config,
@@ -4724,10 +4774,11 @@ Object.assign(GAME.settings, {
 
 // ------------------------------------------------ main loop
 let prevT = performance.now();
+let nativePhysicsRuntimeActive = null;
 
 function stepGameplayFrame(dt, shouldRender){
   if(GAME.state.paused){
-    SFX.update(0, 0, 0);
+    if(SFX.stopEngineSynth) SFX.stopEngineSynth();
     ENGINE_AUDIO.setMuted(true);
     ENGINE_AUDIO.update(dt);
     if(shouldRender) renderPlayerCamera();
@@ -4742,7 +4793,11 @@ function stepGameplayFrame(dt, shouldRender){
   // slow-motion moment is the one thing you were slowing down to look at.
   GAME.state.timeScale = TS.cur;
   const sdt = dt * TS.cur;
-  const nativePlayerActive = !!(GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true);
+  const nativePlayerActive = nativePlayerRuntimeActive();
+  if(PHYS.world && nativePhysicsRuntimeActive !== nativePlayerActive){
+    setPhysicsPlayerActive(nativePlayerActive);
+    nativePhysicsRuntimeActive = nativePlayerActive;
+  }
 
   const {vF, vR, drifting} = updateCar(sdt);
   lastCamVF = vF;
@@ -4890,7 +4945,8 @@ function stepGameplayFrame(dt, shouldRender){
     accel: skidAudioAccel * TS.cur,
   } : {drift:0, brake:0, accel:0});
   const screech01 = nativePlayerActive && !skidByEngineAudio ? (drifting || (handbrake && speedKmh>15) ? Math.min(1,.3+slide) : 0) : 0;
-  SFX.update(nativePlayerActive ? rpm01 * TS.cur : 0, nativePlayerActive ? throttle * TS.cur : 0, screech01 * TS.cur);
+  if(nativePlayerActive) SFX.update(rpm01 * TS.cur, throttle * TS.cur, screech01 * TS.cur);
+  else if(SFX.stopEngineSynth) SFX.stopEngineSynth();
   ENGINE_AUDIO.setMuted(!nativePlayerActive);
   ENGINE_AUDIO.update(sdt);
 

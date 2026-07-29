@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 global.window = global;
 require('../js/runtime/character-placeholder-locomotion.js');
@@ -17,9 +19,11 @@ require('../js/logic/logic-templates-fps.js');
 require('../js/logic/logic-validator.js');
 require('../js/runtime/input/input-actions.js');
 require('../js/runtime/fps-arena-level-template.js');
+require('../js/runtime/fps-hud.js');
 
 const FP = global.LK_RUNTIME_FIRST_PERSON;
 const ACT = global.LK_RUNTIME_INPUT_ACTIONS;
+const FPS_HUD = global.LK_RUNTIME_FPS_HUD;
 const registry = global.LK_LOGIC_NODES_MVP.createRegistry();
 
 function test(name, run){
@@ -176,6 +180,50 @@ test('look input follows the engine sign conventions', () => {
   stick.setViewAngles(0, 0);
   stick.applyStickLook(1, 0, .1);
   assert.ok(stick.viewAngles().yaw < 0, 'stick right must turn right, like the mouse');
+});
+
+test('the FPS radar puts forward at the top and engine-right at screen-right', () => {
+  const project=FPS_HUD.projectRadarOffset;
+  assert.deepEqual(project(0,5,0),{x:0,y:-5},'facing +Z, a point ahead belongs above the player');
+  assert.deepEqual(project(-4,0,0),{x:4,y:0},'facing +Z, the D/right input is world -X');
+  const facingX=project(5,0,Math.PI/2);
+  assert.ok(Math.abs(facingX.x)<1e-9&&Math.abs(facingX.y+5)<1e-9,'after turning toward +X, +X stays at the top');
+  const rightOfFacingX=project(0,3,Math.PI/2);
+  assert.ok(Math.abs(rightOfFacingX.x-3)<1e-9&&Math.abs(rightOfFacingX.y)<1e-9,'after turning toward +X, +Z is screen-right');
+});
+
+test('shooter HUD controls do not overlap the left-centre radar', () => {
+  const css=fs.readFileSync(path.join(__dirname,'../css/lot-king.css'),'utf8');
+  assert.match(css,/#tuneDock\s*\{[^}]*right:84px/s,'the vehicle wrench belongs immediately left of settings');
+  assert.match(css,/#settingsBtn\s*\{[^}]*right:22px/s,'settings belongs on the far right in every gameplay mode');
+  assert.match(css,/\.lk-fps-radar\s*\{[^}]*left:calc\(22px[^}]*top:50%[^}]*translateY\(-50%\)/s,
+    'the FPS radar belongs at left centre, below the vitals block');
+});
+
+test('the camera-mode popup names the view being entered', () => {
+  const runtime=fs.readFileSync(path.join(__dirname,'../js/lot-king.js'),'utf8');
+  assert.ok(runtime.includes("const next = current === 'first' ? 'third' : 'first';"));
+  assert.ok(runtime.includes("popup(next === 'first' ? 'FIRST PERSON' : 'THIRD PERSON'"),
+    'the popup must not describe the view that is being left');
+});
+
+test('the FPS template disables the native vehicle and native effects follow real P1 ownership', () => {
+  const scene=global.LK_RUNTIME_FPS_ARENA_LEVEL_TEMPLATE.buildScene();
+  assert.equal(scene.player.enabled,false);
+  assert.equal(scene.player.hidden,true);
+  assert.equal(scene.player.controllerIndex,null);
+  assert.equal(scene.template.version,5);
+  const runtime=fs.readFileSync(path.join(__dirname,'../js/lot-king.js'),'utf8');
+  assert.ok(runtime.includes('function nativePlayerRuntimeActive()'));
+  assert.ok(runtime.includes('if(!nativePlayerRuntimeActive()){\n    exhaustSmokeAcc = 0;'),
+    'native exhaust must be cleared whenever the native singleton does not own runtime play');
+  assert.ok(runtime.includes('ENGINE_AUDIO.setMuted(!nativePlayerActive)'),
+    'native engine audio must be muted from the same ownership decision');
+  assert.ok(runtime.includes('else if(SFX.stopEngineSynth) SFX.stopEngineSynth();'),
+    'the fallback idle synth must be stopped rather than updated with zero throttle');
+  const audio=fs.readFileSync(path.join(__dirname,'../js/runtime/audio.js'),'utf8');
+  assert.ok(audio.includes('screechGain.gain.setTargetAtTime(0'),
+    'stopping the native fallback audio must also silence any lingering tyre screech');
 });
 
 test('recoil raises the aim rather than pushing it down', () => {

@@ -6,7 +6,7 @@
 > It started as a parking-lot drift prototype.<br>
 > Now it is growing into a browser-native engine for building many kinds of games and interactive 3D experiences.
 
-**Current version: `v0.7.5` · Experimental Alpha**
+**Current version: `v0.7.6` · Experimental Alpha**
 
 [Open Lot King Online](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/) ·
 [Technical README](README_TECHNICAL.md) ·
@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/9c1c8dc2-2d93-4434-958f-23d9f546ac55
 
 https://github.com/user-attachments/assets/c481af98-95d2-46b7-aac4-99a6be812e85
 
-The current `v0.7.5` contains additional systems and fixes that are not shown in these videos yet.
+The current `v0.7.6` contains additional systems and fixes that are not shown in these videos yet.
 
 ---
 
@@ -93,11 +93,11 @@ Important projects should still be backed up as `.lkep.json` files or stored in 
 
 ---
 
-## From v0.0.1 to v0.7.5
+## From v0.0.1 to v0.7.6
 
 The first version, `v0.0.1`, was a small drift prototype created from one prompt.
 
-The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **26 public versioned milestones**, reaching `v0.7.5`.
+The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **27 public versioned milestones**, reaching `v0.7.6`.
 
 Each milestone preserves a real stage of the project rather than hiding the development history behind one final upload.
 
@@ -174,7 +174,7 @@ Feedback, testing, documentation, example projects, reusable logic and other for
 
 - [Technical README](README_TECHNICAL.md)
 - [Startup guide](HOW_TO_START.md)
-- [Current v0.7.5 release notes](RELEASE_NOTES_v0.7.5.md)
+- [Current v0.7.6 release notes](RELEASE_NOTES_v0.7.6.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Runtime modules](docs/RUNTIME_MODULES.md)
 - [First Person Pawn](docs/FIRST_PERSON_PAWN.md) — the shooter layer: rig, traversal, items, interactions, vitals and inventory

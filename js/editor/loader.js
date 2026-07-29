@@ -61,7 +61,7 @@ const EDITOR_SCRIPT_STAGES = Object.freeze([
   [.928, 'loading editor preferences', 'js/editor/preferences.js?v=0.7.4-storage-manager-1'],
   [.9285, 'loading editor welcome', 'js/editor/welcome-overlay.js'],
   [.929, 'loading quick audio controls', 'js/editor/quick-audio.js?v=0.7.4-audio-collision-1'],
-  [.9295, 'loading editor template', 'js/editor/editor-template.js?v=0.7.4-storage-manager-1'],
+  [.9295, 'loading editor template', 'js/editor/editor-template.js?v=0.7.6-audio-designer-1'],
   [.9296, 'loading developer debugger', 'js/editor/developer-debugger.js?v=0.7.4-developer-debugger-3'],
   [.9297, 'loading editor toolbar', 'js/editor/toolbar.js?v=0.7.4-audio-collision-1'],
   [.9298, 'loading side panel controls', 'js/editor/side-panels.js'],

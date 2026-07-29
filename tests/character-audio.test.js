@@ -6,6 +6,8 @@
 // clock are all pure and covered here. The audible graph is browser-only.
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 global.window = global;
 require('../js/runtime/character-audio.js');
@@ -34,6 +36,34 @@ test('the default set is complete and procedural, with no media files', () => {
     assert.equal(weapon.fire.src, '', cls.id + ' fires procedurally out of the box');
   });
   ['jump', 'land', 'breath'].forEach(key => assert.ok(set.body[key], 'body foley: ' + key));
+  assert.ok(set.effects.explosion, 'the shared FX rack includes an explosion');
+  assert.equal(set.effects.explosion.src, '', 'the explosion works without a media file');
+});
+
+test('the default explosion is a layered 808-style impact and remains authorable', () => {
+  const explosion = AUDIO.defaultSet().effects.explosion;
+  assert.ok(explosion.recipe.noise, 'an impact/debris transient is present');
+  assert.ok(explosion.recipe.tone, 'a sub oscillator is present');
+  assert.ok(explosion.recipe.ring, 'a body resonance is present');
+  assert.ok(explosion.recipe.tone.freq >= 80, 'the sub begins with a perceptible punch');
+  assert.ok(explosion.recipe.tone.freqEnd <= 30, 'the sub falls into 808 territory');
+  assert.ok(explosion.recipe.tone.decay >= 1, 'the low-frequency tail has weight');
+
+  const custom = AUDIO.normalizeSet({effects:{explosion:{
+    volume:1.7,
+    recipe:{tone:{wave:'triangle',freq:120,freqEnd:32,decay:1.4,level:.8}},
+  }}});
+  assert.equal(custom.effects.explosion.volume, 1.7);
+  assert.equal(custom.effects.explosion.recipe.tone.wave, 'triangle');
+  assert.equal(custom.effects.explosion.recipe.tone.decay, 1.4);
+});
+
+test('the Character Sound Designer exposes the procedural recipe as live modules', () => {
+  const designer = fs.readFileSync(path.join(__dirname, '../js/editor/character-sound-designer.js'), 'utf8');
+  assert.ok(designer.includes('data-tab="effects"'), 'explosions have a dedicated FX workspace');
+  assert.ok(designer.includes("['noise','tone','ring']"), 'the rack is assembled from independent synthesis modules');
+  assert.ok(designer.includes("rt.playEffect(effect.id)"), 'preview uses the real runtime FX path');
+  assert.ok(designer.includes('cs-signal'), 'weapon slots expose their live signal chain');
 });
 
 test('materials are distinguishable, not the same recipe renamed', () => {
@@ -64,10 +94,12 @@ test('normalization fills gaps, clamps values and keeps custom recipes', () => {
   assert.equal(set.footsteps.strideWalk, .2, 'stride clamps to a sane minimum');
   assert.equal(set.footsteps.surfaces.wood.volume, 4, 'slot volume clamps');
   assert.equal(set.footsteps.surfaces.wood.src, 'sfx/wood.wav', 'a sample path survives');
-  assert.equal(set.footsteps.surfaces.wood.recipe, custom, 'an authored recipe is not overwritten');
+  assert.equal(set.footsteps.surfaces.wood.recipe.noise.freq, 200, 'an authored recipe is not overwritten');
+  assert.equal(set.footsteps.surfaces.wood.recipe.tone, undefined, 'normalization does not invent disabled modules');
   assert.equal(set.footsteps.surfaces.metal.src, '', 'untouched slots keep their defaults');
   assert.equal(set.weapons.shotgun.fire.pitch, 4, 'weapon pitch clamps');
   assert.ok(set.weapons.rifle.fire, 'untouched weapon classes survive');
+  assert.ok(set.effects.explosion, 'older sets gain the default FX rack');
   // A set written by an older build, or by hand, must never come back broken.
   assert.deepEqual(Object.keys(AUDIO.normalizeSet(null).footsteps.surfaces).sort(),
     Object.keys(AUDIO.defaultSet().footsteps.surfaces).sort());

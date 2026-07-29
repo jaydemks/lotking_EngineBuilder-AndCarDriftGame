@@ -30,6 +30,36 @@ const VIDEO_DEFAULTS = Object.freeze({
 });
 const TEXTURE_SIZES = Object.freeze([256, 512, 1024, 2048, 4096]);
 const VIDEO_BENCHMARK_PREF_KEY = 'lotking.videoBenchmark.v1';
+const MENU_RENDER_PROFILE = Object.freeze({
+  quality:'medium',
+  maxPixelRatio:1,
+  renderResolution:1,
+  textureSize:1024,
+  shadowQuality:'low',
+  shadowDistance:55,
+});
+
+// A menu is a presentation surface, not a benchmark scene. Keep the authored
+// preferences untouched and derive a transient, bounded profile for every
+// menu/pause/options context. This lets a future editor-authored UI invoke
+// OPTIONS without silently rewriting the player's gameplay settings.
+function menuRenderValues(input){
+  const values = normalizeVideoValues(input);
+  return Object.assign({}, values, {
+    quality:MENU_RENDER_PROFILE.quality,
+    renderResolution:Math.min(values.renderResolution, MENU_RENDER_PROFILE.renderResolution),
+    textureSize:Math.min(values.textureSize, MENU_RENDER_PROFILE.textureSize),
+    antialiasing:values.antialiasing === 'off' ? 'off' : 'fxaa',
+    rendererMode:'webgl',
+    shadowQuality:MENU_RENDER_PROFILE.shadowQuality,
+    shadowDistance:Math.min(values.shadowDistance, MENU_RENDER_PROFILE.shadowDistance),
+    ambientOcclusion:false,
+    aoQuality:'low',
+    reflections:false,
+    reflectionQuality:'low',
+    volumetricLighting:false,
+  });
+}
 
 function adaptiveLowValues(input){
   return Object.assign(normalizeVideoValues(input), {
@@ -168,6 +198,12 @@ function createVideo(options){
   let project = normalizeVideoProject();
   let overlayTimer = 0;
   let warmProfileSnapshot = null;
+  const presentationReasons = new Set();
+  if(opts.initialPresentation) presentationReasons.add(
+    typeof opts.initialPresentation === 'string' ? opts.initialPresentation : 'menu-overlay');
+  if(typeof document !== 'undefined' && document.body){
+    document.body.classList.toggle('lk-menu-presentation', presentationReasons.size > 0);
+  }
   let benchmarkPreference = {userOverride:false, autoLow:false, fps:null};
   try { benchmarkPreference = Object.assign(benchmarkPreference, JSON.parse(localStorage.getItem(VIDEO_BENCHMARK_PREF_KEY) || 'null') || {}); }
   catch(err){}
@@ -200,15 +236,19 @@ function createVideo(options){
 
   function applyCore(){
     if(!renderer) return;
-    const preset = VIDEO_PRESETS[values.quality] || VIDEO_PRESETS.high;
-    const aaRatio = values.antialiasing === 'off' ? .8 : (values.antialiasing === 'ssaa2x' ? Math.SQRT2 : (values.antialiasing === 'ssaa4x' ? 2 : 1));
+    const activeValues = presentationReasons.size ? menuRenderValues(values) : values;
+    const preset = VIDEO_PRESETS[activeValues.quality] || VIDEO_PRESETS.high;
+    const aaRatio = activeValues.antialiasing === 'off' ? .8 : (activeValues.antialiasing === 'ssaa2x' ? Math.SQRT2 : (activeValues.antialiasing === 'ssaa4x' ? 2 : 1));
     const rayRatio = 1;
     const dpr = opts.pixelRatio ? opts.pixelRatio() : window.devicePixelRatio;
     const size = opts.size ? opts.size() : {width: window.innerWidth, height: window.innerHeight};
     const mobile = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || window.innerWidth < 760;
     const backend=window.LK_RUNTIME_RENDERING_BACKEND,compat=backend&&backend.compatibilityProfile?backend.compatibilityProfile(renderer):null;
-    const maxPixelRatio = mobile ? 2 : (compat?compat.maxPixelRatio:4);
-    const effectiveAaRatio=compat&&compat.conservativePost&&values.antialiasing.indexOf('ssaa')===0?1:aaRatio;
+    const normalMaxPixelRatio = mobile ? 2 : (compat?compat.maxPixelRatio:4);
+    const maxPixelRatio = presentationReasons.size
+      ? Math.min(normalMaxPixelRatio, MENU_RENDER_PROFILE.maxPixelRatio)
+      : normalMaxPixelRatio;
+    const effectiveAaRatio=compat&&compat.conservativePost&&activeValues.antialiasing.indexOf('ssaa')===0?1:aaRatio;
     const sessionScale=backend&&backend.sessionOverrides?backend.sessionOverrides().renderScale:1;
     const pixelRatio = resolvePixelRatio({
       dpr, size, maxPixelRatio,
@@ -216,7 +256,7 @@ function createVideo(options){
       aaRatio:effectiveAaRatio,
       rayRatio,
       sessionScale,
-      resolutionScale:values.renderResolution,
+      resolutionScale:activeValues.renderResolution,
     });
     renderer.setPixelRatio(pixelRatio);
     renderer.setSize(size.width, size.height);
@@ -224,13 +264,13 @@ function createVideo(options){
     // The budget applies to textures loaded from here on; anything already on
     // the GPU keeps the size it was uploaded at until the project reloads.
     const budget = window.LK_ENGINE_TEXTURE_BUDGET;
-    if(budget) budget.setMaxSize(values.textureSize);
-    renderer.shadowMap.enabled = !!values.shadows;
+    if(budget) budget.setMaxSize(activeValues.textureSize);
+    renderer.shadowMap.enabled = !!activeValues.shadows;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     const primaryShadow = opts.scene && opts.scene.children && opts.scene.children.find(node => node && node.isDirectionalLight && node.castShadow && node.shadow);
     if(primaryShadow){
-      const autoShadowQuality = values.quality === 'low' ? 'low' : (values.quality === 'medium' ? 'medium' : (values.quality === 'extreme' ? 'ultra' : 'high'));
-      const shadowProfile = SHADOW_PRESETS[values.shadowQuality === 'auto' ? autoShadowQuality : values.shadowQuality] || SHADOW_PRESETS.high;
+      const autoShadowQuality = activeValues.quality === 'low' ? 'low' : (activeValues.quality === 'medium' ? 'medium' : (activeValues.quality === 'extreme' ? 'ultra' : 'high'));
+      const shadowProfile = SHADOW_PRESETS[activeValues.shadowQuality === 'auto' ? autoShadowQuality : activeValues.shadowQuality] || SHADOW_PRESETS.high;
       const shadowSize = shadowProfile.mapSize;
       if(primaryShadow.shadow.mapSize.x !== shadowSize){
         primaryShadow.shadow.mapSize.set(shadowSize, shadowSize);
@@ -238,7 +278,7 @@ function createVideo(options){
         primaryShadow.shadow.map = null;
       }
       const shadowCamera = primaryShadow.shadow.camera;
-      const shadowDistance = values.shadowDistance;
+      const shadowDistance = activeValues.shadowDistance;
       if(shadowCamera && shadowCamera.isOrthographicCamera){
         shadowCamera.left = -shadowDistance;
         shadowCamera.right = shadowDistance;
@@ -248,9 +288,9 @@ function createVideo(options){
         shadowCamera.far = Math.max(180, shadowDistance * 4);
         shadowCamera.updateProjectionMatrix();
       }
-      primaryShadow.shadow.bias = values.shadowBias;
-      primaryShadow.shadow.normalBias = values.shadowNormalBias;
-      primaryShadow.shadow.radius = shadowProfile.radius * values.shadowSoftness;
+      primaryShadow.shadow.bias = activeValues.shadowBias;
+      primaryShadow.shadow.normalBias = activeValues.shadowNormalBias;
+      primaryShadow.shadow.radius = shadowProfile.radius * activeValues.shadowSoftness;
     }
     if(opts.scene && opts.scene.traverse){
       opts.scene.traverse(node => {
@@ -261,7 +301,7 @@ function createVideo(options){
           if(mat.userData.lkVideoBaseEnvMapIntensity == null) mat.userData.lkVideoBaseEnvMapIntensity = mat.envMapIntensity == null ? 1 : mat.envMapIntensity;
           if(mat.userData.lkVideoBaseRoughness == null && mat.roughness != null) mat.userData.lkVideoBaseRoughness = mat.roughness;
           if(mat.userData.lkVideoBaseMetalness == null && mat.metalness != null) mat.userData.lkVideoBaseMetalness = mat.metalness;
-          if(mat.envMapIntensity != null) mat.envMapIntensity = values.reflections ? mat.userData.lkVideoBaseEnvMapIntensity : 0;
+          if(mat.envMapIntensity != null) mat.envMapIntensity = activeValues.reflections ? mat.userData.lkVideoBaseEnvMapIntensity : 0;
           // Video presets must never rewrite authored PBR properties. Making every
           // surface smoother and more metallic caused bright pools on asphalt and
           // made non-reflective ground enter the SSR pass.
@@ -271,16 +311,20 @@ function createVideo(options){
         });
       });
     }
-    const videoExposure = values.exposure;
+    const videoExposure = activeValues.exposure;
     renderer.userData = renderer.userData || {};
     renderer.userData.videoToneMappingExposure = videoExposure;
     renderer.toneMappingExposure = videoExposure;
-    renderer.userData.videoSettings = Object.assign({}, values, {preset:Object.assign({}, preset)});
+    renderer.userData.videoSettings = Object.assign({}, activeValues, {
+      preset:Object.assign({}, preset),
+      presentationProfile:presentationReasons.size ? 'menu' : 'gameplay',
+    });
     renderer.userData.lkCompatibilityProfile=compat;
     if(compat)document.body.dataset.lkGpuCompatibility=compat.conservativePost?'conservative':'full';
-    document.body.classList.toggle('lk-renderer-raytracing', values.rendererMode === 'raytracing');
-    document.body.classList.toggle('lk-volumetric-lighting', !!values.volumetricLighting);
-    document.body.dataset.lkVideoQuality = values.quality;
+    document.body.classList.toggle('lk-renderer-raytracing', activeValues.rendererMode === 'raytracing');
+    document.body.classList.toggle('lk-volumetric-lighting', !!activeValues.volumetricLighting);
+    document.body.dataset.lkVideoQuality = activeValues.quality;
+    document.body.dataset.lkPresentationProfile = presentationReasons.size ? 'menu' : 'gameplay';
   }
 
   function apply(options){
@@ -354,6 +398,16 @@ function createVideo(options){
     return apply().then(() => ({applied:true, reason:'below-25-fps', fps:benchmarkPreference.fps, values:Object.assign({}, values)}));
   }
 
+  function setPresentationReason(reason, active){
+    const key = String(reason || 'menu');
+    const hadReason = presentationReasons.has(key);
+    if(active) presentationReasons.add(key);
+    else presentationReasons.delete(key);
+    if(hadReason === presentationReasons.has(key)) return Promise.resolve(values);
+    document.body.classList.toggle('lk-menu-presentation', presentationReasons.size > 0);
+    return apply();
+  }
+
   return {
     values,
     apply,
@@ -363,6 +417,9 @@ function createVideo(options){
     commitValues,
     markUserOverride,
     setWarmProfile,
+    setPresentationReason,
+    isMenuPresentation:() => presentationReasons.size > 0,
+    effectiveValues:() => Object.assign({}, presentationReasons.size ? menuRenderValues(values) : values),
     applyAdaptiveLow,
     benchmarkPreference:() => Object.assign({}, benchmarkPreference),
   };
@@ -437,6 +494,7 @@ function createMenu(options){
     const overlay = document.getElementById('settingsOverlay');
     const close = document.getElementById('settingsClose');
     const title = document.getElementById('settingsTitle');
+    const eyebrow = overlay && overlay.querySelector('.settingsEyebrow');
     const resume = document.getElementById('pauseResume');
     const backMenu = document.getElementById('pauseBackMenu');
     const tuneOpen = document.getElementById('openGameplayTune');
@@ -584,12 +642,16 @@ function createMenu(options){
 
     const configureMode = mode => {
       currentMode = mode || (gameState.editorActive ? 'editor' : 'game');
+      const optionsOnly = currentMode === 'options';
       overlay.classList.toggle('editor', currentMode === 'editor');
-      overlay.classList.toggle('game', currentMode !== 'editor');
+      overlay.classList.toggle('game', currentMode === 'game');
+      overlay.classList.toggle('options-only', optionsOnly);
       overlay.querySelectorAll('[data-video-setting]').forEach(row => row.classList.toggle('hidden', currentMode !== 'editor' && row.dataset.videoExposed === 'false'));
-      if(title) title.textContent = currentMode === 'editor' ? 'ENGINE EDITOR MENU' : 'GAME MENU';
+      if(eyebrow) eyebrow.textContent = optionsOnly ? 'OPTIONS' : 'PAUSE';
+      if(title) title.textContent = currentMode === 'editor' ? 'ENGINE EDITOR MENU' : (optionsOnly ? 'AUDIO / VIDEO' : 'GAME MENU');
       const activeTab = overlay.querySelector('[data-settings-tab].on');
-      if(currentMode === 'editor' && activeTab && activeTab.dataset.settingsTab === 'gameplay') setTab('audio');
+      if((currentMode === 'editor' || optionsOnly) && activeTab &&
+          (activeTab.dataset.settingsTab === 'gameplay' || (optionsOnly && activeTab.dataset.settingsTab === 'controls'))) setTab('audio');
     };
 
     function menuCursorAllowed(open, source){
@@ -614,11 +676,13 @@ function createMenu(options){
 
     setOpen = (open, mode, options) => {
       const wasOpen = overlay.classList.contains('open');
-      configureMode(mode);
+      if(open || mode) configureMode(mode);
       const source = options && options.source;
       overlay.classList.toggle('open', open);
       btn.classList.toggle('open', open);
       gameState.paused = !!open && currentMode === 'game' && gameState.started;
+      if(opts.onPresentationChange) opts.onPresentationChange(!!open, currentMode);
+      if(opts.onOpenChange) opts.onOpenChange(!!open, currentMode);
       syncMenuCursor(!!open, source);
       if(open){
         navPrev = {buttons: [], axX: 0, axY: 0, repeat: {}};
@@ -631,10 +695,16 @@ function createMenu(options){
         restoreFocusAfterClose();
       }
     };
-    toggle = (mode, options) => setOpen(!overlay.classList.contains('open'), mode, options);
+    toggle = (mode, options) => {
+      const opening = !overlay.classList.contains('open');
+      setOpen(opening, opening ? mode : null, options);
+    };
 
     btn.addEventListener('pointerdown', e => { lastButtonPointer = e.pointerType || 'mouse'; }, {passive: true});
-    btn.addEventListener('click', () => toggle('game', {source: lastButtonPointer === 'touch' ? 'touch' : 'mouse'}));
+    btn.addEventListener('click', () => {
+      const mode = opts.resolveButtonMode ? opts.resolveButtonMode() : 'game';
+      toggle(mode, {source: lastButtonPointer === 'touch' ? 'touch' : 'mouse'});
+    });
     close.addEventListener('click', () => setOpen(false));
     resume.addEventListener('click', () => setOpen(false));
     backMenu.addEventListener('click', () => {
@@ -797,6 +867,11 @@ function createMenu(options){
     setOpen: (open, mode, options) => setOpen(open, mode, options),
     toggle: (mode, options) => toggle(mode, options),
     openTab: (tab, mode, options) => { setTab(tab || 'audio'); setOpen(true, mode, options || {source:'mouse'}); },
+    openOptions: options => {
+      const config = options || {};
+      setTab(config.tab === 'video' ? 'video' : 'audio');
+      setOpen(true, 'options', {source:config.source || 'mouse'});
+    },
     setAudioChannel,
     getMode: () => currentMode,
   };
@@ -804,8 +879,9 @@ function createMenu(options){
 
 window.LK_RUNTIME_SETTINGS_MENU = Object.freeze({
   createVideo, createMenu, presets:VIDEO_PRESETS, shadowPresets:SHADOW_PRESETS, defaults:VIDEO_DEFAULTS,
-  normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, adaptiveLowValues, syncControls:syncVideoControls,
+  normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, adaptiveLowValues, menuRenderValues, syncControls:syncVideoControls,
   resolvePixelRatio, formatRenderResolution, textureSizes:TEXTURE_SIZES,
   renderBudget:Object.freeze({ratioCeiling:RENDER_RATIO_CEILING, longEdge:RENDER_BUFFER_LONG_EDGE, pixels:RENDER_BUFFER_PIXELS}),
+  menuRenderProfile:MENU_RENDER_PROFILE,
 });
 })();

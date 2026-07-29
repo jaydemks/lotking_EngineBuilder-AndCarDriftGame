@@ -80,7 +80,7 @@ function installStyles(){
   if(document.getElementById(STYLE_ID)) return;
   const css = `
 #lkCharSound{position:fixed;inset:auto 0 0 0;margin:auto;top:50%;left:50%;transform:translate(-50%,-50%);
-  width:min(940px,calc(100vw - 40px));max-height:min(84vh,860px);z-index:10040;display:none;
+  width:min(1120px,calc(100vw - 40px));max-height:min(88vh,900px);z-index:10040;display:none;
   flex-direction:column;pointer-events:auto;border:1px solid #35425a;border-radius:12px;
   background:rgba(9,13,20,.98);box-shadow:0 26px 80px rgba(0,0,0,.75);color:#dfe5f1;
   font:13px/1.45 'Segoe UI',Arial,sans-serif;overflow:hidden}
@@ -111,6 +111,49 @@ function installStyles(){
 #lkCharSound .cs-globals label{display:flex;align-items:center;gap:6px;font-size:11.5px}
 #lkCharSound .cs-dirty{color:#f4c86a;font-size:11px;display:none}
 #lkCharSound .cs-dirty.show{display:inline}
+#lkCharSound .cs-rack{display:grid;gap:10px}
+#lkCharSound .cs-rack-card{border:1px solid #29364b;border-radius:11px;overflow:hidden;
+  background:linear-gradient(145deg,rgba(23,31,45,.96),rgba(12,18,28,.96));box-shadow:inset 0 1px rgba(255,255,255,.025)}
+#lkCharSound .cs-rack-card.fx{border-color:#5e455f;background:
+  radial-gradient(circle at 88% 15%,rgba(235,85,126,.14),transparent 32%),
+  linear-gradient(145deg,rgba(35,25,40,.98),rgba(12,18,28,.98))}
+#lkCharSound .cs-rack-card .cs-row{padding:9px 11px;border-bottom:0}
+#lkCharSound .cs-signal{display:flex;align-items:center;gap:6px;padding:0 11px 9px;color:#7e91ac;
+  font-size:9px;letter-spacing:.7px;text-transform:uppercase}
+#lkCharSound .cs-signal i{font-style:normal;border:1px solid #314057;border-radius:999px;padding:3px 7px}
+#lkCharSound .cs-signal i.on{color:#62e6ad;border-color:#3b8068;background:rgba(75,227,160,.08)}
+#lkCharSound .cs-signal b{font-weight:400;color:#47556b}
+#lkCharSound .cs-recipe{border-top:1px solid rgba(120,140,175,.13)}
+#lkCharSound .cs-recipe summary{cursor:pointer;list-style:none;padding:8px 11px;color:#8fa4bf;
+  font-size:10px;letter-spacing:1.1px;user-select:none}
+#lkCharSound .cs-recipe summary::-webkit-details-marker{display:none}
+#lkCharSound .cs-recipe[open] summary{color:#62e6ad;background:rgba(75,227,160,.035)}
+#lkCharSound .cs-modules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;padding:0 11px 11px}
+#lkCharSound .cs-module{min-width:0;border:1px solid #2a374b;border-radius:9px;padding:9px;background:rgba(7,11,18,.6)}
+#lkCharSound .cs-module.off{opacity:.48}
+#lkCharSound .cs-module-head{display:flex;align-items:center;gap:7px;margin-bottom:8px;color:#a9bad0;
+  font-size:10px;font-weight:700;letter-spacing:1px}
+#lkCharSound .cs-module-head span{flex:1}
+#lkCharSound .cs-module-head button{height:22px;padding:0 7px;font-size:9px}
+#lkCharSound .cs-param{display:grid;grid-template-columns:70px 1fr 42px;gap:6px;align-items:center;margin:5px 0;
+  font-size:9.5px;color:#7f91aa}
+#lkCharSound .cs-param input[type=range]{min-width:0;width:100%}
+#lkCharSound .cs-param output{text-align:right;color:#b8c6d8;font-variant-numeric:tabular-nums}
+#lkCharSound .cs-param select{width:100%;height:23px;font-size:9.5px}
+#lkCharSound .cs-add-modules{display:flex;gap:7px;padding:0 11px 11px}
+#lkCharSound .cs-add-modules button{height:24px;color:#8ea0b8;font-size:9.5px;border-style:dashed}
+#lkCharSound .cs-fx-intro{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center;margin:0 0 13px;
+  padding:12px 14px;border:1px solid #4b3854;border-radius:11px;background:linear-gradient(90deg,rgba(209,62,105,.1),transparent)}
+#lkCharSound .cs-fx-pulse{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;font-size:25px;
+  background:radial-gradient(circle,#ff8b77 0 8%,#d83e68 9% 16%,rgba(216,62,104,.2) 17% 42%,transparent 43%);
+  box-shadow:0 0 30px rgba(216,62,104,.22)}
+#lkCharSound .cs-fx-intro b{display:block;color:#f0b1bf;letter-spacing:.8px}
+#lkCharSound .cs-fx-intro small{display:block;color:#9c8ba3;margin-top:3px}
+@media(max-width:760px){
+  #lkCharSound .cs-row{grid-template-columns:112px 54px repeat(2,minmax(82px,1fr)) 68px}
+  #lkCharSound .cs-row>:nth-child(5){display:none}
+  #lkCharSound .cs-modules{grid-template-columns:1fr}
+}
 `;
   const tag = document.createElement('style');
   tag.id = STYLE_ID;
@@ -146,6 +189,7 @@ function buildRoot(){
     <div class="cs-tabs">
       <button data-tab="footsteps">${tr('Footsteps', 'Passi')}</button>
       <button data-tab="weapons">${tr('Weapons', 'Armi')}</button>
+      <button data-tab="effects">${tr('Explosions / FX', 'Esplosioni / FX')}</button>
       <button data-tab="body">${tr('Body', 'Corpo')}</button>
     </div>
     <div class="cs-body" id="csBody"></div>`;
@@ -236,14 +280,200 @@ function slotRow(label, hint, slot, preview){
     picker.addEventListener('change', () => {
       const chosen = picker.files && picker.files[0];
       if(!chosen) return;
-      slot.src = URL.createObjectURL(chosen);
-      markDirty();
+      file.disabled = true;
+      file.textContent = '…';
+      const finish = src => {
+        slot.src = src;
+        file.disabled = false;
+        markDirty();
+      };
+      if(window.LK_ASSET_BLOBS && window.LK_ASSET_BLOBS.put){
+        const key = 'character_sfx_' + Date.now().toString(36) + '_' +
+          chosen.name.replace(/[^a-z0-9.]+/gi, '_');
+        window.LK_ASSET_BLOBS.put(key, chosen)
+          .then(() => finish('blob:' + key))
+          .catch(() => {
+            file.disabled = false;
+            file.textContent = '＋';
+          });
+        return;
+      }
+      // Standalone fallback: data URLs remain serialisable with the set. The
+      // full editor normally takes the IndexedDB path above.
+      const reader = new FileReader();
+      reader.onload = () => finish(String(reader.result || ''));
+      reader.onerror = () => { file.disabled = false; file.textContent = '＋'; };
+      reader.readAsDataURL(chosen);
     });
     picker.click();
   });
   actions.appendChild(file);
   row.appendChild(actions);
   return row;
+}
+
+function liveEdit(){
+  dirty = true;
+  applyLive();
+  showDirty();
+}
+
+function recipeParam(target, key, label, min, max, step){
+  const row = el('label', 'cs-param');
+  row.appendChild(el('span', null, label));
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = min;
+  input.max = max;
+  input.step = step;
+  input.value = target[key];
+  const output = document.createElement('output');
+  const write = () => {
+    const value = Number(input.value);
+    output.textContent = Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(step < .01 ? 3 : 2);
+  };
+  write();
+  input.addEventListener('input', () => {
+    target[key] = Number(input.value);
+    write();
+    liveEdit();
+  });
+  row.appendChild(input);
+  row.appendChild(output);
+  return row;
+}
+
+function recipeChoice(target, key, label, values){
+  const row = el('label', 'cs-param');
+  row.appendChild(el('span', null, label));
+  const select = document.createElement('select');
+  values.forEach(value => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    option.selected = target[key] === value;
+    select.appendChild(option);
+  });
+  select.addEventListener('change', () => { target[key] = select.value; liveEdit(); });
+  row.appendChild(select);
+  row.appendChild(el('output', null, ''));
+  return row;
+}
+
+const MODULE_DEFAULTS = Object.freeze({
+  noise:{type:'lowpass', freq:900, q:.8, decay:.3, level:.7, sweep:-400},
+  tone:{freq:90, freqEnd:35, decay:.5, level:.7, wave:'sine'},
+  ring:{freq:900, q:6, decay:.3, level:.25},
+});
+
+function recipeModule(key, data){
+  const names = {
+    noise:tr('NOISE / IMPACT', 'NOISE / IMPATTO'),
+    tone:tr('SUB / TONE', 'SUB / TONO'),
+    ring:tr('RESONANCE', 'RISONANZA'),
+  };
+  const module = el('section', 'cs-module' + (data.enabled === false ? ' off' : ''));
+  module.dataset.module = key;
+  const head = el('div', 'cs-module-head');
+  head.appendChild(el('span', null, names[key]));
+  const enabled = el('button', data.enabled === false ? null : 'cs-on', data.enabled === false ? 'OFF' : 'ON');
+  enabled.addEventListener('click', () => {
+    data.enabled = data.enabled === false;
+    enabled.textContent = data.enabled ? 'ON' : 'OFF';
+    enabled.classList.toggle('cs-on', data.enabled);
+    module.classList.toggle('off', !data.enabled);
+    const chip = module.closest('.cs-rack-card') && module.closest('.cs-rack-card').querySelector('[data-signal="' + key + '"]');
+    if(chip) chip.classList.toggle('on', data.enabled);
+    liveEdit();
+  });
+  head.appendChild(enabled);
+  module.appendChild(head);
+
+  if(key === 'noise'){
+    module.appendChild(recipeChoice(data, 'type', tr('Filter', 'Filtro'), ['lowpass','bandpass','highpass']));
+    module.appendChild(recipeParam(data, 'freq', tr('Cutoff', 'Taglio'), 40, 12000, 10));
+    module.appendChild(recipeParam(data, 'q', 'Q', .1, 20, .1));
+    module.appendChild(recipeParam(data, 'decay', tr('Decay', 'Coda'), .02, 2.5, .01));
+    module.appendChild(recipeParam(data, 'level', tr('Level', 'Livello'), 0, 2, .01));
+    module.appendChild(recipeParam(data, 'sweep', 'Sweep', -8000, 8000, 10));
+  } else if(key === 'tone'){
+    module.appendChild(recipeChoice(data, 'wave', tr('Wave', 'Onda'), ['sine','triangle','sawtooth','square']));
+    module.appendChild(recipeParam(data, 'freq', tr('Start Hz', 'Hz iniz.'), 20, 1200, 1));
+    module.appendChild(recipeParam(data, 'freqEnd', tr('End Hz', 'Hz finali'), 20, 1200, 1));
+    module.appendChild(recipeParam(data, 'decay', tr('Decay', 'Coda'), .02, 3, .01));
+    module.appendChild(recipeParam(data, 'level', tr('Level', 'Livello'), 0, 2, .01));
+  } else {
+    module.appendChild(recipeParam(data, 'freq', tr('Frequency', 'Frequenza'), 40, 10000, 10));
+    module.appendChild(recipeParam(data, 'q', 'Q', 1, 24, .1));
+    module.appendChild(recipeParam(data, 'decay', tr('Decay', 'Coda'), .02, 3, .01));
+    module.appendChild(recipeParam(data, 'level', tr('Level', 'Livello'), 0, 2, .01));
+  }
+  return module;
+}
+
+function recipeEditor(slot, expanded){
+  // Recipes may originate from frozen shipped defaults or a stored JSON set.
+  // A private clone makes every rack independently editable.
+  slot.recipe = JSON.parse(JSON.stringify(slot.recipe || {}));
+  const recipe = slot.recipe;
+  if(recipe.grains == null) recipe.grains = 0;
+  const details = el('details', 'cs-recipe');
+  details.open = expanded === true;
+  details.appendChild(el('summary', null, tr('▦  SYNTH MODULES — edit the procedural sound', '▦  MODULI SYNTH — modifica il suono procedurale')));
+  const modules = el('div', 'cs-modules');
+  ['noise','tone','ring'].forEach(key => {
+    if(recipe[key]) modules.appendChild(recipeModule(key, recipe[key]));
+  });
+  if(recipe.noise){
+    const grainModule = el('section', 'cs-module');
+    grainModule.appendChild(el('div', 'cs-module-head', tr('TEXTURE / GRAINS', 'TEXTURE / GRANI')));
+    grainModule.appendChild(recipeParam(recipe, 'grains', tr('Hits', 'Colpi'), 0, 8, 1));
+    modules.appendChild(grainModule);
+  }
+  details.appendChild(modules);
+
+  const missing = ['noise','tone','ring'].filter(key => !recipe[key]);
+  if(missing.length){
+    const add = el('div', 'cs-add-modules');
+    missing.forEach(key => {
+      const button = el('button', null, '+ ' + key.toUpperCase());
+      button.addEventListener('click', () => {
+        recipe[key] = JSON.parse(JSON.stringify(MODULE_DEFAULTS[key]));
+        dirty = true;
+        applyLive();
+        render();
+      });
+      add.appendChild(button);
+    });
+    details.appendChild(add);
+  }
+  return details;
+}
+
+function signalChain(slot){
+  const chain = el('div', 'cs-signal');
+  const recipe = slot.recipe || {};
+  [
+    [slot.src ? 'Sample' : 'Procedural', true, 'source'],
+    ['Noise', !!recipe.noise && recipe.noise.enabled !== false, 'noise'],
+    ['Sub', !!recipe.tone && recipe.tone.enabled !== false, 'tone'],
+    ['Resonance', !!recipe.ring && recipe.ring.enabled !== false, 'ring'],
+    ['Output', slot.enabled !== false, 'output'],
+  ].forEach((entry, index) => {
+    if(index) chain.appendChild(el('b', null, '›'));
+    const chip = el('i', entry[1] ? 'on' : null, entry[0]);
+    chip.dataset.signal = entry[2];
+    chain.appendChild(chip);
+  });
+  return chain;
+}
+
+function rackCard(label, hint, slot, preview, options){
+  const card = el('article', 'cs-rack-card' + (options && options.effect ? ' fx' : ''));
+  card.appendChild(slotRow(label, hint, slot, preview));
+  card.appendChild(signalChain(slot));
+  card.appendChild(recipeEditor(slot, options && options.expanded));
+  return card;
 }
 
 function showDirty(){
@@ -321,17 +551,41 @@ function weaponsPane(body){
   body.appendChild(tabs);
 
   const slots = work.weapons[weaponClass];
-  body.appendChild(headerRow());
+  const rack = el('div', 'cs-rack');
   WEAPON_SLOT_LABELS.forEach(([key, en, it, hintEn, hintIt]) => {
-    body.appendChild(slotRow(tr(en, it), tr(hintEn, hintIt), slots[key], () => {
+    rack.appendChild(rackCard(tr(en, it), tr(hintEn, hintIt), slots[key], () => {
       const rt = runtime();
       if(!rt) return;
       // The fire slot auditions the complete shot — shot, tail, action and
       // casing together — because that is the sound the player actually hears.
       if(key === 'fire') rt.weaponEvent('OnWeaponFired', {preset:weaponClass});
       else rt.playWeaponSlot(weaponClass, key);
-    }));
+    }, {expanded:key === 'fire'}));
   });
+  body.appendChild(rack);
+}
+
+function effectsPane(body){
+  const intro = el('div', 'cs-fx-intro');
+  intro.appendChild(el('div', 'cs-fx-pulse', '◉'));
+  const copy = el('div');
+  copy.appendChild(el('b', null, tr('IMPACT FX RACK', 'RACK FX D’IMPATTO')));
+  copy.appendChild(el('small', null, tr(
+    'Layer transients, an 808-style sub drop and resonances. Every module is live, optional and saved inside the Character Sound Set.',
+    'Sovrapponi transienti, un sub drop stile 808 e risonanze. Ogni modulo è live, opzionale e salvato nel Character Sound Set.')));
+  intro.appendChild(copy);
+  body.appendChild(intro);
+
+  const rack = el('div', 'cs-rack');
+  (AUDIO.EFFECTS || []).forEach(effect => {
+    const slot = work.effects[effect.id];
+    rack.appendChild(rackCard(effect.label,
+      tr('damage-area explosion / grenade', 'esplosione ad area / granata'),
+      slot,
+      () => { const rt = runtime(); if(rt) rt.playEffect(effect.id); },
+      {effect:true, expanded:true}));
+  });
+  body.appendChild(rack);
 }
 
 function bodyPane(body){
@@ -374,6 +628,7 @@ function render(){
   body.innerHTML = '';
   if(tab === 'footsteps') footstepsPane(body);
   else if(tab === 'weapons') weaponsPane(body);
+  else if(tab === 'effects') effectsPane(body);
   else bodyPane(body);
   showDirty();
 }
