@@ -81,6 +81,7 @@ function create(opts){
     const key = keyFromFile(file);
     const existing = list.find(a => a.key === key);
     const kind = assetKindFromFile(file);
+    const has = key => Object.prototype.hasOwnProperty.call(info, key);
     const asset = {
       id: existing ? existing.id : ('asset_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7)),
       key,
@@ -103,12 +104,16 @@ function create(opts){
       size: file.size || 0,
       src: info.src || null,
       dbKey: info.dbKey || null,
-      rigged: kind === 'glb' ? !!(info.rigged || (existing && existing.rigged)) : false,
+      rigged: kind === 'glb' ? (has('rigged') ? !!info.rigged : !!(existing && existing.rigged)) : false,
+      vehicleRigged:kind === 'glb' ? (has('vehicleRigged') ? !!info.vehicleRigged : !!(existing && existing.vehicleRigged)) : undefined,
+      skeletonRigged:kind === 'glb' ? (has('skeletonRigged') ? !!info.skeletonRigged : !!(existing && existing.skeletonRigged)) : undefined,
+      rigType:kind === 'glb' ? String(has('rigType') ? info.rigType : (existing && existing.rigType) || 'static') : undefined,
+      vehicleWheelCount:kind === 'glb' ? Number(has('vehicleWheelCount') ? info.vehicleWheelCount : (existing && existing.vehicleWheelCount)) || 0 : undefined,
       usedAsPlayerModel: kind === 'glb' ? !!(info.usedAsPlayerModel || (existing && existing.usedAsPlayerModel)) : undefined,
       usedAsSoccerPawnModel: kind === 'glb' ? !!(info.usedAsSoccerPawnModel || (existing && existing.usedAsSoccerPawnModel)) : undefined,
       clips: kind === 'glb' && Array.isArray(info.clips) ? info.clips.slice() : (existing && Array.isArray(existing.clips) ? existing.clips.slice() : undefined),
       clipCount: kind === 'glb' ? Number(info.clipCount != null ? info.clipCount : (existing && existing.clipCount)) || 0 : undefined,
-      hasAnimations: kind === 'glb' ? !!(info.hasAnimations || (existing && existing.hasAnimations)) : undefined,
+      hasAnimations: kind === 'glb' ? (has('hasAnimations') ? !!info.hasAnimations : !!(existing && existing.hasAnimations)) : undefined,
       skinnedMeshCount: kind === 'glb' ? Number(info.skinnedMeshCount != null ? info.skinnedMeshCount : (existing && existing.skinnedMeshCount)) || 0 : undefined,
       boneCount: kind === 'glb' ? Number(info.boneCount != null ? info.boneCount : (existing && existing.boneCount)) || 0 : undefined,
       boneNames:kind === 'glb' && Array.isArray(info.boneNames) ? info.boneNames.slice() : (existing && Array.isArray(existing.boneNames) ? existing.boneNames.slice() : undefined),
@@ -164,6 +169,10 @@ function create(opts){
         specular:.35,
         emissive:0x000000,
         emissiveIntensity:0,
+        surfaceInfluence:0,
+        surfaceProbeDistance:1.5,
+        surfaceReceiverId:null,
+        surfaceReceiverName:'',
       },
       asset:{key: asset.key, dbKey: asset.dbKey || null, name: asset.name, source: asset.source || 'Imported texture'},
       t:{p:[at.x, .025, at.z], r:[-Math.PI/2,0,0], s:[1,1,1], v:true},

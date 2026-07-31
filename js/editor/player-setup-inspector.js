@@ -143,8 +143,31 @@ function create(deps){
     sg.body.appendChild(tRow('steer', tr('Steering', 'Sterzo'), -10, 10));
     sg.body.appendChild(tRow('brake', tr('Braking', 'Frenata'), -10, 10));
     sg.body.appendChild(tRow('grip', tr('Grip', 'Aderenza'), -10, 10));
+    sg.body.appendChild(exposeWrap('frontDriveBias', sliderRow(
+      tr('Front drive share (0 = RWD)', 'Quota trazione anteriore (0 = RWD)'),
+      tun.frontDriveBias == null ? 0 : tun.frontDriveBias, 0, 1, .05,
+      v => { player.setTuning({frontDriveBias:v}); markDirty(); },
+      v => Math.round(Number(v) * 100) + '%'
+    ).root));
+    sg.body.appendChild(exposeWrap('turboStrength', sliderRow(
+      tr('Progressive turbo contribution', 'Contributo turbo progressivo'),
+      tun.turboStrength == null ? .28 : tun.turboStrength, 0, 1, .01,
+      v => { player.setTuning({turboStrength:v}); markDirty(); },
+      v => Math.round(Number(v) * 100) + '%'
+    ).root));
+    sg.body.appendChild(exposeWrap('turboThreshold', sliderRow(
+      tr('Turbo spool start', 'Inizio spool turbo'),
+      tun.turboThreshold == null ? 2400 : tun.turboThreshold, 1200, 5000, 100,
+      v => { player.setTuning({turboThreshold:v}); markDirty(); },
+      v => Math.round(Number(v)) + ' rpm'
+    ).root));
+    sg.body.appendChild(tFloatRow('turboSpool', tr('Turbo response time', 'Tempo risposta turbo'), .1, 2.5, .05, .8));
     sg.body.appendChild(tRow('suspension', tr('Suspension stiffness', 'Sospensioni (rigidita)'), -10, 10));
+    sg.body.appendChild(tRow('frontSuspension', tr('Front suspension offset', 'Sospensioni anteriori'), -10, 10));
+    sg.body.appendChild(tRow('rearSuspension', tr('Rear suspension offset', 'Sospensioni posteriori'), -10, 10));
     sg.body.appendChild(tRow('damping', tr('Suspension damping', 'Sospensioni (damping)'), -10, 10));
+    sg.body.appendChild(tRow('frontDamping', tr('Front damping offset', 'Damping anteriore'), -10, 10));
+    sg.body.appendChild(tRow('rearDamping', tr('Rear damping offset', 'Damping posteriore'), -10, 10));
     sg.body.appendChild(tRow('travel', tr('Suspension travel', 'Escursione sospensioni'), -10, 10));
     sg.body.appendChild(tRow('ride', tr('Wheel stance', 'Assetto ruote'), -10, 10));
     sg.body.appendChild(tRow('roll', tr('Chassis roll', 'Rollio telaio'), -10, 10));
@@ -160,7 +183,10 @@ function create(deps){
     if(available.length){
       const select = document.createElement('select');
       select.appendChild(new Option(tr('Choose imported GLB...', 'Scegli GLB importato...'), ''));
-      available.forEach(asset => select.appendChild(new Option(asset.name || asset.source || asset.key || 'GLB', asset.id || asset.key || asset.dbKey || asset.src || '')));
+      available.forEach(asset => {
+        const classification=asset.vehicleRigged?tr('Vehicle rig','Rig veicolo'):asset.skeletonRigged?'Skeleton':asset.rigged?'Rigged':tr('Static','Statico');
+        select.appendChild(new Option((asset.name || asset.source || asset.key || 'GLB')+' · '+classification, asset.id || asset.key || asset.dbKey || asset.src || ''));
+      });
       select.addEventListener('change', () => {
         const asset = available.find(item => [item.id, item.key, item.dbKey, item.src].filter(Boolean).includes(select.value));
         if(asset) (player.replaceModelWithAsset || replaceModelWithAsset)(asset);
@@ -182,6 +208,55 @@ function create(deps){
       sm.body.appendChild(el('<div class="lk-hint">' + tr(
         'Smooth averages vertex normals across matching polygon positions; Flat keeps every polygon face visible. Geometry and polygon count are unchanged.',
         'Smooth media le normali dei vertici sulle posizioni poligonali coincidenti; Flat mantiene visibile ogni faccia. Geometria e numero di poligoni non cambiano.'
+      ) + '</div>'));
+    }
+    if(player.setSteeringWheelConfig || player.getSteeringWheelConfig){
+      const api = window.LK_RUNTIME_MODEL_ASSETS;
+      const defaults = api && api.steeringWheelDefaults ? api.steeringWheelDefaults() : {};
+      const cfg = api && api.normalizeSteeringWheelConfig
+        ? api.normalizeSteeringWheelConfig(player.getSteeringWheelConfig ? player.getSteeringWheelConfig() : player.steeringWheel)
+        : Object.assign({}, defaults, player.steeringWheel || {});
+      const saveSteering = patch => {
+        if(player.setSteeringWheelConfig) player.setSteeringWheelConfig(patch);
+        else Object.assign(player.steeringWheel || (player.steeringWheel = {}), patch);
+        markDirty();
+      };
+      const textSetting = (label, key, value) => {
+        const row = el('<div class="lk-row"><label>' + label + '</label><input type="text"></div>');
+        const input = row.querySelector('input');
+        input.value = value;
+        input.spellcheck = false;
+        input.addEventListener('change', () => saveSteering({[key]:input.value.trim()}));
+        return row;
+      };
+      sm.body.appendChild(el('<div class="lk-subtitle">' + tr('COCKPIT STEERING WHEEL', 'VOLANTE ABITACOLO') + '</div>'));
+      sm.body.appendChild(checkRow(tr('Animate interior steering wheel', 'Anima volante interno'), cfg.enabled !== false, value => saveSteering({enabled:value})).root);
+      sm.body.appendChild(textSetting(tr('Pivot node', 'Nodo pivot'), 'pivotName', cfg.pivotName || 'steering_wheel_pivot'));
+      sm.body.appendChild(textSetting(tr('Mesh node', 'Nodo mesh'), 'meshName', cfg.meshName || 'steering_wheel_mesh'));
+      sm.body.appendChild(selectRow(tr('Driver side', 'Lato guida'), cfg.driverSide || 'auto', [
+        {value:'auto', label:tr('Auto / GLB metadata', 'Auto / metadati GLB')},
+        {value:'left', label:tr('Left-hand drive', 'Guida a sinistra')},
+        {value:'right', label:tr('Right-hand drive', 'Guida a destra')},
+      ], value => saveSteering({driverSide:value})).root);
+      sm.body.appendChild(selectRow(tr('Local rotation axis', 'Asse rotazione locale'), cfg.axis || 'auto', [
+        {value:'auto', label:tr('Auto (GLB metadata)', 'Auto (metadati GLB)')},
+        {value:'x', label:'Local X'}, {value:'y', label:'Local Y'}, {value:'z', label:'Local Z'},
+      ], value => saveSteering({axis:value})).root);
+      sm.body.appendChild(selectRow(tr('Left/right direction', 'Direzione sinistra/destra'), String(cfg.direction || 0), [
+        {value:'0', label:tr('Auto / GLB metadata', 'Auto / metadati GLB')},
+        {value:'-1', label:tr('Common (inverted local axis)', 'Comune (asse locale invertito)')},
+        {value:'1', label:tr('Normal local axis', 'Asse locale normale')},
+      ], value => saveSteering({direction:Number(value)})).root);
+      sm.body.appendChild(sliderRow(tr('Controller lock-to-lock', 'Corsa controller'), cfg.inputLockDegrees || 900, 180, 2160, 10, value => saveSteering({inputLockDegrees:value}), value => Math.round(value) + '°').root);
+      sm.body.appendChild(sliderRow(tr('Visible lock-to-lock', 'Corsa visibile'), cfg.visualLockDegrees || 540, 90, 2160, 10, value => saveSteering({visualLockDegrees:value}), value => Math.round(value) + '°').root);
+      sm.body.appendChild(sliderRow(tr('Animation response', 'Risposta animazione'), cfg.response == null ? 12 : cfg.response, .1, 40, .1, value => saveSteering({response:value}), value => Number(value).toFixed(1)).root);
+      const rigStatus = player.getSteeringWheelRigStatus ? player.getSteeringWheelRigStatus() : null;
+      sm.body.appendChild(el('<div class="lk-hint">' + (rigStatus && rigStatus.ready
+        ? tr('Rig detected: ', 'Rig rilevato: ') + (rigStatus.pivot || 'steering_wheel_pivot') + ' · ' + (rigStatus.visualLockDegrees || cfg.visualLockDegrees || 540) + '°'
+        : tr('Waiting for steering_wheel_pivot. The Blender 0.2.2 add-on creates it and exports axis, direction and lock metadata.', 'In attesa di steering_wheel_pivot. L’add-on Blender 0.2.2 lo crea ed esporta asse, direzione e corsa.')) + '</div>'));
+      sm.body.appendChild(el('<div class="lk-hint">' + tr(
+        'Keyboard and gamepad use the common normalized steering mapping. High-rotation wheels remain compatible up to 2160°, while Visible lock can stay shorter to avoid exaggerated cockpit animation.',
+        'Tastiera e gamepad usano il mapping sterzo normalizzato comune. I volanti ad alta rotazione restano compatibili fino a 2160°, mentre la corsa visibile può restare più corta per evitare animazioni esagerate.'
       ) + '</div>'));
     }
     sm.body.appendChild(el('<div class="lk-hint">' + tr(

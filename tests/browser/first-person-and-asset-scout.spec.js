@@ -1,10 +1,8 @@
 'use strict';
 
-// End-to-end checks that both v0.7.5 additions actually reach the browser:
-// the modules load in the real script order, the first-person templates and
-// level build inside the page, and the Asset Scout button and panel exist and
-// open. Network catalogues are never contacted — the provider layer is covered
-// offline by tests/asset-scout.test.js.
+// End-to-end checks for the v0.7.5 first-person additions and for Asset Scout's
+// v0.7.7 compliance shutdown. The dormant provider layer remains covered by
+// offline fixtures in tests/asset-scout.test.js; no live catalogue is contacted.
 
 const {test, expect} = require('@playwright/test');
 
@@ -208,70 +206,28 @@ test('the FPS Shooter Test environment instantiates as real scene objects', asyn
   expect(pageErrors).toEqual([]);
 });
 
-test('Asset Scout button and panel exist and open in the editor', async ({page}) => {
+test('Asset Scout is not loaded or exposed while live API compliance is unresolved', async ({page}) => {
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   await openEditorPage(page, 'asset-scout-e2e');
-  await page.waitForFunction(() => !!(window.LOT_KING && window.LOT_KING.editor && window.LOT_KING.editor.assetScout));
-
-  const providers = await page.evaluate(() => window.LK_EDITOR_ASSET_SCOUT_PROVIDERS.list().map(item => item.id));
-  expect(providers).toEqual(['polyhaven', 'khronos']);
-
-  const fab = page.locator('#lkAssetScoutFab');
-  await expect(fab).toHaveCount(1);
-  const panel = page.locator('#lkAssetScoutPanel');
-  await expect(panel).toHaveAttribute('aria-hidden', 'true');
-
-  // Clicked, not opened through the API: the listener used to be attached only
-  // inside the first render, so the button itself did nothing until the panel
-  // had already been opened some other way.
-  await page.evaluate(() => {
-    document.querySelectorAll('#lkProjectsOverlay, #lkLevelsOverlay, #lkWelcomeOverlay').forEach(node => {
-      node.classList.remove('open');
-      node.setAttribute('aria-hidden', 'true');
-      node.style.display = 'none';
-    });
+  await page.waitForFunction(() => !!(window.LOT_KING && window.LOT_KING.editor));
+  const disabled = await page.evaluate(() => ({
+    providers:typeof window.LK_EDITOR_ASSET_SCOUT_PROVIDERS,
+    module:typeof window.LK_EDITOR_ASSET_SCOUT,
+    instance:typeof window.LOT_KING.editor.assetScout,
+    openApi:typeof window.LOT_KING.editor.openAssetScout,
+    toggleApi:typeof window.LOT_KING.editor.toggleAssetScout,
+    fab:!!document.getElementById('lkAssetScoutFab'),
+    panel:!!document.getElementById('lkAssetScoutPanel'),
+  }));
+  expect(disabled).toEqual({
+    providers:'undefined',
+    module:'undefined',
+    instance:'undefined',
+    openApi:'undefined',
+    toggleApi:'undefined',
+    fab:false,
+    panel:false,
   });
-  await fab.click();
-  await expect(panel).toHaveAttribute('aria-hidden', 'false');
-  await expect(panel).toHaveClass(/on/);
-  await expect(page.locator('#lkAssetScoutProviders .lk-scout-chip')).toHaveCount(2);
-
-  // #lkEditor is pointer-events:none so the viewport stays clickable through the
-  // chrome. A panel that forgets to opt back in is fully visible and completely
-  // inert: every click lands in the scene behind it.
-  const interactive = await page.evaluate(() => {
-    const node = document.getElementById('lkAssetScoutPanel');
-    return {
-      panel:getComputedStyle(node).pointerEvents,
-      search:getComputedStyle(node.querySelector('input, select, button')).pointerEvents,
-    };
-  });
-  expect(interactive.panel).not.toBe('none');
-  expect(interactive.search).not.toBe('none');
-
-  // Result cards are laid out by CSS alone, so measure the real boxes: the
-  // previews were collapsing into flattened strips inside the grid.
-  const previews = await page.evaluate(() => {
-    const results = document.getElementById('lkAssetScoutResults');
-    results.innerHTML = '';
-    for(let i = 0; i < 5; i++){
-      results.insertAdjacentHTML('beforeend',
-        '<div class="lk-scout-card"><div class="lk-scout-preview"></div>' +
-        '<div class="lk-scout-body"><h4>Asset ' + i + '</h4></div></div>');
-    }
-    return Array.from(results.querySelectorAll('.lk-scout-preview')).map(node => {
-      const box = node.getBoundingClientRect();
-      return {w:Math.round(box.width), h:Math.round(box.height)};
-    });
-  });
-  expect(previews).toHaveLength(5);
-  previews.forEach(box => {
-    expect(box.h, 'preview collapsed to ' + box.h + 'px').toBeGreaterThan(120);
-    expect(box.h / box.w, 'preview is a flattened strip').toBeGreaterThan(.45);
-  });
-
-  await page.evaluate(() => window.LOT_KING.editor.assetScout.close());
-  await expect(panel).toHaveAttribute('aria-hidden', 'true');
   expect(pageErrors).toEqual([]);
 });

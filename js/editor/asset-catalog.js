@@ -240,10 +240,13 @@ function create(deps){
         thumbUrl: type === 'texture' && previewSrc ? previewSrc : null,
         thumbDbKey: type === 'texture' && previewDbKey ? previewDbKey : null,
         thumbAsset: type === 'glb' ? {
+          kind:'glb',
           id: entry.id || entry.key || assetKey,
           name: entryDisplayName(entry),
           src: previewSrc || null,
           dbKey: previewDbKey || null,
+          size:Number(entry.size || entryAsset.size || 0),
+          meshCount:Number(entry.meshCount || entryAsset.meshCount || 0),
           source: entryAsset.source || entryAsset.key || entry.source || entry.name || null,
         } : null,
         draggable:true,
@@ -300,7 +303,10 @@ function create(deps){
     (refs || []).forEach(ref => { if(ref && !unique.includes(ref)) unique.push(ref); });
     ED.selectedAsset = unique[0] || null;
     ED.selectedAssets = unique.length > 1 ? unique : null;
-    if(unique.length) ED.lastAssetSelectedRef = unique[unique.length - 1];
+    if(unique.length){
+      ED.lastAssetSelectedRef = unique[unique.length - 1];
+      ED.selectionContext = 'assets';
+    }
     root.querySelectorAll('#lkAssetsPanel .lk-asset-item').forEach(item => {
       item.classList.toggle('sel', unique.includes(item.dataset.assetRef));
     });

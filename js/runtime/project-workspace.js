@@ -19,6 +19,10 @@ const CATALOG_FILE = 'projects.json';
 const DEMO_PROJECT_URL = 'demo/demo-project.lkep.json';
 const GUIDE_URL = 'HOW_TO_START.md';
 const GITHUB_URL = 'https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame';
+const BROWSER_PROJECT_INDEX = 'lk.editor.projects.v1';
+const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
+const BROWSER_PROJECT_MARKER = 'lk.editor.browserProject.v1';
+const PROJECT_IDENTITY_VERSION = 4;
 const DEMO_BLOCKED_SELECTOR = [
   '#lkSaveAsTrack',
   '#lkNewTrack',
@@ -115,6 +119,77 @@ function saveState(patch){
   syncWorkspaceButtons();
   window.dispatchEvent(new CustomEvent('lot-king:workspace-state', {detail:next}));
   return next;
+}
+
+function browserProjectLevelNames(project){
+  const names = new Set();
+  const add = value => {
+    const normalized = String(value || '').trim();
+    if(normalized) names.add(slugifyWorkspaceName(normalized));
+  };
+  const meta = project && project.meta || {};
+  add(meta.trackName || meta.levelName);
+  (Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : []).forEach(level => {
+    add(level && level.name);
+    add(level && level.project && level.project.meta &&
+      (level.project.meta.trackName || level.project.meta.levelName));
+  });
+  try {
+    const levelIndex = JSON.parse(localStorage.getItem('lotking.levels.v1') || 'null');
+    (levelIndex && Array.isArray(levelIndex.levels) ? levelIndex.levels : []).forEach(level => {
+      add(level && level.name);
+      if(!level || !level.id) return;
+      try {
+        const saved = JSON.parse(localStorage.getItem('lotking.level.' + level.id) || 'null');
+        add(saved && saved.meta && (saved.meta.trackName || saved.meta.levelName));
+      } catch(err){}
+    });
+    const active = JSON.parse(localStorage.getItem('lotking.scene.v1') || 'null');
+    add(active && active.meta && (active.meta.trackName || active.meta.levelName));
+  } catch(err){}
+  return names;
+}
+
+function migrateBrowserProjectIdentityEarly(){
+  try {
+    const index = JSON.parse(localStorage.getItem(BROWSER_PROJECT_INDEX) || 'null');
+    if(!index || !Array.isArray(index.projects)) return false;
+    const marker = JSON.parse(localStorage.getItem(BROWSER_PROJECT_MARKER) || 'null');
+    let changed = false;
+    index.projects.forEach(record => {
+      if(!record || !record.id) return;
+      const key = BROWSER_PROJECT_PREFIX + slugifyWorkspaceName(record.id);
+      const project = JSON.parse(localStorage.getItem(key) || 'null');
+      if(!project) return;
+      const meta = project.meta || {};
+      const oldName = String(record.name || meta.projectName || record.id).trim();
+      const inheritedFromLevel = browserProjectLevelNames(project).has(slugifyWorkspaceName(oldName));
+      const explicitlyNamed = meta.projectIdentityExplicit === true;
+      const needsRepair = inheritedFromLevel && !explicitlyNamed;
+      if(Number(meta.projectIdentityVersion) >= PROJECT_IDENTITY_VERSION && !needsRepair) return;
+      const stableName = needsRepair
+        ? String(project.name || 'Lot King Engine Project').trim()
+        : oldName;
+      record.name = stableName || 'Lot King Engine Project';
+      project.meta = Object.assign({}, meta, {
+        projectName:record.name,
+        projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+        projectIdentityExplicit:explicitlyNamed,
+        projectIdentitySource:needsRepair ? 'stable-project-root' : (meta.projectIdentitySource || 'catalog'),
+      });
+      localStorage.setItem(key, JSON.stringify(project));
+      if(marker && slugifyWorkspaceName(marker.id) === slugifyWorkspaceName(record.id)){
+        marker.name = record.name;
+        localStorage.setItem(BROWSER_PROJECT_MARKER, JSON.stringify(marker));
+      }
+      changed = true;
+    });
+    if(changed) localStorage.setItem(BROWSER_PROJECT_INDEX, JSON.stringify(index));
+    return changed;
+  } catch(err){
+    console.warn('Lot King early project identity migration failed', err);
+    return false;
+  }
 }
 
 function requestPersistentBrowserStorage(){
@@ -344,7 +419,12 @@ async function upsertWorkspaceProject(dir, project, opts){
   const now = new Date().toISOString();
   const projectCopy = JSON.parse(JSON.stringify(payload));
   projectCopy.savedAt = now;
-  projectCopy.meta = Object.assign({}, projectCopy.meta || {}, {trackId:id, trackName:name});
+  projectCopy.meta = Object.assign({}, projectCopy.meta || {}, {
+    projectName:name,
+    projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+    projectIdentityExplicit:projectCopy.meta && projectCopy.meta.projectIdentityExplicit === true || opts.explicitName === true,
+    trackId:projectCopy.meta && projectCopy.meta.trackId || id,
+  });
   const fileName = slugifyWorkspaceName(id) + '.lkep.json';
   const projectsDir = await workspaceProjectsDir(dir);
   await writeJsonFile(projectsDir, fileName, projectCopy);
@@ -398,6 +478,9 @@ function blankWorkspaceProject(name){
     game:'Lot King Browser-Native 3D Engine & Editor',
     savedAt:new Date().toISOString(),
     meta:{
+      projectName,
+      projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+      projectIdentityExplicit:true,
       trackId:'new-project',
       trackName:projectName,
       levelRole:'gameplay',
@@ -424,7 +507,12 @@ async function initializeFolderWorkspace(handle, template){
   if(selectedTemplate === 'demo'){
     const response = await fetch(DEMO_PROJECT_URL, {cache:'reload'});
     if(!response.ok) throw new Error(tr('DEMO project could not be downloaded', 'Impossibile scaricare il progetto DEMO'));
-    project = JSON.parse(await response.text());
+    let text = await response.text();
+    const splitProject = window.LK_RUNTIME_SPLIT_PROJECT;
+    if(splitProject && splitProject.resolveText){
+      text = await splitProject.resolveText(text, new URL(DEMO_PROJECT_URL, location.href).href);
+    }
+    project = JSON.parse(text);
   }
   const saved = await upsertWorkspaceProject(dir, project, {
     id:project && project.meta && project.meta.trackId,
@@ -1214,6 +1302,7 @@ if(legacyDemoState.mode === 'demo'){
   requestPersistentBrowserStorage();
 }
 
+migrateBrowserProjectIdentityEarly();
 installEntryPoints();
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installEntryPoints, {once:true});
 window.addEventListener('lotking:languagechange', () => {

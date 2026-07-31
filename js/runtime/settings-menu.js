@@ -21,12 +21,12 @@ const SHADOW_PRESETS = Object.freeze({
   high:   Object.freeze({label:'High',   mapSize:2048, radius:1.75}),
   ultra:  Object.freeze({label:'Ultra',  mapSize:4096, radius:2.25}),
 });
-const VIDEO_SETTING_KEYS = Object.freeze(['quality','renderResolution','textureSize','antialiasing','rendererMode','exposure','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting']);
+const VIDEO_SETTING_KEYS = Object.freeze(['quality','renderResolution','textureSize','antialiasing','rendererMode','exposure','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting','cinematicLensFlares']);
 const VIDEO_DEFAULTS = Object.freeze({
   quality:'high', renderResolution:1, textureSize:1024, antialiasing:'ssaa2x', rendererMode:'webgl', exposure:1.12,
   shadows:true, shadowQuality:'auto', shadowDistance:55, shadowBias:-0.00035, shadowNormalBias:0.035, shadowSoftness:1,
   ambientOcclusion:true, aoQuality:'medium',
-  reflections:true, reflectionQuality:'high', reflectionDistance:35, volumetricLighting:false,
+  reflections:true, reflectionQuality:'high', reflectionDistance:35, volumetricLighting:true, cinematicLensFlares:false,
 });
 const TEXTURE_SIZES = Object.freeze([256, 512, 1024, 2048, 4096]);
 const VIDEO_BENCHMARK_PREF_KEY = 'lotking.videoBenchmark.v1';
@@ -58,6 +58,7 @@ function menuRenderValues(input){
     reflections:false,
     reflectionQuality:'low',
     volumetricLighting:false,
+    cinematicLensFlares:false,
   });
 }
 
@@ -73,6 +74,7 @@ function adaptiveLowValues(input){
     reflections:false,
     reflectionQuality:'low',
     volumetricLighting:false,
+    cinematicLensFlares:false,
     textureSize:Math.min(512, normalizeVideoValues(input).textureSize),
   });
 }
@@ -167,7 +169,7 @@ function normalizeVideoValues(input){
     // deliberately modest and raising it is an explicit choice.
     textureSize: TEXTURE_SIZES.includes(Math.round(Number(src.textureSize))) ? Math.round(Number(src.textureSize)) : VIDEO_DEFAULTS.textureSize,
     antialiasing: ['off','fxaa','ssaa2x','ssaa4x'].includes(antialiasing) ? antialiasing : VIDEO_DEFAULTS.antialiasing,
-    rendererMode: src.rendererMode === 'raytracing' ? 'raytracing' : 'webgl',
+    rendererMode: ['raytracing','pathtracing'].includes(src.rendererMode) ? src.rendererMode : 'webgl',
     exposure: clampNumber(src.exposure, VIDEO_DEFAULTS.exposure, .7, 1.6),
     shadows: src.shadows !== false,
     shadowQuality: ['auto','low','medium','high','ultra'].includes(src.shadowQuality) ? src.shadowQuality : VIDEO_DEFAULTS.shadowQuality,
@@ -180,7 +182,8 @@ function normalizeVideoValues(input){
     reflections: src.reflections !== false,
     reflectionQuality: ['low','medium','high','ultra'].includes(src.reflectionQuality) ? src.reflectionQuality : VIDEO_DEFAULTS.reflectionQuality,
     reflectionDistance: clampNumber(src.reflectionDistance, VIDEO_DEFAULTS.reflectionDistance, 5, 120),
-    volumetricLighting: !!src.volumetricLighting,
+    volumetricLighting: src.volumetricLighting !== false,
+    cinematicLensFlares: src.cinematicLensFlares === true,
   };
 }
 
@@ -188,7 +191,7 @@ function normalizeVideoProject(input){
   const src = input || {};
   const exposed = {};
   VIDEO_SETTING_KEYS.forEach(key => { exposed[key] = !src.exposed || src.exposed[key] !== false; });
-  return {version:4, defaults:normalizeVideoValues(src.defaults || src), exposed};
+  return {version:5, defaults:normalizeVideoValues(src.defaults || src), exposed};
 }
 
 function createVideo(options){
@@ -198,6 +201,7 @@ function createVideo(options){
   let project = normalizeVideoProject();
   let overlayTimer = 0;
   let warmProfileSnapshot = null;
+  let appliedRendererMode = values.rendererMode;
   const presentationReasons = new Set();
   if(opts.initialPresentation) presentationReasons.add(
     typeof opts.initialPresentation === 'string' ? opts.initialPresentation : 'menu-overlay');
@@ -322,9 +326,18 @@ function createVideo(options){
     renderer.userData.lkCompatibilityProfile=compat;
     if(compat)document.body.dataset.lkGpuCompatibility=compat.conservativePost?'conservative':'full';
     document.body.classList.toggle('lk-renderer-raytracing', activeValues.rendererMode === 'raytracing');
+    document.body.classList.toggle('lk-renderer-pathtracing', activeValues.rendererMode === 'pathtracing');
     document.body.classList.toggle('lk-volumetric-lighting', !!activeValues.volumetricLighting);
+    document.body.classList.toggle('lk-cinematic-lens-flares', activeValues.cinematicLensFlares !== false);
     document.body.dataset.lkVideoQuality = activeValues.quality;
     document.body.dataset.lkPresentationProfile = presentationReasons.size ? 'menu' : 'gameplay';
+    if(values.rendererMode!==appliedRendererMode){
+      const previous=appliedRendererMode;
+      appliedRendererMode=values.rendererMode;
+      window.dispatchEvent(new CustomEvent('lotking:renderer-mode-change',{
+        detail:{previous,mode:values.rendererMode},
+      }));
+    }
   }
 
   function apply(options){
@@ -433,6 +446,7 @@ function syncVideoControls(project, values){
     ambientOcclusion:'#videoAmbientOcclusion',aoQuality:'#videoAoQuality',
     reflections:'#videoReflections', reflectionQuality:'#videoReflectionQuality', reflectionDistance:'#videoReflectionDistance',
     volumetricLighting:'#videoVolumetricLighting',
+    cinematicLensFlares:'#videoCinematicLensFlares',
   };
   Object.keys(selectors).forEach(key => {
     const input = document.querySelector(selectors[key]);
@@ -513,6 +527,7 @@ function createMenu(options){
     const reflectionQuality = document.getElementById('videoReflectionQuality');
     const reflectionDistance = document.getElementById('videoReflectionDistance');
     const volumetricLighting = document.getElementById('videoVolumetricLighting');
+    const cinematicLensFlares = document.getElementById('videoCinematicLensFlares');
     const editorHud = document.getElementById('videoEditorHud');
     if(!btn || !overlay || !close || !resume || !backMenu) return;
 
@@ -766,7 +781,7 @@ function createMenu(options){
     if(rendererMode){
       rendererMode.value = video && video.rendererMode || 'webgl';
       rendererMode.addEventListener('change', () => {
-        if(video) video.rendererMode = rendererMode.value === 'raytracing' ? 'raytracing' : 'webgl';
+        if(video) video.rendererMode = ['raytracing','pathtracing'].includes(rendererMode.value) ? rendererMode.value : 'webgl';
         applyVideo({heavy:true, message:tr('Switching rendering pipeline…', 'Cambio pipeline di rendering…')});
       });
     }
@@ -837,6 +852,13 @@ function createMenu(options){
       volumetricLighting.addEventListener('change', () => {
         if(video) video.volumetricLighting = !!volumetricLighting.checked;
         applyVideo({heavy:true, message:tr('Updating volumetric lighting…', 'Aggiornamento illuminazione volumetrica…')});
+      });
+    }
+    if(cinematicLensFlares){
+      cinematicLensFlares.checked = !!(video&&video.cinematicLensFlares);
+      cinematicLensFlares.addEventListener('change', () => {
+        if(video) video.cinematicLensFlares = !!cinematicLensFlares.checked;
+        applyVideo({heavy:true, message:tr('Updating cinematic lens flares…', 'Aggiornamento lens flare cinematici…')});
       });
     }
     if(editorHud) editorHud.addEventListener('change', () => {

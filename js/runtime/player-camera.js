@@ -15,6 +15,61 @@ const ASPECTS = Object.freeze({
   '9:16': 9 / 16,
 });
 const CLEAR_RESTORE_COLOR = new THREE.Color();
+const INTERIOR_CAMERA_VERSION = 3;
+const INTERIOR_DEFAULTS = Object.freeze({
+  interiorHeight: 1.15,
+  interiorForward: .28,
+  interiorLateral: -.42,
+  interiorLookHeight: .04,
+  interiorFov: 72,
+  interiorLag: 18,
+  interiorGForceMotion: 0,
+  interiorAccelerationMotion: 0,
+  interiorRoadShake: 0,
+  interiorMotionLimit: .035,
+  interiorSpeedFovGain: .025,
+  interiorSpeedFovMax: 4.5,
+});
+
+function isLegacyCenteredInterior(source){
+  if(!source || typeof source !== 'object') return false;
+  const close = (value, expected) => value == null || Math.abs(Number(value) - expected) < .0001;
+  const rotation = Array.isArray(source.interiorRotation) ? source.interiorRotation : null;
+  const authoredRotation = rotation && rotation.some(value => Math.abs(Number(value) || 0) > .0001);
+  return !authoredRotation &&
+    close(source.interiorHeight, 1.15) &&
+    close(source.interiorForward, .28) &&
+    close(source.interiorLateral, 0) &&
+    close(source.interiorLookHeight, .04) &&
+    close(source.interiorFov, 72) &&
+    close(source.interiorLag, 18);
+}
+
+function migrateConfig(source){
+  const config = Object.assign({}, source || {});
+  const oldVersion = Number(config.interiorCameraVersion) || 0;
+  if(oldVersion < 2 && isLegacyCenteredInterior(config)){
+    // Move only the untouched, old centred cockpit preset. A camera with any
+    // authored placement/rotation is left exactly where its creator put it.
+    config.interiorLateral = INTERIOR_DEFAULTS.interiorLateral;
+  }
+  if(oldVersion < 3){
+    // v2 shipped these exact motion values as defaults. Migrate only untouched
+    // presets; deliberately authored non-default strengths remain intact.
+    if(config.interiorGForceMotion == null || Math.abs(Number(config.interiorGForceMotion) - .18) < .0001){
+      config.interiorGForceMotion = 0;
+    }
+    if(config.interiorAccelerationMotion == null) config.interiorAccelerationMotion = 0;
+    if(config.interiorRoadShake == null || Math.abs(Number(config.interiorRoadShake) - .08) < .0001){
+      config.interiorRoadShake = 0;
+    }
+  }
+  Object.keys(INTERIOR_DEFAULTS).forEach(key => {
+    if(config[key] == null) config[key] = INTERIOR_DEFAULTS[key];
+  });
+  config.interiorCameraVersion = INTERIOR_CAMERA_VERSION;
+  return config;
+}
 
 function createConfig(){
   return {
@@ -44,6 +99,20 @@ function createConfig(){
     cinematicDriftClose: 1.65,
     cinematicDriftHeight: .45,
     cinematicLag: 4.2,
+    interiorCameraVersion: INTERIOR_CAMERA_VERSION,
+    interiorHeight: INTERIOR_DEFAULTS.interiorHeight,
+    interiorForward: INTERIOR_DEFAULTS.interiorForward,
+    interiorLateral: INTERIOR_DEFAULTS.interiorLateral,
+    interiorLookHeight: INTERIOR_DEFAULTS.interiorLookHeight,
+    interiorFov: INTERIOR_DEFAULTS.interiorFov,
+    interiorLag: INTERIOR_DEFAULTS.interiorLag,
+    interiorGForceMotion: INTERIOR_DEFAULTS.interiorGForceMotion,
+    interiorAccelerationMotion: INTERIOR_DEFAULTS.interiorAccelerationMotion,
+    interiorRoadShake: INTERIOR_DEFAULTS.interiorRoadShake,
+    interiorSpeedFovGain: INTERIOR_DEFAULTS.interiorSpeedFovGain,
+    interiorSpeedFovMax: INTERIOR_DEFAULTS.interiorSpeedFovMax,
+    externalRotation: null,
+    interiorRotation: null,
     dof: {enabled:false, focus:9, aperture:.025, maxblur:.04, autoFocus:true, focusRadius:.16, feather:.38, showFocus:false},
     grade: {enabled:false, exposure:1, brightness:0, contrast:1, saturation:1, gamma:1},
   };
@@ -110,7 +179,10 @@ function renderScoped(opts){
 
 window.LK_RUNTIME_PLAYER_CAMERA = Object.freeze({
   ASPECTS,
+  INTERIOR_CAMERA_VERSION,
+  INTERIOR_DEFAULTS,
   createConfig,
+  migrateConfig,
   aspectValue,
   renderRect,
   renderScoped,

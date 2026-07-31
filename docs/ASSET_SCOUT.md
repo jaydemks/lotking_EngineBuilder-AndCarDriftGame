@@ -1,5 +1,14 @@
 # Asset Scout
 
+> **Status in v0.7.7: temporarily disabled.** The current Poly Haven API terms permit
+> commercial integrations but require every live request to identify the application
+> through a matching `Referer` or `User-Agent`. Browser JavaScript cannot reliably set
+> either protected header when the editor runs from localhost or generic static hosting.
+> The editor therefore does not load the provider/UI scripts and exposes no Asset Scout
+> button, panel or menu command. The source remains dormant for a future compliant proxy
+> or explicit provider clarification. Assets previously downloaded from Poly Haven remain
+> CC0 and do not need to be removed.
+
 Asset Scout is the editor's built-in search for **free online 3D assets**. It finds models
 and PBR textures in public catalogues, downloads them, converts them to the engine's
 canonical format and hands them to the ordinary asset-import pipeline — the same one a
@@ -10,9 +19,9 @@ place it, without leaving the editor or opening a browser tab.
 
 ---
 
-## Where it is
+## Where it is when enabled
 
-- **Floating button** `⌕ ASSET SCOUT`, bottom-right of the editor viewport.
+- **Dock button** `⌕ ASSET SCOUT`, under the Inspector sidebar.
 - **Menu bar** → `Tools` → `Asset Scout`.
 - **API** `GAME.editor.openAssetScout()` / `GAME.editor.toggleAssetScout()`.
 

@@ -15,10 +15,11 @@ function create(deps){
   const resolveImportedAssetUrl = deps.resolveImportedAssetUrl || function(asset){ return Promise.reject(new Error('asset source missing')); };
   let overlay = null;
   let preview = null;
+  let previewSerial = 0;
 
   function fmtBytes(bytes){
     const n = Number(bytes) || 0;
-    if(!n) return 'Unknown';
+    if(!n) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
     let v = n, i = 0;
     while(v >= 1024 && i < units.length - 1){ v /= 1024; i += 1; }
@@ -32,6 +33,7 @@ function create(deps){
   }
 
   function cleanupPreview(){
+    previewSerial += 1;
     if(!preview) return;
     if(preview.raf) cancelAnimationFrame(preview.raf);
     if(preview.controls){
@@ -62,6 +64,88 @@ function create(deps){
     return r;
   }
 
+  function encodedJsonBytes(value){
+    try {
+      const json = JSON.stringify(value == null ? {} : value);
+      return typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(json).byteLength : json.length * 2;
+    } catch(err){ return 0; }
+  }
+
+  function objectResourceBytes(object){
+    const geometries = new Set();
+    const textures = new Set();
+    let bytes = 0;
+    if(!object || !object.traverse) return 0;
+    object.traverse(node => {
+      if(node.geometry && !geometries.has(node.geometry)){
+        geometries.add(node.geometry);
+        const geometry = node.geometry;
+        if(geometry.index && geometry.index.array) bytes += geometry.index.array.byteLength || 0;
+        Object.values(geometry.attributes || {}).forEach(attribute => {
+          if(attribute && attribute.array) bytes += attribute.array.byteLength || 0;
+        });
+      }
+      const materials = node.material ? (Array.isArray(node.material) ? node.material : [node.material]) : [];
+      materials.forEach(material => {
+        if(!material) return;
+        Object.keys(material).forEach(key => {
+          const texture = material[key];
+          if(!texture || !texture.isTexture || textures.has(texture)) return;
+          textures.add(texture);
+          const image = texture.image;
+          bytes += Math.max(0, Number(image && (image.videoWidth || image.naturalWidth || image.width)) || 0)
+            * Math.max(0, Number(image && (image.videoHeight || image.naturalHeight || image.height)) || 0) * 4;
+        });
+      });
+    });
+    return bytes;
+  }
+
+  function measuredAssetBytes(item, opts){
+    opts = opts || {};
+    const raw = item && item.raw || item || {};
+    const explicit = Number(opts.size || raw.size || raw.sourceSize || raw.entry && raw.entry.size || raw.entry && raw.entry.asset && raw.entry.asset.size) || 0;
+    if(explicit) return explicit;
+    if(opts.previewObject) return objectResourceBytes(opts.previewObject) || encodedJsonBytes(raw);
+    return encodedJsonBytes(raw);
+  }
+
+  function appendMeasuredSize(info, item, opts){
+    const sizeRow = row('Size', 'Calculating…');
+    sizeRow.classList.add('lk-prop-size-row');
+    info.appendChild(sizeRow);
+    const output = sizeRow.querySelector('span');
+    const run = () => {
+      if(!output.isConnected) return;
+      const bytes = measuredAssetBytes(item, opts);
+      output.textContent = fmtBytes(bytes);
+      output.title = bytes.toLocaleString() + ' bytes' + ((opts && opts.previewObject) ? ' · estimated geometry + decoded textures' : '');
+    };
+    if(window.requestIdleCallback) window.requestIdleCallback(run, {timeout:180});
+    else setTimeout(run, 20);
+  }
+
+  function setPreviewLoading(box, label, percent){
+    if(!box) return;
+    let state = box.querySelector('.lk-prop-loading');
+    if(!state){
+      state = documentRef.createElement('div');
+      state.className = 'lk-prop-loading';
+      state.innerHTML = '<i></i><strong></strong><span></span><b></b>';
+      box.appendChild(state);
+    }
+    state.querySelector('strong').textContent = label || 'Preparing preview…';
+    const value = Math.max(4, Math.min(100, Number(percent) || 8));
+    state.querySelector('b').style.width = value + '%';
+    state.querySelector('span').textContent = Math.round(value) + '%';
+    state.classList.toggle('done', value >= 100);
+  }
+
+  function clearPreviewLoading(box){
+    const state = box && box.querySelector('.lk-prop-loading');
+    if(state) state.remove();
+  }
+
   function renderGlbPreview(box, asset){
     if(!THREE || !THREE.GLTFLoader){
       box.textContent = '3D preview unavailable: GLTFLoader missing.';
@@ -71,12 +155,14 @@ function create(deps){
       box.textContent = '3D preview unavailable: OrbitControls missing.';
       return;
     }
+    const token = ++previewSerial;
+    setPreviewLoading(box, 'Resolving stored source…', 7);
     const w = Math.max(240, box.clientWidth || 420);
     const h = 240;
     const renderer = window.LK_RUNTIME_RENDERING_BACKEND ? window.LK_RUNTIME_RENDERING_BACKEND.createWebGL({antialias:true,alpha:true},'asset-properties') : new THREE.WebGLRenderer({antialias:true, alpha:true});
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     renderer.setSize(w, h);
-    box.innerHTML = '';
+    box.querySelectorAll('canvas').forEach(canvas => canvas.remove());
     box.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(43, w / h, .01, 2000);
@@ -90,12 +176,23 @@ function create(deps){
     preview = {renderer, raf:0, controls:null};
     const sourceLoaders=pluginManager&&pluginManager.extensions?pluginManager.extensions('assetPreviewLoader'):[];
     const sourceLoader=sourceLoaders.find(item=>item&&typeof item.accepts==='function'&&typeof item.load==='function'&&item.accepts(asset));
-    const loadRoot=sourceLoader
-      ? Promise.resolve(sourceLoader.load(asset,{THREE,assetBlobs:window.LK_ASSET_BLOBS}))
-      : resolveImportedAssetUrl(asset).then(src => new Promise((resolve, reject) => {
-        new THREE.GLTFLoader().load(src, gltf => resolve(gltf.scene), undefined, reject);
-      }));
+    const loadRoot = new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))).then(() => {
+      if(token !== previewSerial) throw new Error('preview cancelled');
+      setPreviewLoading(box, sourceLoader ? 'Loading authoring source…' : 'Reading model data…', 18);
+      return sourceLoader
+        ? Promise.resolve(sourceLoader.load(asset,{THREE,assetBlobs:window.LK_ASSET_BLOBS}))
+        : resolveImportedAssetUrl(asset).then(src => new Promise((resolve, reject) => {
+          new THREE.GLTFLoader().load(src, gltf => resolve(gltf.scene), progress => {
+            const total = Number(progress && progress.total) || Number(asset && asset.size) || 0;
+            const loaded = Number(progress && progress.loaded) || 0;
+            if(total) box.dispatchEvent(new CustomEvent('lk-preview-source-size', {detail:{bytes:total}}));
+            setPreviewLoading(box, total ? 'Streaming model…' : 'Parsing model…', total ? 18 + (loaded / total) * 58 : 44);
+          }, reject);
+        }));
+    });
     loadRoot.then(root => {
+      if(token !== previewSerial || !box.isConnected) return;
+      setPreviewLoading(box, 'Framing materials and geometry…', 88);
       group.add(root);
       const box3 = new THREE.Box3().setFromObject(group);
       const size = box3.getSize(new THREE.Vector3());
@@ -159,9 +256,18 @@ function create(deps){
         preview.raf = requestAnimationFrame(animate);
       };
       resetToFit();
+      setPreviewLoading(box, 'Preview ready', 100);
+      setTimeout(() => {
+        if(token === previewSerial) clearPreviewLoading(box);
+      }, 220);
       animate();
     }).catch(err => {
-      box.textContent = 'Preview failed: ' + (err && err.message || 'unknown error');
+      if(token !== previewSerial || !box.isConnected) return;
+      clearPreviewLoading(box);
+      const error = documentRef.createElement('div');
+      error.className = 'lk-prop-preview-error';
+      error.textContent = 'Preview failed: ' + (err && err.message || 'unknown error');
+      box.appendChild(error);
     });
   }
 
@@ -229,6 +335,7 @@ function create(deps){
     else p.textContent = opts.icon || item && item.icon || '▣';
     const info = overlay.querySelector('.lk-prop-info');
     (opts.rows || []).forEach(r => info.append(row(r[0], r[1])));
+    appendMeasuredSize(info, item, opts);
     documentRef.body.appendChild(overlay);
   }
 
@@ -255,6 +362,8 @@ function create(deps){
     overlay.querySelector('button').addEventListener('click', close);
     overlay.addEventListener('pointerdown', e => { if(e.target === overlay) close(); });
     const info = overlay.querySelector('.lk-prop-info');
+    const sizeInfo = row('Size', fmtBytes(asset.size || asset.sourceSize));
+    sizeInfo.classList.add('lk-prop-size-row');
     info.append(
       row('Name', asset.source || asset.name || 'Imported Asset'),
       row('Display name', asset.name || ''),
@@ -266,9 +375,11 @@ function create(deps){
       row('Runtime build', asset.sourceFormat === 'fbx' ? String(asset.compileState || 'unknown').toUpperCase() + (asset.compiledAt ? ' · ' + fmtDate(asset.compiledAt) : '') : 'Canonical'),
       row('Linked files', Array.isArray(asset.sourceDependencies) ? asset.sourceDependencies.length : 0),
       row('Conversion warnings', Array.isArray(asset.conversionWarnings) && asset.conversionWarnings.length ? asset.conversionWarnings.join(' · ') : 'None'),
-      row('Size', fmtBytes(asset.size)),
+      sizeInfo,
       row('Storage', asset.dbKey ? 'IndexedDB blob' : (asset.src ? 'Inline/data URL' : 'Unknown')),
-      row('Rigged', asset.rigged ? 'Yes' : 'Unknown'),
+      row('Rig classification', asset.vehicleRigged ? 'Vehicle rig' : (asset.skeletonRigged ? 'Skeleton rig' : (asset.rigged ? 'Rigged (legacy)' : 'Static / non-rigged'))),
+      row('Detected vehicle wheels', asset.vehicleWheelCount || 0),
+      row('Skinned meshes / bones', (asset.skinnedMeshCount || 0) + ' / ' + (asset.boneCount || 0)),
       row('Used as player model', asset.usedAsPlayerModel ? 'Yes' : 'No'),
       row('Imported at', fmtDate(asset.importedAt)),
       row('Player model at', fmtDate(asset.playerModelAt)),
@@ -276,6 +387,11 @@ function create(deps){
       row('Asset key', asset.key || ''),
       row('Blob key', asset.dbKey || '')
     );
+    const previewBox = overlay.querySelector('.lk-prop-preview');
+    previewBox.addEventListener('lk-preview-source-size', event => {
+      const bytes = Number(event.detail && event.detail.bytes) || 0;
+      if(bytes) sizeInfo.querySelector('span').textContent = fmtBytes(bytes);
+    });
     if(asset.sourceFormat==='fbx'&&rebuildImportedAsset){
       const actions=documentRef.createElement('div');actions.className='lk-ps-actions';
       const rebuild=documentRef.createElement('button');rebuild.type='button';rebuild.textContent='↻ Rebuild runtime GLB';
@@ -298,7 +414,30 @@ function create(deps){
       info.appendChild(actions);
     }
     documentRef.body.appendChild(overlay);
-    renderGlbPreview(overlay.querySelector('.lk-prop-preview'), asset);
+    const previewBytes = Number(asset.size || asset.sourceSize || 0);
+    const previewMeshes = Number(asset.meshCount || 0);
+    const heavyPreview = previewBytes > 8 * 1024 * 1024 || previewMeshes > 32;
+    if(heavyPreview){
+      const toolbar = previewBox.querySelector('.lk-prop-preview-toolbar');
+      if(toolbar) toolbar.hidden = true;
+      const gate = documentRef.createElement('div');
+      gate.className = 'lk-prop-preview-gate';
+      gate.innerHTML = '<strong>Heavy 3D preview</strong><span></span><button type="button">Load preview</button>';
+      gate.querySelector('span').textContent =
+        fmtBytes(previewBytes) + (previewMeshes ? ' · ' + previewMeshes + ' meshes' : '') +
+        ' · parsing may briefly use the main thread';
+      gate.querySelector('button').addEventListener('click', () => {
+        gate.remove();
+        if(toolbar) toolbar.hidden = false;
+        // Paint the progress layer before any renderer/context or GLB parser is
+        // created. Heavy work is now an explicit action rather than a side
+        // effect of merely opening Asset Properties.
+        requestAnimationFrame(() => requestAnimationFrame(() => renderGlbPreview(previewBox, asset)));
+      }, {once:true});
+      previewBox.appendChild(gate);
+    } else {
+      renderGlbPreview(previewBox, asset);
+    }
   }
 
   function openImportedTexture(asset){
@@ -421,6 +560,24 @@ function create(deps){
       });
       return true;
     }
+    if(item && (item.kind === 'logic-blueprint' || item.kind === 'logic-template') && raw){
+      const graph = raw.graph || raw.logic || {};
+      const scene = graph.logicScene || graph.scene || {};
+      openGeneric(item, {
+        title:item.name || raw.name || 'Logic Element',
+        icon:item.kind === 'logic-template' ? '◇' : '◆',
+        rows:[
+          ['Name', item.name || raw.name],
+          ['Type', item.kind === 'logic-template' ? 'Logic Element template' : 'Reusable Logic Element'],
+          ['Scene elements', Array.isArray(scene.elements) ? scene.elements.length : 0],
+          ['Nodes', Array.isArray(graph.nodes) ? graph.nodes.length : 0],
+          ['Variables', Array.isArray(graph.variables) ? graph.variables.length : 0],
+          ['Asset id', item.id || raw.id || ''],
+          ['Updated at', fmtDate(raw.updatedAt || raw.createdAt)],
+        ],
+      });
+      return true;
+    }
     return false;
   }
 
@@ -457,6 +614,7 @@ function create(deps){
       row('Data widgets', player.dataWidgets ? Object.keys(player.dataWidgets).length : 0),
       row('Spawn', player.spawn ? [player.spawn.x || 0, player.spawn.z || 0].join(', ') : 'Not stored')
     );
+    appendMeasuredSize(info, item, {size:asset.size || 0});
     documentRef.body.appendChild(overlay);
   }
 

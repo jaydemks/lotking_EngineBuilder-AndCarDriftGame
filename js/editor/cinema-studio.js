@@ -13,6 +13,7 @@ function create(deps){
   const cinemaTimeline = root.querySelector('#lkCinemaTimeline');
   const cinemaPlayBtn = root.querySelector('#lkCinemaTlPlay');
   const cinemaStopBtn = root.querySelector('#lkCinemaTlStop');
+  const cinemaExportBtn = root.querySelector('#lkCinemaTlExport');
   const cinemaLockBtn = root.querySelector('#lkCinemaTlLock');
   const cinemaDockBtn = root.querySelector('#lkCinemaTlDock');
   const cinemaFloatPreviewBtn = root.querySelector('#lkCinemaTlFloatPreview');
@@ -62,6 +63,10 @@ function create(deps){
   if(cinemaStopBtn) cinemaStopBtn.addEventListener('click', () => {
     ED.cinemaPreview = null;
     syncTimeline(currentViewportRect());
+  });
+  if(cinemaExportBtn) cinemaExportBtn.addEventListener('click', () => {
+    const studio = activeStudio();
+    if(studio && deps.openVideoExport) deps.openVideoExport(studio);
   });
   if(cinemaLockBtn) cinemaLockBtn.addEventListener('click', () => {
     const studio = activeStudio();

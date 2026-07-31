@@ -62,10 +62,12 @@
     <button id="lkSaveAsTrack" type="button">Save As</button>
     <span id="lkDirty">*</span>
     <button id="lkSave" type="button">💾 Save</button>
-    <button id="lkExportProject" type="button" title="Export project">⇩ Export project</button>
+    <button id="lkExportProject" type="button" title="Export one portable LKEP file">⇩ Export single LKEP</button>
+    <button id="lkExportProjectFolder" type="button" title="Export a GitHub-safe split project folder">⇩ Export project folder (GitHub)</button>
     <button id="lkExportPlayableLegacy" type="button" title="Export playable legacy HTML">⇩ Export playable legacy (ZIP)</button>
     <button id="lkExportPlayable" type="button" title="Export playable ZIP">⇩ Export playable ZIP</button>
     <button id="lkImportProject" type="button" title="Import LKEP">⇧ Import project</button>
+    <button id="lkImportProjectFolder" type="button" title="Import a split project folder">⇧ Import project folder</button>
     <button id="lkResetScene" type="button">↺ Reset</button>
     </div>
     </div>
@@ -131,9 +133,6 @@
     <div id="lkRightResize" class="lk-resize-handle"></div>
     <div class="lk-panelhead">INSPECTOR</div>
     <div id="lkInspector"></div>
-    <button id="lkAssetScoutFab" class="lk-scout-dock-btn" type="button" title="Search free online assets (models and textures) and import them into the project">
-      <span class="lk-scout-fab-icon">⌕</span><span class="lk-scout-fab-label">ASSET SCOUT</span>
-    </button>
   </aside>
   <section id="lkAssetsDock">
     <div id="lkAssetsResize" class="lk-assets-resize"></div>
@@ -250,6 +249,7 @@
       <button id="lkCinemaTlZoomReset" type="button" title="Reset timeline zoom">1:1</button>
       <button id="lkCinemaTlPlay" type="button">Play</button>
       <button id="lkCinemaTlStop" type="button">Stop</button>
+      <button id="lkCinemaTlExport" class="lk-cinema-export-button" type="button" title="Render every timeline frame to a deterministic WebM video">Render video</button>
       <select id="lkCinemaTlCamera" title="Shot camera"></select>
       <button id="lkCinemaTlAddCut" type="button">Add shot</button>
       <button id="lkCinemaTlInsertCut" type="button" title="Split the current camera cut at the playhead">Insert cut</button>
@@ -305,7 +305,44 @@
     </div>
     <div id="lkCinemaClipPanel"></div>
   </div>
-  <div id="lkPipFrame"><div class="lk-pip-title"><span>PLAYER CAMERA</span><button id="lkPipMinimize" type="button" title="Minimize camera preview">−</button></div><div id="lkPipResize"></div></div>
+  <div id="lkCinemaExportOverlay" aria-hidden="true">
+    <section class="lk-cinema-export-panel" role="dialog" aria-modal="true" aria-labelledby="lkCinemaExportTitle">
+      <header class="lk-cinema-export-head">
+        <div>
+          <b id="lkCinemaExportTitle">FRAME-ACCURATE VIDEO</b>
+          <span>Offline Cinema Studio render</span>
+        </div>
+        <button id="lkCinemaExportClose" type="button" title="Close">×</button>
+      </header>
+      <form id="lkCinemaExportForm" onsubmit="return false">
+        <div class="lk-cinema-export-grid">
+          <label><span>Resolution</span><select id="lkCinemaExportResolution">
+            <option value="1280x720">HD · 1280×720</option>
+            <option value="1920x1080" selected>Full HD · 1920×1080</option>
+            <option value="2560x1440">QHD · 2560×1440</option>
+            <option value="3840x2160">4K UHD · 3840×2160</option>
+            <option value="1080x1920">Vertical · 1080×1920</option>
+          </select></label>
+          <label><span>Frame rate</span><input id="lkCinemaExportFps" type="number" min="1" max="120" step="1" value="24"></label>
+          <label><span>Encoding quality</span><select id="lkCinemaExportQuality">
+            <option value="high" selected>High quality</option>
+            <option value="master">Master quality</option>
+          </select></label>
+          <label><span>File name</span><input id="lkCinemaExportFile" type="text" maxlength="120" value="cinema"></label>
+        </div>
+        <label class="lk-cinema-export-check"><input id="lkCinemaExportPost" type="checkbox" checked><span>Final post-processing, lighting and optical effects</span></label>
+        <div id="lkCinemaExportSummary" class="lk-cinema-export-summary"></div>
+        <p id="lkCinemaExportNote" class="lk-cinema-export-note"></p>
+        <div class="lk-cinema-export-progress-track"><i id="lkCinemaExportProgressBar"></i></div>
+        <div id="lkCinemaExportProgress" class="lk-cinema-export-progress" aria-live="polite"></div>
+        <footer class="lk-cinema-export-actions">
+          <button id="lkCinemaExportCancel" type="button">Close</button>
+          <button id="lkCinemaExportStart" class="primary" type="button">Render WebM</button>
+        </footer>
+      </form>
+    </section>
+  </div>
+  <div id="lkPipFrame"><div class="lk-pip-title"><span>PLAYER CAMERA</span><button id="lkPipMinimize" type="button" title="Minimize camera preview">−</button><button id="lkPipClose" type="button" title="Close camera preview">×</button></div><div id="lkPipResize"></div></div>
   <div id="lkCinemaPreviewFrame"><div class="lk-pip-title"><span>TIMELINE PREVIEW</span><button id="lkCinemaPreviewMinimize" type="button" title="Minimize timeline preview">−</button><button id="lkCinemaPreviewClose" type="button" title="Close timeline preview">×</button></div><div id="lkCinemaPreviewMeta"></div><div id="lkCinemaPreviewResize"></div></div>
   <div id="lkLevelsOverlay"><div class="lk-levels-panel">
     <div class="lk-levels-head"><div class="lk-levels-title">🗀 PROJECT LEVELS</div><div class="lk-levels-sub">stored locally</div><button id="lkLevelsClose" type="button">×</button></div>
@@ -351,24 +388,6 @@
 	      <button id="lkWelcomeContinue" class="lk-welcome-continue" type="button"></button>
 	    </div>
 	  </div>
-	  <section id="lkAssetScoutPanel" class="lk-scout-panel" aria-hidden="true" aria-label="Asset Scout">
-	    <header class="lk-scout-head">
-	      <div><b>ASSET SCOUT</b><span>Free online models and textures, imported into this project</span></div>
-	      <button id="lkAssetScoutClose" type="button" title="Close">×</button>
-	    </header>
-	    <div class="lk-scout-controls">
-	      <div id="lkAssetScoutProviders" class="lk-scout-chips" role="group" aria-label="Source"></div>
-	      <div id="lkAssetScoutCategories" class="lk-scout-chips" role="group" aria-label="Category"></div>
-	      <div class="lk-scout-searchrow">
-	        <input id="lkAssetScoutQuery" type="search" placeholder="Search: crate, barrel, brick wall, rifle…" autocomplete="off">
-	        <button id="lkAssetScoutSearch" type="button">Search</button>
-	      </div>
-	      <div id="lkAssetScoutOptions" class="lk-scout-options"></div>
-	      <p id="lkAssetScoutNote" class="lk-scout-note"></p>
-	    </div>
-	    <div id="lkAssetScoutState" class="lk-scout-state"></div>
-	    <div id="lkAssetScoutResults" class="lk-scout-results"></div>
-	  </section>
 	  <div id="lkCtx"></div>
 	  <div id="lkPluginPanel" class="lk-plugin-panel" aria-hidden="true">
 	    <div class="lk-plugin-head">

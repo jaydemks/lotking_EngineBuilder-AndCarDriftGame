@@ -147,6 +147,103 @@ function create(deps){
       .then(src => STORE.loadGlb(src, asset.fit || 5))
       .then(obj => registerImportedObject(asset, obj, at));
   }
+  function objectAssetRefs(target){
+    const ud = target && target.userData || {};
+    const entry = ud.addedEntry || {};
+    const entryAsset = entry.asset || {};
+    const texture = ud.textureProps || entry.props || {};
+    const textureAsset = texture.asset || {};
+    return [
+      ud.assetKey, ud.assetSource, ud.modelDbKey, ud.modelSrc,
+      entry.dbKey, entry.src, entryAsset.key, entryAsset.dbKey, entryAsset.src, entryAsset.source,
+      texture.dbKey, texture.src, textureAsset.key, textureAsset.dbKey, textureAsset.src, textureAsset.source,
+    ].filter(Boolean).map(String);
+  }
+  function assetReferenceSet(asset){
+    return new Set([asset && asset.id, asset && asset.key, asset && asset.dbKey, asset && asset.src, asset && asset.source]
+      .filter(Boolean).map(String));
+  }
+  function objectUsesImportedAsset(target, asset){
+    const refs = assetReferenceSet(asset);
+    return objectAssetRefs(target).some(value => refs.has(value));
+  }
+  function playerUsesImportedAsset(asset){
+    const car = GAME && GAME.player && GAME.player.car;
+    return !!(car && objectUsesImportedAsset(car, asset));
+  }
+  function importedAssetUsageSummary(assets){
+    const scene = new Set();
+    const logic = new Set();
+    let player = false;
+    (assets || []).forEach(asset => {
+      const refs = Array.from(assetReferenceSet(asset));
+      if(playerUsesImportedAsset(asset)) player = true;
+      (GAME && GAME.world && GAME.world.registry || []).forEach(object => {
+        if(!object || object === (GAME && GAME.player && GAME.player.car)) return;
+        if(objectUsesImportedAsset(object, asset)) scene.add(object);
+        if(object.userData && object.userData.editorType === 'logicElement'){
+          let graphText = '';
+          try { graphText = JSON.stringify(object.userData.logicGraph || object.userData.addedEntry && object.userData.addedEntry.logicGraph || {}); }
+          catch(err){}
+          if(refs.some(ref => graphText.includes(JSON.stringify(ref)))) logic.add(object);
+        }
+      });
+    });
+    return {scene:Array.from(scene).filter(object => !logic.has(object)), logic:Array.from(logic), player};
+  }
+  function restoreLogicAssetPlaceholders(owners, assets){
+    if(!THREE) return;
+    const refs = new Set();
+    (assets || []).forEach(asset => assetReferenceSet(asset).forEach(ref => refs.add(ref)));
+    (owners || []).forEach(owner => {
+      if(!owner || !owner.traverse) return;
+      owner.traverse(node => {
+        const key = String(node.userData && node.userData.logicElementAssetKey || '');
+        if(!key || !Array.from(refs).some(ref => key.includes(String(ref)))) return;
+        Array.from(node.children || []).filter(child => child.userData && child.userData.logicElementAssetVisual).forEach(child => {
+          node.remove(child);
+          if(child.traverse) child.traverse(part => {
+            if(part.geometry && part.geometry.dispose) part.geometry.dispose();
+            const materials = part.material ? (Array.isArray(part.material) ? part.material : [part.material]) : [];
+            materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+          });
+        });
+        const hasPlaceholder = (node.children || []).some(child => child.userData && child.userData.logicElementAssetPlaceholder);
+        if(!hasPlaceholder){
+          const placeholder = new THREE.Mesh(
+            new THREE.BoxGeometry(.8,.8,.8),
+            new THREE.MeshBasicMaterial({color:0x67e8f9, wireframe:true, transparent:true, opacity:.28})
+          );
+          placeholder.userData.logicElementAssetPlaceholder = true;
+          placeholder.userData.logicElementInternal = true;
+          placeholder.userData.editorLocked = true;
+          node.add(placeholder);
+        }
+        node.userData.logicElementAssetError = tr('Source asset removed from Assets', 'Asset sorgente rimosso da Assets');
+      });
+    });
+  }
+  function removeImportedAssetUsages(assets){
+    const usage = importedAssetUsageSummary(assets);
+    usage.scene.forEach(object => performDeleteEntity(object));
+    restoreLogicAssetPlaceholders(usage.logic, assets);
+    if(usage.player && GAME && GAME.player){
+      if(GAME.player.clearModel) GAME.player.clearModel();
+      const car = GAME.player.car;
+      if(car && car.userData){
+        car.userData.modelSrc = null;
+        car.userData.modelDbKey = null;
+        car.userData.modelName = null;
+        car.userData.assetName = 'Default vehicle placeholder';
+        car.userData.assetSource = 'Built-in placeholder';
+      }
+    }
+    if(usage.scene.length || usage.logic.length || usage.player){
+      refreshOutliner();
+      if(deps.markDirty) deps.markDirty();
+    }
+    return usage;
+  }
   function deleteImportedAssets(assets){
     const unique=[];
     (assets||[]).forEach(asset=>{
@@ -154,16 +251,21 @@ function create(deps){
     });
     if(!unique.length)return Promise.resolve(false);
     const count=unique.length,names=unique.slice(0,3).map(asset=>asset.name||asset.source||asset.id).join(', '),more=count>3?' +'+(count-3):'';
+    const usage=importedAssetUsageSummary(unique);
+    const impact=(usage.scene.length?tr(' ',' ')+usage.scene.length+tr(' scene instance(s) will also be removed.',' istanza/e nella scena verranno rimosse.'):'')
+      +(usage.logic.length?tr(' Linked Logic Elements will keep their placeholder.',' I Logic Element collegati manterranno il loro placeholder.'):'')
+      +(usage.player?tr(' The native Player Car will return to its built-in placeholder.',' La Player Car nativa tornerà al placeholder integrato.'):'');
     return confirmEditorAction({
       title:count===1?tr('Delete imported asset?','Eliminare asset importato?'):tr('Delete selected imported assets?','Eliminare gli asset importati selezionati?'),
       message:count===1
-        ?tr('Remove "','Rimuovere "')+names+tr('" and its stored source? Existing Pawn/project references may become unavailable after reload.','" e la relativa sorgente memorizzata? I riferimenti Pawn/progetto esistenti potrebbero non essere più disponibili dopo il reload.')
-        :tr('Remove ','Rimuovere ')+count+tr(' assets and their stored sources? ',' asset e le relative sorgenti memorizzate? ')+names+more+tr('. Existing Pawn/project references may become unavailable after reload.','. I riferimenti Pawn/progetto esistenti potrebbero non essere più disponibili dopo il reload.'),
+        ?tr('Remove "','Rimuovere "')+names+tr('" and its stored source?','" e la relativa sorgente memorizzata?')+impact
+        :tr('Remove ','Rimuovere ')+count+tr(' assets and their stored sources? ',' asset e le relative sorgenti memorizzate? ')+names+more+'.'+impact,
       okText:count===1?tr('Delete asset','Elimina asset'):tr('Delete selected','Elimina selezionati'),
     }).then(ok=>{
       if(!ok)return false;
       const ids=new Set(unique.map(asset=>asset.id));
       if(!assetLibrarySave(assetLibraryLoad().filter(asset=>!ids.has(asset.id))))return false;
+      const removedUsage=removeImportedAssetUsages(unique);
       const blobKeys=new Set();
       unique.forEach(asset=>{
         if(asset.dbKey)blobKeys.add(asset.dbKey);
@@ -174,18 +276,18 @@ function create(deps){
       return Promise.allSettled(removals).then(()=>{
         if(typeof deps.onImportedAssetsDeleted==='function')deps.onImportedAssetsDeleted(unique);
         refreshAssetsPanel();
-        status(count===1?tr('Asset removed from library','Asset rimosso dalla libreria'):count+tr(' assets removed from library',' asset rimossi dalla libreria'));
+        const suffix=removedUsage.scene.length?tr(' · scene cleaned',' · scena ripulita'):'';
+        status((count===1?tr('Asset removed from library','Asset rimosso dalla libreria'):count+tr(' assets removed from library',' asset rimossi dalla libreria'))+suffix);
         return true;
       });
     });
   }
   function deleteImportedAsset(asset){return deleteImportedAssets(asset?[asset]:[]);}
-  function markImportedAssetRigged(asset){
+  function markImportedAssetUsedAsPlayer(asset){
     if(!asset || !asset.id) return;
     const list = assetLibraryLoad();
     const found = list.find(a => a.id === asset.id || a.key === asset.key);
     if(!found) return;
-    found.rigged = true;
     found.usedAsPlayerModel = true;
     found.playerModelAt = new Date().toISOString();
     assetLibrarySave(list);
@@ -193,11 +295,32 @@ function create(deps){
   function glbMetadataFromObject(obj){
     const clips = (obj && obj.animations || []).filter(Boolean).map(clip => clip.name || 'Animation');
     let meshCount = 0, skinnedMeshCount = 0, boneCount = 0;const boneNames=[];
+    const nodes=[];
     if(obj && obj.traverse) obj.traverse(node => {
+      nodes.push(node);
       if(node && node.isMesh) meshCount++;
       if(node && node.isSkinnedMesh) skinnedMeshCount++;
       if(node && node.isBone){boneCount++;if(node.name)boneNames.push(String(node.name));}
     });
+    const nameOf=node=>String(node&&node.name||'').toLowerCase();
+    const exactSpin=new Set(['wheel_fl_spin','wheel_fr_spin','wheel_rl_spin','wheel_rr_spin']);
+    const exactMesh=new Set(['wheel_fl_mesh','wheel_fr_mesh','wheel_rl_mesh','wheel_rr_mesh']);
+    const spinCount=nodes.filter(node=>exactSpin.has(nameOf(node))).length;
+    const namedWheelCount=nodes.filter(node=>exactMesh.has(nameOf(node))).length;
+    const generic=nodes.filter(node=>{
+      const name=nameOf(node);
+      return /(wheel|ruota|tire|tyre)/.test(name)&&!/(steer|spin|collider|arch|fender)/.test(name);
+    });
+    const genericSet=new Set(generic);
+    const topWheelCount=generic.filter(node=>{
+      let parent=node&&node.parent;
+      while(parent){if(genericSet.has(parent))return false;parent=parent.parent;}
+      return true;
+    }).length;
+    const vehicleWheelCount=Math.max(spinCount,namedWheelCount,topWheelCount);
+    const vehicleRigged=spinCount>=2||namedWheelCount>=2||topWheelCount>=2;
+    const skeletonRigged=skinnedMeshCount>0||boneCount>0;
+    const rigged=vehicleRigged||skeletonRigged;
     return {
       clips,
       clipCount:clips.length,
@@ -207,7 +330,11 @@ function create(deps){
       boneCount,
       boneNames:Array.from(new Set(boneNames)).sort(),
       skeletonSignature:Array.from(new Set(boneNames)).sort().join('|'),
-      rigged:skinnedMeshCount > 0 || boneCount > 8 || clips.length > 0,
+      vehicleWheelCount,
+      vehicleRigged,
+      skeletonRigged,
+      rigType:vehicleRigged&&skeletonRigged?'vehicle+skeleton':vehicleRigged?'vehicle':skeletonRigged?'skeleton':'static',
+      rigged,
     };
   }
   function saveImportedBlob(file, dbKey){
@@ -219,6 +346,34 @@ function create(deps){
       : (file && file.size > 12 * 1024 * 1024
         ? Promise.reject(new Error(tr('IndexedDB asset storage is unavailable; large GLB base64 fallback was stopped to protect page memory.', 'Lo storage asset IndexedDB non è disponibile; il fallback base64 del GLB grande è stato fermato per proteggere la memoria della pagina.')))
         : readFileAsDataURL(file).then(src => ({src})));
+  }
+  function storeMaterialTextureFile(file){
+    if(!file) return Promise.reject(new Error(tr('Texture file missing', 'File texture mancante')));
+    if(!window.LK_ASSET_BLOBS || !window.LK_ASSET_BLOBS.put){
+      return Promise.reject(new Error(tr(
+        'IndexedDB texture storage is unavailable. The texture was not embedded in LocalStorage.',
+        'Lo storage texture IndexedDB non è disponibile. La texture non è stata incorporata nel LocalStorage.'
+      )));
+    }
+    const key = assetKeyFromFile(file);
+    const dbKey = assetDbKeyFromFile(file, key);
+    return window.LK_ASSET_BLOBS.put(dbKey, file).then(() => {
+      const asset = upsertImportedAsset(file, {src:null, dbKey});
+      if(refreshAssetsPanel) refreshAssetsPanel();
+      // Asset-library metadata is useful but not required for the material:
+      // the durable blob key is already sufficient and must never fall back to
+      // a multi-megabyte data URL inside the scene JSON.
+      return asset || {
+        id:key,
+        key,
+        kind:'texture',
+        name:file.name || 'Material texture',
+        source:file.name || 'Material texture',
+        size:Number(file.size) || 0,
+        src:null,
+        dbKey,
+      };
+    });
   }
   function sourceBlobKey(file,prefix){
     const name=String(file&&file.webkitRelativePath||file&&file.name||'source').toLowerCase().replace(/[^a-z0-9._/-]+/g,'-');
@@ -501,12 +656,12 @@ function create(deps){
     setAssetLoading(true, asset.name || 'Player model', 20, 'Loading player model');
     return resolveImportedAssetUrl(asset).then(src => {
       setAssetLoading(true, asset.name || 'Player model', 72, 'Applying player model');
-      markImportedAssetRigged(asset);
       return applyPlayerModelSource(src, asset.name || asset.source || 'imported player model', {
         modelSrc: asset.src || null,
         modelDbKey: asset.dbKey || null,
       });
     }).then(() => {
+      markImportedAssetUsedAsPlayer(asset);
       setAssetLoading(true, asset.name || 'Player model', 100, 'Player model replaced');
       setTimeout(() => setAssetLoading(false), 300);
       return true;
@@ -519,28 +674,10 @@ function create(deps){
 
   function replacePlayerModelWithFile(file){
     if(!file){ status(tr('Invalid player file', 'File player non valido')); return Promise.resolve(false); }
-    setAssetLoading(true, file.name, 12, 'Importing player model');
-    const key = assetKeyFromFile(file);
-    const dbKey = assetDbKeyFromFile(file, key);
-    const put = window.LK_ASSET_BLOBS
-      ? window.LK_ASSET_BLOBS.put(dbKey, file).then(() => ({dbKey})).catch(() => readFileAsDataURL(file).then(src => ({src})))
-      : readFileAsDataURL(file).then(src => ({src}));
-    return put.then(sourceInfo => {
-      const asset = upsertImportedAsset(file, sourceInfo);
-      if(asset) markImportedAssetRigged(asset);
-      const srcPromise = sourceInfo.dbKey && window.LK_ASSET_BLOBS
-        ? window.LK_ASSET_BLOBS.getUrl(sourceInfo.dbKey)
-        : Promise.resolve(sourceInfo.src);
-      setAssetLoading(true, file.name, 72, 'Applying player model');
-      return srcPromise.then(src => applyPlayerModelSource(src, file.name, {
-        modelSrc: sourceInfo.src || null,
-        modelDbKey: sourceInfo.dbKey || null,
-      })).then(() => asset);
-    }).then(asset => {
-      if(asset) refreshAssetsPanel();
-      setAssetLoading(true, file.name, 100, 'Player model replaced');
-      setTimeout(() => setAssetLoading(false), 300);
-      return true;
+    return importAssetFiles([file]).then(imported => {
+      const asset=imported&&imported[0];
+      if(!asset)throw new Error(tr('The GLB could not be added to Assets.', 'Il GLB non è stato aggiunto agli Assets.'));
+      return replacePlayerModelWithAsset(asset);
     }).catch(err => {
       setAssetLoading(false);
       status('Player model replace failed: ' + err.message);
@@ -550,6 +687,7 @@ function create(deps){
 
   return Object.freeze({
     readFileAsDataURL,
+    storeMaterialTextureFile,
     hasExternalFileDrag,
     registerImportedObject,
     registerImportedTexture,
@@ -558,6 +696,7 @@ function create(deps){
     deleteImportedAssets,
     importTextureFile,
     importAssetFiles,
+    glbMetadataFromObject,
     rebuildImportedAsset,
     refreshFbxSource,
     replaceSelectedWithAsset,

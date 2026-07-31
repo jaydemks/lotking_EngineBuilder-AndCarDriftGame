@@ -360,6 +360,37 @@ test('old built-in Pawn camera default migrates to working Free camera once', ()
   assert.equal(explicit.variables.find(item=>item.name==='CameraMode').value,'arcade');
 });
 
+test('legacy vehicle cockpit defaults migrate left while authored cameras survive', () => {
+  const legacy=global.LK_LOGIC_GRAPH.createEmptyGraph('Legacy Vehicle Camera','element');
+  legacy.vehiclePawn={
+    schemaVersion:2,
+    camera:{interiorHeight:1.15,interiorForward:.28,interiorLateral:0,interiorLookHeight:.04,interiorFov:72,interiorLag:18},
+  };
+  const migrated=global.LK_LOGIC_GRAPH.normalizeGraph(legacy);
+  assert.equal(migrated.vehiclePawn.camera.interiorLateral,-.42);
+  assert.equal(migrated.vehiclePawn.camera.interiorAccelerationMotion,0);
+  assert.equal(migrated.vehiclePawn.camera.interiorGForceMotion,0);
+  assert.equal(migrated.vehiclePawn.camera.interiorRoadShake,0);
+  assert.equal(migrated.vehiclePawn.camera.interiorMotionLimit,.035);
+  assert.equal(migrated.vehiclePawn.camera.interiorSpeedFovMax,4.5);
+  assert.equal(migrated.vehiclePawn.camera.interiorCameraVersion,3);
+
+  const authored=global.LK_LOGIC_GRAPH.createEmptyGraph('Authored Vehicle Camera','element');
+  authored.vehiclePawn={schemaVersion:2,camera:{
+    interiorCameraVersion:2,
+    interiorLateral:.16,
+    interiorRotation:[0,.08,0],
+    interiorGForceMotion:.32,
+    interiorRoadShake:.21,
+  }};
+  const preserved=global.LK_LOGIC_GRAPH.normalizeGraph(authored);
+  assert.equal(preserved.vehiclePawn.camera.interiorLateral,.16);
+  assert.deepEqual(preserved.vehiclePawn.camera.interiorRotation,[0,.08,0]);
+  assert.equal(preserved.vehiclePawn.camera.interiorGForceMotion,.32);
+  assert.equal(preserved.vehiclePawn.camera.interiorRoadShake,.21);
+  assert.equal(preserved.vehiclePawn.camera.interiorCameraVersion,3);
+});
+
 test('validator reports contextual warnings and blocking pin errors', () => {
   const graph = global.LK_LOGIC_GRAPH.createEmptyGraph('Diagnostics Test', 'element');
   graph.nodes.push(

@@ -13,12 +13,25 @@ const api = sandbox.window.LK_RUNTIME_SETTINGS_MENU;
 
 assert(api, 'video settings API is registered');
 assert(Object.keys(api.presets).join(',') === 'low,medium,high,superhigh,extreme', 'five ordered quality presets are available');
+assert(api.defaults.volumetricLighting === true, 'volumetric lighting is enabled by default');
+assert(api.defaults.cinematicLensFlares === false, 'cinematic lens flares are disabled by default');
+Object.keys(api.presets).forEach(quality => {
+  assert(api.normalizeValues({quality}).volumetricLighting === true,
+    quality + ' keeps the independent volumetric-lighting default enabled');
+  assert(api.normalizeValues({quality}).cinematicLensFlares === false,
+    quality + ' leaves cinematic lens flares disabled until the user enables them');
+});
+assert(api.normalizeValues({quality:'extreme', volumetricLighting:false, cinematicLensFlares:true}).volumetricLighting === false,
+  'an explicit volumetric-lighting opt-out survives the Extreme preset');
+assert(api.normalizeValues({quality:'extreme', cinematicLensFlares:true}).cinematicLensFlares === true,
+  'an explicit cinematic-lens-flare opt-in survives the Extreme preset');
 assert(api.normalizeValues({quality:'Performance'}).quality === 'low', 'legacy Performance preset migrates to Low');
 assert(api.normalizeValues({quality:'Balanced'}).quality === 'medium', 'legacy Balanced preset migrates to Medium');
 assert(api.normalizeValues({antialiasing:'Normal'}).antialiasing === 'fxaa', 'legacy Normal AA migrates to FXAA');
 assert(api.normalizeValues({antialiasing:'High'}).antialiasing === 'ssaa2x', 'legacy High AA migrates to 2x supersampling');
 assert(api.normalizeValues({antialiasing:'ssaa4x'}).antialiasing === 'ssaa4x', '4x supersampling survives normalization');
 assert(api.normalizeValues({rendererMode:'raytracing'}).rendererMode === 'raytracing', 'ray-lighting renderer survives normalization');
+assert(api.normalizeValues({rendererMode:'pathtracing'}).rendererMode === 'pathtracing', 'progressive path-tracing renderer survives normalization');
 assert(api.normalizeValues({exposure:9}).exposure === 1.6, 'exposure is clamped to the safe authoring range');
 assert(api.normalizeValues({shadowQuality:'ultra'}).shadowQuality === 'ultra', 'independent Ultra shadow quality survives normalization');
 assert(api.normalizeValues({shadowDistance:4}).shadowDistance === 15, 'shadow coverage is clamped away from unusable values');
@@ -51,6 +64,7 @@ assert(source.includes('mat.metalness = mat.userData.lkVideoBaseMetalness'), 'vi
 assert(!source.includes('baseRoughness * .58') && !source.includes('baseMetalness + .18'), 'ray lighting does not make every scene material glossy and metallic');
 assert(source.includes('videoToneMappingExposure'), 'video settings own the base tone-mapping exposure');
 assert(source.includes('commitValues'), 'shared editor Video controls can commit the live values to project defaults');
+assert(source.includes("new CustomEvent('lotking:renderer-mode-change'"), 'renderer mode changes notify the runtime so the selected pipeline can be re-benchmarked');
 assert(source.includes('resolvePixelRatio({'), 'the render resolution goes through one shared policy instead of an inline product');
 
 // The drawing buffer is what actually costs fill rate, and it is the product of
@@ -104,14 +118,15 @@ assert(source.includes('resolvePixelRatio({'), 'the render resolution goes throu
   assert(shown.label === '960 × 540 px', 'the row reports the real buffer, got ' + shown.label);
   assert(Math.abs(shown.megapixels - .518) < .01, 'and its pixel count');
 }
-assert(source.includes("values.antialiasing.indexOf('ssaa')===0?1:aaRatio"), 'Apple/WebKit compatibility avoids multiplying Retina DPR by SSAA a second time');
+assert(source.includes("activeValues.antialiasing.indexOf('ssaa')===0?1:aaRatio"), 'Apple/WebKit compatibility avoids multiplying Retina DPR by SSAA a second time');
 assert(source.includes("reason:'user-override'"), 'manual video choices prevent a later benchmark from forcing Low again');
 
 const hidden = api.normalizeProject({defaults:{quality:'extreme'}, exposed:{rendererMode:false}});
 assert(hidden.defaults.quality === 'extreme', 'project default quality is normalized');
 assert(hidden.exposed.rendererMode === false, 'author can hide renderer selection');
 assert(hidden.exposed.quality === true, 'unspecified exposure remains enabled');
-assert(hidden.version === 4, 'project video schema is upgraded to version 4');
+assert(hidden.version === 5, 'project video schema is upgraded to version 5');
+assert(hidden.defaults.cinematicLensFlares === false, 'existing projects default cinematic lens flares to off until the user enables them');
 assert(hidden.defaults.exposure === 1.12, 'r185 exposure default brightens the scene without camera grading');
 assert(hidden.defaults.shadowNormalBias === .035, 'sun shadow acne protection has a stable project default');
 assert(hidden.defaults.reflectionQuality === 'high' && hidden.defaults.reflectionDistance === 35, 'SSR has stable quality and ray-reach defaults');

@@ -211,6 +211,10 @@ function create(options){
       showLevelSelect();
       return Promise.resolve(false);
     }
+    // WebAudio must be created in the same synchronous user-gesture turn. It
+    // also moves the procedural buffers and engine graph out of the first
+    // accelerator frame and into the visible preparation phase.
+    call('primeAudio');
     call('setMenuPresentation', 'menu-overlay', true);
     // Preserve the Play click's user activation across asynchronous runtime
     // preparation so free-look starts with a real pointer lock.
@@ -227,6 +231,7 @@ function create(options){
   function startEditorPreview(mode){
     mode = mode === 'simulate' ? 'simulate' : 'play';
     if(session.isStarted() || session.isPending()) return Promise.resolve(false);
+    call('primeAudio');
     prepareEditorLevel();
     if(mode === 'play') call('armFreeCamera');
     return prepareRuntimeForSession('game', 'track preview failed').then(ready => {

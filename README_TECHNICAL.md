@@ -6,13 +6,13 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The current `v0.7.6` cycle stabilizes the FPS layer, including first/third-person camera switching and lethal explosive damage.
+The current `v0.7.7` release expands the production workflow around frame-accurate Cinema Studio export, pre-benchmark/runtime-stutter reduction, split GitHub-safe projects, interior vehicle cameras and steering rigs, improved drift drivetrain tuning, dynamic in-world displays, car-paint and decal material authoring, and an explicitly experimental Path Tracing mode. It also retains the FPS stability work for first/third-person camera switching and lethal explosive damage.
 
 The released `v0.7.5` milestone adds **Asset Scout** (free online model and texture search imported straight into the project) and a **first-person Pawn** with its own FPS Shooter Test level. Both are additive: the existing import paths and the third-person character path are unchanged.
 
 The released `v0.7.4` milestone adds granular browser-storage inspection and recovery controls to the private workspace introduced in v0.7.3. Projects, levels, preferences, imported asset blobs, workspace handles, explicit caches and Lot King service workers can be audited from Editor Settings without exposing unrelated origin data. Pawn Studio, source-preserving FBX import, Mixamo retargeting and the Three.js r185 baseline remain central foundations.
 
-Editor startup and every Play/Simulate session now include a visible, reversible runtime pre-benchmark. It prepares real project render/physics paths and measures sustained frames; devices remaining below 25 FPS receive a conservative Low video profile. This is a recommendation, not a lock: any explicit change in Video settings becomes the user's persistent override.
+Every Play/Simulate session includes a visible, reversible runtime pre-benchmark. It prepares real project render/physics/Logic Pawn paths, uploads textures in yielded batches and visits populated map sectors before measuring sustained frames; devices remaining below 25 FPS receive a conservative Low video profile. Editor startup remains asynchronous and does not wait for this gameplay-only tour. This is a recommendation, not a lock: any explicit change in Video settings becomes the user's persistent override.
 
 Car racing and drifting remain the most complete gameplay path. Character Pawns can already use a custom rigged Main Mesh and independent Mixamo/FBX/GLB motion sources, but character authoring, retargeting and gameplay integration remain strongly experimental. More gameplay categories and reusable game rules will be added incrementally instead of presenting every current template as equally mature.
 
@@ -33,7 +33,11 @@ The editor runs entirely in the browser and includes projects, levels, an outlin
 
 Play Preview runs the authored level inside the editor viewport. Simulate uses the same runtime, event and physics path while keeping the editor tools active, so logic can be tested without taking control away from the editor.
 
-The environment tools include procedural sky and day/night state, fog, lighting, sun bloom, lens flare, volumetric clouds, rain and shared rendering profiles.
+The environment tools include procedural sky and day/night state, fog, lighting, sun bloom, lens flare, volumetric clouds, rain and shared rendering profiles. Video settings expose normal WebGL, screen-space Ray Lighting, and an isolated progressive Path Tracing mode. Path Tracing uses a BVH-accelerated static-world pass with responsive raster overlays for vehicles, characters and transient effects, and falls back to WebGL when WebGL2 or the path-tracing pipeline is unavailable.
+
+Vehicle cameras include Free, Arcade, Cinematic and Interior modes. Interior position, sight height, stabilization and FOV are authored once and consumed by both the native vehicle and Vehicle Logic Element runtime. Imported car rigs may expose `steering_wheel_pivot` plus `steering_wheel_mesh`; the bundled Blender 5.0+ Car Wheel GLB Rigger 0.2.2 creates that hierarchy and exports axis, direction, driver-side and lock-to-lock metadata. Both native and Logic vehicle Inspectors can override those values per vehicle, while unrigged steering meshes remain untouched.
+
+The Material Editor can bind a selected GLB material slot to a throttled CanvasTexture dashboard (Sport, Minimal or Telemetry) driven by the possessed vehicle, or to a direct CORS-enabled MP4/WebM VideoTexture. These surfaces stay in the responsive raster layer during Path Tracing. YouTube URLs are not decoded or scraped as media files: a YouTube integration must use the [official visible iframe player](https://developers.google.com/youtube/iframe_api_reference), whose documented viewport minimum is 200 × 200 px, and remains separate from in-world WebGL textures.
 
 The r185 WebGL post-processing path keeps screen-space depth effects separate from optical sprites and transparent effects. GTAO excludes lens flare, sun, clouds, smoke and related non-depth helpers from its depth override, avoiding camera-dependent dark rectangles around those effects. Apple Metal/WebKit contexts use a capability-based conservative screen-space profile when a pass is known to be unreliable.
 
@@ -77,9 +81,14 @@ Models, materials, mesh parts, transforms, lights, primitives, text, effects and
 
 This is an assembly and gameplay-authoring workflow, not full mesh creation. Complex topology, sculpting, rig creation and complete texture authoring remain tasks for Blender or another dedicated content tool.
 
-**Asset Scout** searches free online catalogues from inside the editor and imports results through the same pipeline as a local drag-and-drop. It ships two vetted sources: Poly Haven (models and PBR textures, entire catalogue CC0) and the Khronos glTF Sample Assets (reference models, per-model licenses). A downloaded glTF bundle is re-linked and re-exported as a single canonical GLB; an FBX source goes through the FBX importer plugin and keeps its source; texture sets import their individual PBR maps.
-
-Every result card states its license, author, triangle count, real-world dimensions and source link. Anything that is not public domain, or whose license cannot be resolved, requires an explicit confirmation of the terms before it is imported, and an asset carrying several licenses reports the strictest one. Sources are a plain registry of self-contained descriptors, so one can be added or removed without touching anything else. See [Asset Scout](docs/ASSET_SCOUT.md).
+**Asset Scout is temporarily disabled in v0.7.7.** Poly Haven's live API is
+commercially usable, but its current service terms require requests to carry an
+application-identifying `Referer` or `User-Agent`. A static browser application cannot
+reliably set those protected headers when it runs from localhost or generic hosting.
+The dormant provider implementation and its offline tests remain available for a future
+compliant proxy or written clarification, but the scripts, button, panel and Tools entry
+are not shipped in the active editor. Existing downloaded Poly Haven assets remain CC0.
+See [Asset Scout](docs/ASSET_SCOUT.md).
 
 ## Pawn Studio and characters
 
@@ -163,8 +172,9 @@ Cinema Studio is the in-editor timeline system for creating cinematic footage an
 - Markers and named timeline events.
 - Floating Normal/Final preview.
 - Gameplay triggering from collision boxes and Logic events.
+- Deterministic offline WebM export at HD, Full HD, QHD, 4K or vertical resolution. The exporter evaluates frame `n` at exactly `n / FPS`, waits for that GPU submission, then sends one timestamped frame to WebCodecs; slow rendering therefore lengthens the export operation instead of dropping footage frames.
 
-Timelines are saved as scene assets and can be previewed manually or started at runtime.
+Timelines are saved as scene assets and can be previewed manually, started at runtime or rendered through the same final scene/post-processing path. The frame-accurate exporter is video-only for now; it does not claim deterministic audio capture. Existing runtime cinematics and menu-background uses remain separate from export and unchanged.
 
 ## Sound Designer, radio and HUD
 
@@ -193,7 +203,7 @@ The playable exporter produces a standalone ZIP containing the runtime, selected
 
 Export assembly resolves the selected scene data, runtime modules, pinned local dependencies and asset blobs into a portable static build. Further work is moving more systems behind explicit runtime/plugin manifests so projects can include only the capabilities they use.
 
-For an inspectable online project, the author can publish a bundled DEMO. On the project-aware local server, the current DEMO is written atomically to `demo/demo-project.lkep.json` and the previous version is backed up.
+For an inspectable online project, the author can publish a bundled DEMO. On the project-aware local server, projects from 90 MB upward are atomically published as a small `demo/demo-project.lkep.json` pointer plus adjacent ~8 MB verified chunks; once selected, that GitHub-safe layout remains in use. One previous publication is kept in Git-ignored local rollback files.
 
 ## Project layout
 
@@ -208,6 +218,7 @@ For an inspectable online project, the author can publish a bundled DEMO. On the
 - `css/` — runtime and editor styling.
 - `models/`, `media/`, `musics/` — bundled runtime assets.
 - `docs/` — architecture, feature guides and release history.
+- `tools/blender 5.0+/` — source, GPL license and installable ZIP releases for the optional Blender vehicle-rig helper.
 
 ## Technology baseline
 
@@ -251,7 +262,7 @@ Vehicle backend authorship, licenses and adapter changes are tracked in [VEHICLE
 
 `models_sources/` contains local Blender/source assets and is intentionally ignored by Git. Runtime assets needed to reproduce the playable state should remain in the repository or use the project publishing plan.
 
-The project includes project-authored work, AI-assisted/generated assets, bundled samples and external references. The bundled music is AI-generated by the project owner. Runtime and design references include Three.js, cannon.js, JSZip, Anderson Mancini's R3F Ultimate Lens Flare work, and bandinopla's MIT-licensed `three-simplecloth`, itself based on the official Three.js WebGPU compute-cloth example. Exact notices and links are kept in [THIRD_PARTY_LICENSES.md](vendor/THIRD_PARTY_LICENSES.md); the wider asset-by-asset provenance audit remains in progress.
+The project includes project-authored work, AI-assisted/generated assets, bundled samples and external references. The bundled music is AI-generated by the project owner. Runtime and design references include Three.js, cannon.js, JSZip, Anderson Mancini's R3F Ultimate Lens Flare work, Garrett Johnson's MIT-licensed `three-gpu-pathtracer`, Erich Loftis' CC0 browser path-tracing research and demos, and bandinopla's MIT-licensed `three-simplecloth`, itself based on the official Three.js WebGPU compute-cloth example. Exact notices and links are kept in [THIRD_PARTY_LICENSES.md](vendor/THIRD_PARTY_LICENSES.md); the wider asset-by-asset provenance audit remains in progress.
 
 The original one-file drift prototype was generated from a single Fable 5 prompt. Continued implementation with GPT-5.6 Sol then expanded it into the current multi-module editor and runtime, under the project owner's design direction, testing and final decisions. Maintaining that growth requires repeated refactoring, cross-browser checks, export verification and documentation work; AI assistance does not replace those acceptance steps.
 

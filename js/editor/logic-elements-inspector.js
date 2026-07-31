@@ -4961,7 +4961,7 @@ function create(deps){
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('keyup', handleKeyUp, true);
       disposeViewport3D();
-    });
+    }, {once:true});
     renderPalette();
     renderGraphSelect();
     renderComponents();
@@ -6456,6 +6456,29 @@ function create(deps){
             if(livePawn && livePawn.config) livePawn.config.modelShading = graph.vehiclePawn.modelShading;
             saveElementGraph(object, graph);
             return graph.vehiclePawn.modelShading;
+          },
+          getSteeringWheelConfig(){
+            const api = window.LK_RUNTIME_MODEL_ASSETS;
+            graph.vehiclePawn.steeringWheel = api && api.normalizeSteeringWheelConfig
+              ? api.normalizeSteeringWheelConfig(graph.vehiclePawn.steeringWheel)
+              : Object.assign({enabled:true,pivotName:'steering_wheel_pivot',meshName:'steering_wheel_mesh',driverSide:'auto',axis:'auto',direction:0,inputLockDegrees:0,visualLockDegrees:0,response:12}, graph.vehiclePawn.steeringWheel || {});
+            return Object.assign({}, graph.vehiclePawn.steeringWheel);
+          },
+          setSteeringWheelConfig(values){
+            const api = window.LK_RUNTIME_MODEL_ASSETS;
+            const merged = Object.assign({}, this.getSteeringWheelConfig(), values || {});
+            graph.vehiclePawn.steeringWheel = api && api.normalizeSteeringWheelConfig
+              ? api.normalizeSteeringWheelConfig(merged)
+              : merged;
+            const livePawn = liveVehiclePawn();
+            if(livePawn && livePawn.setSteeringWheelConfig) livePawn.setSteeringWheelConfig(graph.vehiclePawn.steeringWheel);
+            saveElementGraph(object, graph);
+            return Object.assign({}, graph.vehiclePawn.steeringWheel);
+          },
+          getSteeringWheelRigStatus(){
+            const livePawn = liveVehiclePawn();
+            const diagnostics = livePawn && livePawn.owner && livePawn.owner.userData && livePawn.owner.userData.vehicleModelRigDiagnostics;
+            return diagnostics && diagnostics.steering || null;
           },
           modelAssets(){ return assetLibraryLoad().filter(asset => asset && asset.kind === 'glb'); },
           replaceModelWithAsset:replaceLogicVehicleModel,

@@ -54,10 +54,13 @@ function create(deps){
     const id = asset && (asset.id || asset.key || asset.dbKey || asset.src || asset.source);
     if(!id) return;
     const key = 'asset:' + id;
-    // A 96px thumbnail must not load a second full copy of a large map GLB.
-    // Keep the normal asset icon instead; the placed scene object is still
-    // rendered normally and can receive a lightweight shared-geometry thumb.
-    if(asset.kind === 'glb'){
+    // GLTFLoader parsing and Draco/mesh decoding still happen on the browser
+    // main thread. Only models whose recorded import metadata proves they are
+    // small enough may generate themselves automatically; unknown/heavy assets
+    // keep their semantic icon until the user requests a detailed preview.
+    const assetBytes = Number(asset.size || asset.sourceSize || 0);
+    const assetMeshes = Number(asset.meshCount || 0);
+    if(asset.kind === 'glb' && (!assetBytes || assetBytes > 8 * 1024 * 1024 || assetMeshes > 32)){
       cache.set(key, null);
       return;
     }
@@ -75,15 +78,22 @@ function create(deps){
   function tooComplexForLiveThumbnail(o){
     let meshes = 0;
     let triangles = 0;
-    if(!o || !o.traverse) return true;
-    o.traverse(node => {
-      if(!node || !node.isMesh || !node.geometry) return;
-      meshes++;
-      const geometry = node.geometry;
-      const count = geometry.index && geometry.index.count || geometry.attributes && geometry.attributes.position && geometry.attributes.position.count || 0;
-      triangles += count / 3;
-    });
-    return meshes > 24 || triangles > 100000;
+    if(!o) return true;
+    const pending = [o];
+    while(pending.length){
+      const node = pending.pop();
+      if(!node) continue;
+      if(node.isMesh && node.geometry){
+        meshes++;
+        const geometry = node.geometry;
+        const count = geometry.index && geometry.index.count || geometry.attributes && geometry.attributes.position && geometry.attributes.position.count || 0;
+        triangles += count / 3;
+        if(meshes > 32 || triangles > 180000) return true;
+      }
+      const children = node.children || [];
+      for(let index = 0; index < children.length; index++) pending.push(children[index]);
+    }
+    return false;
   }
   function runQueue(deadline){
     if(!active()) return;

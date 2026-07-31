@@ -59,13 +59,21 @@ function create(opts){
     return {left, top};
   }
   function clampIntoView(el){
+    const maxWidth = Math.max(160, window.innerWidth - MARGIN * 2);
+    const maxHeight = Math.max(120, window.innerHeight - MARGIN * 2);
+    el.style.maxWidth = maxWidth + 'px';
+    el.style.maxHeight = maxHeight + 'px';
     const r = el.getBoundingClientRect();
-    let left = Math.min(Math.max(r.left, MARGIN - r.width + 80), window.innerWidth - 80);
-    let top = Math.min(Math.max(r.top, MARGIN), window.innerHeight - 40);
+    if(r.width > maxWidth) el.style.width = maxWidth + 'px';
+    if(r.height > maxHeight) el.style.height = maxHeight + 'px';
+    const fitted = el.getBoundingClientRect();
+    let left = Math.min(Math.max(fitted.left, MARGIN), Math.max(MARGIN, window.innerWidth - fitted.width - MARGIN));
+    let top = Math.min(Math.max(fitted.top, MARGIN), Math.max(MARGIN, window.innerHeight - fitted.height - MARGIN));
     el.style.left = left + 'px'; el.style.top = top + 'px';
   }
   function bringToFront(el){ el.style.zIndex = String(++zTop); }
   function center(el){
+    clampIntoView(el);
     el.style.left = Math.max(MARGIN, (window.innerWidth - el.offsetWidth) / 2) + 'px';
     el.style.top = Math.max(MARGIN, (window.innerHeight - el.offsetHeight) / 2) + 'px';
   }
@@ -98,10 +106,12 @@ function create(opts){
       });
       resize.addEventListener('pointermove', e => {
         if(e.pointerId !== rzId) return;
-        el.style.width = Math.max(min.w, rw + (e.clientX - rx)) + 'px';
-        el.style.height = Math.max(min.h, rh + (e.clientY - ry)) + 'px';
+        const maxWidth = Math.max(160, window.innerWidth - MARGIN * 2);
+        const maxHeight = Math.max(120, window.innerHeight - MARGIN * 2);
+        el.style.width = Math.min(maxWidth, Math.max(Math.min(min.w, maxWidth), rw + (e.clientX - rx))) + 'px';
+        el.style.height = Math.min(maxHeight, Math.max(Math.min(min.h, maxHeight), rh + (e.clientY - ry))) + 'px';
       });
-      const endResize = e => { if(e.pointerId !== rzId) return; rzId = null; persist(); };
+      const endResize = e => { if(e.pointerId !== rzId) return; rzId = null; clampIntoView(el); persist(); };
       resize.addEventListener('pointerup', endResize);
       resize.addEventListener('pointercancel', endResize);
     }

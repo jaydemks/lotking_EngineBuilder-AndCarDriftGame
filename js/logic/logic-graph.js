@@ -65,6 +65,41 @@ function migrateTemplateCameraDefault(graph){
   });
 }
 
+function migrateVehicleInteriorCamera(graph){
+  const pawn = graph && graph.vehiclePawn;
+  if(!pawn) return;
+  const camera = pawn.camera || (pawn.camera = {});
+  const version = Number(camera.interiorCameraVersion) || 0;
+  if(version >= 3) return;
+  const close = (value, expected) => value == null || Math.abs(Number(value) - expected) < .0001;
+  const rotation = Array.isArray(camera.interiorRotation) ? camera.interiorRotation : null;
+  const authoredRotation = rotation && rotation.some(value => Math.abs(Number(value) || 0) > .0001);
+  const legacyCentered = !authoredRotation &&
+    close(camera.interiorHeight, 1.15) &&
+    close(camera.interiorForward, .28) &&
+    close(camera.interiorLateral, 0) &&
+    close(camera.interiorLookHeight, .04) &&
+    close(camera.interiorFov, 72) &&
+    close(camera.interiorLag, 18);
+  if(version < 2 && legacyCentered) camera.interiorLateral = -.42;
+  if(version < 3){
+    if(camera.interiorGForceMotion == null || close(camera.interiorGForceMotion, .18)) camera.interiorGForceMotion = 0;
+    if(camera.interiorAccelerationMotion == null) camera.interiorAccelerationMotion = 0;
+    if(camera.interiorRoadShake == null || close(camera.interiorRoadShake, .08)) camera.interiorRoadShake = 0;
+  }
+  const defaults = {
+    interiorHeight:1.15, interiorForward:.28, interiorLateral:-.42,
+    interiorLookHeight:.04, interiorFov:72, interiorLag:18,
+    interiorGForceMotion:0, interiorAccelerationMotion:0,
+    interiorRoadShake:0, interiorMotionLimit:.035,
+    interiorSpeedFovGain:.025, interiorSpeedFovMax:4.5,
+  };
+  Object.keys(defaults).forEach(key => {
+    if(camera[key] == null) camera[key] = defaults[key];
+  });
+  camera.interiorCameraVersion = 3;
+}
+
 function normalizeComments(comments){
   return (Array.isArray(comments) ? comments : []).filter(Boolean).map((c, i) => ({
     id:String(c.id || ('comment_' + i)),
@@ -98,6 +133,17 @@ function normalizeVehiclePawn(vehiclePawn, legacyBlueprint){
     hidden:source.hidden === true,
     possessed:source.possessed !== false && playerId != null,
     modelShading:source.modelShading === 'smooth' || source.modelShading === 'flat' ? source.modelShading : 'original',
+    steeringWheel:Object.assign({
+      enabled:true,
+      pivotName:'steering_wheel_pivot',
+      meshName:'steering_wheel_mesh',
+      driverSide:'auto',
+      axis:'auto',
+      direction:0,
+      inputLockDegrees:0,
+      visualLockDegrees:0,
+      response:12,
+    }, source.steeringWheel || {}),
     playerId,
     spawn:{
       x:Number(spawn.x) || 0, y:Number(spawn.y) || 0, z:Number(spawn.z) || 0,
@@ -189,6 +235,7 @@ function normalizeGraph(graph, fallbackName, fallbackScope){
   const vehiclePawn = normalizeVehiclePawn(g.vehiclePawn, g.playerPawnBlueprint);
   if(vehiclePawn) g.vehiclePawn = vehiclePawn;
   migrateTemplateCameraDefault(g);
+  migrateVehicleInteriorCamera(g);
   return g;
 }
 

@@ -151,6 +151,7 @@ function create(deps){
     else { GAME.player.enabled = nativePlayerActive; GAME.player.hidden = !nativePlayerActive; }
     if(GAME.player.setControllerIndex) GAME.player.setControllerIndex(Object.prototype.hasOwnProperty.call(bp, 'controllerIndex') ? bp.controllerIndex : 0);
     if(GAME.player.setModelShading) GAME.player.setModelShading(bp.modelShading || 'original');
+    if(bp.steeringWheel && GAME.player.setSteeringWheelConfig) GAME.player.setSteeringWheelConfig(bp.steeringWheel);
     if(bp.tuning && GAME.player.setTuning) GAME.player.setTuning(bp.tuning);
     if(bp.cam){
       if(GAME.player.setCameraConfig) GAME.player.setCameraConfig(bp.cam, true);

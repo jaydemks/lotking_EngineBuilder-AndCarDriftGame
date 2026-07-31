@@ -214,7 +214,9 @@ function create(deps){
         filterType:isTexture ? 'texture' : 'glb',
         draggable:true,
         raw:asset,
-        badges: (asset.rigged ? [{label:'Rigged', type:'rigged'}] : [])
+        badges: (asset.vehicleRigged ? [{label:'Vehicle rig', type:'rigged'}] :
+          asset.skeletonRigged ? [{label:'Skeleton', type:'rigged'}] :
+          asset.rigged ? [{label:'Rigged', type:'rigged'}] : [{label:'Static', type:'base'}])
           .concat(asset.sourceFormat === 'fbx' ? [{label:asset.sourceDbKey||asset.sourceSrc?'FBX SOURCE':'FBX→GLB', type:'converted'}] : [])
           .concat(Array.isArray(asset.conversionWarnings) && asset.conversionWarnings.length ? [{label:'Warnings', type:'warning'}] : []),
       };

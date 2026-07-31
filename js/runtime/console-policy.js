@@ -5,6 +5,11 @@ const originalWarn = console.warn.bind(console);
 console.warn = function(){
   const message = Array.from(arguments).map(value => String(value == null ? '' : value)).join(' ');
   if(message.indexOf('THREE.GLTFLoader: Custom UV set 1 for texture normalMap not yet supported.') >= 0) return;
+  // Pinned three-gpu-pathtracer 0.0.24 still instantiates Clock internally and
+  // passes the legacy BVH option name. Both are upstream compatibility notices,
+  // not project failures; keep actionable renderer warnings visible.
+  if(message.indexOf('THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.') >= 0) return;
+  if(message.indexOf('MeshBVH: "maxLeafTris" option has been deprecated. Use "targetLeafSize", instead.') >= 0) return;
   originalWarn.apply(console, arguments);
 };
 function isClosedExtensionChannel(message){

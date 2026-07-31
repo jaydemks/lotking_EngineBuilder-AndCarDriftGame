@@ -346,6 +346,10 @@ html,body {
   #overlay {
     position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
     align-items:center; justify-content:center; gap:18px;
+    box-sizing:border-box;
+    padding:max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    overflow:auto;
+    overscroll-behavior:contain;
     background:
       linear-gradient(rgba(6,8,13,.54), rgba(6,8,13,.82)),
       radial-gradient(circle at 50% 22%, rgba(255,209,102,.24), transparent 30%),
@@ -404,6 +408,8 @@ html,body {
   #overlay .sub { color:#8b93a7; letter-spacing:3px; font-size:13px; text-transform:uppercase; }
   .menu-main {
     display:flex; flex-direction:column; align-items:center; gap:18px;
+    flex:0 0 auto;
+    max-width:100%;
     transition:transform .48s cubic-bezier(.22,.9,.18,1), opacity .32s ease, filter .32s ease;
     will-change:transform, opacity;
   }
@@ -852,7 +858,7 @@ html,body {
     border-color:#ffd166; color:#ffd166; transform:translateY(-1px);
   }
   .level-select {
-    position:absolute; width:min(940px, calc(100vw - 34px)); max-height:min(72vh, 680px);
+    position:absolute; width:min(940px, calc(100vw - 34px)); max-height:min(72vh, 680px); max-height:min(72dvh, 680px);
     opacity:0; pointer-events:none; transform:translateX(42vw) scale(.97);
     transition:transform .52s cubic-bezier(.22,.9,.18,1), opacity .34s ease;
     will-change:transform, opacity;
@@ -873,7 +879,7 @@ html,body {
     transition:background .15s, border-color .15s, transform .15s;
   }
   #levelBackBtn:hover { background:rgba(255,255,255,.11); border-color:#ffd166; transform:translateY(-1px); }
-  .level-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:16px; overflow:auto; max-height:calc(min(72vh, 680px) - 88px); padding-right:4px; }
+  .level-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:16px; overflow:auto; overscroll-behavior:contain; max-height:calc(min(72vh, 680px) - 88px); max-height:calc(min(72dvh, 680px) - 88px); padding-right:4px; }
   .level-card {
     display:grid; grid-template-rows:150px auto auto; min-height:362px; overflow:hidden;
     border-radius:8px; border:1px solid rgba(255,255,255,.13); background:rgba(17,22,34,.86);
@@ -932,6 +938,13 @@ html,body {
     .level-shell { padding:16px; }
     .level-head h2 { font-size:26px; }
     .level-grid { grid-template-columns:1fr; max-height:calc(76vh - 82px); }
+  }
+  @media (max-height: 700px) {
+    #overlay:not(.choosing-level) { justify-content:flex-start; }
+    .menu-main { margin:auto 0; }
+    .controls-panel { max-height:min(420px, 42dvh); overflow:auto; overscroll-behavior:contain; }
+    .level-select { max-height:calc(100dvh - 24px); }
+    .level-grid { max-height:calc(100dvh - 122px); }
   }
 
   /* ---------- HUD ---------- */
@@ -1209,12 +1222,16 @@ html,body {
   #settingsBtn:hover, #settingsBtn.open { transform:rotate(120deg) scale(1.04); border-color:#ffd166; color:#ffd166; }
   #settingsOverlay {
     position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center;
+    box-sizing:border-box;
+    padding:max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    overflow:auto;
+    overscroll-behavior:contain;
     background:rgba(4,6,10,.48); opacity:0; pointer-events:none; transition:opacity .22s ease;
   }
   #settingsOverlay.editor { background:rgba(4,6,10,.58); }
   #settingsOverlay.open { opacity:1; pointer-events:auto; }
   #settingsPanel {
-    position:relative; width:min(520px, calc(100vw - 28px)); max-height:calc(100vh - 48px);
+    position:relative; width:min(520px, 100%); max-height:calc(100vh - 20px); max-height:calc(100dvh - 20px);
     overflow:auto; padding:18px; border-radius:8px;
     background:linear-gradient(180deg, rgba(20,25,37,.98), rgba(8,11,17,.98));
     border:1px solid rgba(255,255,255,.13); color:#dfe6f2;
@@ -1548,6 +1565,7 @@ html,body {
   .lk-win, .lk-movable { pointer-events:auto; }
   .lk-win {
     position:fixed; display:none; flex-direction:column; min-width:300px; min-height:200px;
+    max-width:calc(100vw - 12px); max-height:calc(100vh - 12px); max-height:calc(100dvh - 12px);
     background:linear-gradient(180deg,#141924,#0d1017); border:1px solid rgba(255,255,255,.14);
     border-radius:12px; box-shadow:0 24px 60px rgba(0,0,0,.55); overflow:hidden; color:#dfe5f1;
   }
@@ -1564,7 +1582,7 @@ html,body {
     background:rgba(255,255,255,.05); color:#dfe5f1; cursor:pointer; font-size:16px; line-height:1;
   }
   .lk-win-close:hover { border-color:#ef476f; color:#ff9db1; }
-  .lk-win-body { flex:1; overflow:auto; padding:14px; scrollbar-width:thin; scrollbar-color:rgba(157,180,255,.45) rgba(255,255,255,.05); }
+  .lk-win-body { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:14px; scrollbar-width:thin; scrollbar-color:rgba(157,180,255,.45) rgba(255,255,255,.05); }
   .lk-win-body::-webkit-scrollbar,
   .lk-map-actions::-webkit-scrollbar { width:9px; height:9px; }
   .lk-win-body::-webkit-scrollbar-track,
@@ -2000,6 +2018,25 @@ html,body {
   opacity:.92;
 }
 
+/* Editable vehicle / level radar. It is a Canvas 2D overlay, so enabling it
+   does not allocate another scene camera or WebGL render target. */
+.lk-vehicle-radar {
+  position:absolute;
+  z-index:42;
+  display:none;
+  box-sizing:border-box;
+  pointer-events:none;
+  filter:drop-shadow(0 10px 24px rgba(0,0,0,.42));
+}
+.lk-vehicle-radar.on { display:block; }
+.lk-vehicle-radar.round { border-radius:50%; }
+.lk-vehicle-radar.editor-preview {
+  position:fixed;
+  z-index:100035;
+  outline:1px dashed rgba(109,213,255,.75);
+  outline-offset:5px;
+}
+
 /* ---------------------------------------------- prompts */
 .lk-fps-prompt {
   position:absolute;
@@ -2425,3 +2462,65 @@ html,body {
   .lk-inv,
   .lk-inv-slot { transition:none; }
 }
+
+/* Interactive material surfaces: the official YouTube player stays a real
+   iframe (and therefore keeps its controls, consent and origin boundaries)
+   while the selected vehicle display acts as its in-world launcher. */
+.lk-dynamic-youtube-player {
+  position:fixed;
+  inset:0;
+  z-index:200000;
+  display:grid;
+  place-items:center;
+  padding:max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background:rgba(2, 5, 10, .76);
+  backdrop-filter:blur(10px);
+  pointer-events:auto;
+}
+.lk-dynamic-youtube-player[hidden] { display:none !important; }
+.lk-dynamic-youtube-panel {
+  width:min(1100px, 94vw);
+  max-height:94vh;
+  overflow:hidden;
+  border:1px solid rgba(135, 174, 215, .28);
+  border-radius:14px;
+  background:#080c13;
+  box-shadow:0 28px 90px rgba(0, 0, 0, .62);
+}
+.lk-dynamic-youtube-bar {
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:0 8px 0 16px;
+  color:#eaf3ff;
+  background:linear-gradient(90deg, rgba(255,0,51,.16), rgba(81,245,199,.07));
+  border-bottom:1px solid rgba(135, 174, 215, .18);
+}
+.lk-dynamic-youtube-bar strong {
+  font-size:11px;
+  letter-spacing:1.8px;
+}
+.lk-dynamic-youtube-close {
+  width:34px;
+  height:34px;
+  border:0;
+  border-radius:8px;
+  color:#fff;
+  background:rgba(255,255,255,.08);
+  font:500 25px/1 Arial, sans-serif;
+  cursor:pointer;
+}
+.lk-dynamic-youtube-close:hover,
+.lk-dynamic-youtube-close:focus-visible { background:rgba(255, 0, 51, .34); outline:1px solid rgba(255,255,255,.42); }
+.lk-dynamic-youtube-panel iframe {
+  display:block;
+  width:100%;
+  aspect-ratio:16 / 9;
+  max-height:calc(94vh - 44px);
+  border:0;
+  background:#000;
+}
+body.lk-dynamic-player-open canvas { cursor:default !important; }

@@ -131,7 +131,12 @@ function create(deps){
       else thumb.textContent = deps.entityIcon(o);
     } else {
       thumb.textContent = deps.entityIcon(o);
-      if(o.userData.editorType === 'mesh') deps.queueThumb(o, thumb);
+      const editorType = o && o.userData && o.userData.editorType;
+      let hasRenderableMesh = ['mesh','texture','text','player'].includes(editorType);
+      if(!hasRenderableMesh && editorType === 'logicElement' && o && o.traverse){
+        o.traverse(node => { if(node && node.isMesh) hasRenderableMesh = true; });
+      }
+      if(hasRenderableMesh) deps.queueThumb(o, thumb);
     }
 
     const name = documentRef.createElement('span');

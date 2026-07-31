@@ -113,6 +113,17 @@ function create(deps){
     sh.body.appendChild(sliderRow(tr('Headlight intensity', 'Intensita fari'), lights.front.intensity, 0, 6, .05, v => upd({front:{intensity:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight distance', 'Distanza fari'), lights.front.distance, 5, 80, 1, v => upd({front:{distance:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight cone', 'Cono fari'), lights.front.angle, .15, 1.1, .01, v => upd({front:{angle:v}}), v => (+v).toFixed(2)).root);
+    const lampMaterials=player.lampMaterialOptions?player.lampMaterialOptions('front'):[];
+    sh.body.appendChild(selectRow(tr('Emissive headlight mesh', 'Mesh emissiva fari'), lights.front.emissiveMaterial || '', [
+      {value:'',label:tr('Auto · authored emissive material', 'Auto · materiale emissivo originale')},
+      ...lampMaterials.map(name=>({value:name,label:name})),
+    ], v => upd({front:{emissiveMaterial:v}})).root);
+    sh.body.appendChild(checkRow(tr('Emissive headlight lens', 'Lente fari emissiva'), lights.front.emissive !== false, v => upd({front:{emissive:v}})).root);
+    sh.body.appendChild(checkRow(tr('Preview emission in editor', 'Anteprima emissione in editor'), lights.front.previewEmissive !== false, v => upd({front:{previewEmissive:v}})).root);
+    sh.body.appendChild(sliderRow(tr('Lens emission', 'Emissione lente'), lights.front.emissiveIntensity == null ? 15 : lights.front.emissiveIntensity, 0, 30, .5, v => upd({front:{emissiveIntensity:v}})).root);
+    sh.body.appendChild(sliderRow(tr('High-beam lens emission', 'Emissione lente abbaglianti'), lights.front.highBeamEmissiveIntensity == null ? 24 : lights.front.highBeamEmissiveIntensity, 0, 40, .5, v => upd({front:{highBeamEmissiveIntensity:v}})).root);
+    sh.body.appendChild(sliderRow(tr('Lens color saturation', 'Saturazione colore lente'), lights.front.emissiveColorMix == null ? .22 : lights.front.emissiveColorMix, 0, 1, .01, v => upd({front:{emissiveColorMix:v}}), v => (+v).toFixed(2)).root);
+    sh.body.appendChild(checkRow(tr('Preview lens glow in editor', 'Anteprima glow lente in editor'), lights.front.previewGlow !== false, v => upd({front:{previewGlow:v}})).root);
     sh.body.appendChild(checkRow(tr('Headlight glow', 'Glow fari'), lights.front.glow, v => upd({front:{glow:v}})).root);
     sh.body.appendChild(checkRow(tr('Headlight bloom', 'Bloom fari'), lights.front.bloom, v => upd({front:{bloom:v}})).root);
     sh.body.appendChild(sliderRow(tr('Headlight bloom intensity', 'Intensita bloom fari'), lights.front.bloomIntensity, 0, 1.5, .05, v => upd({front:{bloomIntensity:v}})).root);

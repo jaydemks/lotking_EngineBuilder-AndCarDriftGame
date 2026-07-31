@@ -5,6 +5,41 @@
 (function(){
 'use strict';
 
+const STEERING_WHEEL_DEFAULTS = Object.freeze({
+  enabled:true,
+  pivotName:'steering_wheel_pivot',
+  meshName:'steering_wheel_mesh',
+  driverSide:'auto',
+  axis:'auto',
+  direction:0,
+  inputLockDegrees:0,
+  visualLockDegrees:0,
+  response:12,
+});
+
+function finite(value, fallback){
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function normalizeSteeringWheelConfig(input){
+  const source = input && typeof input === 'object' ? input : {};
+  const axis = String(source.axis || 'auto').toLowerCase();
+  const direction = finite(source.direction, 0);
+  const driverSide = String(source.driverSide || 'auto').toLowerCase();
+  return {
+    enabled:source.enabled !== false,
+    pivotName:String(source.pivotName || STEERING_WHEEL_DEFAULTS.pivotName).trim() || STEERING_WHEEL_DEFAULTS.pivotName,
+    meshName:String(source.meshName || STEERING_WHEEL_DEFAULTS.meshName).trim() || STEERING_WHEEL_DEFAULTS.meshName,
+    driverSide:['left','right'].includes(driverSide) ? driverSide : 'auto',
+    axis:['x','y','z'].includes(axis) ? axis : 'auto',
+    direction:direction < 0 ? -1 : direction > 0 ? 1 : 0,
+    inputLockDegrees:Math.max(0, Math.min(2160, finite(source.inputLockDegrees, 0))),
+    visualLockDegrees:Math.max(0, Math.min(2160, finite(source.visualLockDegrees, 0))),
+    response:Math.max(.1, Math.min(40, finite(source.response, STEERING_WHEEL_DEFAULTS.response))),
+  };
+}
+
 function create(deps){
   const THREE = deps.THREERef;
   const car = deps.car;
@@ -68,13 +103,98 @@ function create(deps){
 
   function createWheelRig(){
     let items = [];
+    let steeringWheel = null;
+    let steeringConfig = normalizeSteeringWheelConfig();
+    let lastModelRoot = null;
     const tmpQ = new THREE.Quaternion();
+    const steeringQ = new THREE.Quaternion();
 
     function nameOf(o){ return (o.name || '').toLowerCase(); }
     function has(o, keys){ const n = nameOf(o); return keys.some(k => n.includes(k)); }
+    function axisVector(value){
+      if(value === 'x') return new THREE.Vector3(1,0,0);
+      if(value === 'y') return new THREE.Vector3(0,1,0);
+      return new THREE.Vector3(0,0,1);
+    }
+    function metadata(node, key, fallback){
+      const value = node && node.userData && node.userData[key];
+      return value == null ? fallback : value;
+    }
+    function bindSteeringWheel(modelRoot, lower){
+      if(steeringWheel && steeringWheel.rotationTarget && steeringWheel.baseQ){
+        steeringWheel.rotationTarget.quaternion.copy(steeringWheel.baseQ);
+      }
+      steeringWheel = null;
+      if(!modelRoot || steeringConfig.enabled === false) return null;
+      const names = lower || {};
+      const pick = name => names[String(name || '').toLowerCase()] || null;
+      const steeringPivot=pick(steeringConfig.pivotName)||pick('steering_wheel_pivot')||pick('steeringwheel_pivot')||pick('volante_pivot');
+      const steeringMesh=pick(steeringConfig.meshName)||pick('steering_wheel_mesh')||pick('steeringwheel_mesh')||pick('volante_mesh');
+      if(steeringPivot){
+        const metadataAxis=String(metadata(steeringPivot,'lkSteeringAxis','z')).toLowerCase();
+        const metadataDirection=finite(metadata(steeringPivot,'lkSteeringDirection'),-1);
+        const inputLock=steeringConfig.inputLockDegrees || finite(metadata(steeringPivot,'lkSteeringLockDegrees'),900);
+        const visualLock=Math.min(
+          inputLock,
+          steeringConfig.visualLockDegrees || finite(metadata(steeringPivot,'lkSteeringVisualDegrees'),540)
+        );
+        const axis=steeringConfig.axis === 'auto' ? (['x','y','z'].includes(metadataAxis) ? metadataAxis : 'z') : steeringConfig.axis;
+        const direction=steeringConfig.direction || (metadataDirection < 0 ? -1 : 1);
+        // Blender exports the authored axle on the metadata pivot, but the
+        // visible wheel must rotate around its own Object3D origin. Rotating
+        // the pivot itself makes a displaced/badly exported pivot at the
+        // vehicle root turn the wheel in a large orbit around the floor.
+        //
+        // Convert the authored pivot-local axle once into the visible mesh's
+        // local coordinates. The animation can then rotate the mesh locally
+        // without changing its position, while correctly supporting meshes
+        // whose authored local orientation is not identity.
+        const rotationTarget=steeringMesh||steeringPivot;
+        modelRoot.updateMatrixWorld(true);
+        const pivotWorldQ=new THREE.Quaternion();
+        const targetWorldInvQ=new THREE.Quaternion();
+        steeringPivot.getWorldQuaternion(pivotWorldQ);
+        rotationTarget.getWorldQuaternion(targetWorldInvQ).invert();
+        const localAxis=axisVector(axis)
+          .applyQuaternion(pivotWorldQ)
+          .applyQuaternion(targetWorldInvQ)
+          .normalize();
+        steeringWheel={
+          pivot:steeringPivot,
+          mesh:steeringMesh,
+          rotationTarget,
+          baseQ:rotationTarget.quaternion.clone(),
+          axis:localAxis,
+          axisName:axis,
+          direction,
+          inputLockDegrees:Math.max(180,Math.min(2160,inputLock || 900)),
+          visualLockDegrees:Math.max(90,Math.min(2160,visualLock || 540)),
+          driverSide:steeringConfig.driverSide === 'auto'
+            ? String(metadata(steeringPivot,'lkDriverSide','auto')).toLowerCase()
+            : steeringConfig.driverSide,
+          currentAngle:0,
+        };
+      }
+      modelRoot.userData.lkSteeringRig={
+        convention:'steering_wheel_pivot + steering_wheel_mesh',
+        pivotFound:!!steeringPivot,
+        meshFound:!!steeringMesh,
+        rotationTarget:steeringWheel&&steeringWheel.rotationTarget&&steeringWheel.rotationTarget.name||null,
+        rotationSpace:steeringWheel&&steeringWheel.mesh?'mesh-local':'pivot-local',
+        enabled:steeringConfig.enabled !== false,
+        axis:steeringWheel&&steeringWheel.axisName||null,
+        direction:steeringWheel&&steeringWheel.direction||null,
+        inputLockDegrees:steeringWheel&&steeringWheel.inputLockDegrees||null,
+        visualLockDegrees:steeringWheel&&steeringWheel.visualLockDegrees||null,
+        driverSide:steeringWheel&&steeringWheel.driverSide||null,
+      };
+      return steeringWheel;
+    }
 
     function build(modelRoot){
       items = [];
+      steeringWheel = null;
+      lastModelRoot = modelRoot;
       car.updateMatrixWorld(true);
       const carQ = new THREE.Quaternion(); car.getWorldQuaternion(carQ);
       const upWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(carQ);
@@ -83,6 +203,7 @@ function create(deps){
       const lower = {};
       modelRoot.traverse(o => { if(o.name) lower[o.name.toLowerCase()] = o; });
       const pick = n => lower[n] || null;
+      bindSteeringWheel(modelRoot,lower);
       let found = 0;
       let exactPivotOk = true;
       for(const key of ['fl', 'fr', 'rl', 'rr']){
@@ -204,11 +325,47 @@ function create(deps){
       return items.length > 0;
     }
 
-    function drive(vF, dt, steerAngle){
+    function drive(vF, dt, steerAngle, normalizedSteer){
       for(const it of items){
         it.spinGroup.rotateOnAxis(it.spinAxis, vF * dt / it.radius);
         if(it.front && it.pivot) it.pivot.quaternion.copy(it.baseQ).multiply(tmpQ.setFromAxisAngle(it.steerAxis, steerAngle));
       }
+      if(steeringWheel&&steeringWheel.rotationTarget){
+        const normalized=Number.isFinite(Number(normalizedSteer))
+          ? Math.max(-1,Math.min(1,Number(normalizedSteer)))
+          : Math.max(-1,Math.min(1,finite(steerAngle,0)/.75));
+        const target=normalized*THREE.MathUtils.degToRad(steeringWheel.visualLockDegrees*.5)*steeringWheel.direction;
+        const alpha=1-Math.exp(-steeringConfig.response*Math.max(0,finite(dt,0)));
+        steeringWheel.currentAngle+=(target-steeringWheel.currentAngle)*alpha;
+        steeringWheel.rotationTarget.quaternion.copy(steeringWheel.baseQ)
+          .multiply(steeringQ.setFromAxisAngle(steeringWheel.axis,steeringWheel.currentAngle));
+      }
+    }
+
+    function setSteeringConfig(value){
+      steeringConfig=normalizeSteeringWheelConfig(value);
+      if(lastModelRoot){
+        const lower={};
+        lastModelRoot.traverse(o=>{if(o.name)lower[o.name.toLowerCase()]=o;});
+        bindSteeringWheel(lastModelRoot,lower);
+      }
+      return Object.assign({},steeringConfig);
+    }
+
+    function steeringStatus(){
+      return {
+        configured:Object.assign({},steeringConfig),
+        ready:!!steeringWheel,
+        pivot:steeringWheel&&steeringWheel.pivot&&steeringWheel.pivot.name||null,
+        mesh:steeringWheel&&steeringWheel.mesh&&steeringWheel.mesh.name||null,
+        rotationTarget:steeringWheel&&steeringWheel.rotationTarget&&steeringWheel.rotationTarget.name||null,
+        rotationSpace:steeringWheel&&steeringWheel.mesh?'mesh-local':'pivot-local',
+        axis:steeringWheel&&steeringWheel.axisName||null,
+        direction:steeringWheel&&steeringWheel.direction||null,
+        inputLockDegrees:steeringWheel&&steeringWheel.inputLockDegrees||null,
+        visualLockDegrees:steeringWheel&&steeringWheel.visualLockDegrees||null,
+        driverSide:steeringWheel&&steeringWheel.driverSide||null,
+      };
     }
 
     // per-wheel suspension travel: offsets are [FL,FR,RL,RR]-ordered metres
@@ -240,13 +397,20 @@ function create(deps){
       build,
       drive,
       setSuspension,
-      clear: () => { items = []; },
+      setSteeringConfig,
+      steeringStatus,
+      clear: () => { items = []; steeringWheel = null; lastModelRoot = null; },
       active: () => items.length > 0,
+      steeringReady: () => !!steeringWheel,
     };
   }
 
   return {gltfLoader, prepModel, tryLoadModel, rig:createWheelRig()};
 }
 
-window.LK_RUNTIME_MODEL_ASSETS = Object.freeze({create});
+window.LK_RUNTIME_MODEL_ASSETS = Object.freeze({
+  create,
+  normalizeSteeringWheelConfig,
+  steeringWheelDefaults:() => Object.assign({},STEERING_WHEEL_DEFAULTS),
+});
 })();

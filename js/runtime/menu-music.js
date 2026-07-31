@@ -17,6 +17,19 @@ function create(options){
   audio.loop = true;
   audio.volume = opts.volume == null ? .55 : opts.volume;
 
+  function claimMenuAudioFocus(){
+    const focus = window.LK_MEDIA_AUDIO_FOCUS;
+    if(focus && focus.claim) focus.claim('menu-music', audio);
+  }
+
+  function playMenuAudio(){
+    claimMenuAudioFocus();
+    return audio.play();
+  }
+
+  // Also catch playback started by browser controls or another subsystem.
+  audio.addEventListener('play', claimMenuAudioFocus);
+
   function editorActive(){
     const editor = document.getElementById('lkEditor');
     return !!(editor && editor.classList.contains('active'));
@@ -47,7 +60,7 @@ function create(options){
   function play(){
     stopFade();
     audio.volume = targetVolume();
-    return audio.play().then(syncButton);
+    return playMenuAudio().then(syncButton);
   }
 
   function pause(){
@@ -83,7 +96,7 @@ function create(options){
 
   function toggle(){
     if(audio.paused){
-      return audio.play()
+      return playMenuAudio()
         .then(() => {
           if(button){
             button.textContent = '♪ MUSIC ON';

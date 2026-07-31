@@ -20,6 +20,7 @@ out/
 exports/
 playable-exports/
 *.zip
+!tools/blender 5.0+/car_wheel_glb_rigger-*.zip
 
 # Oversized source/runtime assets: keep locally, publish through Git LFS or release assets.
 models/player.glb
@@ -42,6 +43,7 @@ ROADMAP_NODES_BLUEPRINT_JS_PART1.md
 ROADMAP_NODES_BLUEPRINT_JS_PART2.md
 THREE_R185_ADVANCED_RENDERING_ROADMAP.tmp.md
 roadmap_tmp.md
+/TEMP_PROMPT.md
 
 # Local/private environment files
 .env
@@ -57,3 +59,4 @@ roadmap_tmp.md
 .git-local/
 .lotking-local/
 demo/demo-project.previous.lkep.json
+demo/demo-project.previous/

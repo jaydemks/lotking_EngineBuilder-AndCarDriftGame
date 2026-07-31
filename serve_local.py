@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -24,6 +25,95 @@ DEMO_PUBLISH_URL = "/__lotking/publish-demo"
 DEMO_DIR = "demo"
 DEMO_FILE = "demo-project.lkep.json"
 DEMO_BACKUP_FILE = "demo-project.previous.lkep.json"
+DEMO_SPLIT_FOLDER = "demo-project"
+DEMO_SPLIT_BACKUP_FOLDER = "demo-project.previous"
+DEMO_SPLIT_THRESHOLD_BYTES = 90 * 1000 * 1000
+DEMO_CHUNK_CHAR_LIMIT = 8_000_000
+
+
+def _utf16_length(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _atomic_write(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix=path.name + "-", suffix=".tmp") as handle:
+        handle.write(payload)
+        temporary = Path(handle.name)
+    os.replace(temporary, path)
+
+
+def write_split_demo(path: Path, payload: bytes, project: dict) -> dict[str, object]:
+    """Publish a static-host-safe demo folder, retaining one local rollback copy."""
+    text = payload.decode("utf-8")
+    project_folder = path.parent / DEMO_SPLIT_FOLDER
+    previous_folder = path.parent / DEMO_SPLIT_BACKUP_FOLDER
+    staging = Path(tempfile.mkdtemp(dir=path.parent, prefix=".demo-project-publish-"))
+    chunks: list[dict[str, object]] = []
+    try:
+        chunks_folder = staging / "chunks"
+        chunks_folder.mkdir(parents=True)
+        for index, offset in enumerate(range(0, len(text), DEMO_CHUNK_CHAR_LIMIT), start=1):
+            part = text[offset : offset + DEMO_CHUNK_CHAR_LIMIT]
+            encoded = part.encode("utf-8")
+            relative = f"chunks/project-{index:04d}.lkep-part"
+            (staging / relative).write_bytes(encoded)
+            chunks.append({
+                "file": relative,
+                "chars": _utf16_length(part),
+                "bytes": len(encoded),
+                "sha256": hashlib.sha256(encoded).hexdigest(),
+            })
+        manifest = {
+            "format": "LKEP_SPLIT_MANIFEST",
+            "version": 1,
+            "encoding": "utf-8-json-text-chunks",
+            "project": {
+                "name": project.get("meta", {}).get("projectName")
+                or project.get("meta", {}).get("trackName")
+                or DEMO_SPLIT_FOLDER,
+                "savedAt": project.get("savedAt"),
+                "format": "LKEP",
+            },
+            "totalChars": _utf16_length(text),
+            "totalBytes": len(payload),
+            "chunkCharLimit": DEMO_CHUNK_CHAR_LIMIT,
+            "chunks": chunks,
+        }
+        (staging / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        backup_path = path.with_name(DEMO_BACKUP_FILE)
+        previous_pointer = path.read_bytes() if path.is_file() else None
+        if previous_pointer is not None:
+            try:
+                descriptor = json.loads(previous_pointer.decode("utf-8"))
+                if descriptor.get("format") == "LKEP_SPLIT_POINTER":
+                    previous_pointer = (json.dumps({
+                        "format": "LKEP_SPLIT_POINTER",
+                        "version": 1,
+                        "manifest": f"{DEMO_SPLIT_BACKUP_FOLDER}/manifest.json",
+                    }, indent=2) + "\n").encode("utf-8")
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                pass
+
+        if previous_folder.exists():
+            shutil.rmtree(previous_folder)
+        if project_folder.exists():
+            os.replace(project_folder, previous_folder)
+        os.replace(staging, project_folder)
+        staging = None
+        if previous_pointer is not None:
+            _atomic_write(backup_path, previous_pointer)
+        pointer = (json.dumps({
+            "format": "LKEP_SPLIT_POINTER",
+            "version": 1,
+            "manifest": f"{DEMO_SPLIT_FOLDER}/manifest.json",
+        }, indent=2) + "\n").encode("utf-8")
+        _atomic_write(path, pointer)
+        return {"split": True, "chunks": len(chunks), "largestChunkBytes": max(item["bytes"] for item in chunks)}
+    finally:
+        if staging is not None and staging.exists():
+            shutil.rmtree(staging)
 
 
 def local_ips() -> list[str]:
@@ -304,12 +394,22 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             return
         path = self.demo_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix="demo-project-", suffix=".tmp") as handle:
-            handle.write(payload)
-            temp_path = Path(handle.name)
+        publish_report: dict[str, object] = {"split": False, "chunks": 1, "largestChunkBytes": len(payload)}
+        existing_split = False
         if path.is_file():
-            shutil.copy2(path, path.with_name(DEMO_BACKUP_FILE))
-        os.replace(temp_path, path)
+            try:
+                existing_split = json.loads(path.read_text(encoding="utf-8")).get("format") == "LKEP_SPLIT_POINTER"
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                pass
+        if len(payload) >= DEMO_SPLIT_THRESHOLD_BYTES or existing_split:
+            publish_report = write_split_demo(path, payload, project)
+        else:
+            with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix="demo-project-", suffix=".tmp") as handle:
+                handle.write(payload)
+                temp_path = Path(handle.name)
+            if path.is_file():
+                shutil.copy2(path, path.with_name(DEMO_BACKUP_FILE))
+            os.replace(temp_path, path)
         response = json.dumps({
             "ok": True,
             "file": f"{DEMO_DIR}/{DEMO_FILE}",
@@ -318,6 +418,7 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             "savedAt": project.get("savedAt"),
             "trackId": meta.get("trackId"),
             "trackName": meta.get("trackName") or meta.get("levelName"),
+            **publish_report,
         }).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

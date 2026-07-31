@@ -88,7 +88,10 @@ function create(deps){
     else if(key === keymap.focus) focusSelected();
     else if(key === 'g') setGrid(!ED.gridOn);
     else if(key === 'delete' || key === 'backspace'){
-      if(ED.leftMode==='assets'){e.preventDefault();requestDeleteSelectedAssets();}
+      if(ED.selectionContext==='assets'){
+        e.preventDefault();
+        if(ED.selectedAsset || ED.selectedAssets) requestDeleteSelectedAssets();
+      }
       else requestDeleteSelection();
     }
   }

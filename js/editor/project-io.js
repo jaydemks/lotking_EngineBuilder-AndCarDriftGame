@@ -30,6 +30,7 @@ function create(deps){
   const BROWSER_PROJECT_INDEX = 'lk.editor.projects.v1';
   const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
   const BROWSER_PROJECT_MARKER = 'lk.editor.browserProject.v1';
+  const PROJECT_IDENTITY_VERSION = 4;
   const LOCAL_BRIDGE_URL = '/__lotking/project-state';
   const LOCAL_DEMO_PUBLISH_URL = '/__lotking/publish-demo';
   const LOCAL_BRIDGE_MARKER = 'lk.localProjectBridge.v1';
@@ -69,6 +70,7 @@ function create(deps){
 
   function setTrackMeta(meta){
     meta = meta || {};
+    if(meta.projectName) ED.projectName = meta.projectName;
     ED.trackName = meta.trackName || meta.levelName || ED.trackName || 'Parking Lot';
     ED.trackId = meta.trackId || meta.levelId || slugifyTrackName(ED.trackName);
     ED.levelRole = ['editor-menu','game-menu'].includes(meta.levelRole)
@@ -84,6 +86,8 @@ function create(deps){
 
   function currentTrackMeta(){
     const meta = {trackId: ED.trackId || slugifyTrackName(ED.trackName), trackName: ED.trackName || 'Parking Lot', levelRole:ED.levelRole || 'gameplay'};
+    const projectName = ED.projectName || activeBrowserProjectName();
+    if(projectName) meta.projectName = projectName;
     if(ED.inputConfig) meta.input = ACT ? ACT.normalizeConfig(ED.inputConfig) : ED.inputConfig;
     return meta;
   }
@@ -92,6 +96,9 @@ function create(deps){
     let project = null;
     if(STORE.loadProject){
       project = STORE.loadProject();
+      const LV = levelsApi();
+      const loadedId = project && project.meta && (project.meta.trackId || project.meta.levelId);
+      if(LV && LV.reconcileActive && loadedId) LV.reconcileActive(loadedId);
       setTrackMeta(project.meta);
     } else {
       setTrackMeta({trackName:'Parking Lot', trackId:'parking-lot'});
@@ -109,7 +116,7 @@ function create(deps){
   function projectFilename(project){
     const stamp = (project.savedAt || new Date().toISOString()).replace(/[:.]/g, '-');
     const meta = project.meta || currentTrackMeta();
-    return 'lot-king-' + slugifyTrackName(meta.trackName || meta.levelName || 'track') + '-' + stamp + '.lkep.json';
+    return 'lot-king-' + slugifyTrackName(meta.projectName || activeBrowserProjectName() || meta.trackName || meta.levelName || 'project') + '-' + stamp + '.lkep.json';
   }
 
   function canPickProjectFile(){
@@ -202,6 +209,8 @@ function create(deps){
       const etag = response.headers.get('ETag');
       if(etag) localStorage.setItem(LOCAL_BRIDGE_ETAG, etag);
     } catch(err){}
+    try { sessionStorage.setItem(LOCAL_BRIDGE_MARKER, result.project.savedAt || project.savedAt || 'saved'); }
+    catch(err){}
     return result;
   }
 
@@ -215,7 +224,11 @@ function create(deps){
         cache:'no-store',
         headers:etag ? {'If-None-Match':etag} : {},
       });
-      if(response.status === 304) return false;
+      if(response.status === 304){
+        try { sessionStorage.setItem(LOCAL_BRIDGE_MARKER, etag || 'confirmed'); } catch(err){}
+        compactActiveBrowserProjectForLocalBridge();
+        return false;
+      }
       if(!response.ok) return false;
       try {
         const nextEtag = response.headers.get('ETag');
@@ -224,8 +237,12 @@ function create(deps){
       progressToken = beginStatusWork(tr('Restoring project', 'Ripristino progetto'), tr('Reading the complete project from disk', 'Lettura del progetto completo dal disco'), 'loading');
       updateStatusWork(progressToken, 22, tr('Parsing levels', 'Analisi livelli'), 'loading');
       const project = STORE.parseProject ? STORE.parseProject(await response.text()) : await response.json();
-      repairBridgeCreatedBrowserProjectDuplicate(project);
       const stamp = String(project.savedAt || 'project');
+      // SessionStorage gives quota recovery a tiny independent proof even when
+      // LocalStorage was already too full to record the previous bridge marker.
+      try { sessionStorage.setItem(LOCAL_BRIDGE_MARKER, stamp); } catch(err){}
+      compactActiveBrowserProjectForLocalBridge();
+      repairBridgeCreatedBrowserProjectDuplicate(project);
       const LV = levelsApi();
       const localCount = LV && LV.list ? LV.list({includeHidden:true}).length : 0;
       const bridgeCount = 1 + (Array.isArray(project.embeddedLevels) ? project.embeddedLevels.length : 0);
@@ -495,6 +512,126 @@ function create(deps){
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   }
 
+  function ensureJsZipForProjectFolder(){
+    if(window.JSZip) return Promise.resolve(window.JSZip);
+    if(ensureJsZipForProjectFolder.pending) return ensureJsZipForProjectFolder.pending;
+    ensureJsZipForProjectFolder.pending = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'vendor/jszip-3.10.1.min.js?v=3.10.1-lk1';
+      script.onload = () => window.JSZip ? resolve(window.JSZip) : reject(new Error('JSZip unavailable'));
+      script.onerror = () => reject(new Error(tr('Unable to load the local ZIP writer', 'Impossibile caricare il generatore ZIP locale')));
+      document.head.appendChild(script);
+    });
+    return ensureJsZipForProjectFolder.pending;
+  }
+
+  async function downloadSplitProjectZip(bundle){
+    const JSZip = await ensureJsZipForProjectFolder();
+    const zip = new JSZip();
+    zip.file(bundle.base + '.lkep.json', JSON.stringify(bundle.pointer, null, 2));
+    zip.file(bundle.base + '/manifest.json', JSON.stringify(bundle.manifest, null, 2));
+    bundle.chunks.forEach(entry => zip.file(bundle.base + '/' + entry.file, entry.text));
+    zip.file('README.txt', [
+      'LOT KING split LKEP project',
+      '',
+      'Extract this ZIP before committing it to GitHub.',
+      'Keep the .lkep.json pointer next to its same-named folder.',
+      'For the bundled online demo use demo-project.lkep.json + demo-project/.',
+      'Editor and Game load and verify every manifest part automatically.',
+    ].join('\n'));
+    const blob = await zip.generateAsync({type:'blob'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = bundle.base + '-split-project.zip';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  async function exportProjectFolder(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return false; }
+    const splitProject = window.LK_RUNTIME_SPLIT_PROJECT;
+    if(!splitProject) throw new Error('Split project runtime is unavailable');
+    const progressToken = beginStatusWork(tr('Export project folder', 'Esporta cartella progetto'), tr('Serializing project levels', 'Serializzazione livelli progetto'), 'loading');
+    try {
+      flushHudHistory();
+      const sceneData = STORE.collect(GAME);
+      const LV = levelsApi();
+      const allLevels = LV && LV.list ? (LV.list({includeHidden:true}) || []) : [];
+      const activeId = LV && LV.activeId ? LV.activeId() : ED.trackId;
+      const exportLevels = await pickProjectExportLevels(allLevels, activeId);
+      if(exportLevels === null) throw new DOMException('Operation cancelled', 'AbortError');
+      updateStatusWork(progressToken, 25, tr('Generating exact project snapshot', 'Generazione snapshot esatto'), 'loading');
+      const project = createProjectSnapshotWithLevels(sceneData, exportLevels);
+      requireExactPersistence(sceneData, project, tr('Split LKEP snapshot verification', 'Verifica snapshot LKEP diviso'));
+      updateStatusWork(progressToken, 42, tr('Preparing portable assets', 'Preparazione asset portabili'), 'loading');
+      const prepared = await preparePortableProject(project);
+      const projectName = browserProjectName(prepared.project);
+      const suggested = /\bdemo\b/i.test(projectName) ? 'demo-project' : slugifyTrackName(projectName);
+      const requested = await promptEditorAction({
+        title:tr('Project folder name', 'Nome cartella progetto'),
+        message:tr('Base name. For the GitHub online demo use "demo-project".', 'Nome base. Per il demo online GitHub usa "demo-project".'),
+        value:suggested,
+        okText:tr('Export', 'Esporta'),
+      });
+      if(requested == null) throw new DOMException('Operation cancelled', 'AbortError');
+      updateStatusWork(progressToken, 55, tr('Splitting project into GitHub-safe parts', 'Divisione in parti compatibili con GitHub'), 'loading');
+      const bundle = await splitProject.createBundle(prepared.project, requested);
+      let info;
+      if(typeof window.showDirectoryPicker === 'function'){
+        const parent = await window.showDirectoryPicker({mode:'readwrite', id:'lotking-split-project-export'});
+        info = await splitProject.writeBundle(parent, bundle, (ratio, file) => {
+          updateStatusWork(progressToken, 62 + Math.round(ratio * 32), file, 'loading');
+        });
+      } else {
+        await downloadSplitProjectZip(bundle);
+        info = {pointerFile:bundle.base + '.lkep.json', folder:bundle.base, chunks:bundle.chunks.length, zipped:true};
+      }
+      const warning = prepared.warnings && prepared.warnings.length ? prepared.warnings[0] : '';
+      const detail = info.pointerFile + ' + ' + info.folder + '/ · ' + info.chunks + tr(' parts', ' parti') + (warning ? ' · ' + warning : '');
+      finishStatusWork(progressToken, tr('Split project exported', 'Progetto diviso esportato'), detail, warning ? 'warning' : 'success');
+      status(info.zipped
+        ? tr('Split project ZIP downloaded: extract it before committing to GitHub ✓', 'ZIP progetto diviso scaricato: estrailo prima del commit su GitHub ✓')
+        : tr('GitHub-safe project folder exported ✓', 'Cartella progetto compatibile con GitHub esportata ✓'));
+      return info;
+    } catch(err){
+      if(err && err.name === 'AbortError'){
+        finishStatusWork(progressToken, tr('Export cancelled', 'Export annullato'), tr('No project folder written', 'Nessuna cartella scritta'), 'warning');
+        return false;
+      }
+      finishStatusWork(progressToken, tr('Folder export failed', 'Export cartella fallito'), err && err.message || String(err), 'error');
+      status(tr('Project folder export failed: ', 'Export cartella progetto fallito: ') + (err && err.message || err));
+      return false;
+    }
+  }
+
+  async function importProjectFolder(){
+    if(isOnlineDemo()){ blockOnlineDemoAction(); return false; }
+    const splitProject = window.LK_RUNTIME_SPLIT_PROJECT;
+    if(!splitProject || typeof window.showDirectoryPicker !== 'function'){
+      status(tr('Project-folder import requires Chrome or Edge directory access.', 'L’import cartella progetto richiede accesso cartelle di Chrome o Edge.'));
+      return false;
+    }
+    const progressToken = beginStatusWork(tr('Import project folder', 'Importa cartella progetto'), tr('Select the folder containing manifest.json', 'Seleziona la cartella contenente manifest.json'), 'loading');
+    try {
+      const directory = await window.showDirectoryPicker({mode:'read', id:'lotking-split-project-import'});
+      const text = await splitProject.loadDirectory(directory, (ratio, file) => {
+        updateStatusWork(progressToken, 10 + Math.round(ratio * 65), file, 'loading');
+      });
+      const project = STORE.parseProject ? STORE.parseProject(text) : JSON.parse(text);
+      await importProjectAsBrowserProject({name:directory.name + '.lkep.json'}, JSON.stringify(project), progressToken);
+      return true;
+    } catch(err){
+      if(err && err.name === 'AbortError'){
+        finishStatusWork(progressToken, tr('Import cancelled', 'Import annullato'), '', 'warning');
+        return false;
+      }
+      finishStatusWork(progressToken, tr('Folder import failed', 'Import cartella fallito'), err && err.message || String(err), 'error');
+      status(tr('Project folder import failed: ', 'Import cartella progetto fallito: ') + (err && err.message || err));
+      return false;
+    }
+  }
+
   function pickProjectFile(project){
     if(!canPickProjectFile()) return Promise.resolve(null);
     return window.showSaveFilePicker({
@@ -506,9 +643,19 @@ function create(deps){
     });
   }
 
+  function activeBrowserProjectName(){
+    const idx = browserProjectIndex();
+    const marker = getBrowserMarker();
+    const id = activeBrowserProjectId || idx.activeId || (marker && marker.id) || '';
+    const record = browserProjectRecord(idx, id);
+    return record && record.name
+      || (marker && (!id || slugifyTrackName(marker.id) === slugifyTrackName(id)) && marker.name)
+      || '';
+  }
+
   function browserProjectName(project){
     const meta = project && project.meta || currentTrackMeta();
-    return meta.projectName || meta.trackName || meta.levelName || ED.trackName || 'New Project';
+    return meta.projectName || activeBrowserProjectName() || meta.trackName || meta.levelName || ED.trackName || 'New Project';
   }
 
   function browserProjectIndex(){
@@ -538,6 +685,7 @@ function create(deps){
   function setBrowserMarker(record){
     if(!record || !record.id) return;
     activeBrowserProjectId = record.id;
+    ED.projectName = record.name || ED.projectName || record.id;
     try { localStorage.setItem(BROWSER_PROJECT_MARKER, JSON.stringify({id:record.id, savedAt:record.savedAt || null, name:record.name || record.id})); }
     catch(err){}
   }
@@ -545,6 +693,74 @@ function create(deps){
   function browserProjectRecord(idx, id){
     id = slugifyTrackName(id || '');
     return (idx.projects || []).find(item => item && slugifyTrackName(item.id) === id) || null;
+  }
+
+  function projectLevelNames(project){
+    const names = [];
+    const add = value => {
+      const normalized = String(value || '').trim();
+      if(normalized) names.push(slugifyTrackName(normalized));
+    };
+    const meta = project && project.meta || {};
+    add(meta.trackName || meta.levelName);
+    (Array.isArray(project && project.embeddedLevels) ? project.embeddedLevels : []).forEach(level => {
+      add(level && level.name);
+      add(level && level.project && level.project.meta &&
+        (level.project.meta.trackName || level.project.meta.levelName));
+    });
+    // Browser projects created before complete multi-level snapshots keep their
+    // levels in the separate scene-store library. The bad project name may
+    // therefore not appear inside `embeddedLevels` at all.
+    try {
+      const levelIndex = JSON.parse(localStorage.getItem('lotking.levels.v1') || 'null');
+      (levelIndex && Array.isArray(levelIndex.levels) ? levelIndex.levels : []).forEach(level => {
+        add(level && level.name);
+        const id = level && level.id;
+        if(!id) return;
+        try {
+          const savedLevel = JSON.parse(localStorage.getItem('lotking.level.' + id) || 'null');
+          add(savedLevel && savedLevel.meta && (savedLevel.meta.trackName || savedLevel.meta.levelName));
+        } catch(err){}
+      });
+      const activeScene = JSON.parse(localStorage.getItem('lotking.scene.v1') || 'null');
+      add(activeScene && activeScene.meta && (activeScene.meta.trackName || activeScene.meta.levelName));
+    } catch(err){}
+    return new Set(names);
+  }
+
+  function migrateLegacyBrowserProjectIdentity(idx){
+    let changed = false;
+    const marker = getBrowserMarker();
+    (idx.projects || []).forEach(record => {
+      if(!record || !record.id) return;
+      const project = readBrowserProject(record.id);
+      if(!project) return;
+      const meta = project.meta || {};
+      const recordName = String(record.name || meta.projectName || record.id || '').trim();
+      const inheritedFromLevel = projectLevelNames(project).has(slugifyTrackName(recordName));
+      const explicitlyNamed = meta.projectIdentityExplicit === true;
+      const needsRepair = inheritedFromLevel && !explicitlyNamed;
+      if(Number(meta.projectIdentityVersion) >= PROJECT_IDENTITY_VERSION && !needsRepair) return;
+      const stableFallback = String(project.name || STORE.PROJECT_NAME || 'Lot King Engine Project').trim();
+      const projectName = needsRepair && stableFallback
+        ? stableFallback
+        : (recordName || stableFallback || 'Lot King Engine Project');
+      record.name = projectName;
+      project.meta = Object.assign({}, meta, {
+        projectName,
+        projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+        projectIdentityExplicit:explicitlyNamed,
+        projectIdentitySource:needsRepair ? 'stable-project-root' : (meta.projectIdentitySource || 'catalog'),
+      });
+      localStorage.setItem(browserProjectKey(record.id), JSON.stringify(project));
+      changed = true;
+      if(slugifyTrackName(idx.activeId) === slugifyTrackName(record.id) ||
+        marker && slugifyTrackName(marker.id) === slugifyTrackName(record.id)){
+        setBrowserMarker(record);
+      }
+    });
+    if(changed) writeBrowserProjectIndex(idx);
+    return changed;
   }
 
   function uniqueBrowserProjectId(idx, name){
@@ -566,19 +782,96 @@ function create(deps){
     } catch(err){ return null; }
   }
 
+  function localBridgeMarker(){
+    if(!localBridgeEligible()) return '';
+    try {
+      return String(localStorage.getItem(LOCAL_BRIDGE_MARKER) || sessionStorage.getItem(LOCAL_BRIDGE_MARKER) || '');
+    } catch(err){
+      try { return String(sessionStorage.getItem(LOCAL_BRIDGE_MARKER) || ''); }
+      catch(sessionError){ return ''; }
+    }
+  }
+
+  function bridgeProjectManifest(project, record, marker){
+    const source = project || {};
+    const sourceMeta = source.meta || {};
+    const name = record && record.name || sourceMeta.projectName || ED.projectName || STORE.PROJECT_NAME || 'Lot King Engine Project';
+    return {
+      format:source.format || 'LKEP',
+      version:source.version || STORE.PROJECT_VERSION || '0.7.7',
+      name:source.name || STORE.PROJECT_NAME || 'Lot King Engine Project',
+      savedAt:source.savedAt || record && record.savedAt || new Date().toISOString(),
+      meta:Object.assign({}, currentTrackMeta(), sourceMeta, {
+        projectName:name,
+        projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+      }),
+      browserStorage:{
+        mode:'local-bridge-manifest',
+        completeProject:'/__lotking/project-state',
+        bridgeSavedAt:String(marker || ''),
+      },
+    };
+  }
+
+  function compactActiveBrowserProjectForLocalBridge(){
+    const marker = localBridgeMarker();
+    if(!marker) return false;
+    try {
+      const idx = browserProjectIndex();
+      const activeId = slugifyTrackName(activeBrowserProjectId || idx.activeId || (getBrowserMarker() && getBrowserMarker().id) || '');
+      const record = browserProjectRecord(idx, activeId);
+      if(!record) return false;
+      const key = browserProjectKey(record.id);
+      const raw = localStorage.getItem(key);
+      if(!raw) return false;
+      let alreadyCompact = false;
+      try {
+        const parsed = raw.length < 256 * 1024 ? JSON.parse(raw) : null;
+        alreadyCompact = !!(parsed && parsed.browserStorage && parsed.browserStorage.mode === 'local-bridge-manifest');
+      } catch(err){}
+      if(alreadyCompact) return false;
+      // A successful bridge marker proves a complete recoverable LKEP already
+      // exists on disk. Keep only project identity in LocalStorage; level JSON
+      // remains in the level library and imported payloads remain in IndexedDB.
+      localStorage.setItem(key, JSON.stringify(bridgeProjectManifest(null, record, marker)));
+      console.info('LotKing storage: compacted redundant browser project snapshot; complete project remains in the local LKEP bridge');
+      return true;
+    } catch(err){
+      console.warn('LotKing storage: browser project compaction failed', err);
+      return false;
+    }
+  }
+
   function writeBrowserProject(project, opts){
     opts = opts || {};
     const idx = browserProjectIndex();
     const now = new Date().toISOString();
     const targetId = opts.newProject ? '' : slugifyTrackName(opts.id || activeBrowserProjectId || (getBrowserMarker() && getBrowserMarker().id) || '');
-    const name = opts.name || browserProjectName(project);
+    const existingRecord = targetId && browserProjectRecord(idx, targetId);
+    const sourceMeta = project && project.meta || {};
+    const name = opts.name || (existingRecord && existingRecord.name) || sourceMeta.projectName || browserProjectName(project);
     const id = targetId || uniqueBrowserProjectId(idx, name);
-    const record = browserProjectRecord(idx, id) || {id};
+    const record = existingRecord || browserProjectRecord(idx, id) || {id};
     const makeActive = opts.active !== false;
-    const saved = JSON.parse(JSON.stringify(project || {}));
-    saved.savedAt = now;
-    saved.meta = Object.assign({}, saved.meta || {}, {trackId: saved.meta && saved.meta.trackId || id, trackName: name});
-    localStorage.setItem(browserProjectKey(id), JSON.stringify(saved));
+    // JSON.stringify below already creates the detached persisted copy. Avoid a
+    // full JSON clone immediately before it: complete multi-level projects can
+    // be hundreds of MB and the duplicate pass blocks the editor thread.
+    const source = project || {};
+    const saved = Object.assign({}, source, {
+      savedAt:now,
+      meta:Object.assign({}, source.meta || {}, {
+        trackId:source.meta && source.meta.trackId || id,
+        projectName:name,
+        projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+        projectIdentityExplicit:sourceMeta.projectIdentityExplicit === true || opts.explicitName === true,
+      }),
+    });
+    const marker = localBridgeMarker();
+    const bridgeBacked = !!(marker && makeActive && !opts.newProject);
+    localStorage.setItem(
+      browserProjectKey(id),
+      JSON.stringify(bridgeBacked ? bridgeProjectManifest(saved, record, marker) : saved)
+    );
     record.id = id;
     record.name = name;
     record.savedAt = now;
@@ -633,6 +926,7 @@ function create(deps){
         writeBrowserProject(copy, {
           name:tr('Author DEMO · Private Copy', 'DEMO autore · Copia privata'),
           newProject:true,
+          explicitName:true,
         });
         status(tr(
           'Private DEMO ready · Save stays in this browser. Use a folder or Export LKEP for a portable copy.',
@@ -645,6 +939,7 @@ function create(deps){
     }
     const idx = browserProjectIndex();
     if(idx.projects && idx.projects.length){
+      migrateLegacyBrowserProjectIdentity(idx);
       activeBrowserProjectId = idx.activeId || (getBrowserMarker() && getBrowserMarker().id) || null;
       return;
     }
@@ -784,6 +1079,22 @@ function create(deps){
     return meta.projectName || meta.trackName || meta.levelName || (file && file.name ? file.name.replace(/\.lkep(\.json)?$|\.json$/i, '') : 'Imported Project');
   }
 
+  function commitActiveEditorControl(){
+    const active = document.activeElement;
+    if(!active || !active.matches || !active.matches('input, select, textarea')) return;
+    const inspector = $('#lkInspector');
+    const trackName = $('#lkTrackName');
+    if(active !== trackName && !(inspector && inspector.contains(active))) return;
+    // Many text/URL Inspector fields intentionally commit on change. Clicking
+    // Save while they still had focus used to serialize the previous value.
+    // Number/range controls also need input for their live preview callbacks.
+    if(active.matches('input[type="number"], input[type="range"]')){
+      active.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+    active.dispatchEvent(new Event('change', {bubbles:true}));
+    if(active.blur && active.isConnected) active.blur();
+  }
+
   function importProjectAsBrowserProject(file, raw, progressToken){
     if(isOnlineDemo()) throw new Error('Online demo is read-only');
     const project = STORE.parseProject ? STORE.parseProject(raw) : JSON.parse(raw);
@@ -792,7 +1103,7 @@ function create(deps){
     return prepareImportedProjectText(JSON.stringify(project)).then(projectText => {
       STORE.importProject(projectText);
       const imported = STORE.parseProject ? STORE.parseProject(projectText) : JSON.parse(projectText);
-      writeBrowserProject(imported, {name, newProject:true});
+      writeBrowserProject(imported, {name, newProject:true, explicitName:true});
       finishStatusWork(progressToken, tr('Import complete', 'Importazione completata'), tr('Loading project', 'Caricamento progetto'), 'success');
       reopenEditorAndReload('Project imported', name);
     });
@@ -806,12 +1117,7 @@ function create(deps){
     opts = opts || {};
     const progressToken = beginStatusWork(tr('Saving level', 'Salvataggio livello'), tr('Checking current state', 'Verifica stato corrente'), 'loading');
     updateStatusWork(progressToken, 10, tr('Preparing data', 'Preparazione dati'), 'loading');
-    const active = document.activeElement;
-    if(active && active.matches && active.matches('input[type="number"]')){
-      active.dispatchEvent(new Event('input', {bubbles:true}));
-      active.dispatchEvent(new Event('change', {bubbles:true}));
-      if(active.blur) active.blur();
-    }
+    commitActiveEditorControl();
     flushHudHistory();
     const input = $('#lkTrackName');
     if(input && input.value.trim()){
@@ -819,12 +1125,17 @@ function create(deps){
     }
     updateStatusWork(progressToken, 45, tr('Writing catalog', 'Scrittura catalogo'), 'loading');
     const sceneData = STORE.collect(GAME);
+    // A previous complete multi-level browser-project snapshot can consume the
+    // whole LocalStorage quota even though the authoritative localhost LKEP is
+    // already on disk. Compact that proven-recoverable duplicate before the
+    // level store needs room for the new revision.
+    compactActiveBrowserProjectForLocalBridge();
     const ok = STORE.save(sceneData, currentTrackMeta());
     if(!ok){
       ED.dirty = true;
       $('#lkDirty').classList.add('show');
-      finishStatusWork(progressToken, tr('Save failed', 'Salvataggio fallito'), tr('Local storage unavailable', 'Local storage non disponibile'), 'error');
-      status('⚠ Save failed: local level library was not updated');
+      finishStatusWork(progressToken, tr('Save failed', 'Salvataggio fallito'), tr('Browser storage quota exhausted', 'Quota di archiviazione browser esaurita'), 'error');
+      status(tr('⚠ Save failed: browser storage quota exhausted', '⚠ Salvataggio fallito: quota di archiviazione browser esaurita'));
       return false;
     }
     try {
@@ -845,18 +1156,29 @@ function create(deps){
     $('#lkDirty').classList.remove('show');
     if(LV && LV.syncCatalog) LV.syncCatalog();
     if(ED.levelsOpen) refreshLevelsOverlay();
-    refreshAssetsPanel();
+    // Rebuilding the complete asset catalog is expensive and invisible while
+    // the Scene tab is active. setLeftMode('assets') refreshes it on demand.
+    if(ED.leftMode === 'assets') refreshAssetsPanel();
     finishStatusWork(progressToken, tr('Level saved', 'Livello salvato'), tr('Operation complete', 'Operazione completata'), 'success');
     const project = createCompleteProjectSnapshot(sceneData);
+    let browserCatalogSaved = false;
     try {
       writeBrowserProject(project);
+      browserCatalogSaved = true;
       status('Project saved ✓');
-      saveWorkspaceProjectCopy(project);
-      saveLocalBridgeProject(project).catch(err => status('⚠ Local disk backup failed: ' + (err && err.message ? err.message : err)));
     } catch(err) {
       saveProjectFileAsync(project, {allowPicker: !!opts.projectFile, allowDownloadFallback: !!opts.projectFile});
       if(!projectFileHandle) status('Track saved locally ✓');
     }
+    // Disk/workspace persistence must not be skipped just because the optional
+    // browser project catalog is full. The old ordering returned from the catch
+    // before either durable copy had a chance to run.
+    saveWorkspaceProjectCopy(project);
+    saveLocalBridgeProject(project).then(result => {
+      if(!result || browserCatalogSaved) return;
+      try { writeBrowserProject(project); }
+      catch(err){}
+    }).catch(err => status('⚠ Local disk backup failed: ' + (err && err.message ? err.message : err)));
     return true;
   }
 
@@ -866,12 +1188,7 @@ function create(deps){
       blockOnlineDemoAction();
       return Promise.resolve(false);
     }
-    const active = document.activeElement;
-    if(active && active.matches && active.matches('input[type="number"]')){
-      active.dispatchEvent(new Event('input', {bubbles:true}));
-      active.dispatchEvent(new Event('change', {bubbles:true}));
-      if(active.blur) active.blur();
-    }
+    commitActiveEditorControl();
     flushHudHistory();
     const input = $('#lkTrackName');
     if(input && input.value.trim()) ED.trackName = input.value.trim();
@@ -894,7 +1211,7 @@ function create(deps){
         name:result.record && result.record.name || browserProjectName(savedProject),
       });
       activeBrowserProjectId = record.id;
-      ED.trackId = record.id;
+      ED.projectName = record.name;
       ED.dirty = false;
       const dirty = $('#lkDirty');
       if(dirty) dirty.classList.remove('show');
@@ -939,7 +1256,18 @@ function create(deps){
       const handle = bundle.handle;
       const project = bundle.project;
       if(handle) projectFileHandle = handle;
-      return preparePortableProject(project).then(result => ({handle, result}));
+      return preparePortableProject(project).then(result => {
+        const singleFileBytes = projectJsonBlob(result.project).size;
+        result.singleFileBytes = singleFileBytes;
+        if(singleFileBytes >= 95 * 1024 * 1024){
+          result.warnings = Array.isArray(result.warnings) ? result.warnings : [];
+          result.warnings.unshift(tr(
+            'This single LKEP exceeds GitHub’s safe per-file size. Use Export project folder (GitHub).',
+            'Questo LKEP singolo supera la dimensione sicura per file di GitHub. Usa Esporta cartella progetto (GitHub).'
+          ));
+        }
+        return {handle, result};
+      });
     }).then(bundle => {
       if(!bundle) return null;
       updateStatusWork(progressToken, 82, bundle.handle ? tr('Writing project file', 'Scrittura file progetto') : tr('Download started', 'Download avviato'), 'loading');
@@ -972,6 +1300,18 @@ function create(deps){
     const reader = new FileReader();
     reader.onload = () => {
       Promise.resolve().then(async () => {
+        try {
+          const descriptor = JSON.parse(reader.result);
+          if(descriptor && descriptor.format === 'LKEP_SPLIT_POINTER'){
+            throw new Error(tr(
+              'This is a split-project pointer. Use Import project folder and select the adjacent folder containing manifest.json.',
+              'Questo è un puntatore a un progetto diviso. Usa Importa cartella progetto e seleziona la cartella adiacente che contiene manifest.json.'
+            ));
+          }
+        } catch(err){
+          if(err && /split-project pointer|puntatore a un progetto diviso/i.test(err.message || '')) throw err;
+          // Ordinary malformed JSON is reported by the normal LKEP parser.
+        }
         if(importTarget === 'project'){
           await importProjectAsBrowserProject(file, reader.result, progressToken);
           return;
@@ -1076,6 +1416,10 @@ function create(deps){
     if(!box) return;
     box.innerHTML = '';
     const idx = browserProjectIndex();
+    // The Projects card is the user-visible authority. Run the cheap,
+    // versioned repair here too so no alternate startup route can render a
+    // stale level-derived project name before loadTrackMeta completes.
+    migrateLegacyBrowserProjectIdentity(idx);
     const list = Array.isArray(idx.projects) ? idx.projects.map(project => Object.assign({}, project, {active: project.id === idx.activeId})) : [];
     if(!list.length){
       box.appendChild(el('<div class="lk-empty">' + tr('No saved projects.<br>Create a project or press Save to save the current one.', 'Nessun progetto salvato.<br>Crea un progetto o premi Salva per salvare quello corrente.') + '</div>'));
@@ -1126,11 +1470,17 @@ function create(deps){
     }
     const LV = levelsApi();
     const sceneData = options.empty ? STORE.blank() : (LV && LV.templateScene ? LV.templateScene(GAME) : STORE.blank());
-    const meta = {trackId: slugifyTrackName(next.trim()), trackName: next.trim()};
+    const meta = {
+      projectName:next.trim(),
+      projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+      projectIdentityExplicit:true,
+      trackId:slugifyTrackName(next.trim()),
+      trackName:next.trim(),
+    };
     const project = createProjectSnapshot(sceneData);
     project.meta = Object.assign({}, project.meta || {}, meta);
     try {
-      writeBrowserProject(project, {name:next.trim(), newProject:true});
+      writeBrowserProject(project, {name:next.trim(), newProject:true, explicitName:true});
       STORE.importProject(JSON.stringify(project));
       reopenEditorAndReload('Project created', next.trim());
     } catch(err) {
@@ -1181,10 +1531,18 @@ function create(deps){
       const project = readBrowserProject(id);
       if(!record || !project) throw new Error('project not found');
       record.name = next.trim();
-      project.meta = Object.assign({}, project.meta || {}, {trackName: next.trim()});
+      project.meta = Object.assign({}, project.meta || {}, {
+        projectName:next.trim(),
+        projectIdentityVersion:PROJECT_IDENTITY_VERSION,
+        projectIdentityExplicit:true,
+        projectIdentitySource:'user-rename',
+      });
       localStorage.setItem(browserProjectKey(id), JSON.stringify(project));
       writeBrowserProjectIndex(idx);
-      if(record.id === activeBrowserProjectId) setBrowserMarker(record);
+      if(record.id === activeBrowserProjectId || record.id === idx.activeId){
+        ED.projectName = record.name;
+        setBrowserMarker(record);
+      }
       refreshProjectsOverlay();
       status('Project renamed ✓');
     } catch(err) {
@@ -1222,7 +1580,11 @@ function create(deps){
   }
 
   function exportBrowserProject(id){
-    const project = readBrowserProject(id);
+    const idx = browserProjectIndex();
+    const activeId = String(idx.activeId || activeBrowserProjectId || '');
+    const project = String(id || '') === activeId
+      ? createCompleteProjectSnapshot(STORE.collect(GAME))
+      : readBrowserProject(id);
     if(!project){
       status('Export failed: project not found');
       return;
@@ -1272,9 +1634,12 @@ function create(deps){
       try{response=await fetch(LOCAL_DEMO_PUBLISH_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:payload});}catch(err){}
       if(response&&response.ok){
         const report=await response.json();
-        const detail=(report.trackName||name)+' · '+Math.round((Number(report.bytes)||payload.length)/1048576)+' MB';
+        const splitDetail=report.split?' · '+Number(report.chunks||0)+tr(' GitHub-safe parts',' parti compatibili con GitHub'):'';
+        const detail=(report.trackName||name)+' · '+Math.round((Number(report.bytes)||payload.length)/1048576)+' MB'+splitDetail;
         finishStatusWork(progressToken,tr('Author DEMO published','DEMO autore pubblicato'),detail,'success');
-        status(tr('DEMO published to demo/demo-project.lkep.json; previous file backed up.','DEMO pubblicato in demo/demo-project.lkep.json; file precedente salvato come backup.'));
+        status(report.split
+          ? tr('DEMO published as a GitHub-safe pointer + folder; previous publication backed up.','DEMO pubblicato come puntatore + cartella compatibili con GitHub; pubblicazione precedente salvata.')
+          : tr('DEMO published to demo/demo-project.lkep.json; previous file backed up.','DEMO pubblicato in demo/demo-project.lkep.json; file precedente salvato come backup.'));
         return report;
       }
       if(response&&(response.status===400||response.status===413))throw new Error('Local DEMO publisher HTTP '+response.status);
@@ -1387,7 +1752,7 @@ function create(deps){
   }
 
   return Object.freeze({
-    slugifyTrackName, setTrackMeta, currentTrackMeta, loadTrackMeta, saveScene, projectFilename, exportProject, importProjectFile,
+    slugifyTrackName, setTrackMeta, currentTrackMeta, loadTrackMeta, saveScene, projectFilename, exportProject, exportProjectFolder, importProjectFile, importProjectFolder,
     setProjectImportTarget, setProjectsOverlayOpen, refreshProjectsOverlay, createBrowserProject, loadBrowserProject, renameBrowserProject, deleteBrowserProject, exportBrowserProject,
     createPortableCollaborationSnapshot, applyPortableCollaborationSnapshot,
     publishProjectAsDemo,

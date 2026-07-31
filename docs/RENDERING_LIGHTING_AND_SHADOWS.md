@@ -12,6 +12,7 @@ Use **Environment → Day / Night Lighting** for level-authored light balance:
 - **Day ambient fill** lights surfaces facing away from the sun. Raise this before overexposing the whole image.
 - **Moon direct light** controls the directional lunar contribution and its cast shadows.
 - **Moon indirect light** controls the blue diffuse night fill and follows moon visibility.
+- **Night environment response** scales image-based reflections and indirect environment response after sunset independently from the hemisphere fill. Its extended range is intended for night scenes with no visible sun.
 
 Point and spot lights use the photometric model required by Three.js r185. Their inspector exposes luminous power in lumens and decay separately; `2` is the physically correct inverse-square decay. Legacy project values are migrated to candela when loaded instead of remaining nearly black after the renderer upgrade.
 
@@ -64,6 +65,18 @@ SSR can reflect only geometry currently visible to the camera. Objects behind th
 
 Volumetric shafts now accept only HDR light emitters and automatically fade out when the source is behind or outside the camera. This prevents bright neutral meshes from being interpreted as smoke and leaving directional ghost trails.
 
+## Rendering modes
+
+The Video menu offers three independent rendering modes:
+
+- **Normal** uses the stable WebGL post-processing pipeline.
+- **Ray lighting** adds the real-time screen-space ray effects intended for driving.
+- **Path tracing** progressively accumulates a physically based static-world image. It shares the primary Three.js bundle so materials cannot cross incompatible Three.js instances. Vehicles, characters, custom shader materials, dynamic dashboard/video textures and transient effects remain a depth-correct raster overlay so controls stay responsive while the static image converges.
+
+Path tracing requires WebGL 2 and is intentionally progressive: camera movement resets accumulation, and the quality preset controls its render scale, bounce count and texture-array budget. If initialization or BVH construction fails, the frame falls back to Normal rendering instead of leaving a black view.
+
+The visually specialized demos in Erich Loftis' project use scene-specific GLSL integrators for effects such as oceans, participating media and mathematical primitives. Lot King uses a general scene/BVH renderer instead: it cannot copy every demo-specific shader into arbitrary editor levels, but it provides the transferable features—progressive global illumination, multiple bounces, physically based reflections/refractions and soft light transport—without constraining the authored level to one demo scene.
+
 ## Shadow controls
 
 The player Video menu can expose:
@@ -97,11 +110,14 @@ The sun flare is an engine-native procedural effect with:
 - optional anamorphic horizontal response;
 - camera-specific smoothing for editor, gameplay, PIP and split views.
 
-The Cinematic mode integrates Anderson Mancini's complete CC0 shader from [R3F Ultimate Lens Flare](https://github.com/ektogamat/R3F-Ultimate-Lens-Flare), adapted to remain HDR until Lot King's Three.js r185 OutputPass. The Classic mode remains the lighter engine-native implementation. Attribution and the CC0 notice ship with the editor and playable exports under `media/lensflare/`.
+The Cinematic mode integrates Anderson Mancini's complete CC0 shader from [R3F Ultimate Lens Flare](https://github.com/ektogamat/R3F-Ultimate-Lens-Flare), adapted to remain HDR until Lot King's Three.js r185 OutputPass. Its complete ring, ghost and starburst design is retained, while the expensive optical field runs at reduced HDR resolution and is composited back over the full-resolution scene. The Classic mode remains the lighter engine-native implementation. Attribution and the CC0 notice ship with the editor and playable exports under `media/lensflare/`.
 
 For a photographic starting point, keep intensity below `0.9`, chromatic split around `0.35–0.55`, ghost opacity below `0.8` and starburst below `0.4`. Anamorphic mode is a stylistic lens choice, not a universal realism upgrade.
 
 Occlusion performs a throttled ray query toward the sun and fades smoothly. Disable **Scene occlusion** only for stylized scenes or profiling.
+
+Vehicle lamp meshes now receive state-driven color and emissive intensity for running lights, high beam, braking and reverse. The optional front/rear glow sprites remain disabled by default; they can be enabled independently when a stronger halo is wanted.
+
 ## macOS and WebKit compatibility
 
 The rendering backend derives a compatibility profile from the actual WebGL context, extensions and GPU renderer. Apple Metal/WebKit contexts use a conservative screen-space path: device pixel ratio is capped at 2, SSAA does not add a second Retina multiplier, and GTAO/SSR are disabled when their intermediate HDR/depth buffers are not considered reliable. This does not alter authored materials, lighting, shadows, tone mapping or animation data. The active profile is exposed through `LK_RUNTIME_RENDERING_BACKEND.compatibilityProfile(renderer)` and `renderer.userData.lkCompatibilityProfile`.

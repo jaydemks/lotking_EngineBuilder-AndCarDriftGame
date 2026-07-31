@@ -159,9 +159,10 @@ visualHelpers = window.LK_EDITOR_VISUAL_HELPERS && window.LK_EDITOR_VISUAL_HELPE
 function clearReplaceDropHelper(){ return visualHelpers.clearReplaceDropHelper(); }
 function setReplaceDropHelper(target, ok){ return visualHelpers.setReplaceDropHelper(target, ok); }
 function refreshSelectionHelpers(){
-  const result = visualHelpers.refreshSelectionHelpers();
-  visualHelpers.rebuildColliderHelpers();
-  return result;
+  // Selection only changes helper styling. Rebuilding every collider in the
+  // project here made an ordinary outliner/viewport click traverse the whole
+  // scene, recompute bounds and recreate complex wireframes on the UI thread.
+  return visualHelpers.refreshSelectionHelpers();
 }
 function ensureCameraRigHelper(){ return visualHelpers.ensureCameraRigHelper(); }
 function rebuildColliderHelpers(){ return visualHelpers.rebuildColliderHelpers(); }
@@ -235,7 +236,7 @@ toolbar = window.LK_EDITOR_TOOLBAR && window.LK_EDITOR_TOOLBAR.create({
   applyGridSize,
   openMenu, addMenuItems, spawnPointAhead, setTool, undo, redo, saveScene,
   newTrack, saveAsTrack, setLevelsOverlayOpen, setProjectsOverlayOpen, createBrowserProject, setProjectImportTarget, importProjectFile,
-  confirmEditorAction, exportProject, stopPlayPreview, startPlayPreview,
+  confirmEditorAction, exportProject, exportProjectFolder, importProjectFolder, stopPlayPreview, startPlayPreview,
   exitEditor, restoreFloatingPanels, updateSelectionAndDropHelpers, rebuildColliderHelpers,
   setLevelLoading, setEditorLoading,
   requestWarmup: requestEditorWarmup,
@@ -650,7 +651,7 @@ function createTextureEntryFromAsset(asset, at){ return assetLibrary ? assetLibr
 
 assetImports = window.LK_EDITOR_ASSET_IMPORTS && window.LK_EDITOR_ASSET_IMPORTS.create({
   GAME, STORE, THREE, status, setAssetLoading, confirmEditorAction, refreshAssetsPanel, refreshOutliner, finishAdd,
-  spawnPointAhead, performDeleteEntity, selected: () => ED.selected,
+  spawnPointAhead, performDeleteEntity, markDirty, selected: () => ED.selected,
   assetLibraryLoad, assetLibrarySave, supportedAssetFiles, assetKeyFromFile, assetDbKeyFromFile,
   resolveImportedAssetUrl, upsertImportedAsset, createGlbEntryFromAsset, createTextureEntryFromAsset,
   assetImporters:() => pluginManager && pluginManager.extensions ? pluginManager.extensions('assetImporter') : [],
@@ -664,6 +665,7 @@ assetImports = window.LK_EDITOR_ASSET_IMPORTS && window.LK_EDITOR_ASSET_IMPORTS.
   },
 });
 function readFileAsDataURL(f){ return assetImports ? assetImports.readFileAsDataURL(f) : Promise.reject(new Error('asset imports unavailable')); }
+function storeMaterialTextureFile(f){ return assetImports ? assetImports.storeMaterialTextureFile(f) : Promise.reject(new Error('asset imports unavailable')); }
 function hasExternalFileDrag(e){ return assetImports ? assetImports.hasExternalFileDrag(e) : false; }
 function importAssetFiles(files, opts){ return assetImports ? assetImports.importAssetFiles(files, opts) : Promise.resolve([]); }
 function rebuildImportedAsset(asset){ return assetImports ? assetImports.rebuildImportedAsset(asset) : Promise.reject(new Error('asset imports unavailable')); }
@@ -676,7 +678,41 @@ function selectedImportedAssets(){
   const refs=Array.isArray(ED.selectedAssets)&&ED.selectedAssets.length?ED.selectedAssets:(ED.selectedAsset?[ED.selectedAsset]:[]);
   return refs.map(ref=>getAssetByRef(ref)).filter(item=>item&&(item.kind==='imported-glb'||item.kind==='imported-texture')&&item.raw).map(item=>item.raw);
 }
-function requestDeleteSelectedAssets(){const assets=selectedImportedAssets();if(!assets.length)return false;deleteImportedAssets(assets);return true;}
+function requestDeleteSelectedAssets(){
+  const refs=Array.isArray(ED.selectedAssets)&&ED.selectedAssets.length?ED.selectedAssets.slice():(ED.selectedAsset?[ED.selectedAsset]:[]);
+  const items=refs.map(ref=>getAssetByRef(ref)).filter(Boolean);
+  if(!items.length)return false;
+  const imported=items.filter(item=>(item.kind==='imported-glb'||item.kind==='imported-texture')&&item.raw).map(item=>item.raw);
+  if(imported.length){deleteImportedAssets(imported);return true;}
+  const sceneItems=items.filter(item=>item.kind==='scene'&&item.raw);
+  if(sceneItems.length){
+    const objects=[];sceneItems.forEach(item=>(item.raw.instances||[]).forEach(object=>{if(object&&!objects.includes(object))objects.push(object);}));
+    if(!objects.length){status('This asset has no removable scene instances');return true;}
+    confirmEditorAction({
+      title:objects.length===1?'Delete scene asset?':'Delete selected scene assets?',
+      message:'Remove '+objects.length+' scene instance(s) represented by the selected Assets cards?',
+      okText:'Delete from scene',
+    }).then(ok=>{if(!ok)return;objects.forEach(performDeleteEntity);refreshAssetsPanel();});
+    return true;
+  }
+  const item=items[0];
+  if(item.kind==='level'){deleteLevel(item.id,item.name);return true;}
+  if(item.kind==='player-blueprint'&&!item.base){deletePlayerBlueprintAsset(item.raw);return true;}
+  if(item.kind==='logic-blueprint'&&STORE.logicElementAssets&&STORE.logicElementAssets.deleteAsset){
+    confirmEditorAction({title:'Delete Logic Element asset?',message:'Delete "'+(item.name||item.id)+'" from Assets?',okText:'Delete asset'}).then(ok=>{
+      if(!ok)return;STORE.logicElementAssets.deleteAsset(item.id);refreshAssetsPanel();
+    });
+    return true;
+  }
+  if(item.kind==='sound-set'&&STORE.soundSets){
+    confirmEditorAction({title:'Delete sound set?',message:'Delete "'+(item.name||item.id)+'" from Assets?',okText:'Delete'}).then(ok=>{
+      if(!ok)return;STORE.soundSets.remove(item.id);refreshAssetsPanel();
+    });
+    return true;
+  }
+  status('This Assets item is project-owned and cannot be removed from the current level');
+  return true;
+}
 function replaceSelectedWithAsset(asset, target){ if(assetImports) assetImports.replaceSelectedWithAsset(asset, target); }
 function replaceObjectWithFile(target, file){ if(assetImports) assetImports.replaceObjectWithFile(target, file); }
 function replaceTextureObjectWithAsset(asset, target){ if(assetImports) assetImports.replaceTextureObjectWithAsset(asset, target); }
@@ -684,13 +720,6 @@ function replaceTextureObjectWithFile(target, file){ if(assetImports) assetImpor
 function replacePlayerModelWithAsset(asset){ return assetImports ? assetImports.replacePlayerModelWithAsset(asset) : Promise.resolve(false); }
 function replacePlayerModelWithFile(file){ return assetImports ? assetImports.replacePlayerModelWithFile(file) : Promise.resolve(false); }
 
-// Asset Scout: optional online free-asset search. It feeds the same
-// importAssetFiles pipeline as a local drag-and-drop, so removing the two
-// scripts leaves every other import path untouched.
-const assetScout = window.LK_EDITOR_ASSET_SCOUT ? window.LK_EDITOR_ASSET_SCOUT.create({
-  GAME, THREE, status, setAssetLoading, confirmEditorAction, importAssetFiles, refreshAssetsPanel,
-}) : null;
-function openAssetScout(){ if(assetScout) assetScout.open(); }
 // The designer was reachable only from Tools, three levels down a menu, which
 // is the same as not existing. It gets a toolbar button next to Add. The
 // listener is delegated because the editor markup is injected after load, so
@@ -699,8 +728,6 @@ addEventListener('click', event => {
   const button = event.target && event.target.closest && event.target.closest('#lkSoundDesigner');
   if(button) openCharacterSoundDesigner();
 }, true);
-function toggleAssetScout(){ if(assetScout) assetScout.toggle(); }
-
 // Character Sound Designer: loaded on demand, like the engine one, so the
 // editor does not pay for a panel most sessions never open.
 function openCharacterSoundDesigner(setId){
@@ -904,9 +931,20 @@ function applyLastTransform(){ return historyManager.applyLastTransform(); }
 function hasLastTransformRepeat(){ return historyManager.hasLastTransformRepeat(); }
 function isHudHistorySuppress(){ return historyManager.isHudHistorySuppress(); }
 
+let pathTracingSceneDirtyTimer = 0;
 function markDirty(){
   ED.dirty = true;
   $('#lkDirty').classList.add('show');
+  const video=GAME.settings&&GAME.settings.video;
+  const pathTracing=GAME.systems&&GAME.systems.pathTracing;
+  if(video&&video.rendererMode==='pathtracing'&&GAME.state.editorActive&&!GAME.state.editorPreview&&
+    pathTracing&&pathTracing.invalidate){
+    // Inspector sliders can emit dozens of changes per second. Rebuild the BVH
+    // once after the authored edit settles, otherwise the progressive image
+    // keeps an obsolete mesh/material solution under the live raster depth.
+    clearTimeout(pathTracingSceneDirtyTimer);
+    pathTracingSceneDirtyTimer=setTimeout(()=>pathTracing.invalidate(),180);
+  }
 }
 addEventListener('lotking:video-project-change', () => markDirty());
 function commitNumberInput(target){
@@ -995,7 +1033,9 @@ function loadTrackMeta(){ return projectIo.loadTrackMeta(); }
 function saveScene(opts){ return projectIo.saveScene(opts); }
 function projectFilename(project){ return projectIo.projectFilename(project); }
 function exportProject(){ return projectIo.exportProject(); }
+function exportProjectFolder(){ return projectIo.exportProjectFolder(); }
 function importProjectFile(file){ return projectIo.importProjectFile(file); }
+function importProjectFolder(){ return projectIo.importProjectFolder(); }
 function setProjectImportTarget(target){ return projectIo.setProjectImportTarget(target); }
 function setProjectsOverlayOpen(open){ return projectIo.setProjectsOverlayOpen(open); }
 function createBrowserProject(){ return projectIo.createBrowserProject(); }
@@ -1007,7 +1047,6 @@ appMenuBar = window.LK_EDITOR_MENU_BAR && window.LK_EDITOR_MENU_BAR.create({
   pluginManager,
   openMenu,
   status,
-  openAssetScout,
   openCharacterSoundDesigner,
   newTrack,
   saveScene,
@@ -1015,7 +1054,9 @@ appMenuBar = window.LK_EDITOR_MENU_BAR && window.LK_EDITOR_MENU_BAR.create({
   setProjectsOverlayOpen,
   setLevelsOverlayOpen,
   importProject:() => { setProjectImportTarget('project'); $('#lkProjectInput').click(); },
+  importProjectFolder,
   exportProject,
+  exportProjectFolder,
   exportPlayable:() => {
     if(playableExport) playableExport.exportCurrentPlayableProjectZip();
   },
@@ -1360,6 +1401,7 @@ selectionManager = window.LK_EDITOR_SELECTION_MANAGER && window.LK_EDITOR_SELECT
   applyZUpProxyToSelected,
   applyMultiGizmoProxyToSelection,
   syncTransformFields,
+  syncToolbarState,
 });
 function selectObject(o, opts){
   if(ED.liveMaterialSelection && ED.liveMaterialSelection.object !== o) clearLiveMaterialSelection();
@@ -1395,6 +1437,7 @@ function selectPlayerCollider(){
   ED.colliderEdit = false;
   ED.colliderPartIndex = null;
   ED.playerColliderEdit = true;
+  ED.selectionContext = 'scene';
   ED.selected = GAME.player.car;
   setTool('translate');
   refreshSelectionHelpers();
@@ -1855,10 +1898,12 @@ materialEditor = window.LK_EDITOR_MATERIAL_EDITOR && window.LK_EDITOR_MATERIAL_E
   markDirty,
   refreshOutliner,
   buildInspector,
-  readFileAsDataURL,
+  storeMaterialTextureFile,
+  status,
   section,
   selectRow,
   colorRow,
+  checkRow,
   sliderRow,
   textureDrop,
   assetLibraryLoad,
@@ -2034,6 +2079,7 @@ hudInspector = window.LK_EDITOR_HUD_INSPECTOR && window.LK_EDITOR_HUD_INSPECTOR.
   GAME,
   ED,
   markDirty,
+  buildInspector,
   musicLibrarySection,
   section,
   selectRow,
@@ -2259,9 +2305,6 @@ addEventListener('lotking:radiohudchange', e => {
 GAME.editor = {
   enter: enterEditor,
   exit: exitEditor,
-  assetScout,
-  openAssetScout,
-  toggleAssetScout,
   openCharacterSoundDesigner,
   state: ED,
   requestWarmup: requestEditorWarmup,
@@ -2271,5 +2314,6 @@ GAME.editor = {
   refreshAssetsPanel,
   plugins:pluginManager,
   getPlayableExport:() => playableExport,
+  openCinemaVideoExport:studio => editorRuntime && editorRuntime.openCinemaVideoExport(studio),
 };
 })();

@@ -6,7 +6,7 @@
 > It started as a parking-lot drift prototype.<br>
 > Now it is growing into a browser-native engine for building many kinds of games and interactive 3D experiences.
 
-**Current version: `v0.7.6` · Experimental Alpha**
+**Current version: `v0.7.7` · Experimental Alpha**
 
 [Open Lot King Online](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/) ·
 [Technical README](README_TECHNICAL.md) ·
@@ -22,6 +22,8 @@ Lot King is an experimental, local-first 3D game engine and visual editor that r
 It began as a small car drift game, but it is not a car-only editor. It is gradually growing into a tool for assembling imported 3D assets into levels, interactive visuals and playable browser projects, then connecting them through physics, animation, cinematics, sound and visual JavaScript logic.
 
 Lot King is not a complete 3D modelling package. Vehicles, characters and other complex meshes are normally created in Blender or another dedicated tool and then imported as GLB, GLTF or FBX assets. Inside Lot King you can place and transform them, adjust supported mesh, material, texture and animation properties, and connect them to gameplay systems.
+
+For four-wheel vehicles, `tools/blender 5.0+` includes the optional open-source Car Wheel GLB Rigger 0.2.2 source and Blender-built ZIP. In addition to wheels, discs and calipers, it can detect and rig an interior steering wheel for the shared native/Logic vehicle runtime.
 
 The main workflow is simple:
 
@@ -45,7 +47,7 @@ https://github.com/user-attachments/assets/9c1c8dc2-2d93-4434-958f-23d9f546ac55
 
 https://github.com/user-attachments/assets/c481af98-95d2-46b7-aac4-99a6be812e85
 
-The current `v0.7.6` contains additional systems and fixes that are not shown in these videos yet.
+The current `v0.7.7` contains additional systems and fixes that are not shown in these videos yet.
 
 ---
 
@@ -53,7 +55,7 @@ The current `v0.7.6` contains additional systems and fixes that are not shown in
 
 - Build projects with multiple levels and custom 3D menu scenes.
 - Import GLB, GLTF and FBX-based assets, then place, transform and configure their supported properties.
-- Search free online models and PBR textures with Asset Scout and import them without leaving the editor.
+- Import local GLB, GLTF, FBX and PBR texture assets through the editor asset library.
 - Build simple playable browser projects and interactive 3D visuals.
 - Create custom interactions and reusable gameplay behavior with Logic Elements.
 - Create and tune Race or Drift vehicle gameplay.
@@ -68,9 +70,10 @@ The current `v0.7.6` contains additional systems and fixes that are not shown in
 - Drop, throw and shoot loose objects and watch them fall, bounce and settle according to their mass.
 - Design on-foot audio in the Character Sound Designer: footsteps that change with the surface underfoot, weapon fire per weapon class, jump, landing and breathing. Every sound is synthesised procedurally by default, so a project has full character audio with no media files; any slot can be replaced with your own sample.
 - Assign rigged characters and Mixamo animations through Pawn Studio.
-- Create camera sequences with Cinema Studio.
+- Create camera sequences with Cinema Studio and render them to frame-accurate WebM footage independently of realtime playback speed.
 - Test projects through Play Preview or Simulate.
 - Export portable `.lkep.json` projects.
+- Export GitHub-safe split project folders: a small `.lkep.json` pointer, manifest and independently verified ~8 MB parts that Editor and Game reassemble automatically.
 - Export standalone playable ZIP builds for static websites.
 - Experiment with browser-to-browser P2P gameplay and coworking.
 
@@ -89,15 +92,15 @@ Choosing a local folder is optional. It can be used as a portable mirror when di
 
 Version `0.7.4` also adds a dedicated interface for inspecting and cleaning the LocalStorage, IndexedDB and cached data used by Lot King.
 
-Important projects should still be backed up as `.lkep.json` files or stored in an authorized local folder.
+Important projects should still be backed up as `.lkep.json` files, split project folders, or stored in an authorized local folder. For the bundled online demo, export with base name `demo-project` into `demo/`; keep both `demo-project.lkep.json` and the adjacent `demo-project/` folder in Git.
 
 ---
 
-## From v0.0.1 to v0.7.6
+## From v0.0.1 to v0.7.7
 
 The first version, `v0.0.1`, was a small drift prototype created from one prompt.
 
-The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **27 public versioned milestones**, reaching `v0.7.6`.
+The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **28 public versioned milestones**, reaching `v0.7.7`.
 
 Each milestone preserves a real stage of the project rather than hiding the development history behind one final upload.
 
@@ -174,7 +177,7 @@ Feedback, testing, documentation, example projects, reusable logic and other for
 
 - [Technical README](README_TECHNICAL.md)
 - [Startup guide](HOW_TO_START.md)
-- [Current v0.7.6 release notes](RELEASE_NOTES_v0.7.6.md)
+- [Current v0.7.7 release notes](RELEASE_NOTES_v0.7.7.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Runtime modules](docs/RUNTIME_MODULES.md)
 - [First Person Pawn](docs/FIRST_PERSON_PAWN.md) — the shooter layer: rig, traversal, items, interactions, vitals and inventory
@@ -184,13 +187,30 @@ A screenshot-based manual may be added later, when the interface is stable enoug
 
 ---
 
-## Credits and license
+## Credits
 
 Lot King builds on [Three.js](https://threejs.org/), [cannon.js](https://github.com/schteppe/cannon.js) and [JSZip](https://stuk.github.io/jszip/).
+
+The progressive Path Tracing mode uses Garrett Johnson's
+[three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer). The
+realtime path-tracing research and extensive browser demos by
+[Erich Loftis (`erichlof`)](https://github.com/erichlof), especially
+[THREE.js-PathTracing-Renderer](https://github.com/erichlof/THREE.js-PathTracing-Renderer),
+are credited as a principal technical and visual reference.
+
+The 3D city used as the background environment in the bundled demo is
+[Modern City Block](https://sketchfab.com/3d-models/modern-city-block-c80dba249d9547cbb48d00828d23cfa7)
+by [akselmot](https://sketchfab.com/akselmot). The model is currently listed
+under the Sketchfab Free Standard License; creator credit is included
+voluntarily and also preserves attribution for copies distributed under
+earlier [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) terms. The
+demo copy was converted and adapted for the Lot King scene.
 
 See the repository documentation and third-party notices for additional credits and asset provenance.
 
 Music is included and may be used in Lot King projects. If you enjoy it, please support the artists with a follow, comment, like or share; [Num0 is on YouTube](https://www.youtube.com/@Num0-music).
+
+## License
 
 The project is publicly **source-available** under the custom
 [Lot King Source License 0.1](LICENSE). It is not released under an OSI-approved open-source license.

@@ -35,6 +35,8 @@ function create(deps){
   const runtimeCamPos = new THREE.Vector3();
   const runtimeCamQuat = new THREE.Quaternion();
   const playerPreviewForward = new THREE.Vector3();
+  const playerDummyPreviewCamera = new THREE.PerspectiveCamera(72, 16 / 9, .03, 500);
+  let cinemaVideoExporter = null;
   const cinemaStudio = window.LK_EDITOR_CINEMA_STUDIO && window.LK_EDITOR_CINEMA_STUDIO.create({
     GAME,
     ED,
@@ -50,6 +52,23 @@ function create(deps){
       ED.viewportSlots[1] = 'cam:' + cameraId;
       if(deps.setActiveViewportSlot) deps.setActiveViewportSlot(1);
     },
+    openVideoExport:studio => {
+      if(cinemaVideoExporter) cinemaVideoExporter.open(studio);
+    },
+  });
+  cinemaVideoExporter = window.LK_EDITOR_CINEMA_VIDEO_EXPORT && window.LK_EDITOR_CINEMA_VIDEO_EXPORT.create({
+    THREE,
+    GAME,
+    ED,
+    root,
+    renderer,
+    scene,
+    cinemaStudio:() => cinemaStudio,
+    sceneCameraHolderById,
+    normalizeSceneCamera:normalizeSceneCameraLocal,
+    beginFinalRender:beginCinemaFinalPreviewRender,
+    endFinalRender:endCinemaFinalPreviewRender,
+    status:deps.status,
   });
   const viewportLayout = window.LK_EDITOR_VIEWPORT_LAYOUT && window.LK_EDITOR_VIEWPORT_LAYOUT.create({
     THREE,
@@ -71,8 +90,20 @@ function create(deps){
     cinemaStudio,
     renderPost:(rect, camera) => {
       const post = GAME.systems && GAME.systems.post;
+      const pathTracing = GAME.systems && GAME.systems.pathTracing;
       const video = GAME.settings && GAME.settings.video;
-      const enabled = post && post.ok && video && (video.rendererMode === 'raytracing' || video.volumetricLighting || video.quality !== 'high' || video.antialiasing === 'fxaa');
+      if(video&&video.rendererMode==='pathtracing'&&ED.viewportMode!=='quad'&&pathTracing&&pathTracing.supported){
+        try {
+          if(pathTracing.render(camera,video,{width:rect.w,height:rect.h}))return true;
+        } catch(err){}
+      }
+      const enabled = post && post.ok && video && (
+        video.rendererMode === 'raytracing' ||
+        video.volumetricLighting ||
+        video.quality !== 'high' ||
+        video.antialiasing === 'fxaa' ||
+        post.needsOpticalPost && post.needsOpticalPost(camera)
+      );
       // One composer cannot efficiently serve four differently sized cameras:
       // every setSize reallocates all SSR/DOF/bloom render targets. In quad view
       // use the direct renderer; single view keeps the configured post effects.
@@ -337,6 +368,11 @@ function create(deps){
     }
     ED.active = false;
     GAME.state.editorActive = false;
+    if(GAME.player && GAME.player.cameraDummies){
+      Object.keys(GAME.player.cameraDummies).forEach(key => {
+        if(GAME.player.cameraDummies[key]) GAME.player.cameraDummies[key].visible = false;
+      });
+    }
     setEditorLightHandlesVisible(false);
     GAME.hooks.frameOverride = null;
     if(GAME.ui && GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(false);
@@ -372,6 +408,10 @@ function create(deps){
   }
 
   function editorFrame(dt){
+    // Offline Cinema export owns the shared renderer and advances the timeline
+    // with an exact fixed step. The normal editor loop must not submit a second
+    // scene between the rendered frame and its WebCodecs snapshot.
+    if(ED.cinemaExporting) return;
     // The pre-benchmark owns the renderer while it deliberately exercises
     // hidden objects, lights and camera views. Rendering the normal editor
     // frame concurrently doubles GPU work and exposes transient scene state.
@@ -476,6 +516,12 @@ function create(deps){
 
   function updateCameraHelpers(){
     const nativePlayerCameraActive = ED.camHelperOn && GAME.player.enabled !== false && GAME.player.hidden !== true;
+    const cameraDummies = GAME.player && GAME.player.cameraDummies;
+    if(cameraDummies){
+      Object.keys(cameraDummies).forEach(key => {
+        if(cameraDummies[key]) cameraDummies[key].visible = nativePlayerCameraActive && !ED.playPreview;
+      });
+    }
     camProxy.position.copy(gameCam.position);
     camProxy.quaternion.copy(gameCam.quaternion);
     camProxy.fov = gameCam.fov;
@@ -533,16 +579,39 @@ function create(deps){
     return cam;
   }
 
+  function syncPlayerDummyPreviewCamera(dummy){
+    if(!dummy) return gameCam;
+    const cfg = GAME.player.cameraCfg || {};
+    dummy.updateWorldMatrix(true, false);
+    dummy.getWorldPosition(playerDummyPreviewCamera.position);
+    dummy.getWorldQuaternion(playerDummyPreviewCamera.quaternion);
+    playerDummyPreviewCamera.fov = dummy.userData && dummy.userData.cameraRole === 'interior'
+      ? (Number(cfg.interiorFov) || 72)
+      : (Number(cfg.fov) || 62);
+    playerDummyPreviewCamera.near = .03;
+    playerDummyPreviewCamera.far = Math.max(20, Number(cfg.far) || 500);
+    playerDummyPreviewCamera.updateProjectionMatrix();
+    playerDummyPreviewCamera.updateMatrixWorld(true);
+    return playerDummyPreviewCamera;
+  }
+
   function renderPip(){
     if(!(ED.pipOn && deps.isPlayerCameraSelection())){
       $('#lkPipFrame').classList.remove('on');
       return;
     }
-    let selectedCameraHolder = ED.selected;
-    while(selectedCameraHolder && !(selectedCameraHolder.userData && selectedCameraHolder.userData.editorType === 'camera' && selectedCameraHolder.userData.sceneCamera)){
-      selectedCameraHolder = selectedCameraHolder.parent;
+    let selectedCameraHolder = null;
+    let selectedPlayerCamera = null;
+    let selectedNode = ED.selected;
+    while(selectedNode){
+      const data = selectedNode.userData || {};
+      if(data.editorType === 'playerCamera'){ selectedPlayerCamera = selectedNode;break; }
+      if(data.editorType === 'camera' && data.sceneCamera){ selectedCameraHolder = selectedNode;break; }
+      selectedNode = selectedNode.parent;
     }
-    const sourceCamera = selectedCameraHolder ? normalizeSceneCameraLocal(selectedCameraHolder) : gameCam;
+    const sourceCamera = selectedCameraHolder
+      ? normalizeSceneCameraLocal(selectedCameraHolder)
+      : (selectedPlayerCamera ? syncPlayerDummyPreviewCamera(selectedPlayerCamera) : gameCam);
     const isSceneCamera = !!selectedCameraHolder;
     const rightW = deps.panelWidth('right');
     const usableW = Math.max(320, innerWidth - deps.panelWidth('left') - rightW - 28);
@@ -564,7 +633,9 @@ function create(deps){
     const pipTitle = pipFrame.querySelector('.lk-pip-title span');
     if(pipTitle) pipTitle.textContent = isSceneCamera
       ? ((selectedCameraHolder.userData.editorName || selectedCameraHolder.name || 'SCENE CAMERA').toUpperCase() + ' · PREVIEW')
-      : 'PLAYER CAMERA';
+      : (selectedPlayerCamera
+        ? ((selectedPlayerCamera.userData.editorName || selectedPlayerCamera.name || 'PLAYER CAMERA').toUpperCase() + ' · PREVIEW')
+        : 'PLAYER CAMERA');
     const pipMin = $('#lkPipMinimize');
     if(pipMin){
       pipMin.textContent = ED.pipMinimized ? '+' : '−';
@@ -692,6 +763,10 @@ function create(deps){
   function triggerCinemaEvent(eventName, opts){
     if(!cinemaStudio) return [];
     return cinemaStudio.triggerRuntimeEvent(eventName, opts);
+  }
+  function openCinemaVideoExport(studio){
+    const target = studio || (cinemaStudio && cinemaStudio.activeStudio());
+    return !!(target && cinemaVideoExporter && cinemaVideoExporter.open(target));
   }
   window.addEventListener('lotking:cinemastart', event => {
     if(!cinemaStudio || !GAME.state || !GAME.state.editorActive) return;
@@ -873,6 +948,34 @@ function create(deps){
     fwd.normalize();
     const side = new THREE.Vector3(fwd.z, 0, -fwd.x).normalize();
     const target = car.position.clone().add(new THREE.Vector3(0, Math.max(.1, Number(cfg.lookHeight) || 1.1), 0));
+    if(mode === 'interior'){
+      const interiorDummy = GAME.player.cameraDummies && GAME.player.cameraDummies.interior;
+      if(interiorDummy){
+        interiorDummy.updateWorldMatrix(true, false);
+        interiorDummy.getWorldPosition(gameCam.position);
+        interiorDummy.getWorldQuaternion(gameCam.quaternion);
+      } else {
+        gameCam.position.copy(car.localToWorld(new THREE.Vector3(
+          cfg.interiorLateral == null ? -.42 : Number(cfg.interiorLateral) || 0,
+          Number(cfg.interiorHeight) || 1.15,
+          Number(cfg.interiorForward) || 0
+        )));
+        const interiorTarget = gameCam.position.clone().addScaledVector(fwd, 12);
+        interiorTarget.y += Number(cfg.interiorLookHeight) || 0;
+        gameCam.lookAt(interiorTarget);
+        if(Array.isArray(cfg.interiorRotation)){
+          gameCam.quaternion.copy(car.getWorldQuaternion(new THREE.Quaternion()).multiply(
+            new THREE.Quaternion().setFromEuler(new THREE.Euler(cfg.interiorRotation[0] || 0, cfg.interiorRotation[1] || 0, cfg.interiorRotation[2] || 0, 'XYZ'))
+          ));
+        }
+      }
+      gameCam.fov = cfg.interiorFov || 72;
+      gameCam.aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (innerWidth / innerHeight);
+      gameCam.far = cfg.far || 500;
+      gameCam.updateProjectionMatrix();
+      gameCam.updateMatrixWorld(true);
+      return;
+    }
     const freePitch = Math.max(.05, Math.min(1.2, Number(cfg.freePitch) || .32));
     let height = mode === 'free' ? Math.max(.2, Math.sin(freePitch) * dist) : Math.max(1.2, cfg.arcadeHeight || 3.1);
     let sideOffset = Math.max(-8, Math.min(8, Number(cfg.lateralOffset) || 0));
@@ -896,6 +999,11 @@ function create(deps){
         .add(new THREE.Vector3(0, height, 0));
     }
     gameCam.lookAt(target);
+    if((mode === 'arcade' || mode === 'cinematic') && Array.isArray(cfg.externalRotation)){
+      gameCam.quaternion.copy(car.getWorldQuaternion(new THREE.Quaternion()).multiply(
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(cfg.externalRotation[0] || 0, cfg.externalRotation[1] || 0, cfg.externalRotation[2] || 0, 'XYZ'))
+      ));
+    }
     gameCam.fov = cfg.fov || 62;
     gameCam.aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (innerWidth / innerHeight);
     gameCam.far = cfg.far || 500;
@@ -912,6 +1020,7 @@ function create(deps){
     editorFrame,
     syncGamePreviewCamera,
     triggerCinemaEvent,
+    openCinemaVideoExport,
     requestWarmup,
   });
 }

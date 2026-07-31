@@ -53,8 +53,18 @@ function createRadioHud(deps){
   const audio = new Audio();
   audio.volume = .65;
   audio.preload = 'auto';
+  function claimRadioAudioFocus(){
+    const focus = window.LK_MEDIA_AUDIO_FOCUS;
+    if(focus && focus.claim) focus.claim('radio', audio);
+  }
+  function playRadioAudio(){
+    claimRadioAudioFocus();
+    return audio.play();
+  }
+  audio.addEventListener('play', claimRadioAudioFocus);
 
   let idx = 0, shuffle = false, open = false, started = false, sessionActive = false, available = false;
+  let materialSurfaceAvailable = false;
   let activePlayerId = 1;
   let frameRect = null;
   const $ = id => document.getElementById(id);
@@ -400,7 +410,7 @@ function createRadioHud(deps){
     audio.src = musicLib.audioSrc(track.url);
     el.title.textContent = track.title;
     el.artist.textContent = track.artist;
-    if(autoplay) audio.play().catch(()=>{});
+    if(autoplay) playRadioAudio().catch(()=>{});
     popup('♪ ' + track.title, '#4be3a0');
   }
   function pickNext(){
@@ -411,7 +421,7 @@ function createRadioHud(deps){
   function prev(){ if(available || editorPreview) load(idx-1, true); }
   function togglePlay(){
     if(!available && !editorPreview) return;
-    audio.paused ? audio.play().catch(()=>{}) : audio.pause();
+    audio.paused ? playRadioAudio().catch(()=>{}) : audio.pause();
   }
   function toggleShuffle(){
     if(!available && !editorPreview) return;
@@ -484,7 +494,10 @@ function createRadioHud(deps){
     canvas.classList.toggle('slowmo', open && !editorPreview);
   }
   function syncAvailability(){
-    const next = editorPreview || !!resolveAvailability(cfg);
+    // Explicitly authoring a Radio HUD material is itself a valid radio binding.
+    // Without this, the mesh could animate as clicked while every action was
+    // rejected because the vehicle-level Radio toggle happened to be off.
+    const next = editorPreview || materialSurfaceAvailable || !!resolveAvailability(cfg);
     if(next === available) return available;
     available = next;
     el.radio.classList.toggle('unavailable', !available);
@@ -493,9 +506,14 @@ function createRadioHud(deps){
       if(open) toggleOpen(false);
     } else if(sessionActive && cfg.enabled){
       if(!started){ started = true; load(0, true); }
-      else audio.play().catch(()=>{});
+      else playRadioAudio().catch(()=>{});
     }
     return available;
+  }
+  function setMaterialSurfaceAvailable(value){
+    materialSurfaceAvailable = value === true;
+    syncAvailability();
+    return materialSurfaceAvailable;
   }
   function begin(){
     sessionActive = true;
@@ -606,11 +624,18 @@ function createRadioHud(deps){
   });
 
   let oilT = 90, gHist = new Array(60).fill(0), gPtr = 0;
+  let surfaceTelemetry = {speedKmh:0, lastLatG:0, rpm01:0, throttle:0};
   const artCtx = el.art.getContext('2d'), gCtx = el.gGraph.getContext('2d');
   let artT = 0;
   function updateHUD(dt, rpm01, throttle, playerTelemetry){
     syncAvailability();
     const t = playerTelemetry || (telemetry ? telemetry() : {});
+    surfaceTelemetry = {
+      speedKmh:Number(t.speedKmh) || 0,
+      lastLatG:Number(t.lastLatG) || 0,
+      rpm01:Number(rpm01) || 0,
+      throttle:Number(throttle) || 0,
+    };
     el.play.textContent = audio.paused ? '▶' : '⏸';
     el.shuf.classList.toggle('on', shuffle);
     el.tCur.textContent = fmt(audio.currentTime);
@@ -668,9 +693,73 @@ function createRadioHud(deps){
     syncPlayerHitboxes();
   }
 
+  // Serializable view of the same state used by the DOM Radio TAB. Dynamic
+  // material surfaces consume this instead of duplicating their own player,
+  // playlist or telemetry state.
+  function surfaceState(){
+    const track = library.at(idx) || {};
+    return {
+      title:track.title || el.title && el.title.textContent || tr('NO TRACK', 'NESSUN BRANO'),
+      artist:track.artist || el.artist && el.artist.textContent || 'RADIO',
+      paused:audio.paused,
+      shuffle,
+      currentTime:Number(audio.currentTime) || 0,
+      duration:Number(audio.duration) || 0,
+      volume:playerVol,
+      bass,
+      available,
+      speedKmh:surfaceTelemetry.speedKmh,
+      lastLatG:surfaceTelemetry.lastLatG,
+      rpm01:surfaceTelemetry.rpm01,
+      throttle:surfaceTelemetry.throttle,
+      oilC:oilT,
+      boostBar:surfaceTelemetry.throttle * (.4 + surfaceTelemetry.rpm01 * 1.2),
+    };
+  }
+
+  function surfaceAction(action, value){
+    // A material-surface click is itself an explicit user gesture. It may
+    // control the same player even while the large TAB overlay is closed.
+    const playFromSurface = () => {
+      if(!library.count()){
+        popup(tr('RADIO: NO TRACKS', 'RADIO: NESSUN BRANO'), '#ff5566');
+        return false;
+      }
+      if(!audio.getAttribute('src')) load(idx, false);
+      playRadioAudio().catch(error => {
+        console.warn('Lot King Radio material playback failed', error);
+        popup(tr('RADIO PLAYBACK FAILED', 'RIPRODUZIONE RADIO FALLITA'), '#ff5566');
+      });
+      return true;
+    };
+    if(action === 'prev'){
+      load(idx - 1, false);
+      playFromSurface();
+    }
+    else if(action === 'play') audio.paused ? playFromSurface() : audio.pause();
+    else if(action === 'next'){
+      load(pickNext(), false);
+      playFromSurface();
+    }
+    else if(action === 'shuffle'){
+      shuffle = !shuffle;
+      el.shuf.classList.toggle('on', shuffle);
+      popup(shuffle ? 'SHUFFLE ON' : 'SHUFFLE OFF', '#4be3a0');
+    }
+    else if(action === 'volume-down') setPlayerVol(playerVol - 1);
+    else if(action === 'volume-up') setPlayerVol(playerVol + 1);
+    else if(action === 'bass') cycleBass();
+    else if(action === 'seek' && isFinite(audio.duration)){
+      audio.currentTime = clamp(Number(value) || 0, 0, 1) * audio.duration;
+    } else return false;
+    return true;
+  }
+
   applyConfig();
   return {toggleOpen, next, prev, togglePlay, toggleShuffle, updateHUD, begin, stop, setVolume,
     setPlayerVol, setBass, getPlayerVol: () => playerVol, getBass: () => bass,
+    surfaceState, surfaceAction,
+    pauseForExternalMedia:() => audio.pause(),
     isOpen: () => open, audio, config: cfg, setConfig, setEditorPreview,
     setFrameRect,
     setActivePlayer: playerId => {
@@ -681,6 +770,7 @@ function createRadioHud(deps){
     },
     activePlayer: () => activePlayerId,
     isAvailable: () => available,
+    setMaterialSurfaceAvailable,
     syncAvailability,
     getTracks: options => library.list(options),
     addTracks,

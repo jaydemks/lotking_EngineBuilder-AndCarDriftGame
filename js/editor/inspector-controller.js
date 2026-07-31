@@ -161,6 +161,12 @@ function create(deps){
 
   function buildInspector(){
     const box = deps.insp();
+    // Object Inspector history uses delegated listeners on this persistent
+    // container. Dispose them also when routing to Player/Environment/etc.
+    if(box._lkInspectorHistoryAbort){
+      box._lkInspectorHistoryAbort.abort();
+      box._lkInspectorHistoryAbort = null;
+    }
     box.innerHTML = '';
     tf.inputs = null;
     if(ED.special === 'env') return deps.environmentInspector.build(box);

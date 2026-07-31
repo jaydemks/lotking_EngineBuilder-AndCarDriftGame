@@ -78,7 +78,10 @@ test('online DEMO becomes a complete private browser workspace',async({page})=>{
     try{Object.defineProperty(window,'showDirectoryPicker',{value:undefined,configurable:true});}catch(error){}
   });
   await page.goto('/engine_editor.html?online-demo-save-regression=1',{waitUntil:'domcontentloaded'});
-  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:120000});
+  // The published fixture intentionally exercises the complete 100+ MB DEMO.
+  // SwiftShader CI can spend more than two minutes parsing, localizing and
+  // applying it even though the browser remains responsive between phases.
+  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.editor&&LOT_KING.editor.state.active===true,null,{timeout:240000});
   await page.evaluate(()=>{
     document.querySelector('#lkProjectsClose')?.click();
     document.querySelector('#lkWorkspaceClose')?.click();

@@ -1,6 +1,6 @@
 # Lot King Browser-Native 3D Engine & Editor Architecture
 
-This document describes the current project architecture through the v0.7.6 release: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
+This document describes the current project architecture through the v0.7.7 release: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
@@ -118,6 +118,8 @@ The intended boundary is component-oriented: vehicle physics should eventually b
 
 Editor projects are browser-based by default. `js/editor/project-io.js` owns the editor-facing Projects overlay and stores the project list in browser storage for the current origin, while larger imported assets still live in IndexedDB through `LK_ASSET_BLOBS`. This keeps the editor full-browser/static-server based: there is no required project backend. Because browser storage is scoped by device and origin, the portable path between origins/devices is explicit `.lkep.json` export/import. During export, blob-backed project assets are normalized into portable data so the resulting file does not depend on the original browser cache.
 
+Projects that exceed a repository host's single-file limit can use the versioned split-LKEP transport in `js/runtime/split-project.js`. The root `.lkep.json` becomes a small pointer to an adjacent project folder; that folder contains `manifest.json` and ordered UTF-8 JSON chunks capped at roughly 8 million characters each. Every part records character length, byte length and SHA-256 when Web Crypto is available. Editor and Game fetch, verify and concatenate all parts before the ordinary LKEP parser runs, so scene semantics, embedded levels and portable assets are identical to the single-file form. Chromium can write/read the folder directly; other browsers receive an extract-before-use ZIP fallback.
+
 `js/runtime/project-workspace.js` adds an editor-only project workspace layer on top of that storage model. The entrypoint detects hosted versus local/LAN origins automatically and asks for the project, not for a storage mode. Every supported browser can author against its origin-scoped database; Safari/WebKit imports LKEP through a standard file input, while Chromium may additionally authorize a writable file or folder. No FTP or server-side project database write is used.
 
 ## P2P Networking And Collaboration
@@ -130,7 +132,7 @@ On the standalone editor page, `project-workspace.js` is intentionally the first
 
 Every level carries a persisted `meta.levelRole`: `gameplay`, `editor-menu`, or `game-menu`. These roles deliberately reuse the normal scene/LKEP authoring pipeline, allowing the editor and game shells to select authored menu scenes without creating a separate menu document format. Loading, Editor Menu and Game Menu have independent ordered music libraries. Both menu roles suppress gameplay radio/HUD startup when tested or used as a menu background.
 
-The bundled demo path is intentionally static-host friendly. The site owner exports a local project as a portable LKEP, uploads it as `demo/demo-project.lkep.json`, and the online editor/game loads that project for demonstration. No server database, PHP upload endpoint, or shared asset write path is required.
+The bundled demo path is intentionally static-host friendly. The site owner may upload either one portable `demo/demo-project.lkep.json`, or a split pointer at that path plus `demo/demo-project/manifest.json` and its chunk folder. The online editor/game resolves both forms transparently. No server database, PHP upload endpoint, or shared asset write path is required.
 
 ## Logic Element Architecture
 
@@ -295,7 +297,7 @@ The runtime should stay playable without loading editor CSS or `js/editor/*` mod
 
 Gameplay and editor Play Preview share the same runtime input and camera state machine. The `cameraMode` action (`C` by default) cycles Free, Arcade and Cinematic modes; this override belongs to the active session and is reset when preview/gameplay stops. Authored `player.cam.mode` remains the project default and is never mutated by runtime switching, preventing a preview-only camera choice from leaking into the next save or playable export.
 
-Runtime camera modes hide the pointer while the session is active. Free may acquire pointer lock for mouse look; Arcade and Cinematic only apply the hidden-cursor state. Editor Play Preview can temporarily reveal the pointer with `Shift+F1` in every mode, while normal gameplay reveals it only for menus/UI.
+Runtime camera modes hide the pointer while the session is active. Free may acquire pointer lock for mouse look; Arcade and Cinematic only apply the hidden-cursor state. `Y` shows or hides the interaction cursor in both Editor Play Preview and normal gameplay (`Shift+F1` remains a compatibility shortcut), allowing authored material screens to receive pointer input.
 
 Pointer ownership is Player-frame aware. The runtime records rendered rectangles by Player ID, accepts Free-camera pointer acquisition only inside the active Player's rectangle, exposes the owner on the canvas, and releases pointer lock if camera ownership moves to another Player. This contract is also used by editor Play Preview and is ready for the split-screen compositor.
 
@@ -323,7 +325,7 @@ Major editor areas:
 - Logic authoring: `logic-elements-inspector.js` plus the editor-independent modules under `js/logic/`.
 - Input authoring: `input-settings.js` plus shared runtime mapping modules.
 - Runtime handoff and preview: `editor-runtime.js`.
-- Sequencer/cameras: `cinema-studio.js`.
+- Sequencer/cameras: `cinema-studio.js`; deterministic footage encoding: `cinema-video-export.js`.
 - Playable export: `playable-export.js`, `playable-export-level-picker.js`, `playable-export-assets.js`, `playable-export-zip.js`.
 - Sound Designer: `sound-designer.js`, `sound-designer-template.js`, `sound-designer-form.js`.
 
@@ -359,7 +361,7 @@ Play Preview uses the normal runtime pause/settings overlay. `Esc` opens/closes 
 
 The hosted Author DEMO is writable only inside the visitor's browser profile. Editor Save updates the private project/level records and IndexedDB assets, while Play Preview and Simulate use the same private state. A folder link can mirror the complete snapshot, but server files and the shared GitHub project remain immutable throughout.
 
-`cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. It is browser-only and intentionally does not depend on external render/export tooling. Advanced curve editing, blend modes, more camera/lens parameters, and full track controls remain future work.
+`cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. `cinema-video-export.js` is a focused browser-only companion: it takes temporary ownership of the shared renderer, evaluates exact `frame / FPS` timeline times, waits on a WebGL2 fence, encodes VP9 or VP8 through WebCodecs and writes timestamped WebM clusters. It restores renderer, composer, cameras, animated targets and preview state on completion, cancellation or failure. Advanced curve editing, blend modes, more camera/lens parameters, deterministic audio and full track controls remain future work.
 
 Cinema Studio data is stored on scene timeline/director objects through normalized `cinemaProps` data. `scene-store.js` keeps `cameraCuts`, `objectTracks`, `lensTracks`, `eventTracks`, and `markers` persistent, while maintaining the legacy `movieTrack` alias during migration. Its scene representation is a non-exportable clapperboard helper: it remains an editor selection/authoring handle and never becomes playable geometry. Collision Box trigger settings can call named Cinema Studio runtime events in Play Preview; timeline Event Track playback emits browser `lotking:timelineevent` events for project-specific listeners.
 

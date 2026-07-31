@@ -21,6 +21,7 @@ function create(deps){
   const selectObject = deps.selectObject || function(){};
   const requestPhysicsRebuild = deps.requestPhysicsRebuild || function(){ if(deps.GAME.systems && deps.GAME.systems.physics) deps.GAME.systems.physics.rebuild(); };
   const liveSelection = deps.liveSelection || {};
+  const uvEditor = window.LK_EDITOR_UV_EDITOR ? window.LK_EDITOR_UV_EDITOR.create({status}) : null;
   let extractionPending = false;
   const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
 
@@ -241,6 +242,7 @@ function create(deps){
     if(!object || !object.userData || !['mesh','player'].includes(object.userData.editorType)) return;
     if(object.userData.editorType === 'mesh' && (!object.userData.addedEntry || object.userData.addedEntry.kind !== 'glb')) return;
     const panel = section(tr('EDIT MESH / GLB PARTS', 'MODIFICA MESH / PARTI GLB'), false);
+    panel.root.classList.add('lk-mesh-editor');
     if(panel.root.classList.contains('closed')){
       panel.body.appendChild(el('<div class="lk-hint">' + tr('Open this section to inspect GLB mesh nodes.', 'Apri questa sezione per analizzare i nodi mesh del GLB.') + '</div>'));
       const header = panel.root.querySelector('.lk-sec-h');
@@ -255,6 +257,10 @@ function create(deps){
     const selectedSet = new Set(selectedIds(object));
     const selected = entries.filter(item => selectedSet.has(item.id));
     const live = !!(liveSelection.isActive && liveSelection.isActive(object));
+    panel.body.appendChild(el(
+      '<div class="lk-mesh-edit-hero"><span>GLB STRUCTURE</span><strong>' + entries.length + '</strong><small>' +
+      tr('mesh nodes', 'nodi mesh') + ' · ' + selected.length + ' ' + tr('selected', 'selezionati') + '</small></div>'
+    ));
     panel.body.appendChild(el('<div class="lk-hint">' + tr(
       'Select one or more GLB mesh nodes. Detach keeps parts inside the source GLB; Extract creates independent scene objects with their own editable collision. Decomposition can first split by materials or connected geometry.',
       'Seleziona uno o più nodi mesh del GLB. Scollega mantiene le parti nel GLB sorgente; Estrai crea oggetti scena indipendenti con collisione modificabile. Prima puoi scomporre per materiali o geometria connessa.'
@@ -289,6 +295,7 @@ function create(deps){
       panel.body.appendChild(transformRow(object, selected, 'r', 'Rotation°'));
       panel.body.appendChild(transformRow(object, selected, 's', 'Scale'));
       panel.body.appendChild(propertiesPanel(object, selected));
+      if(uvEditor) uvEditor.build(panel.body, object, selected, currentEdits, edit);
       panel.body.appendChild(btnRow([
         {label:tr('Detach inside GLB', 'Scollega nel GLB'), action:() => edit(object, 'Detach GLB mesh nodes', edits => {
           selected.forEach(item => { if(!edits.detached.includes(item.id)) edits.detached.push(item.id); });
@@ -334,7 +341,7 @@ function create(deps){
       ]));
     }
     panel.body.appendChild(btnRow([{label:tr('Reset all mesh edits', 'Ripristina modifiche mesh'), action:() => edit(object, 'Reset GLB mesh edits', edits => {
-      edits.deleted = []; edits.detached = []; edits.transforms = {}; edits.properties = {}; edits.splits = {}; edits.joins = [];
+      edits.deleted = []; edits.detached = []; edits.transforms = {}; edits.properties = {}; edits.splits = {}; edits.joins = []; edits.uvMappings = {};
     }, [])}]));
     box.appendChild(panel.root);
   }

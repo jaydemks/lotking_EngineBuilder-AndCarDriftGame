@@ -35,6 +35,20 @@ function create(deps){
     cam.cinematicDriftClose = cam.cinematicDriftClose == null ? 1.65 : cam.cinematicDriftClose;
     cam.cinematicDriftHeight = cam.cinematicDriftHeight == null ? .45 : cam.cinematicDriftHeight;
     cam.cinematicLag = cam.cinematicLag == null ? 4.2 : cam.cinematicLag;
+    cam.interiorHeight = cam.interiorHeight == null ? 1.15 : cam.interiorHeight;
+    cam.interiorForward = cam.interiorForward == null ? .28 : cam.interiorForward;
+    cam.interiorLateral = cam.interiorLateral == null ? -.42 : cam.interiorLateral;
+    cam.interiorLookHeight = cam.interiorLookHeight == null ? .04 : cam.interiorLookHeight;
+    cam.interiorFov = cam.interiorFov == null ? 72 : cam.interiorFov;
+    cam.interiorLag = cam.interiorLag == null ? 18 : cam.interiorLag;
+    cam.interiorGForceMotion = cam.interiorGForceMotion == null ? 0 : cam.interiorGForceMotion;
+    cam.interiorAccelerationMotion = cam.interiorAccelerationMotion == null ? 0 : cam.interiorAccelerationMotion;
+    cam.interiorRoadShake = cam.interiorRoadShake == null ? 0 : cam.interiorRoadShake;
+    cam.interiorMotionLimit = cam.interiorMotionLimit == null ? .035 : cam.interiorMotionLimit;
+    cam.interiorSpeedFovGain = cam.interiorSpeedFovGain == null ? .025 : cam.interiorSpeedFovGain;
+    cam.interiorSpeedFovMax = cam.interiorSpeedFovMax == null ? 4.5 : cam.interiorSpeedFovMax;
+    cam.externalRotation = Array.isArray(cam.externalRotation) ? cam.externalRotation : null;
+    cam.interiorRotation = Array.isArray(cam.interiorRotation) ? cam.interiorRotation : null;
     cam.dof = Object.assign({enabled:false, focus:9, aperture:.025, maxblur:.04, autoFocus:true, focusRadius:.16, feather:.38, showFocus:false, bokeh:3}, cam.dof || {});
     delete cam.dof.exposure;
     if(cam.dof.aperture > 0 && cam.dof.aperture < .006) cam.dof.aperture = .025;
@@ -58,6 +72,7 @@ function create(deps){
       const before = JSON.parse(JSON.stringify(cam));
       if(player.setCameraConfig) player.setCameraConfig(patch, reset);
       else { Object.assign(cam, patch); player.applyCameraCfg(); }
+      if(player.syncCameraDummies) player.syncCameraDummies();
       markDirty();
       const after = JSON.parse(JSON.stringify(cam));
       if(!replaying && JSON.stringify(before) !== JSON.stringify(after)) pushHistory({label:'Vehicle Pawn camera',undo:() => restore(before),redo:() => restore(after)});
@@ -65,6 +80,7 @@ function create(deps){
     const sc = section('GAME CAMERA');
     sc.body.appendChild(selectRow('Mode', cam.mode, [
       {value:'free', label:'Default free orbit'},
+      {value:'interior', label:'Interior · steering-wheel height'},
       {value:'arcade', label:'Arcade follow'},
       {value:'cinematic', label:'Cinematic drift'},
     ], v => setCam({mode:v}, true)).root);
@@ -97,6 +113,19 @@ function create(deps){
     sc.body.appendChild(sliderRow('Drift close-up', cam.cinematicDriftClose, 0, 4, .05, v => setCam({cinematicDriftClose:v}), v => (+v).toFixed(2) + ' m').root);
     sc.body.appendChild(sliderRow('Drift height lift', cam.cinematicDriftHeight, 0, 1.8, .05, v => setCam({cinematicDriftHeight:v}), v => (+v).toFixed(2) + ' m').root);
     sc.body.appendChild(sliderRow('Cinematic smoothness', cam.cinematicLag, 1.5, 10, .1, v => setCam({cinematicLag:v}), v => (+v).toFixed(1)).root);
+    sc.body.appendChild(sliderRow('Interior camera height', cam.interiorHeight, .45, 2.4, .01, v => setCam({interiorHeight:v}), v => (+v).toFixed(2) + ' m').root);
+    sc.body.appendChild(sliderRow('Interior forward position', cam.interiorForward, -1.5, 2.5, .01, v => setCam({interiorForward:v}), v => (+v).toFixed(2) + ' m').root);
+    sc.body.appendChild(sliderRow('Interior lateral position', cam.interiorLateral, -1.5, 1.5, .01, v => setCam({interiorLateral:v}), v => (+v).toFixed(2) + ' m').root);
+    sc.body.appendChild(sliderRow('Interior sight height', cam.interiorLookHeight, -.5, .8, .01, v => setCam({interiorLookHeight:v}), v => (+v).toFixed(2) + ' m').root);
+    sc.body.appendChild(sliderRow('Interior FOV', cam.interiorFov, 40, 110, 1, v => setCam({interiorFov:v})).root);
+    sc.body.appendChild(sliderRow('Optional motion response', cam.interiorLag, 2, 30, .5, v => setCam({interiorLag:v}), v => (+v).toFixed(1)).root);
+    sc.body.appendChild(sliderRow('Interior G-force motion', cam.interiorGForceMotion, 0, 1, .01, v => setCam({interiorGForceMotion:v}), v => Math.round(v * 100) + '%').root);
+    sc.body.appendChild(sliderRow('Acceleration fore/aft motion', cam.interiorAccelerationMotion, 0, 1, .01, v => setCam({interiorAccelerationMotion:v}), v => Math.round(v * 100) + '%').root);
+    sc.body.appendChild(sliderRow('Interior road / engine shake', cam.interiorRoadShake, 0, 1, .01, v => setCam({interiorRoadShake:v}), v => Math.round(v * 100) + '%').root);
+    sc.body.appendChild(sliderRow('Interior movement safety range', cam.interiorMotionLimit, 0, .15, .005, v => setCam({interiorMotionLimit:v}), v => Math.round(v * 100) + ' cm').root);
+    sc.body.appendChild(sliderRow('Interior speed FOV gain', cam.interiorSpeedFovGain, 0, .1, .001, v => setCam({interiorSpeedFovGain:v}), v => (+v).toFixed(3) + '°/km/h').root);
+    sc.body.appendChild(sliderRow('Interior speed FOV maximum', cam.interiorSpeedFovMax, 0, 12, .25, v => setCam({interiorSpeedFovMax:v}), v => (+v).toFixed(2) + '°').root);
+    sc.body.appendChild(el('<div class="lk-hint">Cockpit translation and shake are off by default. If enabled, every physical offset is clamped to the safety range and the camera remains rigidly attached to the cabin; speed can still add at most 4.5° FOV. Interior is shared by the native Player Car and Vehicle Pawn Logic.</div>'));
     sc.body.appendChild(sliderRow('View distance', cam.far, 100, 1500, 10, v => setCam({far:v})).root);
     sc.body.appendChild(sliderRow('Fog', cam.fogDensity, 0, .03, .0005, v => setCam({fogDensity:v}), v => (+v).toFixed(4)).root);
     sc.body.appendChild(sliderRow('Impact shake', cam.shake, 0, 2, .05, v => setCam({shake:v})).root);

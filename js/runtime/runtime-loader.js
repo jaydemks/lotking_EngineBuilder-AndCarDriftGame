@@ -137,7 +137,8 @@ function create(options){
     for(const key of Object.keys(keys)) keys[key] = false;
   }
 
-  function warmRuntimeAssets(){
+  function warmRuntimeAssets(requestedMode){
+    requestedMode = requestedMode || 'game';
     setLoadingPart('warmup', .05, 'warming runtime');
     return nextFrame().then(nextFrame).then(() => {
       const oldKeys = Object.assign({}, keys);
@@ -203,14 +204,21 @@ function create(options){
           warmRenderStep('preparing full scene benchmark', .39);
         })
         .then(() => { restoreWarmupState(); }, err => { restoreWarmupState(); throw err; });
-    }).then(() => preBenchmark ? preBenchmark.run({mode:loadingMode || 'game'}) : null).then(() => {
+    }).then(() => {
+      // Opening the editor must never wait for the gameplay benchmark. The
+      // complete benchmark still runs on every Play/Simulate request, after the
+      // authored level is final and immediately before interactive gameplay.
+      if(requestedMode === 'editor') return null;
+      return preBenchmark ? preBenchmark.run({mode:requestedMode}) : null;
+    }).then(() => {
       setLoadingPart('warmup', 1, 'runtime warmed');
     });
   }
 
   function ensureReady(mode){
-    loadingMode = mode || 'game';
-    if(loading) loading.setMode(loadingMode);
+    const requestedMode = mode || 'game';
+    loadingMode = requestedMode;
+    if(loading) loading.setMode(requestedMode);
     setMenuBusy(true);
     if(!assetsLoading){
       resetLoadingParts();
@@ -226,12 +234,12 @@ function create(options){
       }
       setLoadingPart('project', 1, 'editor project loaded');
       return null;
-    }).then(() => warmRuntimeAssets()).then(() => {
+    }).then(() => warmRuntimeAssets(requestedMode)).then(() => {
       gameState.sceneReady = true;
       // preBenchmark already performs the complete scene compilation. Starting
       // a second idle compile here used to overlap the first gameplay frames.
       if(opts.schedulePipelineWarmup && !(preBenchmark && preBenchmark.report())) opts.schedulePipelineWarmup();
-      if(loadingMode === 'editor'){
+      if(requestedMode === 'editor'){
         setLoadingPart('editor', .35, 'loading editor UI');
         return;
       }

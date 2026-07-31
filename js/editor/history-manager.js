@@ -219,6 +219,7 @@ function create(deps){
         if(GAME.systems.physics) GAME.systems.physics.syncPlayer();
       }
     }
+    if(o.userData.editorType === 'playerCamera' && GAME.player.syncCameraDummy) GAME.player.syncCameraDummy(o);
     if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
     if(o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);
     STORE.syncCollider(o);
@@ -389,6 +390,21 @@ function create(deps){
     'cinemaTrigger', 'assetKey', 'assetName', 'assetSource',
     'editorName',
   ];
+  const INSPECTOR_ENTRY_KEYS = [
+    'name', 'props', 'params', 'textureKind', 'lightProps', 'meshEdits',
+    'physicsMass', 'physicsImpact', 'physics', 'collide', 'colliderKind',
+    'colliderOnly', 'driveSurface', 'colliderShape', 'colliderDummyVisibility',
+    'cinemaTrigger', 'enabled', 'runInEditorPreview', 'variableOverrides',
+  ];
+
+  function inspectorEntrySnapshot(entry){
+    if(!entry) return null;
+    const values = {};
+    INSPECTOR_ENTRY_KEYS.forEach(key => {
+      if(Object.prototype.hasOwnProperty.call(entry, key)) values[key] = cloneValue(entry[key]);
+    });
+    return values;
+  }
 
   function inspectorSnapshot(o){
     if(!o || !o.userData) return null;
@@ -400,7 +416,10 @@ function create(deps){
     return {
       transform: STORE.tOf(o),
       configs,
-      addedEntry: cloneValue(o.userData.addedEntry),
+      // Do not clone the immutable asset/source payload here. Portable projects
+      // can contain very large embedded GLBs and images; Inspector undo only
+      // needs the authored fields that its controls can change.
+      addedEntry: inspectorEntrySnapshot(o.userData.addedEntry),
       light: light && STORE.lightProps ? STORE.lightProps(light) : null,
       collider: colliderSnapshot(o),
     };
@@ -411,7 +430,10 @@ function create(deps){
     if(snap.transform) STORE.applyT(o, snap.transform);
     INSPECTOR_CONFIG_KEYS.forEach(key => { delete o.userData[key]; });
     Object.keys(snap.configs || {}).forEach(key => { o.userData[key] = cloneValue(snap.configs[key]); });
-    if(snap.addedEntry) o.userData.addedEntry = cloneValue(snap.addedEntry);
+    if(snap.addedEntry && o.userData.addedEntry){
+      INSPECTOR_ENTRY_KEYS.forEach(key => { delete o.userData.addedEntry[key]; });
+      Object.assign(o.userData.addedEntry, cloneValue(snap.addedEntry));
+    }
     const light = o.isLight ? o : o.userData.light;
     if(light && snap.light && STORE.applyLightProps) STORE.applyLightProps(light, snap.light);
     if(o.userData.matProps && STORE.applyMatProps) STORE.applyMatProps(o, o.userData.matProps);

@@ -29,6 +29,7 @@ import {BokehPass} from 'three/addons/postprocessing/BokehPass.js';
 import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
 import {OutlineEffect} from 'three/addons/effects/OutlineEffect.js';
 import {RectAreaLightUniformsLib} from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import {WebGLPathTracer} from 'three-gpu-pathtracer';
 
 const EXPECTED_REVISION = '185';
 if(String(ThreeCore.REVISION) !== EXPECTED_REVISION){
@@ -76,4 +77,12 @@ Object.defineProperty(ThreeCompat, '__LOT_KING_BUNDLE__', {
 });
 
 globalThis.THREE = ThreeCompat;
+// Path tracing must share this exact Three.js module graph. Loading it from a
+// second standalone bundle creates incompatible Color/Material instances and
+// makes material packing fail before the first sample.
+globalThis.LK_PATH_TRACING_VENDOR=Object.freeze({
+  WebGLPathTracer,
+  version:'three-gpu-pathtracer@0.0.24',
+  sharedThreeRevision:EXPECTED_REVISION,
+});
 globalThis.dispatchEvent(new CustomEvent('lotking:three-ready', {detail:ThreeCompat.__LOT_KING_BUNDLE__}));

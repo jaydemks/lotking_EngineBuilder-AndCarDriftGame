@@ -48,6 +48,12 @@ const imports=global.LK_EDITOR_ASSET_IMPORTS.create({
   assert.equal(saved.data.sourceSize,3);
   assert.equal(saved.data.sourceLastModified,11);
   assert.equal(writes.length,3,'compiled GLB, original FBX and linked texture must be persisted');
+  const materialMap=new File([new Uint8Array([9,8,7,6])],'paint-normal.png',{type:'image/png',lastModified:14});
+  const storedMap=await imports.storeMaterialTextureFile(materialMap);
+  assert.equal(storedMap.dbKey,'glb:hero:compiled');
+  assert.equal(saved.data.src,null,'material textures must never persist an inline data URL');
+  assert.equal(saved.data.dbKey,'glb:hero:compiled');
+  assert.equal(writes.length,4,'the material map must be written directly to the blob database');
   library=[result[0]];
   let checked=await imports.refreshFbxSource(result[0],new File([new Uint8Array([1,2,3])],'hero.fbx',{lastModified:11}));
   assert.equal(checked.changed,false);

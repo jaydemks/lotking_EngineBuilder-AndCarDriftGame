@@ -93,6 +93,7 @@ function create(options){
   const gltfLoader = modelAssets.gltfLoader;
   const modelSize = opts.modelSize || {playerLen: 5.6};
   const canDropReplace = typeof opts.canDropReplace === 'function' ? opts.canDropReplace : () => true;
+  const getSteeringWheelConfig = typeof opts.getSteeringWheelConfig === 'function' ? opts.getSteeringWheelConfig : () => null;
   let playerModel = null;
   let modelShading = normalizeShadingMode(car && car.userData && car.userData.modelShading);
 
@@ -110,12 +111,36 @@ function create(options){
     applyModelShading(model, modelShading, window.THREE);
     car.updateMatrixWorld(true);
     try {
+      if(rig.setSteeringConfig) rig.setSteeringConfig(getSteeringWheelConfig());
       const ok = rig.build(model);
       if(!ok) console.warn('LotKing: nessun rig ruote riconosciuto — modello statico');
     } catch(err){
       rig.clear();
       console.warn('LotKing: errore nel rig ruote, modello usato senza rig', err);
     }
+  }
+
+  function clearPlayerModel(){
+    rig.clear();
+    const removed = playerModel;
+    if(removed && removed.parent) removed.parent.remove(removed);
+    playerModel = null;
+    if(removed && removed.traverse) removed.traverse(node => {
+      if(node.geometry && node.geometry.dispose) node.geometry.dispose();
+      const materials = node.material ? (Array.isArray(node.material) ? node.material : [node.material]) : [];
+      materials.forEach(material => {
+        if(!material) return;
+        Object.keys(material).forEach(key => {
+          const texture = material[key];
+          if(texture && texture.isTexture && texture.dispose) texture.dispose();
+        });
+        if(material.dispose) material.dispose();
+      });
+    });
+    carVisual.visible = true;
+    applyModelShading(carVisual, modelShading, window.THREE);
+    car.updateMatrixWorld(true);
+    return carVisual;
   }
 
   function setModelShading(value){
@@ -158,6 +183,7 @@ function create(options){
   return {
     prepModel,
     setPlayerModel,
+    clearPlayerModel,
     getPlayerModel: () => playerModel,
     setModelShading,
     getModelShading: () => modelShading,

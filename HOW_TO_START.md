@@ -59,13 +59,15 @@ The Project Workspace button is an optional bridge. It does not replace the curr
 - The editor detects a hosted site versus localhost automatically. It then asks only which project to open: the author `DEMO` (authored for consumer high-end hardware) or a clean project. The hosted path asks the visitor to authorize a local project directory in Chrome/Edge; the workspace manifest and DEMO project are written there, while browser storage remains local to that visitor.
 - On first editor entry, this project choice is required and appears before world/assets/editor warm-up. It has no close button until a choice is completed. After the selection reload, the normal loading phase starts; later the workspace panel can be reopened and closed normally from the toolbar.
 - Hosted Editor never uploads project data or imported assets to the site's FTP/server. If writable folder access is unavailable, **Run locally / GitHub** shows the download, extraction and `avvio.bat` steps.
-- To publish your authored online demo level, export a portable LKEP locally and upload it as:
+- To publish your authored online demo level, use the GitHub-safe folder export and keep both entries together:
 
 ```text
 demo/demo-project.lkep.json
+demo/demo-project/manifest.json
+demo/demo-project/chunks/
 ```
 
-Prefer **Projects → chosen project → ★ DEMO**. The active row publishes the exact open state; another row publishes that saved project. On localhost this atomically replaces the repository file and creates `demo/demo-project.previous.lkep.json`; on LAN/hosted browsers it downloads the exact filename because remote devices are not allowed to write the host repository.
+Prefer **Projects → chosen project → ★ DEMO**. The active row publishes the exact open state; another row publishes that saved project. On localhost, projects at or above 90 MB are automatically written as an 8 MB chunk folder and future publications keep that safe layout. The previous publication is retained in ignored local rollback files. On LAN/hosted browsers use **Export project folder (GitHub)**; browsers without directory access download a ZIP that must be extracted before committing.
 
 The published site offers that file as the Author DEMO. It remains read-only until the visitor explicitly authorizes a local project folder, then an editable copy is written into that workspace without modifying the hosted source.
 - In Chrome or Edge on `localhost`, `Project Workspace -> Open / sync LKEP file` can link a portable project file. The editor imports the file, and the normal Save button writes the portable `.lkep.json` file again.

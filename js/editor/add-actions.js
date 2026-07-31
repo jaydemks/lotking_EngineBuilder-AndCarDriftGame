@@ -152,6 +152,10 @@ function create(deps){
       specular:.35,
       emissive:0x000000,
       emissiveIntensity:0,
+      surfaceInfluence:0,
+      surfaceProbeDistance:1.5,
+      surfaceReceiverId:null,
+      surfaceReceiverName:'',
     };
     const obj = STORE.createTexture(textureKind, props);
     const entry = {id, kind:'texture', textureKind, name:textureKind === 'image' ? 'Free Texture Image' : 'Free Texture Decal', collide:false,

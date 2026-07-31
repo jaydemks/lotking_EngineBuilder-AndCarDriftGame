@@ -4,6 +4,11 @@ const {test, expect} = require('@playwright/test');
 const fs = require('node:fs');
 const JSZip = require('jszip');
 
+// These editor integration scenarios intentionally boot the complete Three.js
+// workspace under Playwright's software renderer. Keep enough headroom for a
+// loaded CI host without weakening any of the functional assertions.
+test.describe.configure({timeout:240000});
+
 async function closeStartupOverlays(page){
   await page.evaluate(() => {
     document.querySelector('#lkWorkspaceClose')?.click();
@@ -94,9 +99,17 @@ test.beforeEach(async ({page}) => {
   const active = await page.waitForFunction(() => !!(document.querySelector('#lkEditor.active') || window.LOT_KING && LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active === true), null, {timeout:15000}).then(() => true).catch(() => false);
   await closeStartupOverlays(page);
   if(!active){
-    const editorButton = page.locator('#editorBtn');
-    await editorButton.waitFor({state:'visible', timeout:15000});
-    await editorButton.click({force:true});
+    const entered = await page.evaluate(() => {
+      const editor = window.LOT_KING && LOT_KING.editor;
+      if(!editor || typeof editor.enter !== 'function') return false;
+      editor.enter();
+      return true;
+    });
+    if(!entered){
+      const editorButton = page.locator('#editorBtn');
+      await editorButton.waitFor({state:'visible', timeout:15000});
+      await editorButton.click({force:true});
+    }
   }
   await page.waitForFunction(() => !!(document.querySelector('#lkEditor.active') || window.LOT_KING && LOT_KING.editor && LOT_KING.editor.state && LOT_KING.editor.state.active === true), null, {timeout:60000});
   await closeStartupOverlays(page);
@@ -823,7 +836,7 @@ test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({pag
   expect(zip.file('vendor/THIRD_PARTY_LICENSES.md')).toBeTruthy();
   expect(zip.file('vendor/GLTFLoader.js')).toBeNull();
   const runtimeHtml = await zip.file('gameplay.html').async('string');
-  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk4');
+  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk6');
   expect(runtimeHtml).not.toMatch(/three@0\.128\.0|three\.js\/r128|examples\/js\//);
 });
 
@@ -856,12 +869,16 @@ test('Logic Player Car owns P1 without native overlap or manual Cinema takeover'
   expect(setup.nativeEnabled).toBe(false);
   expect(setup.nativeVisible).toBe(false);
   await page.evaluate(() => {
+    // Ownership/Cinema integration is the subject of this scenario. The full
+    // strategic texture/physics benchmark has its own unit + browser suite and
+    // can take minutes under Playwright's forced SwiftShader renderer.
+    window.LOT_KING.assets.benchmark.run = async () => ({mode:'game', reason:'logic-player-ownership-e2e'});
     window.LOT_KING.state.sceneReady = true;
     window.LOT_KING.actions.startEditorPreview('play');
     window.LOT_KING.editor.state.playPreview = true;
     window.LOT_KING.editor.state.playPreviewMode = 'play';
   });
-  await page.waitForFunction(() => window.LOT_KING.state.started === true && window.LOT_KING.state.editorPreview === true, null, {timeout:60000});
+  await page.waitForFunction(() => window.LOT_KING.state.started === true && window.LOT_KING.state.editorPreview === true, null, {timeout:120000});
   await page.waitForTimeout(1200);
   const runtime = await page.evaluate(ownerId => {
     const game = window.LOT_KING;

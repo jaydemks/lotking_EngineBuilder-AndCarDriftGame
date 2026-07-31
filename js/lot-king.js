@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.7.6',
+  version: '0.7.7',
   assets: null,
   core: {},
   world: {},
@@ -80,7 +80,7 @@ const RUNTIME_DOM_I18N = [
   ['#controls-list .editor-controls span:nth-of-type(8)', 'text', 'Focus selection', 'Centra selezione'],
   ['#controls-list .editor-controls span:nth-of-type(10)', 'text', 'Undo / Redo', 'Annulla / Ripeti'],
   ['#controls-list .editor-controls span:nth-of-type(12)', 'text', 'Stop Play Preview', 'Ferma anteprima gioco'],
-  ['#controls-list .editor-controls span:nth-of-type(14)', 'text', 'Release / capture cursor', 'Libera / cattura cursore'],
+  ['#controls-list .editor-controls span:nth-of-type(14)', 'text', 'Show / hide interaction cursor', 'Mostra / nascondi cursore interattivo'],
   ['#controls-list .gameplay-controls span:nth-of-type(2)', 'text', 'Accelerate', 'Accelera'],
   ['#controls-list .gameplay-controls span:nth-of-type(4)', 'text', 'Brake / Reverse', 'Frena / Retromarcia'],
   ['#controls-list .gameplay-controls span:nth-of-type(6)', 'text', 'Steer', 'Sterza'],
@@ -139,7 +139,7 @@ const RUNTIME_DOM_I18N = [
   ['#videoAA', 'row-label', 'Antialiasing', 'Antialiasing'],
   ['#videoAA', 'row-desc', 'FXAA is mobile-friendly; 2× and 4× supersampling increase internal edge resolution.', 'FXAA è adatto al mobile; il supersampling 2× e 4× aumenta la risoluzione interna dei bordi.'],
   ['#videoRenderer', 'row-label', 'Renderer', 'Renderer'],
-  ['#videoRenderer', 'row-desc', 'Standard rendering or enhanced ray lighting with automatic WebGL compatibility.', 'Rendering standard oppure ray lighting migliorato con compatibilita WebGL automatica.'],
+  ['#videoRenderer', 'row-desc', 'WebGL, enhanced ray lighting, or progressive path tracing with safe fallback.', 'WebGL, ray lighting migliorato oppure path tracing progressivo con fallback sicuro.'],
   ['#videoShadows', 'row-label', 'Dynamic shadows', 'Ombre dinamiche'],
   ['#videoShadows', 'row-desc', 'Quality-scaled realtime scene shadows.', 'Ombre realtime scalate in base alla qualita.'],
   ['#videoReflections', 'row-label', 'Material reflections', 'Riflessi materiali'],
@@ -150,9 +150,12 @@ const RUNTIME_DOM_I18N = [
   ['#videoReflectionDistance', 'row-desc', 'Maximum distance traced by screen-space reflection rays.', 'Distanza massima percorsa dai raggi di riflessione screen-space.'],
   ['#videoVolumetricLighting', 'row-label', 'Volumetric lighting', 'Volumetric lighting'],
   ['#videoVolumetricLighting', 'row-desc', 'Enables screen-space light rays in the current renderer.', 'Abilita raggi luce screen-space nel renderer attuale.'],
+  ['#videoCinematicLensFlares', 'row-label', 'Cinematic lens flares', 'Lens flare cinematici'],
+  ['#videoCinematicLensFlares', 'row-desc', 'Advanced photographic flares and bloom for the sun and authored lights.', 'Flare fotografici avanzati e bloom per il sole e le luci configurate.'],
   ['#videoEditorHud', 'row-label', 'Editor HUD', 'HUD editor'],
   ['#videoEditorHud', 'row-desc', 'Shows editor panels and helpers.', 'Mostra pannelli e helper dell\'editor.'],
   ['#videoVolumetricLighting', 'next-label', 'Enabled', 'Abilitato'],
+  ['#videoCinematicLensFlares', 'next-label', 'Enabled', 'Abilitati'],
   ['#videoShadows', 'next-label', 'Enabled', 'Abilitate'],
   ['#videoReflections', 'next-label', 'Enabled', 'Abilitati'],
   ['#videoEditorHud', 'next-label', 'Visible', 'Visibile'],
@@ -718,6 +721,30 @@ const PLAYER_DATA_WIDGETS = window.LK_RUNTIME_PLAYER_DATA_WIDGETS.create({
   isEditorPreview: () => !!GAME.state.editorPreview,
   getSelected: () => GAME.editor && GAME.editor.state && GAME.editor.state.selected,
 });
+// Shared, read-only telemetry source for in-world CanvasTexture dashboards.
+// It resolves the possessed Logic Pawn first and falls back to the native car,
+// so authored material slots work identically with both vehicle systems.
+window.LK_RUNTIME_VEHICLE_TELEMETRY = Object.freeze({
+  get: () => {
+    const pawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+    const state = pawn && pawn.hidden !== true && pawn.enabled !== false ? (pawn.state || {}) : null;
+    const rpm = state ? Number(state.rpm) || 0 : Number(ENGINE.rpm) || 0;
+    const limiter = state && pawn.config && pawn.config.gearbox
+      ? Number(pawn.config.gearbox.limiter) || 8000
+      : Number(GEARBOX && GEARBOX.limiter) || 8000;
+    return {
+      speedKmh:state ? Number(state.speedKmh) || 0 : speedKmh,
+      rpm,
+      rpm01:state && Number.isFinite(Number(state.rpm01)) ? Number(state.rpm01) : Math.max(0, Math.min(1, rpm / limiter)),
+      gear:state ? state.gear : ENGINE.gear,
+      gearLabel:state ? (state.reverse ? 'R' : String(state.gear || 1)) : (ENGINE.reverseActive ? 'R' : String(ENGINE.gear || 1)),
+      reverse:state ? !!state.reverse : !!ENGINE.reverseActive,
+      throttle:state ? Number(state.throttle) || 0 : Number(ENGINE.throttle) || 0,
+      lateralG:state ? Number(state.lateralG) || 0 : lastLatG,
+      drift:state ? !!state.drift : !!lastCamDrifting,
+    };
+  },
+});
 
 // ------------------------------------------------ car physics
 // Axle slip-angle model ("bicycle model" + friction circle):
@@ -781,6 +808,10 @@ const DRIVE = {
   reverseDelay: 0.5,           // automatic reverse engagement delay after stopping [s]
   horsepower: 450,
   powerScale: 1,
+  frontDriveBias: 0,          // 0 = RWD, .5 = AWD, 1 = FWD
+  turboStrength: .28,         // progressive extra torque at full boost
+  turboThreshold: 2400,       // RPM where useful spool starts
+  turboSpool: .8,             // seconds to approach requested boost
 };
 const BASE_DRIVE = Object.freeze({...DRIVE});
 const PLAYER_COLLISION = {hx:0.92, hy:0.42, hz:1.85, offsetY:0.45, bodyY:0.55, radius:1.4};
@@ -798,6 +829,7 @@ const ENGINE = {
   reverseActive: false,
   burnout: false,
   driftShiftSpeed: 0,
+  boost01: 0,
 };
 const GEARBOX = Object.freeze({
   idle: 950,
@@ -935,6 +967,19 @@ function updateEngineModel(vF, throttle, sliding, dt, driftCtx){
     : .82;
   ENGINE.torque01 = curve * GEARBOX.torque[ENGINE.gear - 1] * (ENGINE.shiftTimer > 0 ? shiftTorque : (ENGINE.limiterTimer > 0 ? limiterTorque : 1));
   return ENGINE;
+}
+const ENGINE_DRIFT_FRAME = {
+  active:false,
+  speedTot:0,
+  lateral:0,
+  forward:0,
+};
+function setEngineDriftFrame(active, speedTot, lateral, forward){
+  ENGINE_DRIFT_FRAME.active=!!active;
+  ENGINE_DRIFT_FRAME.speedTot=speedTot;
+  ENGINE_DRIFT_FRAME.lateral=lateral;
+  ENGINE_DRIFT_FRAME.forward=forward;
+  return ENGINE_DRIFT_FRAME;
 }
 
 const PHYS_WORLD = window.LK_RUNTIME_PHYSICS_WORLD.create({
@@ -1148,6 +1193,12 @@ const SURFACE_TMP = {
   origin: new THREE.Vector3(),
   normal: new THREE.Vector3(),
 };
+// Physics runs every frame (and may sub-step eight times), so its body-space
+// basis must not allocate fresh vectors and wait for a later GC pause.
+const DRIVE_FRAME_TMP = {
+  fwd: new THREE.Vector3(),
+  right: new THREE.Vector3(),
+};
 
 function isDriveSurfaceObject(obj){
   let o = obj;
@@ -1336,13 +1387,14 @@ function applyPlayerVisual(vF, vR, steerAngle, up, down, dt){
     w.rim.rotation.x = w.spin;
     if(w.front) w.pivot.rotation.y = visSteer;
   }
-  RIG.drive(vF, dt, visSteer);
+  RIG.drive(vF, dt, visSteer, P.steer);
 }
 
 // cannon RaycastVehicle conventions (measured): negative engine force drives +Z
 const CANNON_FWD_SIGN = -1;
 const WHEEL_GRIP = 2.6;               // wheel frictionSlip at mu = 1
 const wheelSuspVis = [0, 0, 0, 0];    // smoothed per-wheel suspension offsets
+const wheelSuspRigOffsets = [0, 0, 0, 0];
 
 function wheelsOnGround(){
   const v = PHYS.vehicle;
@@ -1387,8 +1439,8 @@ function updateCarCannon(dt){
   P.steer = steeringState.value;
 
   P.heading = yawQuat(body.quaternion);
-  const fwd = new THREE.Vector3(Math.sin(P.heading), 0, Math.cos(P.heading));
-  const rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
+  const fwd = DRIVE_FRAME_TMP.fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
+  const rightV = DRIVE_FRAME_TMP.right.set(fwd.z, 0, -fwd.x);
   let vx = body.velocity.x * fwd.x + body.velocity.z * fwd.z;
   let vy = body.velocity.x * rightV.x + body.velocity.z * rightV.z;
   const r = body.angularVelocity.y;
@@ -1409,12 +1461,13 @@ function updateCarCannon(dt){
   let handbrakeForce = 0;
   let burnoutFrontBrakeForce = 0;
   const burnout = updateBurnoutState(up, down, handbrake, speedTot, dt);
-  const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, dt, {
-    active: isDrifting || handbrake || Math.abs(vy) > 2.0,
-    speedTot,
-    lateral: vy,
-    forward: vx,
-  });
+  const engine = updateEngineModel(
+    vx,
+    throttleAmt,
+    isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0,
+    dt,
+    setEngineDriftFrame(isDrifting || handbrake || Math.abs(vy) > 2.0, speedTot, vy, vx)
+  );
   ENGINE.reverseActive = false;
   if(down && !up) brakeHoldTimer = Math.min(BRAKE_RAMP_TIME, brakeHoldTimer + dt);
   else brakeHoldTimer = 0;
@@ -1509,12 +1562,17 @@ function updateCarCannon(dt){
 
   // ---- map onto the raycast wheels: RWD engine force, braking, steering,
   // per-wheel grip (the drift character lives in the frictionSlip modulation)
-  const rearForce = CANNON_FWD_SIGN * ax * mass * .5;
+  const totalDriveForce = CANNON_FWD_SIGN * ax * mass;
+  const frontDriveBias = clamp(Number(DRIVE.frontDriveBias) || 0, 0, 1);
+  const frontWheelForce = totalDriveForce * frontDriveBias * .5;
+  const rearWheelForce = totalDriveForce * (1 - frontDriveBias) * .5;
   const brakeForce = mass * brakeA * (DRIVE.brakeWheelScale == null ? .36 : DRIVE.brakeWheelScale);
   const frontBrake = brakeForce * DRIVE.brakeBias * .5 + burnoutFrontBrakeForce * .5;
   const rearBrake = brakeForce * (1 - DRIVE.brakeBias) * .5 + handbrakeForce * .5;
   SHARED_RAYCAST_ACTUATOR.apply({
-    vehicle, driven:[2,3], engineForce:rearForce * 2, steering:[0,1], steer:delta,
+    vehicle,
+    engineForces:[frontWheelForce,frontWheelForce,rearWheelForce,rearWheelForce],
+    steering:[0,1], steer:delta,
     brakes:[frontBrake,frontBrake,rearBrake,rearBrake],
     frictionSlip:[WHEEL_GRIP * muFl,WHEEL_GRIP * muFl,WHEEL_GRIP * muRl,WHEEL_GRIP * muRl],
   });
@@ -1668,8 +1726,11 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
     });
     wheelSuspVis[i] = state ? state.suspension : 0;
   }
-  RIG.drive(vF, dt, visSteer);
-  if(RIG.setSuspension) RIG.setSuspension(wheelSuspVis.map(v => (v || 0) - chassisLift));
+  RIG.drive(vF, dt, visSteer, P.steer);
+  if(RIG.setSuspension){
+    for(let i=0;i<wheelSuspRigOffsets.length;i++) wheelSuspRigOffsets[i]=(wheelSuspVis[i]||0)-chassisLift;
+    RIG.setSuspension(wheelSuspRigOffsets);
+  }
 }
 
 function updateCar(dt){
@@ -1695,8 +1756,8 @@ function updateCar(dt){
   P.steer += (steerTarget - P.steer) * Math.min(1, dt*steerRate);
 
   // body-frame velocity (fwd / right) carried through the substeps
-  let fwd = new THREE.Vector3(Math.sin(P.heading), 0, Math.cos(P.heading));
-  let rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
+  const fwd = DRIVE_FRAME_TMP.fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
+  const rightV = DRIVE_FRAME_TMP.right.set(fwd.z, 0, -fwd.x);
   let vx = P.vel.dot(fwd), vy = P.vel.dot(rightV);
   let r = P.yawRate;
   let delta = lastSteerAngle;
@@ -1731,12 +1792,13 @@ function updateCar(dt){
     let driveA = 0;
     let brakeA = 0;
     const burnout = updateBurnoutState(up, down, handbrake, speedTot, h);
-    const engine = updateEngineModel(vx, throttleAmt, isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0, h, {
-      active: isDrifting || handbrake || Math.abs(vy) > 2.0,
-      speedTot,
-      lateral: vy,
-      forward: vx,
-    });
+    const engine = updateEngineModel(
+      vx,
+      throttleAmt,
+      isDrifting || handbrake || burnout > 0 || Math.abs(vy) > 2.0,
+      h,
+      setEngineDriftFrame(isDrifting || handbrake || Math.abs(vy) > 2.0, speedTot, vy, vx)
+    );
     ENGINE.reverseActive = false;
     if(down && !up) brakeHoldTimer = Math.min(BRAKE_RAMP_TIME, brakeHoldTimer + h);
     else brakeHoldTimer = 0;
@@ -1935,6 +1997,7 @@ let totalScore = 0, driftScore = 0, driftMult = 1, driftTime = 0, driftEndTimer 
 const HUD = window.LK_RUNTIME_GAME_HUD.create();
 // Optional overlay: absent script means no first-person HUD, no other effect.
 const FPS_HUD = window.LK_RUNTIME_FPS_HUD ? window.LK_RUNTIME_FPS_HUD.create(GAME) : null;
+const VEHICLE_RADAR = window.LK_RUNTIME_VEHICLE_RADAR ? window.LK_RUNTIME_VEHICLE_RADAR.create(GAME) : null;
 const FPS_VIEW_MODEL = window.LK_RUNTIME_FPS_VIEW_MODEL ? window.LK_RUNTIME_FPS_VIEW_MODEL.create(GAME) : null;
 // World verbs and pickups. Both are Pawn-agnostic: they read the scene through
 // userData contracts, so a level authored in the editor drives them with no
@@ -2132,6 +2195,10 @@ for(let i=0;i<EXHAUST_N;i++){
 }
 let exhaustIdx = 0, exhaustSmokeAcc = 0, exhaustFireAcc = 0, exhaustFireBurst = 0, exhaustFireNext = 0;
 const exhaustFireEdges={hot:false,shift:false,limiter:false,test:false};
+const exhaustWorldPosition = new THREE.Vector3();
+const exhaustWorldQuaternion = new THREE.Quaternion();
+const exhaustWorldDirection = new THREE.Vector3();
+const exhaustSpreadVelocity = new THREE.Vector3();
 function resetExhaustFireEdges(){
   exhaustFireBurst=0;
   exhaustFireNext=0;
@@ -2143,11 +2210,11 @@ function resetExhaustFireEdges(){
 function spawnExhaustParticle(anchor, fire, intensity, sourceVelocity, configOverride){
   const p = exhaustPool[exhaustIdx++ % EXHAUST_N];
   const cfg = configOverride || PLAYER_EXHAUST_CFG;
-  const pos = new THREE.Vector3();
-  const quat = new THREE.Quaternion();
+  const pos = exhaustWorldPosition;
+  const quat = exhaustWorldQuaternion;
   anchor.getWorldPosition(pos);
   anchor.getWorldQuaternion(quat);
-  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat).normalize();
+  const dir = exhaustWorldDirection.set(0, 0, -1).applyQuaternion(quat).normalize();
   p.life = 0;
   p.fire = !!fire;
   p.phase = Math.random()*Math.PI*2;
@@ -2185,8 +2252,9 @@ function spawnExhaustParticle(anchor, fire, intensity, sourceVelocity, configOve
     p.max = (1.1 + Math.random() * 1.05) * life;
     p.size = (.22 + Math.random() * .30) * intensity * size;
     p.opacity = Math.max(0, Math.min(1, Number.isFinite(Number(cfg.smokeOpacity)) ? Number(cfg.smokeOpacity) : .3));
+    exhaustSpreadVelocity.set((Math.random()-.5)*.42*spread, (.5 + Math.random()*.65)*rise, (Math.random()-.5)*.42*spread);
     p.vel.copy(dir).multiplyScalar((.5 + Math.random() * 1.15) * pressure)
-      .add(new THREE.Vector3((Math.random()-.5)*.42*spread, (.5 + Math.random()*.65)*rise, (Math.random()-.5)*.42*spread))
+      .add(exhaustSpreadVelocity)
       .addScaledVector(sourceVelocity || P.vel, .025);
     p.s.material.color.setHex(0xbec3cc);
     p.s.material.opacity = p.opacity;
@@ -2342,6 +2410,7 @@ GAME.hooks.warmup.push(context => {
   if(WORLD_ITEMS && WORLD_ITEMS.warmup) warmed.push(WORLD_ITEMS.warmup());
   if(WEAPON_TRACERS && WEAPON_TRACERS.warmup) warmed.push(WEAPON_TRACERS.warmup());
   if(FPS_HUD && FPS_HUD.prewarm) FPS_HUD.prewarm();
+  if(VEHICLE_RADAR && VEHICLE_RADAR.prewarm) VEHICLE_RADAR.prewarm();
   const count = warmed.reduce((total, entry) => total + (entry.objects ? entry.objects.length : 0), 0);
   if(!count) return;
   if(context && context.progress){
@@ -2424,11 +2493,125 @@ function updateWind(dt, speed){
 const PLAYER_CAMERA = window.LK_RUNTIME_PLAYER_CAMERA;
 const CAM_CFG = PLAYER_CAMERA.createConfig();
 const CAMERA_ASPECTS = PLAYER_CAMERA.ASPECTS;
+const playerCameraDummies = {};
+const playerCameraDummyMatrix = new THREE.Matrix4();
+const playerCameraDummyTarget = new THREE.Vector3();
+
+function cameraDummyVisual(color){
+  const group = new THREE.Group();
+  const material = new THREE.MeshBasicMaterial({color, wireframe:true, depthTest:false, transparent:true, opacity:.9});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(.58, .38, .3), material);
+  const lens = new THREE.Mesh(new THREE.ConeGeometry(.15, .36, 12), material);
+  lens.rotation.x = Math.PI / 2;
+  lens.position.z = -.3;
+  group.add(body, lens);
+  group.traverse(node => {
+    node.renderOrder = 1000;
+    node.userData.editorOnly = true;
+    node.userData.helperOnly = true;
+    node.userData.nonExportable = true;
+    node.userData.lkFlareIgnore = true;
+  });
+  return group;
+}
+
+function cameraDummyQuaternion(position, target, storedRotation){
+  if(Array.isArray(storedRotation) && storedRotation.length >= 3){
+    return new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      Number(storedRotation[0]) || 0,
+      Number(storedRotation[1]) || 0,
+      Number(storedRotation[2]) || 0,
+      'XYZ'
+    ));
+  }
+  playerCameraDummyMatrix.lookAt(position, target, new THREE.Vector3(0, 1, 0));
+  return new THREE.Quaternion().setFromRotationMatrix(playerCameraDummyMatrix);
+}
+
+function ensurePlayerCameraDummies(){
+  if(playerCameraDummies.external && playerCameraDummies.interior) return playerCameraDummies;
+  const createDummy = (role, name, color, id) => {
+    const dummy = new THREE.Object3D();
+    dummy.name = name;
+    dummy.userData.cameraRole = role;
+    dummy.userData.linkParentId = 'player';
+    dummy.userData.nonExportable = true;
+    dummy.add(cameraDummyVisual(color));
+    car.add(dummy);
+    tagEntity(dummy, name, 'playerCamera', {id});
+    dummy.visible = false;
+    playerCameraDummies[role] = dummy;
+    return dummy;
+  };
+  createDummy('external', 'External Player Camera', 0x9db4ff, 'player_camera_external');
+  createDummy('interior', 'Interior Player Camera', 0xa78bfa, 'player_camera_interior');
+  syncPlayerCameraDummiesFromConfig();
+  return playerCameraDummies;
+}
+
+function syncPlayerCameraDummiesFromConfig(){
+  if(!playerCameraDummies.external || !playerCameraDummies.interior) return;
+  const external = playerCameraDummies.external;
+  external.position.set(
+    Number(CAM_CFG.lateralOffset) || 0,
+    Number(CAM_CFG.arcadeHeight) || 3.1,
+    -Math.max(2, Number(CAM_CFG.arcadeDistance) || 9)
+  );
+  playerCameraDummyTarget.set(0, Math.max(.1, Number(CAM_CFG.lookHeight) || 1.1), 0);
+  external.quaternion.copy(cameraDummyQuaternion(external.position, playerCameraDummyTarget, CAM_CFG.externalRotation));
+
+  const interior = playerCameraDummies.interior;
+  interior.position.set(
+    CAM_CFG.interiorLateral == null ? -.42 : Number(CAM_CFG.interiorLateral) || 0,
+    Number(CAM_CFG.interiorHeight) || 1.15,
+    Number(CAM_CFG.interiorForward) || 0
+  );
+  playerCameraDummyTarget.copy(interior.position).add(new THREE.Vector3(0, Number(CAM_CFG.interiorLookHeight) || 0, 12));
+  interior.quaternion.copy(cameraDummyQuaternion(interior.position, playerCameraDummyTarget, CAM_CFG.interiorRotation));
+  external.updateMatrixWorld(true);
+  interior.updateMatrixWorld(true);
+}
+
+function syncPlayerCameraConfigFromDummy(dummy){
+  if(!dummy || dummy.userData.editorType !== 'playerCamera') return false;
+  const role = dummy.userData.cameraRole;
+  const rotation = [dummy.rotation.x || 0, dummy.rotation.y || 0, dummy.rotation.z || 0];
+  if(role === 'interior'){
+    CAM_CFG.interiorLateral = clamp(Number(dummy.position.x) || 0, -1.5, 1.5);
+    CAM_CFG.interiorHeight = clamp(Number(dummy.position.y) || 0, .45, 2.4);
+    CAM_CFG.interiorForward = clamp(Number(dummy.position.z) || 0, -1.5, 2.5);
+    CAM_CFG.interiorRotation = rotation;
+  } else {
+    CAM_CFG.lateralOffset = clamp(Number(dummy.position.x) || 0, -8, 8);
+    CAM_CFG.arcadeHeight = clamp(Number(dummy.position.y) || 0, 1.2, 7);
+    CAM_CFG.arcadeDistance = clamp(-Number(dummy.position.z) || 0, 2, 18);
+    CAM_CFG.externalRotation = rotation;
+  }
+  applyCameraCfg();
+  camSnapNext = true;
+  return true;
+}
+ensurePlayerCameraDummies();
 const camPos = new THREE.Vector3(0, 6, 65);
 const camFocus = new THREE.Vector3();
 const camLook = new THREE.Vector3();
 const camVisualForward = new THREE.Vector3();
 const camVisualSide = new THREE.Vector3();
+const cameraFrameLookTarget = new THREE.Vector3();
+const cameraFrameWant = new THREE.Vector3();
+const cameraFrameBehind = new THREE.Vector3();
+const cameraFrameFront = new THREE.Vector3();
+const cameraFrameOffset = new THREE.Vector3();
+const cameraFrameShake = new THREE.Vector3();
+const interiorCameraWorldPosition = new THREE.Vector3();
+const interiorCameraWorldQuaternion = new THREE.Quaternion();
+const interiorCameraLocalQuaternion = new THREE.Quaternion();
+const interiorCameraYawQuaternion = new THREE.Quaternion();
+const interiorCameraUpAxis = new THREE.Vector3(0, 1, 0);
+const interiorCameraEuler = new THREE.Euler();
+const externalCameraLocalQuaternion = new THREE.Quaternion();
+const externalCameraVehicleYawQuaternion = new THREE.Quaternion();
+const externalCameraEuler = new THREE.Euler();
 const playerVisualForwardTmp = new THREE.Vector3();
 const playerVisualQuatTmp = new THREE.Quaternion();
 const playerVisualInvQuatTmp = new THREE.Quaternion();
@@ -2444,6 +2627,18 @@ let camDriftSide = 0, camReverseBlend = 0, camCinematicRoll = 0, lastCamVF = 0, 
 let camSnapNext = false;
 let camReverseHold = 0;
 let camHeading = 0, camSpeedForFov = 0;
+const interiorPreviousPosition = new THREE.Vector3();
+const interiorSmoothedVelocity = new THREE.Vector3();
+const interiorPreviousVelocity = new THREE.Vector3();
+const interiorPositionOffset = new THREE.Vector3();
+const interiorTargetOffset = new THREE.Vector3();
+const interiorInstantVelocity = new THREE.Vector3();
+const interiorAcceleration = new THREE.Vector3();
+let interiorMotionOwnerId = 'native';
+let interiorMotionStateOwnerId = '';
+let interiorMotionValid = false;
+let interiorHeadRoll = 0;
+let interiorShakePhase = 0;
 let runtimeCinemaState = null;
 let runtimeCinemaAutoLevelKey = '';
 let runtimeCinemaAutoStarted = new Set();
@@ -2693,10 +2888,14 @@ function resetCameraState(preserveRuntimeMode){
   lastCamVF = 0;
   lastCamVR = 0;
   lastCamDrifting = false;
+  interiorMotionValid = false;
+  interiorPositionOffset.set(0, 0, 0);
+  interiorTargetOffset.set(0, 0, 0);
+  interiorHeadRoll = 0;
   camSnapNext = true;
 }
 function cycleGameplayCameraMode(){
-  // Free/arcade/cinematic are follow-camera modes. A character rig owns its own
+  // Vehicle follow/interior cameras share one input. A character rig owns its own
   // view instead, and toggles it from the same key inside its own frame step, so
   // this only reports the result rather than cycling anything.
   const rig = activeFirstPersonRig();
@@ -2708,12 +2907,12 @@ function cycleGameplayCameraMode(){
     popup(next === 'first' ? 'FIRST PERSON' : 'THIRD PERSON', '#9db4ff');
     return next;
   }
-  const modes = ['free', 'arcade', 'cinematic'];
+  const modes = ['free', 'interior', 'arcade', 'cinematic'];
   const current = activeCameraMode();
   runtimeCameraMode = modes[(Math.max(0, modes.indexOf(current)) + 1) % modes.length];
   resetCameraState(true);
   if(GAME.pawns && GAME.pawns.list) GAME.pawns.list().forEach(pawn => { if(pawn) pawn.cameraRuntime = null; });
-  const labels = {free:'FREE CAMERA', arcade:'ARCADE CAMERA', cinematic:'CINEMATIC CAMERA'};
+  const labels = {free:'FREE CAMERA', arcade:'ARCADE CAMERA', cinematic:'CINEMATIC CAMERA', interior:'INTERIOR CAMERA'};
   popup(labels[runtimeCameraMode], '#9db4ff');
   return runtimeCameraMode;
 }
@@ -2785,6 +2984,7 @@ function cameraRenderRect(w, h){
   return PLAYER_CAMERA.renderRect(CAM_CFG, w, h);
 }
 function applyCameraCfg(){
+  if(PLAYER_CAMERA.migrateConfig) Object.assign(CAM_CFG, PLAYER_CAMERA.migrateConfig(CAM_CFG));
   Object.assign(CAM_CFG, {
     mode: CAM_CFG.mode || 'free',
     arcadeDistance: CAM_CFG.arcadeDistance == null ? 9 : CAM_CFG.arcadeDistance,
@@ -2795,12 +2995,26 @@ function applyCameraCfg(){
     cinematicDriftClose: CAM_CFG.cinematicDriftClose == null ? 1.65 : CAM_CFG.cinematicDriftClose,
     cinematicDriftHeight: CAM_CFG.cinematicDriftHeight == null ? .45 : CAM_CFG.cinematicDriftHeight,
     cinematicLag: CAM_CFG.cinematicLag == null ? 4.2 : CAM_CFG.cinematicLag,
+    interiorHeight: CAM_CFG.interiorHeight == null ? 1.15 : CAM_CFG.interiorHeight,
+    interiorForward: CAM_CFG.interiorForward == null ? .28 : CAM_CFG.interiorForward,
+    interiorLateral: CAM_CFG.interiorLateral == null ? -.42 : CAM_CFG.interiorLateral,
+    interiorLookHeight: CAM_CFG.interiorLookHeight == null ? .04 : CAM_CFG.interiorLookHeight,
+    interiorFov: CAM_CFG.interiorFov == null ? 72 : CAM_CFG.interiorFov,
+    interiorLag: CAM_CFG.interiorLag == null ? 18 : CAM_CFG.interiorLag,
+    interiorGForceMotion: CAM_CFG.interiorGForceMotion == null ? 0 : CAM_CFG.interiorGForceMotion,
+    interiorAccelerationMotion: CAM_CFG.interiorAccelerationMotion == null ? 0 : CAM_CFG.interiorAccelerationMotion,
+    interiorRoadShake: CAM_CFG.interiorRoadShake == null ? 0 : CAM_CFG.interiorRoadShake,
+    interiorMotionLimit: CAM_CFG.interiorMotionLimit == null ? .035 : CAM_CFG.interiorMotionLimit,
+    interiorSpeedFovGain: CAM_CFG.interiorSpeedFovGain == null ? .025 : CAM_CFG.interiorSpeedFovGain,
+    interiorSpeedFovMax: CAM_CFG.interiorSpeedFovMax == null ? 4.5 : CAM_CFG.interiorSpeedFovMax,
     freePitch: CAM_CFG.freePitch == null ? .32 : CAM_CFG.freePitch,
     freeYawOffset: CAM_CFG.freeYawOffset == null ? 0 : CAM_CFG.freeYawOffset,
     lookHeight: CAM_CFG.lookHeight == null ? 1.1 : CAM_CFG.lookHeight,
     lateralOffset: CAM_CFG.lateralOffset == null ? 0 : CAM_CFG.lateralOffset,
     helperRange: CAM_CFG.helperRange == null ? 5 : CAM_CFG.helperRange,
     helperSize: CAM_CFG.helperSize == null ? .7 : CAM_CFG.helperSize,
+    externalRotation: Array.isArray(CAM_CFG.externalRotation) ? CAM_CFG.externalRotation : null,
+    interiorRotation: Array.isArray(CAM_CFG.interiorRotation) ? CAM_CFG.interiorRotation : null,
   });
   CAM_CFG.grade = Object.assign({enabled:false, exposure:1, brightness:0, contrast:1, saturation:1, gamma:1}, CAM_CFG.grade || {});
   CAM_CFG.dof = Object.assign({enabled:false, focus:9, aperture:.025, maxblur:.04, autoFocus:true, focusRadius:.16, feather:.38, showFocus:false}, CAM_CFG.dof || {});
@@ -2815,9 +3029,14 @@ function applyCameraCfg(){
     ? CAM_CFG.grade.exposure
     : (renderer.userData && renderer.userData.videoToneMappingExposure || 1.05);
   camDist = clamp(camDist, CAM_CFG.minDist, CAM_CFG.maxDist);
+  syncPlayerCameraDummiesFromConfig();
 }
 function setCameraConfig(patch, reset){
   if(!patch) return;
+  if(PLAYER_CAMERA.migrateConfig && patch.interiorCameraVersion == null &&
+    patch.interiorHeight != null && patch.interiorForward != null && patch.interiorLateral != null){
+    patch = PLAYER_CAMERA.migrateConfig(patch);
+  }
   const previousMode = CAM_CFG.mode;
   if(patch.dof) CAM_CFG.dof = Object.assign({}, CAM_CFG.dof, patch.dof);
   if(patch.grade) CAM_CFG.grade = Object.assign({}, CAM_CFG.grade, patch.grade);
@@ -2834,6 +3053,7 @@ const LETTERBOX_COLOR = new THREE.Color(0x141518);
 let TOUCH_CONTROLS = null;
 let runtimePointerPlayerId = null;
 let runtimePointerLockArmed = false;
+const runtimeInteractionRectScratch = {x:0, y:0, w:0, h:0};
 function activeRuntimePlayerId(){
   const cameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
   const pawnId = cameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
@@ -2918,7 +3138,13 @@ function endFinalGameplayRender(hidden){
   });
 }
 function videoNeedsPost(){
-  return !!(VIDEO && (VIDEO.volumetricLighting || VIDEO.rendererMode === 'raytracing' || VIDEO.quality !== 'high' || VIDEO.antialiasing === 'fxaa'));
+  return !!(VIDEO && (
+    VIDEO.volumetricLighting ||
+    VIDEO.rendererMode === 'raytracing' ||
+    VIDEO.quality !== 'high' ||
+    VIDEO.antialiasing === 'fxaa' ||
+    POST && POST.needsOpticalPost && POST.needsOpticalPost(camera)
+  ));
 }
 function renderPlayerCamera(targetRect){
   const area = targetRect || {x:0, y:0, w:innerWidth, h:innerHeight};
@@ -2936,6 +3162,11 @@ function renderPlayerCamera(targetRect){
       clip: !!targetRect,
       clearColor: letterboxColor(),
       render: rect => {
+        const pathTracingViewport=targetRect&&GAME.state.editorPreview?{width:area.w,height:area.h}:null;
+        const pathTracingSurface=!targetRect||!!pathTracingViewport;
+        if(VIDEO.rendererMode === 'pathtracing' && PATH_TRACING && PATH_TRACING.supported && pathTracingSurface && PATH_TRACING.render(camera, VIDEO, pathTracingViewport)){
+          return;
+        }
         if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || videoNeedsPost())){
           if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
           POST.render();
@@ -3036,15 +3267,27 @@ function requestRuntimeCameraPointerLock(armForPendingSession){
     if(result && result.catch) result.catch(() => { runtimePointerLockArmed = false; });
   } catch(err){ runtimePointerLockArmed = false; }
 }
+function runtimeInteractionRect(){
+  const playerId = activeRuntimePlayerId();
+  const playerFrame = GAME.state && GAME.state.runtimePlayerFrames && GAME.state.runtimePlayerFrames[playerId];
+  if(playerFrame && playerFrame.w > 0 && playerFrame.h > 0) return playerFrame;
+  if(GAME.state.editorPreview){
+    const editorRect = GAME.editor && GAME.editor.viewportRect ? GAME.editor.viewportRect() : null;
+    if(editorRect && editorRect.w > 0 && editorRect.h > 0) return editorRect;
+  }
+  const rect = canvas.getBoundingClientRect();
+  runtimeInteractionRectScratch.x = rect.left;
+  runtimeInteractionRectScratch.y = rect.top;
+  runtimeInteractionRectScratch.w = rect.width;
+  runtimeInteractionRectScratch.h = rect.height;
+  return runtimeInteractionRectScratch;
+}
 function pointInRuntimeViewport(e){
   const playerId = activeRuntimePlayerId();
   const playerFrame = GAME.state && GAME.state.runtimePlayerFrames && GAME.state.runtimePlayerFrames[playerId];
-  if(playerFrame){
-    return e.clientX >= playerFrame.x && e.clientX <= playerFrame.x + playerFrame.w && e.clientY >= playerFrame.y && e.clientY <= playerFrame.y + playerFrame.h;
-  }
-  if(!GAME.state.editorPreview) return true;
-  const rect = GAME.editor && GAME.editor.viewportRect ? GAME.editor.viewportRect() : null;
-  if(!rect) return true;
+  if(!playerFrame && !GAME.state.editorPreview) return true;
+  const rect = runtimeInteractionRect();
+  if(!rect || !rect.w || !rect.h) return false;
   return e.clientX >= rect.x && e.clientX <= rect.x + rect.w && e.clientY >= rect.y && e.clientY <= rect.y + rect.h;
 }
 function runtimePointerLookUiTarget(target){
@@ -3145,7 +3388,7 @@ function shouldShowRuntimeCursor(){
   if(isEditorSimulationPreview()) return false;
   if(isSettingsOverlayOpen()) return !!GAME.state.menuCursorVisible;
   if(isNonSettingsGameplayOverlayOpen()) return true;
-  return !!(GAME.state.editorPreview && GAME.state.playPreviewCursorVisible);
+  return !!(runtimeSessionActive() && GAME.state.playPreviewCursorVisible);
 }
 function syncRuntimeCursorState(){
   const cursorVisible = shouldShowRuntimeCursor() && runtimeSessionActive();
@@ -3253,6 +3496,12 @@ addEventListener('wheel', e => {
 const logicPawnCameraPosition = new THREE.Vector3();
 const logicPawnCameraQuaternion = new THREE.Quaternion();
 const logicPawnCameraForward = new THREE.Vector3();
+const logicPawnPreviousPosition = new THREE.Vector3();
+const logicPawnCameraConfigSnapshot = {};
+const logicPawnFrameSnapshot = {
+  heading:0, steer:0, speedKmh:0, lastCamVF:0, lastCamVR:0,
+  lastCamDrifting:false, driftAngle:0, reverseActive:false,
+};
 let runtimeCameraInputPlayerId = null;
 // A first-person Pawn owns the eye transform completely: the follow-camera
 // blending below would fight its yaw/pitch, so that path is bypassed rather
@@ -3313,11 +3562,15 @@ function updateLogicPawnCameraOverride(dt, pawnRef){
   logicPawnCameraForward.set(0,0,1).applyQuaternion(logicPawnCameraQuaternion).setY(0);
   if(logicPawnCameraForward.lengthSq() < .0001) logicPawnCameraForward.set(0,0,1);
   logicPawnCameraForward.normalize();
-  const previous = {
-    position:P.pos.clone(), heading:P.heading, steer:P.steer,
-    speedKmh, lastCamVF, lastCamVR, lastCamDrifting, driftAngle,
-    reverseActive:ENGINE.reverseActive,
-  };
+  logicPawnPreviousPosition.copy(P.pos);
+  logicPawnFrameSnapshot.heading=P.heading;
+  logicPawnFrameSnapshot.steer=P.steer;
+  logicPawnFrameSnapshot.speedKmh=speedKmh;
+  logicPawnFrameSnapshot.lastCamVF=lastCamVF;
+  logicPawnFrameSnapshot.lastCamVR=lastCamVR;
+  logicPawnFrameSnapshot.lastCamDrifting=lastCamDrifting;
+  logicPawnFrameSnapshot.driftAngle=driftAngle;
+  logicPawnFrameSnapshot.reverseActive=ENGINE.reverseActive;
   P.pos.copy(logicPawnCameraPosition);
   P.heading = Math.atan2(logicPawnCameraForward.x, logicPawnCameraForward.z);
   P.steer = Number(pawn.state && pawn.state.steer) || 0;
@@ -3328,25 +3581,83 @@ function updateLogicPawnCameraOverride(dt, pawnRef){
   driftAngle = lastCamDrifting ? Math.min(.82, Math.abs(P.steer) * .82) : 0;
   ENGINE.reverseActive = pawn.state && pawn.state.reverse === true;
   runtimeCameraInputPlayerId = pawn.playerId;
-  const nativeCameraConfig = Object.assign({}, CAM_CFG);
+  const previousMotionOwnerId = interiorMotionOwnerId;
+  interiorMotionOwnerId = 'logic:' + pawn.id;
+  Object.keys(logicPawnCameraConfigSnapshot).forEach(key=>delete logicPawnCameraConfigSnapshot[key]);
+  Object.assign(logicPawnCameraConfigSnapshot, CAM_CFG);
   const pawnCameraConfig = pawn.config && pawn.config.camera || {};
   Object.assign(CAM_CFG, pawnCameraConfig);
   try { updateCamera(dt); }
   finally {
-    Object.keys(CAM_CFG).forEach(key => { if(!Object.prototype.hasOwnProperty.call(nativeCameraConfig,key)) delete CAM_CFG[key]; });
-    Object.assign(CAM_CFG, nativeCameraConfig);
+    Object.keys(CAM_CFG).forEach(key => { if(!Object.prototype.hasOwnProperty.call(logicPawnCameraConfigSnapshot,key)) delete CAM_CFG[key]; });
+    Object.assign(CAM_CFG, logicPawnCameraConfigSnapshot);
+    interiorMotionOwnerId = previousMotionOwnerId;
   }
   runtimeCameraInputPlayerId = null;
-  P.pos.copy(previous.position);
-  P.heading = previous.heading;
-  P.steer = previous.steer;
-  speedKmh = previous.speedKmh;
-  lastCamVF = previous.lastCamVF;
-  lastCamVR = previous.lastCamVR;
-  lastCamDrifting = previous.lastCamDrifting;
-  driftAngle = previous.driftAngle;
-  ENGINE.reverseActive = previous.reverseActive;
+  P.pos.copy(logicPawnPreviousPosition);
+  P.heading = logicPawnFrameSnapshot.heading;
+  P.steer = logicPawnFrameSnapshot.steer;
+  speedKmh = logicPawnFrameSnapshot.speedKmh;
+  lastCamVF = logicPawnFrameSnapshot.lastCamVF;
+  lastCamVR = logicPawnFrameSnapshot.lastCamVR;
+  lastCamDrifting = logicPawnFrameSnapshot.lastCamDrifting;
+  driftAngle = logicPawnFrameSnapshot.driftAngle;
+  ENGINE.reverseActive = logicPawnFrameSnapshot.reverseActive;
   return true;
+}
+
+function updateInteriorCameraMotion(dt, fwd, side, snap){
+  const frameDt = clamp(Number(dt) || 0, 0, .05);
+  const ownerChanged = interiorMotionStateOwnerId !== interiorMotionOwnerId;
+  const teleported = interiorMotionValid && interiorPreviousPosition.distanceToSquared(P.pos) > 64;
+  if(!interiorMotionValid || ownerChanged || teleported || snap){
+    interiorMotionStateOwnerId = interiorMotionOwnerId;
+    interiorMotionValid = true;
+    interiorPreviousPosition.copy(P.pos);
+    interiorSmoothedVelocity.set(0, 0, 0);
+    interiorPreviousVelocity.set(0, 0, 0);
+    interiorPositionOffset.set(0, 0, 0);
+    interiorTargetOffset.set(0, 0, 0);
+    interiorHeadRoll = 0;
+    return interiorPositionOffset;
+  }
+  if(frameDt <= .0001) return interiorPositionOffset;
+
+  interiorInstantVelocity.copy(P.pos).sub(interiorPreviousPosition).multiplyScalar(1 / frameDt);
+  interiorPreviousPosition.copy(P.pos);
+  interiorSmoothedVelocity.lerp(interiorInstantVelocity, dampAlpha(8, frameDt));
+  interiorAcceleration.copy(interiorSmoothedVelocity).sub(interiorPreviousVelocity).multiplyScalar(1 / frameDt);
+  interiorPreviousVelocity.copy(interiorSmoothedVelocity);
+
+  const lateralG = clamp(interiorAcceleration.dot(side) / 9.81, -2, 2);
+  const longitudinalG = clamp(interiorAcceleration.dot(fwd) / 9.81, -2, 2);
+  const verticalG = clamp(interiorAcceleration.y / 9.81, -2, 2);
+  const gForceStrength = clamp(Number(CAM_CFG.interiorGForceMotion) || 0, 0, 1);
+  const accelerationStrength = clamp(Number(CAM_CFG.interiorAccelerationMotion) || 0, 0, 1);
+  const shakeStrength = clamp(Number(CAM_CFG.interiorRoadShake) || 0, 0, 1);
+
+  interiorTargetOffset.set(0, 0, 0)
+    .addScaledVector(side, -lateralG * .075 * gForceStrength)
+    .addScaledVector(fwd, -longitudinalG * .09 * accelerationStrength);
+  interiorTargetOffset.y += -verticalG * .045 * gForceStrength;
+
+  // A deterministic, filtered engine/road vibration reads as a supported head
+  // instead of the frame-to-frame random jitter used by collision impacts.
+  interiorShakePhase += frameDt * (8 + clamp(Math.abs(speedKmh || 0), 0, 260) * .04);
+  const speedMix = clamp(Math.abs(speedKmh || 0) / 180, 0, 1);
+  const shakeAmplitude = shakeStrength * (.002 + speedMix * .008);
+  interiorTargetOffset.addScaledVector(side, Math.sin(interiorShakePhase * 1.73) * shakeAmplitude * .45);
+  interiorTargetOffset.y += Math.sin(interiorShakePhase * 2.31 + .7) * shakeAmplitude;
+  interiorTargetOffset.addScaledVector(fwd, Math.sin(interiorShakePhase * 1.13 + 1.9) * shakeAmplitude * .3);
+
+  const rawMotionLimit = Number(CAM_CFG.interiorMotionLimit);
+  const motionLimit = clamp(Number.isFinite(rawMotionLimit) ? rawMotionLimit : .035, 0, .15);
+  interiorTargetOffset.clampLength(0, motionLimit);
+  const motionResponse = clamp(Number(CAM_CFG.interiorLag) || 18, 2, 30);
+  interiorPositionOffset.lerp(interiorTargetOffset, dampAlpha(motionResponse, frameDt));
+  const targetRoll = clamp(-lateralG * .04 * gForceStrength, -motionLimit * .6, motionLimit * .6);
+  interiorHeadRoll += (targetRoll - interiorHeadRoll) * dampAlpha(7, frameDt);
+  return interiorPositionOffset;
 }
 
 function updateCamera(dt){
@@ -3366,6 +3677,7 @@ function updateCamera(dt){
   camFocus.lerp(P.pos, focusAlpha);
   camHeading += angleDelta(P.heading, camHeading) * headingAlpha;
   const camInput = readDriveInput();
+  const lookBack = !!(keys['v'] || camInput.lookBack);
   if(mode === 'free'){
     const lookX = camInput.cameraLookX || 0;
     const lookY = camInput.cameraLookY || 0;
@@ -3375,12 +3687,61 @@ function updateCamera(dt){
       camPitch = Math.max(.05, Math.min(1.2, camPitch));
     }
   }
-  let look = new THREE.Vector3(camFocus.x, camFocus.y + clamp(Number(CAM_CFG.lookHeight) || 1.1, .1, 6), camFocus.z);
+  const look = cameraFrameLookTarget.set(camFocus.x, camFocus.y + clamp(Number(CAM_CFG.lookHeight) || 1.1, .1, 6), camFocus.z);
   let lag = 6;
-  if(mode === 'arcade' || mode === 'cinematic'){
+  let interiorWorldRotationReady = false;
+  if(mode === 'interior'){
+    const nativeCabin = interiorMotionOwnerId === 'native' && car;
+    const cabinBase = nativeCabin ? car.position : P.pos;
+    const fwd = nativeCabin
+      ? playerVisibleForwardVector(camVisualForward)
+      : playerCameraForwardVector(camVisualForward);
+    const side=camVisualSide.set(fwd.z,0,-fwd.x);
+    // Cockpit position is vehicle-local, not a world-space chase camera. Any
+    // interpolation here makes the eye lag behind the cabin under acceleration,
+    // braking and jumps, which is both visibly wrong and nausea-inducing.
+    const interiorDummy = nativeCabin && playerCameraDummies.interior;
+    const want = interiorCameraWorldPosition;
+    if(interiorDummy){
+      // The authored dummy is the single source of truth for both halves of
+      // the camera transform. Reconstructing position from the visual car but
+      // rotation from the physics heading lets the two references diverge
+      // after repeated turns and reads as an orbit around a displaced pivot.
+      car.updateMatrixWorld(true);
+      interiorDummy.updateWorldMatrix(true, false);
+      interiorDummy.getWorldPosition(want);
+      interiorDummy.getWorldQuaternion(interiorCameraWorldQuaternion);
+      interiorWorldRotationReady = true;
+    } else {
+      want.copy(cabinBase)
+        .addScaledVector(fwd,clamp(Number(CAM_CFG.interiorForward)||0,-1.5,2.5))
+        .addScaledVector(side,clamp(CAM_CFG.interiorLateral == null ? -.42 : Number(CAM_CFG.interiorLateral)||0,-1.5,1.5));
+      want.y=cabinBase.y+clamp(Number(CAM_CFG.interiorHeight)||1.15,.45,2.4);
+      if(Array.isArray(CAM_CFG.interiorRotation) && CAM_CFG.interiorRotation.length >= 3){
+        interiorCameraLocalQuaternion.setFromEuler(interiorCameraEuler.set(
+          Number(CAM_CFG.interiorRotation[0]) || 0,
+          Number(CAM_CFG.interiorRotation[1]) || 0,
+          Number(CAM_CFG.interiorRotation[2]) || 0,
+          'XYZ'
+        ));
+        interiorCameraYawQuaternion.setFromAxisAngle(interiorCameraUpAxis, Math.atan2(fwd.x, fwd.z));
+        interiorCameraWorldQuaternion.copy(interiorCameraYawQuaternion).multiply(interiorCameraLocalQuaternion);
+        interiorWorldRotationReady = true;
+      }
+    }
+    want.add(updateInteriorCameraMotion(dt, fwd, side, snap));
+    camPos.copy(want);
+    // Rear glance keeps the authored cockpit mount perfectly fixed and only
+    // reverses the eye direction. Native and Logic Element vehicles both use
+    // this camera path, so keyboard and mapped gamepad input behave alike.
+    look.copy(camPos).addScaledVector(fwd, lookBack ? -12 : 12);
+    look.y+=clamp(Number(CAM_CFG.interiorLookHeight)||0,-.5,.8);
+    camDriftSide+=(0-camDriftSide)*(snap?1:dampAlpha(8,dt));
+    camCinematicRoll+=(0-camCinematicRoll)*(snap?1:dampAlpha(8,dt));
+  } else if(mode === 'arcade' || mode === 'cinematic'){
+    interiorMotionValid = false;
     const reversingForCamera = ENGINE.reverseActive && lastCamVF < -1.8;
     camReverseHold = reversingForCamera ? camReverseHold + dt : Math.max(0, camReverseHold - dt * 2.4);
-    const lookBack = !!(keys['v'] || camInput.lookBack);
     const reverseTarget = (lookBack || camReverseHold > .65) ? 1 : 0;
     camReverseBlend += (reverseTarget - camReverseBlend) * (snap ? 1 : dampAlpha(CAM_CFG.reverseFrontSpeed, dt));
     const fwd = playerCameraForwardVector(camVisualForward);
@@ -3405,16 +3766,17 @@ function updateCamera(dt){
       camCinematicRoll += (0 - camCinematicRoll) * (snap ? 1 : dampAlpha(5, dt));
     }
 
-    const behind = camFocus.clone().addScaledVector(fwd, -dist).addScaledVector(side, sideOffset);
-    const front = camFocus.clone().addScaledVector(fwd, dist).addScaledVector(side, -sideOffset);
-    const want = behind.lerp(front, camReverseBlend);
+    const behind = cameraFrameBehind.copy(camFocus).addScaledVector(fwd, -dist).addScaledVector(side, sideOffset);
+    const front = cameraFrameFront.copy(camFocus).addScaledVector(fwd, dist).addScaledVector(side, -sideOffset);
+    const want = cameraFrameWant.copy(behind).lerp(front, camReverseBlend);
     want.y = camFocus.y + height;
     camPos.lerp(want, snap ? 1 : dampAlpha(Math.max(lag, 8), dt));
     look.addScaledVector(fwd, camReverseBlend > .5 ? -2.2 : clamp(lastCamVF * .06, -1.2, 1.8));
   } else {
+    interiorMotionValid = false;
     const cy = Math.cos(camPitch), sy = Math.sin(camPitch);
-    const off = new THREE.Vector3(Math.sin(camYaw)*cy, sy, Math.cos(camYaw)*cy).multiplyScalar(camDist);
-    const want = camFocus.clone().add(off);
+    const off = cameraFrameOffset.set(Math.sin(camYaw)*cy, sy, Math.cos(camYaw)*cy).multiplyScalar(camDist);
+    const want = cameraFrameWant.copy(camFocus).add(off);
     if(CAM_CFG.lateralOffset){
       const fwd = playerCameraForwardVector(camVisualForward);
       want.addScaledVector(camVisualSide.set(fwd.z,0,-fwd.x), clamp(Number(CAM_CFG.lateralOffset)||0,-8,8));
@@ -3423,14 +3785,39 @@ function updateCamera(dt){
     camPos.lerp(want, snap ? 1 : dampAlpha(6, dt));
   }
   camShake = Math.max(0, camShake - dt*2.5);
-  const sh = camShake * .35 * CAM_CFG.shake;
-  camera.position.copy(camPos).add(new THREE.Vector3((Math.random()-.5)*sh,(Math.random()-.5)*sh,(Math.random()-.5)*sh));
-  camLook.lerp(look, snap ? 1 : dampAlpha(18, dt));
-  camera.lookAt(camLook);
+  const sh = mode === 'interior' ? 0 : camShake * .35 * CAM_CFG.shake;
+  cameraFrameShake.set((Math.random()-.5)*sh,(Math.random()-.5)*sh,(Math.random()-.5)*sh);
+  camera.position.copy(camPos).add(cameraFrameShake);
+  if(mode === 'interior') camLook.copy(look);
+  else camLook.lerp(look, snap ? 1 : dampAlpha(18, dt));
+  if(mode === 'interior' && interiorWorldRotationReady){
+    camera.quaternion.copy(interiorCameraWorldQuaternion);
+    if(lookBack) camera.rotateY(Math.PI);
+  } else {
+    camera.lookAt(camLook);
+  }
+  const authoredRotation = mode === 'arcade' || mode === 'cinematic' ? CAM_CFG.externalRotation : null;
+  if(Array.isArray(authoredRotation) && authoredRotation.length >= 3){
+    const localCameraQuat = externalCameraLocalQuaternion.setFromEuler(externalCameraEuler.set(
+      Number(authoredRotation[0]) || 0,
+      Number(authoredRotation[1]) || 0,
+      Number(authoredRotation[2]) || 0,
+      'XYZ'
+    ));
+    const vehicleYawQuat = externalCameraVehicleYawQuaternion.setFromAxisAngle(interiorCameraUpAxis, P.heading || 0);
+    camera.quaternion.copy(vehicleYawQuat.multiply(localCameraQuat));
+  }
+  if(mode === 'interior') camera.rotateZ(interiorHeadRoll);
   if(mode === 'cinematic') camera.rotateZ(camCinematicRoll);
   // speed FOV
   camSpeedForFov += ((speedKmh || 0) - camSpeedForFov) * (snap ? 1 : dampAlpha(7, dt));
-  const targetFov = CAM_CFG.fov + Math.min(CAM_CFG.fovSpeedMax, camSpeedForFov * CAM_CFG.fovSpeedGain);
+  const targetFov = mode==='interior'
+    ? clamp(
+        (Number(CAM_CFG.interiorFov) || 72) +
+          Math.min(clamp(Number(CAM_CFG.interiorSpeedFovMax) || 0, 0, 12), camSpeedForFov * clamp(Number(CAM_CFG.interiorSpeedFovGain) || 0, 0, .1)),
+        40, 110
+      )
+    : CAM_CFG.fov + Math.min(CAM_CFG.fovSpeedMax, camSpeedForFov * CAM_CFG.fovSpeedGain);
   camera.fov += (targetFov - camera.fov) * (snap ? 1 : dampAlpha(4, dt));
   camera.far = Math.max(20, Number(CAM_CFG.far) || 500);
   camera.updateProjectionMatrix();
@@ -3449,6 +3836,23 @@ const POST = window.LK_RUNTIME_POST.createPost({
   volumetricTarget: () => sun,
   lensFlareState: activeCamera => SKY.flare && SKY.flare.postState ? SKY.flare.postState(activeCamera) : null,
 });
+const PATH_TRACING = window.LK_RUNTIME_PATH_TRACING ? window.LK_RUNTIME_PATH_TRACING.create({
+  THREERef:THREE,
+  renderer,
+  scene,
+  camera,
+  // The authored scene is stationary outside Preview, so the vehicle and
+  // Logic Element visuals can participate in the physical solution. Gameplay
+  // keeps moving actors in the responsive raster overlay: rebuilding their BVH
+  // on every physics frame would erase the performance budget.
+  staticEditorMode:()=>GAME.state.editorActive&&!GAME.state.editorPreview,
+  dynamicRoots:()=>GAME.state.editorActive&&!GAME.state.editorPreview?[]:[car],
+}) : null;
+GAME.hooks.warmup.push(context=>{
+  if(!PATH_TRACING||!PATH_TRACING.supported||!PATH_TRACING.prepare||VIDEO.rendererMode!=='pathtracing')return;
+  if(context&&context.progress)context.progress(.64,'Preparing progressive path tracing','Loading the optional renderer, building the static-world BVH and compiling its first sample');
+  return PATH_TRACING.prepare(VIDEO,camera);
+});
 
 // ------------------------------------------------ sound (procedural WebAudio)
 const SFX = window.LK_RUNTIME_AUDIO.createSfx({getVolumes: () => AUDIO});
@@ -3458,13 +3862,26 @@ const ENGINE_AUDIO = window.LK_RUNTIME_ENGINE_AUDIO.create({
   audio: SFX,
   engine: ENGINE,
   gearbox: GEARBOX,
-  gearbox: GEARBOX,
   getSpeed: () => speedKmh,
   getTimescale: () => TS.cur,
   resolveSrc: src => {
     if(src && src.indexOf('blob:') === 0 && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(src.slice(5));
     return Promise.resolve(src);
   },
+});
+GAME.hooks.warmup.push(async context => {
+  if(!ENGINE_AUDIO || !ENGINE_AUDIO.prewarm) return;
+  if(context && context.progress){
+    context.progress(.645, 'Preparing vehicle Sound Designer banks',
+      'Fetching, decoding and attaching every engine, transmission, skid and event sample before play');
+  }
+  const report = await ENGINE_AUDIO.prewarm();
+  if(context && context.progress){
+    context.progress(.655, 'Vehicle audio ready',
+      report.loaded + ' decoded sample' + (report.loaded === 1 ? '' : 's') +
+      (report.failed ? ' · ' + report.failed + ' synthetic fallback' + (report.failed === 1 ? '' : 's') : ''));
+  }
+  return report;
 });
 // On-foot audio: footsteps by surface, weapon fire by class, explosive FX and
 // body foley. It is procedural by default, so it works with no media files; a
@@ -3519,24 +3936,35 @@ function setPlayerEngineSound(setId){
 
 // ------------------------------------------------ input
 const keys = {};
+function toggleRuntimeInteractionCursor(){
+  if(!runtimeSessionActive() || (GAME.state.editorActive && !GAME.state.editorPreview)) return false;
+  GAME.state.playPreviewCursorVisible = !GAME.state.playPreviewCursorVisible;
+  dragging = false;
+  if(GAME.state.playPreviewCursorVisible){
+    document.body.classList.remove('lk-free-camera-cursor-hidden');
+    document.body.classList.add('lk-game-ui-cursor');
+    if(document.pointerLockElement === canvas && document.exitPointerLock){
+      try { document.exitPointerLock(); } catch(err){}
+    }
+  } else {
+    document.body.classList.remove('lk-game-ui-cursor');
+    document.body.classList.add('lk-free-camera-cursor-hidden');
+    if(activeCameraMode() === 'free') requestRuntimeCameraPointerLock();
+  }
+  const cockpitSlowMotion = cockpitInteractionSlowMotionRequested() && runtimeSinglePlayer();
+  popup(
+    GAME.state.playPreviewCursorVisible
+      ? (cockpitSlowMotion ? 'COCKPIT CURSOR · SUPER SLOW-MO' : 'INTERACTION CURSOR ON')
+      : 'INTERACTION CURSOR OFF',
+    '#9db4ff'
+  );
+  return true;
+}
 addEventListener('keydown', e => {
   if(isEditorSimulationPreview()) return;
-  if(e.key === 'F1' && e.shiftKey && GAME.state.editorActive && GAME.state.editorPreview){
+  if(e.key === 'F1' && e.shiftKey && runtimeSessionActive() && !(GAME.state.editorActive && !GAME.state.editorPreview)){
     e.preventDefault();
-    GAME.state.playPreviewCursorVisible = !GAME.state.playPreviewCursorVisible;
-    dragging = false;
-    if(GAME.state.playPreviewCursorVisible){
-      document.body.classList.remove('lk-free-camera-cursor-hidden');
-      document.body.classList.add('lk-game-ui-cursor');
-      if(document.pointerLockElement === canvas && document.exitPointerLock){
-        try { document.exitPointerLock(); } catch(err){}
-      }
-    } else {
-      document.body.classList.remove('lk-game-ui-cursor');
-      document.body.classList.add('lk-free-camera-cursor-hidden');
-      if(activeCameraMode() === 'free') requestRuntimeCameraPointerLock();
-    }
-    popup(GAME.state.playPreviewCursorVisible ? 'PREVIEW CURSOR ON' : 'PREVIEW CURSOR OFF', '#9db4ff');
+    if(!e.repeat) toggleRuntimeInteractionCursor();
     return;
   }
   if(e.key === 'F1'){
@@ -3545,6 +3973,11 @@ addEventListener('keydown', e => {
   }
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;      // editor owns the keyboard outside play preview
   const key = e.key.toLowerCase();
+  if(key === 'y'){
+    e.preventDefault();
+    if(!e.repeat) toggleRuntimeInteractionCursor();
+    return;
+  }
   if(key === 'escape'){
     e.preventDefault();
     toggleSettingsMenu('game', {source: 'keyboard'});
@@ -3821,6 +4254,15 @@ function syncEditorSpawnFromPlayer(){
 const MODEL_ASSETS = window.LK_RUNTIME_MODEL_ASSETS.create({THREERef: THREE, car, isFileMode: IS_FILE_MODE});
 const gltfLoader = MODEL_ASSETS.gltfLoader;
 const RIG = MODEL_ASSETS.rig;
+const PLAYER_STEERING_WHEEL_CFG = window.LK_RUNTIME_MODEL_ASSETS.normalizeSteeringWheelConfig({});
+function setPlayerSteeringWheelConfig(values){
+  const next = window.LK_RUNTIME_MODEL_ASSETS.normalizeSteeringWheelConfig(
+    Object.assign({}, PLAYER_STEERING_WHEEL_CFG, values || {})
+  );
+  Object.assign(PLAYER_STEERING_WHEEL_CFG, next);
+  if(RIG.setSteeringConfig) RIG.setSteeringConfig(PLAYER_STEERING_WHEEL_CFG);
+  return Object.assign({}, PLAYER_STEERING_WHEEL_CFG);
+}
 const MODEL_SIZE = Object.freeze({
   playerLen: 5.6,
   parkedLen: 4.2,
@@ -3838,6 +4280,7 @@ const PLAYER_MODEL = window.LK_RUNTIME_PLAYER_MODEL.create({
   modelSize: MODEL_SIZE,
   popup,
   canDropReplace: () => GAME.state.started && !GAME.state.editorActive && !GAME.state.editorPreview,
+  getSteeringWheelConfig: () => PLAYER_STEERING_WHEEL_CFG,
 });
 const prepModel = PLAYER_MODEL.prepModel;
 function setPlayerModel(sceneRoot){
@@ -3882,8 +4325,63 @@ const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
   resolveAvailability: radioRuntimeAvailable,
 });
 
-// slow-motion state (radio open → super slow-mo)
-const TS = {cur:1, get target(){ return RADIO.isOpen() ? 0.1 : 1; }};
+let runtimeMultiplayerProbeAt = 0;
+let runtimeMultiplayerProbeResult = false;
+window.addEventListener('lotking:p2p-state', () => { runtimeMultiplayerProbeAt = 0; });
+function runtimeSinglePlayer(){
+  const configuredPlayers = Math.max(1, Math.min(4, Number(GAME.settings.localPlayerCount) || 1));
+  if(configuredPlayers > 1) return false;
+  if(GAME.pawns && GAME.pawns.getByPlayerId){
+    let players = 0;
+    for(let playerId = 1; playerId <= 4; playerId++){
+      const pawn = GAME.pawns.getByPlayerId(playerId);
+      if(pawn && pawn.possessed !== false && pawn.enabled !== false && pawn.hidden !== true && ++players > 1) return false;
+    }
+  }
+  const now = performance.now();
+  if(now >= runtimeMultiplayerProbeAt){
+    runtimeMultiplayerProbeAt = now + 250;
+    runtimeMultiplayerProbeResult = false;
+    const session = window.LK_P2P_ACTIVE_SESSION;
+    if(session && typeof session.state === 'function'){
+      try {
+        const state = session.state();
+        runtimeMultiplayerProbeResult = !!(state && state.closed !== true && (state.peerCount > 0 || state.role && state.role !== 'idle'));
+      } catch(err){
+        // An unreadable network session is treated as multiplayer: time dilation
+        // must never be guessed safe while another peer may own simulation time.
+        runtimeMultiplayerProbeResult = true;
+      }
+    }
+  }
+  return !runtimeMultiplayerProbeResult;
+}
+function runtimeInteriorVehicleActive(){
+  if(activeCameraMode() !== 'interior' || !GAME.pawns || !GAME.pawns.getByPlayerId) return false;
+  const pawn = GAME.pawns.getByPlayerId(activeRuntimePlayerId());
+  return !!(pawn && pawn.possessed !== false && pawn.enabled !== false && pawn.hidden !== true &&
+    (pawn.pawnType === 'vehicle' || pawn.kind === 'native-adapter' || pawn.id === 'native-player-car'));
+}
+function cockpitInteractionSlowMotionRequested(){
+  return !!(GAME.state.playPreviewCursorVisible && shouldShowRuntimeCursor() &&
+    runtimeInteriorVehicleActive());
+}
+
+// Runtime UI keeps real-time input and painting while vehicle simulation slows.
+// Multiplayer is intentionally excluded because peers must never disagree on dt.
+const TS = {
+  cur:1,
+  update(dt){
+    const requested = RADIO.isOpen() || cockpitInteractionSlowMotionRequested();
+    if(requested && !runtimeSinglePlayer()){
+      this.cur = 1;
+      return this.cur;
+    }
+    const target = requested ? 0.1 : 1;
+    this.cur += (target - this.cur) * Math.min(1, dt * 4);
+    return this.cur;
+  },
+};
 
 const IS_EMBEDDED_GAMEPLAY = !!window.__LK_EMBEDDED_GAMEPLAY;
 const MENU_PREVIEW_MODE = window.__LK_MENU_PREVIEW === 'editor' || window.__LK_MENU_PREVIEW === 'game'
@@ -4377,12 +4875,34 @@ RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
   },
   runWarmupHooks:context => {
     const hooks = GAME.hooks && Array.isArray(GAME.hooks.warmup) ? GAME.hooks.warmup.slice() : [];
-    return hooks.reduce((chain, hook) => chain.then(() => typeof hook === 'function' ? hook(context) : null), Promise.resolve());
+    const logic = GAME.systems && GAME.systems.logic;
+    const prepareLogic = logic && logic.prewarm ? logic.prewarm(context) : null;
+    return Promise.resolve(prepareLogic).then(() =>
+      hooks.reduce((chain, hook) => chain.then(() => typeof hook === 'function' ? hook(context) : null), Promise.resolve())
+    );
   },
   setVideoWarmProfile:active => VIDEO_SETTINGS.setWarmProfile(active),
   applyAdaptiveLow:report => VIDEO_SETTINGS.applyAdaptiveLow(report),
   schedulePipelineWarmup:() => RENDERING_BACKEND&&RENDERING_BACKEND.scheduleWarmup?RENDERING_BACKEND.scheduleWarmup(renderer,scene,camera,{timeout:1800}):null,
   getSceneReady: () => window.LK_STORE && (window.LK_STORE.ensureApplied ? window.LK_STORE.ensureApplied(GAME) : window.LK_STORE.ready),
+});
+window.addEventListener('lotking:renderer-mode-change',event=>{
+  const detail=event&&event.detail||{};
+  if(PATH_TRACING&&PATH_TRACING.invalidate)PATH_TRACING.invalidate();
+  if(!RUNTIME_LOADER||!RUNTIME_LOADER.benchmark)return;
+  RUNTIME_LOADER.benchmark.run({
+    mode:'game',
+    adaptive:false,
+    reason:'renderer-change:'+String(detail.previous||'unknown')+'→'+String(detail.mode||VIDEO.rendererMode),
+  }).then(()=>{
+    const state=PATH_TRACING&&PATH_TRACING.status?PATH_TRACING.status():null;
+    if(detail.mode==='pathtracing'&&state&&(!state.supported||state.failure)){
+      console.warn('Lot King path tracing is using WebGL fallback:',state.failure||'unsupported GPU/context');
+    }
+  });
+});
+window.addEventListener('lotking:environment-lighting-change',()=>{
+  if(PATH_TRACING&&PATH_TRACING.refreshLighting)PATH_TRACING.refreshLighting();
 });
 
 GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
@@ -4395,6 +4915,14 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   ensureRuntimeReady: RUNTIME_LOADER.ensureReady,
   isRuntimeReady: RUNTIME_LOADER.isReady,
   clearInput: () => { for(const k of Object.keys(keys)) keys[k] = false; },
+  primeAudio: () => {
+    SFX.init();
+    SFX.resume();
+    // Build and begin fetching/decompressing the authored engine bank while the
+    // benchmark overlay is visible. It stays muted until gameplay takes over.
+    ENGINE_AUDIO.start({silent:true});
+    ENGINE_AUDIO.setMuted(true);
+  },
   pauseRadio: () => {
     RADIO.toggleOpen(false);
     if(RADIO.stop) RADIO.stop();
@@ -4614,9 +5142,14 @@ Object.assign(GAME.player, {
   setVisualBaseRotation: setPlayerVisualBaseRotation,
   syncSpawnFromVisibleTransform: syncPlayerSpawnFromVisibleTransform,
   setModel: setPlayerModel,
+  clearModel: PLAYER_MODEL.clearPlayerModel,
   getModel: PLAYER_MODEL.getPlayerModel,
   setModelShading: PLAYER_MODEL.setModelShading,
   getModelShading: PLAYER_MODEL.getModelShading,
+  steeringWheel: PLAYER_STEERING_WHEEL_CFG,
+  setSteeringWheelConfig: setPlayerSteeringWheelConfig,
+  getSteeringWheelConfig: () => Object.assign({}, PLAYER_STEERING_WHEEL_CFG),
+  getSteeringWheelRigStatus: () => RIG.steeringStatus ? RIG.steeringStatus() : null,
   headlight: PLAYER_LIGHT_RIG.headlight,
   lights: PLAYER_LIGHT_CFG,
   setLights: setPlayerLightConfig,
@@ -4625,6 +5158,7 @@ Object.assign(GAME.player, {
   duplicateLight: duplicatePlayerAuxLight,
   moveLight: movePlayerAuxLight,
   updateLights: updatePlayerLights,
+  lampMaterialOptions: PLAYER_LIGHT_RIG.lampMaterialOptions,
   dataWidgets: PLAYER_DATA_WIDGETS.config,
   setDataWidgets: PLAYER_DATA_WIDGETS.set,
   addDataWidget: PLAYER_DATA_WIDGETS.add,
@@ -4663,9 +5197,14 @@ Object.assign(GAME.player, {
     },
   }),
   cameraCfg: CAM_CFG,
+  cameraDummies: playerCameraDummies,
+  syncCameraDummies: syncPlayerCameraDummiesFromConfig,
+  syncCameraDummy: syncPlayerCameraConfigFromDummy,
   cameraAspects: CAMERA_ASPECTS,
   cameraAspectValue,
   cameraRenderRect,
+  runtimeInteractionRect,
+  surfaceInteractionEnabled: () => shouldShowRuntimeCursor() && runtimeSessionActive(),
   applyCameraCfg,
   setCameraConfig,
   resetCamera: resetCameraState,
@@ -4683,6 +5222,7 @@ Object.assign(GAME.systems, {
   sky: SKY,
   rig: RIG,
   post: POST,
+  pathTracing: PATH_TRACING,
   session: SESSION,
   physics: {
     available: () => PHYS.available,
@@ -4750,6 +5290,9 @@ Object.assign(GAME.ui, {
   radioHud: RADIO.config,
   setRadioHud: RADIO.setConfig,
   previewRadioHud: RADIO.setEditorPreview,
+  vehicleRadar: VEHICLE_RADAR && VEHICLE_RADAR.config,
+  setVehicleRadar: patch => VEHICLE_RADAR && VEHICLE_RADAR.setConfig(patch),
+  previewVehicleRadar: value => VEHICLE_RADAR && VEHICLE_RADAR.setEditorPreview(value),
 });
 Object.assign(GAME.settings, {
   audio: AUDIO,
@@ -4769,12 +5312,20 @@ Object.assign(GAME.settings, {
   renderingBackend:RENDERING_BACKEND||null,
   getRenderingReport:()=>RENDERING_BACKEND?RENDERING_BACKEND.describe(renderer):null,
   getPreBenchmarkReport:()=>RUNTIME_LOADER&&RUNTIME_LOADER.benchmark?RUNTIME_LOADER.benchmark.report():null,
+  getPathTracingReport:()=>PATH_TRACING&&PATH_TRACING.status?PATH_TRACING.status():null,
   getVideoBenchmarkPreference:VIDEO_SETTINGS.benchmarkPreference,
 });
 
 // ------------------------------------------------ main loop
 let prevT = performance.now();
 let nativePhysicsRuntimeActive = null;
+const skidFrameWorldPosition = new THREE.Vector3();
+const skidFrameWorldQuaternion = new THREE.Quaternion();
+const skidFrameWorldDirection = new THREE.Vector3();
+const skidFallbackForward = new THREE.Vector3();
+const skidFallbackSide = new THREE.Vector3();
+const skidFallbackPosition = new THREE.Vector3();
+const skidFallbackWheelIndices = [2, 3, 0, 1];
 
 function stepGameplayFrame(dt, shouldRender){
   if(GAME.state.paused){
@@ -4787,7 +5338,7 @@ function stepGameplayFrame(dt, shouldRender){
   ENGINE_AUDIO.setMuted(false);
 
   // super slow-motion while the radio is open (smooth in/out)
-  TS.cur += (TS.target - TS.cur) * Math.min(1, dt*4);
+  TS.update(dt);
   // Published so systems stepped outside this function — world items, tracers —
   // slow down with everything else. A bullet that keeps full speed through a
   // slow-motion moment is the one thing you were slowing down to look at.
@@ -4874,45 +5425,44 @@ function stepGameplayFrame(dt, shouldRender){
   ), 0, 1);
   const tireSmokeActive = PLAYER_SKID_CFG.smokeEnabled !== false && tireSmokeAmount > 0 && tireSmokeCauseActive && tireSmokeHeat >= tireSmokeMinHeat;
   if(hasTireContact && (lateralSlip || brakeSlip || accelSlip || burnoutSlip || spinoutSlip > .42)){
-    const activeSkids = playerSkidRig.sources
-      .map((rig, i) => ({rig, cfg:PLAYER_SKID_CFG.sources[i]}))
-      .filter(item => item.rig && item.rig.anchor && item.cfg && item.cfg.enabled !== false);
-    const hasSkidRig = playerSkidRig.sources.some(rig => rig && rig.anchor);
-    if(activeSkids.length){
-      for(const item of activeSkids){
-        const idx = item.rig.anchor.userData.skidIndex;
-        const wheel = skidWheelKey(idx, item.cfg);
+    let activeSkidCount=0;
+    let hasSkidRig=false;
+    for(let skidIndex=0;skidIndex<playerSkidRig.sources.length;skidIndex++){
+      const rig=playerSkidRig.sources[skidIndex];
+      if(!(rig&&rig.anchor)) continue;
+      hasSkidRig=true;
+      const cfg=PLAYER_SKID_CFG.sources[skidIndex];
+      if(!cfg||cfg.enabled===false) continue;
+      activeSkidCount++;
+      {
+        const idx = rig.anchor.userData.skidIndex;
+        const wheel = skidWheelKey(idx, cfg);
         if(!nativeSkidWheelInContact(wheel)) continue;
         const slipAmount = clamp(isFrontSkidWheel(wheel) ? frontWheelSlip : (isRearSkidWheel(wheel) ? rearWheelSlip : allWheelSlip), 0, 1);
         if(slipAmount < tireSmokeThreshold && slipAmount < .08) continue;
-        const anchor = item.rig.anchor;
-        const wp = new THREE.Vector3();
+        const anchor = rig.anchor;
+        const wp = skidFrameWorldPosition;
         anchor.getWorldPosition(wp);
-        const q = new THREE.Quaternion();
+        const q = skidFrameWorldQuaternion;
         anchor.getWorldQuaternion(q);
-        const dir = new THREE.Vector3(0,0,1).applyQuaternion(q);
+        const dir = skidFrameWorldDirection.set(0,0,1).applyQuaternion(q);
         const heading = Math.atan2(dir.x, dir.z);
         const density = clamp(.16 + slipAmount * .74 + speed01 * .12 + gSlip * .16, 0, 1);
         if(tireSmokeActive && slipAmount >= tireSmokeThreshold && Math.random() < clamp(density * .62 * tireSmokeAmount, 0, 1)) spawnSmoke(wp, slipAmount, PLAYER_SKID_CFG);
         if(slipAmount >= .08 && Math.random() < density) spawnSkid(wp.x, wp.z, heading, Math.abs(anchor.scale.x || 1), Math.abs(anchor.scale.z || 1), slipAmount);
       }
-    } else if(!hasSkidRig) {
-      const fwd = new THREE.Vector3(Math.sin(P.heading),0,Math.cos(P.heading));
-      const side = new THREE.Vector3(fwd.z,0,-fwd.x);
-      const fallback = [
-        {z:-1.35, s:-1, slip:rearWheelSlip},
-        {z:-1.35, s:1, slip:rearWheelSlip},
-        {z:1.35, s:-1, slip:frontWheelSlip},
-        {z:1.35, s:1, slip:frontWheelSlip},
-      ];
-      const fallbackWheelIndices = [2, 3, 0, 1];
-      for(let fallbackIndex = 0; fallbackIndex < fallback.length; fallbackIndex++){
-        const src = fallback[fallbackIndex];
-        const wheelInfoIndex = fallbackWheelIndices[fallbackIndex];
+    }
+    if(!activeSkidCount&&!hasSkidRig) {
+      const fwd = skidFallbackForward.set(Math.sin(P.heading),0,Math.cos(P.heading));
+      const side = skidFallbackSide.set(fwd.z,0,-fwd.x);
+      for(let fallbackIndex = 0; fallbackIndex < 4; fallbackIndex++){
+        const wheelInfoIndex = skidFallbackWheelIndices[fallbackIndex];
         if(PHYS.vehicle && !(PHYS.vehicle.wheelInfos[wheelInfoIndex] && PHYS.vehicle.wheelInfos[wheelInfoIndex].isInContact)) continue;
-        const slipAmount = clamp(src.slip, 0, 1);
+        const slipAmount = clamp(fallbackIndex<2?rearWheelSlip:frontWheelSlip, 0, 1);
         if(slipAmount < tireSmokeThreshold && slipAmount < .08) continue;
-        const wp = P.pos.clone().addScaledVector(fwd, src.z).addScaledVector(side, src.s*.92);
+        const wp = skidFallbackPosition.copy(P.pos)
+          .addScaledVector(fwd, fallbackIndex<2?-1.35:1.35)
+          .addScaledVector(side, (fallbackIndex%2===0?-1:1)*.92);
         const density = clamp(.16 + slipAmount * .74 + speed01 * .12 + gSlip * .16, 0, 1);
         if(tireSmokeActive && slipAmount >= tireSmokeThreshold && Math.random() < clamp(density * .62 * tireSmokeAmount, 0, 1)) spawnSmoke(wp, slipAmount, PLAYER_SKID_CFG);
         if(slipAmount >= .08 && Math.random() < density) spawnSkid(wp.x, wp.z, P.heading, 1, 1, slipAmount);
@@ -4994,6 +5544,7 @@ function stepGameplayFrame(dt, shouldRender){
   if(RADIO.setActivePlayer) RADIO.setActivePlayer(hudPlayerId);
   stepWorldSystems(dt);
   if(FPS_HUD) FPS_HUD.update(dt);
+  if(VEHICLE_RADAR) VEHICLE_RADAR.update(dt);
   RADIO.updateHUD(dt, rpm01, throttle, playerTelemetry);
   if(shouldRender && !renderLocalMultiplayer(dt)) renderPlayerCamera();
 }

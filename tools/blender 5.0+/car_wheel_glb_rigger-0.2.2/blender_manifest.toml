@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "car_wheel_glb_rigger"
+version = "0.2.2"
+name = "Car Wheel GLB Rigger"
+tagline = "Fast car wheel rig setup for GLB and three.js"
+maintainer = "CodesAndTips"
+type = "add-on"
+
+blender_version_min = "5.0.0"
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 CodesAndTips"]
+tags = ["Object", "Rigging", "Import-Export"]
+
+[permissions]
+files = "Export GLB files selected by the user"

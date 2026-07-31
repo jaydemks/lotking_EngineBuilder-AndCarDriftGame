@@ -51,22 +51,40 @@ function create(deps){
   const commitInspectorHistory = deps.commitInspectorHistory || function(){};
 
   function bindInspectorHistory(box, object){
+    // buildInspector reuses the same panel element. Without disposing these
+    // delegated listeners every rebuild stacked another complete set, so one
+    // click could serialize the selected asset tens of times.
+    if(box._lkInspectorHistoryAbort) box._lkInspectorHistoryAbort.abort();
+    const historyAbort = new AbortController();
+    box._lkInspectorHistoryAbort = historyAbort;
+    const listenerOptions = capture => ({capture:!!capture, signal:historyAbort.signal});
     const isControl = target => !!(target && target.matches && target.matches('input, select, textarea'));
     const isManaged = target => !!(target && target.closest && target.closest('[data-history-managed]'));
     const isTransform = target => !!(tf.inputs || []).find(item => item && item.input === target);
     const shouldTrack = target => isControl(target) && !isManaged(target) && !isTransform(target);
+    let historyControl = null;
+    const beginFor = target => {
+      if(!shouldTrack(target) || historyControl === target) return;
+      historyControl = target;
+      beginInspectorHistory(object);
+    };
+    const commitFor = target => {
+      if(!shouldTrack(target)) return;
+      commitInspectorHistory('Inspector parameter');
+      historyControl = null;
+    };
     box.addEventListener('focusin', event => {
-      if(shouldTrack(event.target)) beginInspectorHistory(object);
-    }, true);
+      beginFor(event.target);
+    }, listenerOptions(true));
     box.addEventListener('pointerdown', event => {
-      if(shouldTrack(event.target)) beginInspectorHistory(object);
-    }, true);
+      beginFor(event.target);
+    }, listenerOptions(true));
     box.addEventListener('change', event => {
-      if(shouldTrack(event.target)) commitInspectorHistory('Inspector parameter');
-    });
+      commitFor(event.target);
+    }, listenerOptions(false));
     box.addEventListener('pointerup', event => {
-      if(shouldTrack(event.target) && event.target.matches('input[type="range"], input[type="color"]')) commitInspectorHistory('Inspector parameter');
-    });
+      if(shouldTrack(event.target) && event.target.matches('input[type="range"], input[type="color"]')) commitFor(event.target);
+    }, listenerOptions(false));
   }
 
   function transformContextInfo(o){
@@ -169,7 +187,8 @@ function create(deps){
     nameI.addEventListener('change', () => { o.userData.editorName = nameI.value; markDirty(); refreshOutliner(); });
     box.appendChild(head);
     if(o.userData.editorType === 'playerLight' || o.userData.editorType === 'playerEffect' ||
-      o.userData.editorType === 'playerSkid' || o.userData.editorType === 'playerDataWidget'){
+      o.userData.editorType === 'playerSkid' || o.userData.editorType === 'playerDataWidget' ||
+      o.userData.editorType === 'playerCamera'){
       box.appendChild(btnRow([
         {label:'← player_car Logic', action:() => selectObject(GAME.player.car)},
         {label:tr('Focus component', 'Focus componente'), action: focusSelected},
@@ -203,7 +222,7 @@ function create(deps){
         const i = el('<input type="number" step="' + (isDeg ? 1 : .1) + '" title="' + axis.label + '">');
         i.value = +get(ax).toFixed(3);
         i.addEventListener('focus', beginTransformHistory);
-        i.addEventListener('input', () => { set(ax, parseFloat(i.value) || 0); STORE.syncCollider(o); markDirty(); if(o.userData.editorType==='player' || o.userData.editorType==='playerDataWidget' || o.userData.editorType==='playerSkid') onGizmoChange(); });
+        i.addEventListener('input', () => { set(ax, parseFloat(i.value) || 0); STORE.syncCollider(o); markDirty(); if(o.userData.editorType==='player' || o.userData.editorType==='playerDataWidget' || o.userData.editorType==='playerSkid' || o.userData.editorType==='playerCamera') onGizmoChange(); });
         i.addEventListener('change', () => commitTransformHistory(label));
         row.appendChild(i); ins.push({input:i, prop:ax, kind});
       });
@@ -574,6 +593,7 @@ function create(deps){
         mode:'decal', src:null, dbKey:null, asset:null, width:2, height:2, opacity:1, color:0xffffff,
         alphaTest:.01, blending:'normal', depthBias:.012, doubleSide:true, animated:false,
         materialModel:'unlit', roughness:.65, metalness:0, specular:.35, emissive:0x000000, emissiveIntensity:0,
+        surfaceInfluence:0, surfaceProbeDistance:1.5, surfaceReceiverId:null, surfaceReceiverName:'',
       }, o.userData.textureProps || {});
       o.userData.textureProps = props;
       const updateTexture = patch => {
@@ -678,29 +698,99 @@ function create(deps){
         commitTransformHistory('Texture mode');
         syncTransformFields();
       }).root);
+      let surfacePanel = null;
+      let pbrPanel = null;
+      let lightingSelect = null;
       tex.body.appendChild(selectRow(tr('Blending', 'Fusione'), props.blending || 'normal', [
         {value:'normal', label:'Normal alpha'},
+        {value:'surface', label:tr('Surface Layer · preserve PBR', 'Livello superficie · preserva PBR')},
         {value:'additive', label:'Additive'},
         {value:'multiply', label:'Multiply'},
         {value:'subtractive', label:'Subtractive'},
-      ], v => updateTexture({blending:v})).root);
+      ], v => {
+        updateTexture({
+          blending:v,
+          materialModel:v === 'surface' ? 'lit' : props.materialModel,
+          surfaceReceiverId:v === 'surface' ? null : props.surfaceReceiverId,
+          surfaceReceiverName:v === 'surface' ? '' : props.surfaceReceiverName,
+        });
+        if(v === 'surface' && STORE.matchTextureSurface) STORE.matchTextureSurface(o, true);
+        if(surfacePanel) surfacePanel.hidden = v !== 'surface';
+        if(lightingSelect && v === 'surface'){
+          lightingSelect.value = 'lit';
+          lightingSelect.disabled = true;
+        } else if(lightingSelect) lightingSelect.disabled = false;
+        if(pbrPanel) pbrPanel.hidden = v !== 'surface' && props.materialModel !== 'lit';
+      }).root);
+      surfacePanel = el('<div class="lk-material-preserve"></div>');
+      surfacePanel.hidden = props.blending !== 'surface';
+      const surfaceHint = el('<div class="lk-hint"></div>');
+      const updateSurfaceHint = () => {
+        const current = o.userData.textureProps || props;
+        surfaceHint.textContent = current.surfaceReceiverName
+          ? tr('Matched surface: ', 'Superficie associata: ') + current.surfaceReceiverName
+          : tr('Move the decal onto a surface, then use Match surface. The engine also rematches it automatically after a transform.', 'Sposta il decal su una superficie, poi usa Associa superficie. Il motore lo riassocia anche automaticamente dopo una trasformazione.');
+      };
+      surfacePanel.appendChild(el('<div class="lk-hint"><b>' +
+        tr('Material-preserving color decal', 'Decal colore che preserva il materiale') +
+        '</b><br>' +
+        tr('Uses normal alpha instead of Multiply and reuses the receiver’s normal, roughness, metallic, AO and environment maps. A controlled amount of the base texture can pass through the decal without cloning GPU textures.', 'Usa alpha normale al posto di Multiply e riutilizza normal, roughness, metallic, AO ed environment map della superficie. Una quantità controllata della texture base può attraversare il decal senza clonare texture GPU.') +
+        '</div>'));
+      surfacePanel.appendChild(surfaceHint);
+      surfacePanel.appendChild(sliderRow(
+        tr('Material override', 'Sovrascrivi materiale'),
+        props.surfaceInfluence == null ? 0 : props.surfaceInfluence,
+        0, 1, .01,
+        v => updateTexture({surfaceInfluence:v}),
+        v => Math.round(v * 100) + '%'
+      ).root);
+      surfacePanel.appendChild(sliderRow(
+        tr('Receiver base texture', 'Texture base ricevente'),
+        props.surfaceBaseInfluence == null ? .18 : props.surfaceBaseInfluence,
+        0, 1, .01,
+        v => updateTexture({surfaceBaseInfluence:v}),
+        v => Math.round(v * 100) + '%'
+      ).root);
+      surfacePanel.appendChild(sliderRow(
+        tr('Surface probe', 'Raggio superficie'),
+        props.surfaceProbeDistance == null ? 1.5 : props.surfaceProbeDistance,
+        .05, 5, .05,
+        v => updateTexture({surfaceProbeDistance:v, surfaceReceiverId:null, surfaceReceiverName:''}),
+        v => (+v).toFixed(2) + 'm'
+      ).root);
+      surfacePanel.appendChild(btnRow([{label:tr('Match surface now', 'Associa superficie ora'), action:() => {
+        updateTexture({surfaceReceiverId:null, surfaceReceiverName:''});
+        if(STORE.matchTextureSurface) STORE.matchTextureSurface(o, true);
+        Object.assign(props, o.userData.textureProps || {});
+        if(o.userData.addedEntry) o.userData.addedEntry.props = Object.assign({}, props);
+        updateSurfaceHint();
+      }}]));
+      updateSurfaceHint();
+      tex.body.appendChild(surfacePanel);
       tex.body.appendChild(colorRow(tr('Base color', 'Colore base'), props.color == null ? 0xffffff : props.color, v => updateTexture({color:v})).root);
       tex.body.appendChild(sliderRow(tr('Width', 'Larghezza'), props.width || 2, .05, 24, .05, v => updateTexture({width:v}), v => (+v).toFixed(2) + 'm').root);
       tex.body.appendChild(sliderRow(tr('Height', 'Altezza'), props.height || 2, .05, 24, .05, v => updateTexture({height:v}), v => (+v).toFixed(2) + 'm').root);
       tex.body.appendChild(sliderRow(tr('Opacity', 'Opacità'), props.opacity == null ? 1 : props.opacity, 0, 1, .01, v => updateTexture({opacity:v}), v => Math.round(v * 100) + '%').root);
       tex.body.appendChild(sliderRow('Alpha cut', props.alphaTest == null ? .01 : props.alphaTest, 0, .8, .01, v => updateTexture({alphaTest:v}), v => (+v).toFixed(2)).root);
       tex.body.appendChild(sliderRow('Depth bias', props.depthBias == null ? .012 : props.depthBias, 0, .08, .001, v => updateTexture({depthBias:v}), v => (+v).toFixed(3) + 'm').root);
-      tex.body.appendChild(selectRow(tr('Lighting', 'Illuminazione'), props.materialModel || 'unlit', [
+      const lightingRow = selectRow(tr('Lighting', 'Illuminazione'), props.materialModel || 'unlit', [
         {value:'unlit', label:tr('Unlit / flat', 'Non illuminato / piatto')},
         {value:'lit', label:tr('Lit / PBR', 'Illuminato / PBR')},
-      ], v => updateTexture({materialModel:v})).root);
-      if((props.materialModel || 'unlit') === 'lit'){
-        tex.body.appendChild(sliderRow(tr('Roughness', 'Ruvidità'), props.roughness == null ? .65 : props.roughness, 0, 1, .01, v => updateTexture({roughness:v}), v => Math.round(v * 100) + '%').root);
-        tex.body.appendChild(sliderRow(tr('Metallic', 'Metallico'), props.metalness == null ? 0 : props.metalness, 0, 1, .01, v => updateTexture({metalness:v}), v => Math.round(v * 100) + '%').root);
-        tex.body.appendChild(sliderRow(tr('Specular', 'Speculare'), props.specular == null ? .35 : props.specular, 0, 1, .01, v => updateTexture({specular:v}), v => Math.round(v * 100) + '%').root);
-        tex.body.appendChild(colorRow(tr('Emission color', 'Colore emissione'), props.emissive == null ? 0x000000 : props.emissive, v => updateTexture({emissive:v})).root);
-        tex.body.appendChild(sliderRow(tr('Emission', 'Emissione'), props.emissiveIntensity == null ? 0 : props.emissiveIntensity, 0, 3, .01, v => updateTexture({emissiveIntensity:v}), v => (+v).toFixed(2)).root);
-      }
+      ], v => {
+        updateTexture({materialModel:v});
+        if(pbrPanel) pbrPanel.hidden = v !== 'lit' && props.blending !== 'surface';
+      });
+      lightingSelect = lightingRow.input;
+      if(props.blending === 'surface') lightingSelect.disabled = true;
+      tex.body.appendChild(lightingRow.root);
+      pbrPanel = el('<div class="lk-decal-pbr"></div>');
+      pbrPanel.hidden = (props.materialModel || 'unlit') !== 'lit' && props.blending !== 'surface';
+      pbrPanel.appendChild(sliderRow(tr('Roughness', 'Ruvidità'), props.roughness == null ? .65 : props.roughness, 0, 1, .01, v => updateTexture({roughness:v}), v => Math.round(v * 100) + '%').root);
+      pbrPanel.appendChild(sliderRow(tr('Metallic', 'Metallico'), props.metalness == null ? 0 : props.metalness, 0, 1, .01, v => updateTexture({metalness:v}), v => Math.round(v * 100) + '%').root);
+      pbrPanel.appendChild(sliderRow(tr('Specular', 'Speculare'), props.specular == null ? .35 : props.specular, 0, 1, .01, v => updateTexture({specular:v}), v => Math.round(v * 100) + '%').root);
+      pbrPanel.appendChild(colorRow(tr('Emission color', 'Colore emissione'), props.emissive == null ? 0x000000 : props.emissive, v => updateTexture({emissive:v})).root);
+      pbrPanel.appendChild(sliderRow(tr('Emission', 'Emissione'), props.emissiveIntensity == null ? 0 : props.emissiveIntensity, 0, 3, .01, v => updateTexture({emissiveIntensity:v}), v => (+v).toFixed(2)).root);
+      tex.body.appendChild(pbrPanel);
       tex.body.appendChild(checkRow(tr('Double side', 'Doppio lato'), props.doubleSide !== false, v => updateTexture({doubleSide:v})).root);
       tex.body.appendChild(checkRow(tr('Animated / GIF refresh', 'Animata / refresh GIF'), !!props.animated, v => updateTexture({animated:v})).root);
       box.appendChild(tex.root);

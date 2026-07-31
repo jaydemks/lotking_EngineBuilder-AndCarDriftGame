@@ -8,15 +8,21 @@
 const PRESETS = Object.freeze({
   default: Object.freeze({
     torque:3, horsepower:360, maxSpeed:4, oversteer:1, handbrake:2, steer:2, brake:0, grip:1,
-    reverseDelay:.5, suspension:2, damping:4, travel:0, ride:0, roll:-4, chassisLift:0,
+    frontDriveBias:0, turboStrength:.28, turboThreshold:2400, turboSpool:.8,
+    reverseDelay:.5, suspension:2, frontSuspension:0, rearSuspension:0,
+    damping:4, frontDamping:0, rearDamping:0, travel:0, ride:0, roll:-4, chassisLift:0,
   }),
   race: Object.freeze({
     torque:3, horsepower:430, maxSpeed:6, oversteer:-2, handbrake:0, steer:4, brake:1, grip:4,
-    reverseDelay:.5, suspension:5, damping:6, travel:-2, ride:-1, roll:-6, chassisLift:0,
+    frontDriveBias:0, turboStrength:.34, turboThreshold:2600, turboSpool:.65,
+    reverseDelay:.5, suspension:5, frontSuspension:1, rearSuspension:0,
+    damping:6, frontDamping:1, rearDamping:0, travel:-2, ride:-1, roll:-6, chassisLift:0,
   }),
   drift: Object.freeze({
     torque:5, horsepower:400, maxSpeed:4, oversteer:7, handbrake:7, steer:5, brake:0, grip:-5,
-    reverseDelay:.45, suspension:2, damping:4, travel:1, ride:-1, roll:-5, chassisLift:0,
+    frontDriveBias:0, turboStrength:.38, turboThreshold:2600, turboSpool:.9,
+    reverseDelay:.45, suspension:2, frontSuspension:1, rearSuspension:-2,
+    damping:4, frontDamping:1, rearDamping:-1, travel:1, ride:-1, roll:-5, chassisLift:0,
   }),
 });
 const TUNE_PARAMS = Object.freeze([
@@ -28,8 +34,16 @@ const TUNE_PARAMS = Object.freeze([
   {key:'steer', label:'Steering', it:'Sterzo', min:-10, max:10, step:1, fallback:0},
   {key:'brake', label:'Braking', it:'Frenata', min:-10, max:10, step:1, fallback:0},
   {key:'grip', label:'Tire grip', it:'Aderenza gomme', min:-10, max:10, step:1, fallback:0},
+  {key:'frontDriveBias', label:'Front drive share', it:'Quota trazione anteriore', min:0, max:1, step:.05, fallback:0, format:v => Math.round(Number(v) * 100) + '%'},
+  {key:'turboStrength', label:'Turbo contribution', it:'Contributo turbo', min:0, max:1, step:.01, fallback:.28, format:v => Math.round(Number(v) * 100) + '%'},
+  {key:'turboThreshold', label:'Turbo spool start', it:'Inizio spool turbo', min:1200, max:5000, step:100, fallback:2400, format:v => Math.round(Number(v)) + ' rpm'},
+  {key:'turboSpool', label:'Turbo response', it:'Risposta turbo', min:.1, max:2.5, step:.05, fallback:.8, format:v => Number(v).toFixed(2) + ' s'},
   {key:'suspension', label:'Suspension stiffness', it:'Rigidita sospensioni', min:-10, max:10, step:1, fallback:0},
+  {key:'frontSuspension', label:'Front suspension offset', it:'Sospensioni anteriori', min:-10, max:10, step:1, fallback:0},
+  {key:'rearSuspension', label:'Rear suspension offset', it:'Sospensioni posteriori', min:-10, max:10, step:1, fallback:0},
   {key:'damping', label:'Suspension damping', it:'Damping sospensioni', min:-10, max:10, step:1, fallback:0},
+  {key:'frontDamping', label:'Front damping offset', it:'Damping anteriore', min:-10, max:10, step:1, fallback:0},
+  {key:'rearDamping', label:'Rear damping offset', it:'Damping posteriore', min:-10, max:10, step:1, fallback:0},
   {key:'travel', label:'Suspension travel', it:'Escursione sospensioni', min:-10, max:10, step:1, fallback:0},
   {key:'ride', label:'Wheel stance', it:'Assetto ruote', min:-10, max:10, step:1, fallback:0},
   {key:'roll', label:'Chassis roll', it:'Rollio telaio', min:-10, max:10, step:1, fallback:0},
@@ -224,6 +238,10 @@ function create(options){
     values.horsepower = horsepower;
     drive.horsepower = horsepower;
     drive.powerScale = hpScale;
+    drive.frontDriveBias = clamp(values.frontDriveBias == null ? 0 : Number(values.frontDriveBias), 0, 1);
+    drive.turboStrength = clamp(values.turboStrength == null ? .28 : Number(values.turboStrength), 0, 1);
+    drive.turboThreshold = clamp(values.turboThreshold == null ? 2400 : Number(values.turboThreshold), 1200, 5000);
+    drive.turboSpool = clamp(values.turboSpool == null ? .8 : Number(values.turboSpool), .1, 2.5);
     values.curves = normalizeCurves(values.curves);
     values.exposed = normalizeExposed(values.exposed);
     drive.curves = {
@@ -270,13 +288,23 @@ function create(options){
     // raycast suspension: stiffness/damping and ride height + travel
     if(susp){
       const s = (values.suspension || 0) / 10;
+      const sf = (values.frontSuspension || 0) / 10;
+      const sr = (values.rearSuspension || 0) / 10;
       const d = (values.damping || 0) / 10;
+      const df = (values.frontDamping || 0) / 10;
+      const dr = (values.rearDamping || 0) / 10;
       const t = (values.travel || 0) / 10;
       const h = (values.ride || 0) / 10;
       const r = (values.roll || 0) / 10;
       susp.stiffness = baseSusp.stiffness * clamp(1 + s * .6, .45, 1.8);
       susp.compression = baseSusp.compression * clamp(1 + d * .75, .35, 2.0);
       susp.relaxation = baseSusp.relaxation * clamp(1 + d * .75, .35, 2.0);
+      susp.frontStiffness = susp.stiffness * clamp(1 + sf * .55, .5, 1.55);
+      susp.rearStiffness = susp.stiffness * clamp(1 + sr * .55, .5, 1.55);
+      susp.frontCompression = susp.compression * clamp(1 + df * .6, .45, 1.65);
+      susp.rearCompression = susp.compression * clamp(1 + dr * .6, .45, 1.65);
+      susp.frontRelaxation = susp.relaxation * clamp(1 + df * .6, .45, 1.65);
+      susp.rearRelaxation = susp.relaxation * clamp(1 + dr * .6, .45, 1.65);
       susp.restLength = baseSusp.restLength * clamp(1 + h * .35, .6, 1.4);
       susp.travel = baseSusp.travel * clamp(1 + t * .75 + h * .25, .45, 1.9);
       susp.rollInfluence = clamp(baseSusp.rollInfluence * (1 + r * .8), .04, .42);

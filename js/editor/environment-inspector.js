@@ -92,9 +92,10 @@ function create(deps){
       sli.body.appendChild(sliderRow(tr('Day sun', 'Sole diurno'), lighting.daySun, 0, 3, .02, v => lset({daySun:v}), v => (+v).toFixed(2)).root);
       sli.body.appendChild(sliderRow(tr('Day ambient fill', 'Riempimento ambiente giorno'), lighting.dayAmbient, 0, 2, .02, v => lset({dayAmbient:v}), v => (+v).toFixed(2)).root);
       sli.body.appendChild(sliderRow(tr('Moon direct light', 'Luce lunare diretta'), lighting.moonDirect, 0, 1, .01, v => lset({moonDirect:v}), v => (+v).toFixed(2)).root);
-      sli.body.appendChild(sliderRow(tr('Moon indirect light', 'Luce lunare indiretta'), lighting.moonIndirect, 0, 1, .01, v => lset({moonIndirect:v}), v => (+v).toFixed(2)).root);
+      sli.body.appendChild(sliderRow(tr('Moon indirect light', 'Luce lunare indiretta'), lighting.moonIndirect, 0, 4, .02, v => lset({moonIndirect:v}), v => (+v).toFixed(2)).root);
+      sli.body.appendChild(sliderRow(tr('Night environment response', 'Risposta ambiente notturna'), lighting.nightEnvironment == null ? 1 : lighting.nightEnvironment, 0, 5, .05, v => lset({nightEnvironment:v}), v => (+v).toFixed(2)).root);
       sli.body.appendChild(btnRow([{label:'↺ Default r185', action:() => { sky.lighting.set(sky.lighting.defaults()); markDirty(); buildInspector(); }}]));
-      sli.body.appendChild(el('<div class="lk-hint">' + tr('Moon direct light casts the night shadow; moon indirect light controls blue diffuse fill and follows moon visibility. Exposure is configured under Rendering / Video.', 'La luce lunare diretta proietta l\'ombra notturna; la luce lunare indiretta controlla il riempimento diffuso blu e segue la visibilita della luna. L\'esposizione si configura in Rendering / Video.') + '</div>'));
+      sli.body.appendChild(el('<div class="lk-hint">' + tr('Moon direct light casts the night shadow. Moon indirect controls diffuse blue fill; with HDRI/Procedural Environment active, Night environment response separately amplifies PBR and path-traced reflections after sunset.', 'La luce lunare diretta proietta l’ombra notturna. Luce lunare indiretta controlla il riempimento diffuso blu; con HDRI/Ambiente procedurale attivo, Risposta ambiente notturna amplifica separatamente i riflessi PBR e path traced dopo il tramonto.') + '</div>'));
     }
     box.appendChild(sli.root);
 

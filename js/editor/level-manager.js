@@ -241,6 +241,10 @@ function create(deps){
     if(!box) return;
     box.innerHTML = '';
     const LV = levelsApi();
+    // The loaded editor scene is authoritative. A project import or an
+    // interrupted two-key localStorage update can leave the small level index
+    // pointing at the previous level even though another scene is open.
+    if(LV && LV.reconcileActive && ED.trackId) LV.reconcileActive(ED.trackId);
     // The editor is the authoritative project view: levels hidden from normal
     // gameplay/menu pickers must still remain visible and editable here.
     // LEVELS.list also repairs orphaned lotking.level.* records before return.

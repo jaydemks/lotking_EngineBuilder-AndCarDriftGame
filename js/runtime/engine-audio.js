@@ -84,6 +84,7 @@ function create(deps){
   const skidCur = {drift: 0, brake: 0, accel: 0};       // livelli smussati (attack/release)
   let skidTest = {key: null, t: 0};         // test dal designer
   let skidNoiseBuf = null;                  // loop di rumore per il fallback sintetico
+  const fallbackNoiseBuffers = new Map();   // evita AudioBuffer grandi al primo evento
   let manual = null;                        // {rpm, throttle, limiter} → test mode editor
   let thr = 0, boost = 0, prevBoost = 0, prevThrottle = 0;
   let smRpm = gearbox.idle;                 // rpm smussati: doma l'oscillazione veloce del limiter fisico
@@ -95,23 +96,31 @@ function create(deps){
 
   // ------------------------------------------------ buffers
   function loadBuffer(src){
-    if(!src || buffers.has(src)) return;
-    buffers.set(src, {status: 'loading', buffer: null});
+    if(!src) return Promise.resolve(null);
+    const existing = buffers.get(src);
+    if(existing) return existing.promise || Promise.resolve(existing.buffer || null);
+    const record = {status: 'loading', buffer: null, promise:null};
+    buffers.set(src, record);
     notifyStatus();
-    resolveSrc(src)
+    record.promise = Promise.resolve(resolveSrc(src))
       .then(url => fetch(url))
       .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
       .then(ab => ctx.decodeAudioData(ab))
       .then(buf => {
-        buffers.set(src, {status: 'ok', buffer: buf});
+        record.status = 'ok';
+        record.buffer = buf;
         if(built) attachPendingVoices();
         notifyStatus();
+        return buf;
       })
       .catch(err => {
         console.warn('LotKing engine audio: sample non caricato "' + src + '"', err);
-        buffers.set(src, {status: 'error', buffer: null});
+        record.status = 'error';
+        record.buffer = null;
         notifyStatus();
+        return null;
       });
+    return record.promise;
   }
   function bufferOf(src){
     const b = src && buffers.get(src);
@@ -285,9 +294,15 @@ function create(deps){
   function noiseBurst(opts){
     const o = opts || {};
     const dur = o.dur || .25;
-    const buf = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * dur | 0), ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, o.shape == null ? 1.6 : o.shape);
+    const shape = o.shape == null ? 1.6 : o.shape;
+    const noiseKey = dur.toFixed(3) + '|' + Number(shape).toFixed(2);
+    let buf = fallbackNoiseBuffers.get(noiseKey);
+    if(!buf){
+      buf = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * dur | 0), ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, shape);
+      fallbackNoiseBuffers.set(noiseKey, buf);
+    }
     const node = ctx.createBufferSource();
     node.buffer = buf;
     const f = ctx.createBiquadFilter();
@@ -472,7 +487,9 @@ function create(deps){
     const turbo = cfg.layers.turbo;
     prevBoost = boost;
     if(turbo && turbo.enabled){
-      const target = thr * clamp(st.rpm / gearbox.redline, 0, 1.1);
+      const target = Number.isFinite(Number(st.boost01))
+        ? clamp(Number(st.boost01), 0, 1)
+        : thr * clamp(st.rpm / gearbox.redline, 0, 1.1);
       const k = target > boost ? (1 / Math.max(.02, turbo.attack || .3)) : (1 / Math.max(.02, turbo.release || .5));
       boost += (target - boost) * Math.min(1, dt * k);
       const v = layerVoices.turbo;
@@ -578,6 +595,33 @@ function create(deps){
     if(!(opts && opts.silent)) fireEvent('ignition', {force: true});
     return true;
   }
+  async function prewarm(){
+    if(!ensureContext() || !cfg) return {ready:false, loaded:0, failed:0};
+    if(!built) build();
+    // Materialise every procedural one-shot buffer as well as the authored
+    // banks. Previously fetch/decode continued behind the loading overlay and
+    // attachPendingVoices ran on the first accelerator frames.
+    [
+      {dur:.8, shape:1}, {dur:.1, shape:2.2}, {dur:.45, shape:1.2},
+      {dur:.2, shape:2}, {dur:.12, shape:2.4}, {dur:.5, shape:.8},
+    ].forEach(options => {
+      const key = options.dur.toFixed(3) + '|' + Number(options.shape).toFixed(2);
+      if(fallbackNoiseBuffers.has(key)) return;
+      const buffer = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * options.dur | 0), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for(let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, options.shape);
+      fallbackNoiseBuffers.set(key, buffer);
+    });
+    const pending = Array.from(buffers.values()).map(entry => entry.promise).filter(Boolean);
+    await Promise.all(pending);
+    if(running) attachPendingVoices();
+    const values = Array.from(buffers.values());
+    return {
+      ready:sampleEngineReady(),
+      loaded:values.filter(entry => entry.status === 'ok').length,
+      failed:values.filter(entry => entry.status === 'error').length,
+    };
+  }
   function stop(){
     running = false;
     if(!ctx || !built) return;
@@ -655,6 +699,7 @@ function create(deps){
     liveConfig: () => cfg,   // riferimento vivo: il designer lo muta per i parametri continui
     update,
     start,
+    prewarm,
     stop,
     setMuted: v => { masterMute = v ? 0 : 1; },
     setManual,

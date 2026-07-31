@@ -25,6 +25,8 @@ const MENU_ROLE_MANIFEST_URL = 'demo/menu-roles.json';
 const BUNDLED_DEMO_LEVEL_ID = 'online-demo';
 const assetUrlCache = new Map();
 const logicElementAssetCache = new Map();
+const dynamicMaterialTextures = new Set();
+let dynamicRadioSurfaceCount = 0;
 
 // ------------------------------------------------ procedural surfaces
 // Optional engine module (js/engine/procedural-surfaces.js). It is read lazily
@@ -1896,7 +1898,16 @@ function readLevelProject(id){
   id = normalizeLevelId(id);
   try {
     const raw = localStorage.getItem(LEVEL_PREFIX + id);
-    return raw ? parseProject(JSON.parse(raw)) : null;
+    if(raw) return parseProject(JSON.parse(raw));
+    // The active level already lives in KEY. Keeping a second byte-for-byte
+    // copy under LEVEL_PREFIX can double storage for the largest scene and
+    // exhaust LocalStorage even though every asset payload is in IndexedDB.
+    const idx = readIndex();
+    if(normalizeLevelId(idx.activeId) === id){
+      const activeRaw = localStorage.getItem(KEY);
+      return activeRaw ? parseProject(JSON.parse(activeRaw)) : null;
+    }
+    return null;
   } catch(err){ console.warn('LotKing store: livello "' + id + '" corrotto', err); return null; }
 }
 function writeLevelProject(id, project){
@@ -2015,6 +2026,17 @@ function ensureBundledDemoProject(){
   bundledDemoReady = fetchTextWithProgress(url, 8, 42, 'downloading demo project')
     .then(async text => {
       if(!text) return null;
+      const splitProject = window.LK_RUNTIME_SPLIT_PROJECT;
+      if(splitProject && splitProject.resolveText){
+        text = await splitProject.resolveText(text, new URL(url, location.href).href, (ratio, file) => {
+          reportBundledDemoProgress({
+            progress:42 + Math.round(Math.max(0, Math.min(1, ratio)) * 11),
+            step:'assembling demo project parts',
+            file,
+            url,
+          });
+        });
+      }
       reportBundledDemoProgress({progress:54, step:'parsing demo project', url});
       const project = parseProject(text);
       const meta = project.meta || {};
@@ -2109,7 +2131,10 @@ function upsertActiveLevel(project){
   if(meta.levelVisible === false) entry.visible = false;
   else if(!Object.prototype.hasOwnProperty.call(entry, 'visible')) entry.visible = true;
   const copy = Object.assign({}, project, {meta: Object.assign({}, meta, {trackId: id, trackName: entry.name})});
-  if(!writeLevelProject(id, copy)) return false;
+  // save() has already committed this exact project to KEY. The active level
+  // is an alias of that slot, not a second full LocalStorage allocation.
+  try { localStorage.removeItem(LEVEL_PREFIX + id); }
+  catch(err){ console.warn('LotKing store: active level duplicate not removed', err); }
   if(!writeIndex(idx)) return false;
   maybeStorePlayerBlueprintDefault(copy, entry);
   maybeStoreRadioHudDefault(copy, entry);
@@ -2462,6 +2487,7 @@ function collectPlayerBlueprint(GAME){
     skids: cloneData(GAME.player.skids || {}),
     collision: cloneData(GAME.player.collision || {}),
     modelShading: GAME.player.getModelShading ? GAME.player.getModelShading() : (GAME.player.car && GAME.player.car.userData.modelShading || 'original'),
+    steeringWheel: cloneData(GAME.player.getSteeringWheelConfig ? GAME.player.getSteeringWheelConfig() : (GAME.player.steeringWheel || {})),
   };
   if(GAME.player.spawn){
     player.spawn = cloneData(GAME.player.spawn);
@@ -2655,6 +2681,7 @@ function playerTemplateFromLevelLibrary(GAME){
       skids: cloneData(GAME.player.skids || {}),
       collision: cloneData(GAME.player.collision || {}),
       modelShading: GAME.player.getModelShading ? GAME.player.getModelShading() : 'original',
+      steeringWheel: cloneData(GAME.player.getSteeringWheelConfig ? GAME.player.getSteeringWheelConfig() : (GAME.player.steeringWheel || {})),
     };
     if(GAME.player.car && GAME.player.car.userData.modelSrc) player.modelSrc = GAME.player.car.userData.modelSrc;
   }
@@ -2700,6 +2727,20 @@ const LEVELS = {
     });
   },
   activeId(){ return normalizeLevelId(ensureLibrary().activeId); },
+  reconcileActive(id){
+    const target = normalizeLevelId(id);
+    if(!target) return false;
+    const idx = ensureLibrary();
+    if(!levelEntry(idx, target)) return false;
+    const previous = normalizeLevelId(idx.activeId);
+    if(previous === target) return true;
+    idx.activeId = target;
+    if(!writeIndex(idx)) return false;
+    if(applied && appliedMode === 'active') appliedLevelId = target;
+    syncCatalog();
+    console.warn('LotKing store: active level index realigned with the loaded editor scene', previous, '→', target);
+    return true;
+  },
   get: readLevelProject,
   create(name, scene, meta){
     const idx = ensureLibrary();
@@ -2718,10 +2759,36 @@ const LEVELS = {
     const idx = ensureLibrary();
     id = normalizeLevelId(id);
     if(!levelEntry(idx, id)) return false;
+    const previousId = normalizeLevelId(idx.activeId);
+    let previousRaw = null;
+    if(previousId && previousId !== id){
+      try {
+        previousRaw = localStorage.getItem(KEY);
+        if(previousRaw){
+          // Move, rather than copy, the old active slot. If the new KEY write
+          // fails, restore the old slot immediately.
+          localStorage.setItem(LEVEL_PREFIX + previousId, previousRaw);
+          localStorage.removeItem(KEY);
+        }
+      } catch(err){
+        console.warn('LotKing store: current level could not be archived before switch', err);
+        return false;
+      }
+    }
     const project = readLevelProject(id);
-    if(!project) return false;
-    try { localStorage.setItem(KEY, JSON.stringify(project)); }
-    catch(err){ console.warn('LotKing store: attivazione livello fallita', err); return false; }
+    if(!project){
+      if(previousRaw) try { localStorage.setItem(KEY, previousRaw); } catch(err){}
+      return false;
+    }
+    try {
+      localStorage.setItem(KEY, JSON.stringify(project));
+      localStorage.removeItem(LEVEL_PREFIX + id);
+    }
+    catch(err){
+      if(previousRaw) try { localStorage.setItem(KEY, previousRaw); } catch(restoreError){}
+      console.warn('LotKing store: attivazione livello fallita', err);
+      return false;
+    }
     idx.activeId = id;
     writeIndex(idx);
     syncCatalog();
@@ -3284,15 +3351,32 @@ function objectLight(obj){
 }
 
 // material override: global or per material slot (edited via editor)
+function normalizeStoredMaterialState(value){
+  const state = Object.assign({}, value || {});
+  // Old Inspector saves could contain a contradictory state: Standard +
+  // explicitly opaque, but with a Physical transmission value left behind by
+  // a previous Glass preset. Three then kept rendering the mesh as transmissive
+  // even though the saved opacity was exactly 1.
+  if(Number(state.opacity) >= 1 &&
+    state.transparent === false &&
+    state.depthWrite !== false){
+    state.opacity = 1;
+    state.transmission = 0;
+  }
+  return state;
+}
+
 function normalizeStoredMatProps(p){
   if(!p) return {global:{}, slots:{}};
   if(p.global || p.slots){
+    const slots = {};
+    Object.keys(p.slots || {}).forEach(key => { slots[key] = normalizeStoredMaterialState(p.slots[key]); });
     return {
-      global:Object.assign({}, p.global || {}),
-      slots:Object.assign({}, p.slots || {}),
+      global:normalizeStoredMaterialState(p.global),
+      slots,
     };
   }
-  const flat = Object.assign({}, p);
+  const flat = normalizeStoredMaterialState(p);
   delete flat.materialSlot;
   return {global:flat, slots:{}};
 }
@@ -3341,6 +3425,766 @@ function sanitizePlayerMatProps(props){
 function materialSlotMatches(mesh, meshIndex, materialIndex, targetSlot){
   const stableId = mesh && mesh.userData && mesh.userData.lkMeshEditId;
   return !targetSlot || targetSlot === 'all' || targetSlot === (meshIndex + ':' + materialIndex) || (stableId && targetSlot === ('id|' + stableId + '|' + materialIndex));
+}
+
+function dynamicTextureTelemetry(){
+  const provider = typeof window !== 'undefined' && window.LK_RUNTIME_VEHICLE_TELEMETRY;
+  const value = provider && typeof provider.get === 'function' ? provider.get() : null;
+  if(value) return value;
+  return {
+    speedKmh:0,
+    rpm:900,
+    rpm01:.12,
+    gearLabel:'N',
+    throttle:0,
+    lateralG:0,
+    drift:false,
+    editorPreview:true,
+  };
+}
+
+function drawDynamicVehicleHud(controller, force){
+  const now = performance.now();
+  const hz = Math.max(1, Math.min(30, Number(controller.props.dynamicRefreshHz) || 15));
+  if(!force && now - controller.lastPaint < 1000 / hz) return;
+  controller.lastPaint = now;
+  const data = dynamicTextureTelemetry();
+  const speed = Math.max(0, Math.round(Number(data.speedKmh) || 0));
+  const rpm = Math.max(0, Math.round(Number(data.rpm) || 0));
+  const rpm01 = Math.max(0, Math.min(1, Number(data.rpm01) || rpm / 8000));
+  const gear = String(data.gearLabel != null ? data.gearLabel : (data.reverse ? 'R' : (data.gear || 'N')));
+  const lateralG = Number(data.lateralG != null ? data.lateralG : data.lastLatG) || 0;
+  const style = controller.props.dynamicHudStyle || 'sport';
+  const signature = [speed, Math.round(rpm / 25), gear, Math.round(rpm01 * 100), Math.round(lateralG * 10), style].join('|');
+  if(!force && signature === controller.signature) return;
+  controller.signature = signature;
+
+  const c = controller.canvas, g = controller.ctx, w = c.width, h = c.height;
+  const accent = style === 'telemetry' ? '#51f5c7' : (rpm01 > .9 ? '#ff496c' : '#58b8ff');
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = '#05080d';
+  g.fillRect(0, 0, w, h);
+  const gradient = g.createRadialGradient(w * .5, h * .58, 0, w * .5, h * .58, w * .7);
+  gradient.addColorStop(0, 'rgba(28,45,70,.72)');
+  gradient.addColorStop(1, 'rgba(2,4,8,0)');
+  g.fillStyle = gradient;
+  g.fillRect(0, 0, w, h);
+
+  g.save();
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  if(style === 'minimal'){
+    g.shadowColor = accent; g.shadowBlur = w * .025;
+    g.fillStyle = '#f4f8ff';
+    g.font = '800 ' + Math.round(h * .54) + 'px Arial, sans-serif';
+    g.fillText(String(speed), w * .43, h * .51);
+    g.shadowBlur = 0;
+    g.fillStyle = accent;
+    g.font = '700 ' + Math.round(h * .105) + 'px Arial, sans-serif';
+    g.fillText('KM/H', w * .43, h * .84);
+    g.font = '900 ' + Math.round(h * .33) + 'px Arial, sans-serif';
+    g.fillText(gear, w * .82, h * .54);
+  } else {
+    const cx = w * .35, cy = h * .55, radius = h * .36;
+    g.lineCap = 'round';
+    g.lineWidth = Math.max(8, h * .035);
+    g.strokeStyle = 'rgba(255,255,255,.12)';
+    g.beginPath(); g.arc(cx, cy, radius, Math.PI * .72, Math.PI * 2.28); g.stroke();
+    g.strokeStyle = accent;
+    g.shadowColor = accent; g.shadowBlur = h * .05;
+    g.beginPath(); g.arc(cx, cy, radius, Math.PI * .72, Math.PI * (.72 + 1.56 * rpm01)); g.stroke();
+    g.shadowBlur = 0;
+    g.fillStyle = '#f5f8ff';
+    g.font = '900 ' + Math.round(h * .42) + 'px Arial, sans-serif';
+    g.fillText(String(speed), cx, cy - h * .025);
+    g.fillStyle = 'rgba(235,242,255,.72)';
+    g.font = '700 ' + Math.round(h * .075) + 'px Arial, sans-serif';
+    g.fillText('KM/H', cx, cy + h * .23);
+    g.fillStyle = accent;
+    g.font = '900 ' + Math.round(h * .3) + 'px Arial, sans-serif';
+    g.fillText(gear, w * .76, h * .42);
+    g.fillStyle = 'rgba(235,242,255,.74)';
+    g.font = '700 ' + Math.round(h * .07) + 'px Arial, sans-serif';
+    g.fillText(Math.round(rpm).toLocaleString() + ' RPM', w * .76, h * .68);
+    if(style === 'telemetry'){
+      g.fillStyle = lateralG > .7 ? '#ffcf5a' : '#51f5c7';
+      g.font = '800 ' + Math.round(h * .085) + 'px Arial, sans-serif';
+      g.fillText(Math.abs(lateralG).toFixed(1) + ' G  ·  ' + (data.drift ? 'DRIFT' : 'GRIP'), w * .76, h * .84);
+    }
+  }
+  g.restore();
+  controller.texture.needsUpdate = true;
+}
+
+function dynamicRadioRuntime(){
+  const game = typeof window !== 'undefined' && window.LOT_KING;
+  return game && game.systems && game.systems.radio || null;
+}
+
+function syncDynamicRadioSurfaceAvailability(){
+  const radio = dynamicRadioRuntime();
+  if(radio && radio.setMaterialSurfaceAvailable){
+    radio.setMaterialSurfaceAvailable(dynamicRadioSurfaceCount > 0);
+  }
+}
+
+function retainDynamicRadioSurface(controller){
+  if(!controller || controller.type !== 'radio-hud' || controller.radioSurfaceRetained) return;
+  controller.radioSurfaceRetained = true;
+  dynamicRadioSurfaceCount++;
+  syncDynamicRadioSurfaceAvailability();
+}
+
+function releaseDynamicRadioSurface(controller){
+  if(!controller || !controller.radioSurfaceRetained) return;
+  controller.radioSurfaceRetained = false;
+  dynamicRadioSurfaceCount = Math.max(0, dynamicRadioSurfaceCount - 1);
+  syncDynamicRadioSurfaceAvailability();
+}
+
+function canvasRoundRect(g, x, y, w, h, radius){
+  const r = Math.max(0, Math.min(radius, w * .5, h * .5));
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+function drawDynamicRadioHud(controller, force){
+  const now = performance.now();
+  const hz = Math.max(1, Math.min(30, Number(controller.props.dynamicRefreshHz) || 15));
+  if(!force && now - controller.lastPaint < 1000 / hz) return;
+  controller.lastPaint = now;
+  const radio = dynamicRadioRuntime();
+  const state = radio && radio.surfaceState ? radio.surfaceState() : {
+    title:'LOT KING RADIO', artist:'EDITOR PREVIEW', paused:true, shuffle:false,
+    currentTime:0, duration:0, volume:10, bass:0, speedKmh:0, lastLatG:0, rpm01:.12, throttle:0,
+  };
+  const signature = [
+    state.title, state.artist, state.paused, state.shuffle,
+    Math.floor((state.currentTime || 0) * 2), Math.round(state.speedKmh || 0),
+    Math.round((state.lastLatG || 0) * 10), state.volume, state.bass,
+  ].join('|');
+  if(!force && signature === controller.signature) return;
+  controller.signature = signature;
+
+  const c = controller.canvas, g = controller.ctx, w = c.width, h = c.height;
+  const fmt = seconds => {
+    const value = Math.max(0, Number(seconds) || 0) | 0;
+    return (value / 60 | 0) + ':' + String(value % 60).padStart(2, '0');
+  };
+  g.clearRect(0, 0, w, h);
+  const bg = g.createLinearGradient(0, 0, w, h);
+  bg.addColorStop(0, '#101827'); bg.addColorStop(.55, '#070c14'); bg.addColorStop(1, '#140914');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(81,245,199,.35)'; g.lineWidth = Math.max(2, w * .003);
+  canvasRoundRect(g, w * .018, h * .035, w * .964, h * .93, h * .05); g.stroke();
+
+  g.fillStyle = '#51f5c7';
+  g.font = '800 ' + Math.round(h * .055) + 'px Arial, sans-serif';
+  g.textBaseline = 'middle';
+  g.fillText('LOT KING  ·  RADIO TAB', w * .055, h * .105);
+  g.fillStyle = 'rgba(235,245,255,.55)';
+  g.font = '700 ' + Math.round(h * .04) + 'px Arial, sans-serif';
+  g.textAlign = 'right';
+  g.fillText(Math.round(state.speedKmh || 0) + ' KM/H   ' + Math.abs(state.lastLatG || 0).toFixed(1) + ' G', w * .945, h * .105);
+
+  g.textAlign = 'left';
+  g.fillStyle = '#f3f7ff';
+  g.font = '900 ' + Math.round(h * .105) + 'px Arial, sans-serif';
+  g.fillText(String(state.title || 'NO TRACK').slice(0, 26), w * .055, h * .285);
+  g.fillStyle = '#ff7dce';
+  g.font = '700 ' + Math.round(h * .052) + 'px Arial, sans-serif';
+  g.fillText(String(state.artist || 'RADIO').slice(0, 32), w * .058, h * .39);
+
+  const progress = state.duration > 0 ? Math.max(0, Math.min(1, state.currentTime / state.duration)) : 0;
+  const barX = w * .055, barY = h * .48, barW = w * .89, barH = Math.max(6, h * .018);
+  g.fillStyle = 'rgba(255,255,255,.12)'; canvasRoundRect(g, barX, barY, barW, barH, barH * .5); g.fill();
+  g.fillStyle = '#51f5c7'; canvasRoundRect(g, barX, barY, Math.max(barH, barW * progress), barH, barH * .5); g.fill();
+  g.fillStyle = 'rgba(235,245,255,.62)';
+  g.font = '700 ' + Math.round(h * .038) + 'px Arial, sans-serif';
+  g.fillText(fmt(state.currentTime) + '  /  ' + fmt(state.duration), barX, h * .555);
+
+  const buttons = [
+    {key:'prev', label:'◀◀', x:.08, w:.12},
+    {key:'play', label:state.paused ? '▶' : 'Ⅱ', x:.225, w:.14},
+    {key:'next', label:'▶▶', x:.39, w:.12},
+    {key:'shuffle', label:state.shuffle ? 'SHUFFLE ON' : 'SHUFFLE', x:.535, w:.17},
+    {key:'volume-down', label:'VOL −', x:.73, w:.095},
+    {key:'volume-up', label:'VOL +', x:.84, w:.095},
+  ];
+  controller.hitAreas = [];
+  buttons.forEach(button => {
+    const x = w * button.x, y = h * .68, bw = w * button.w, bh = h * .18;
+    g.fillStyle = button.key === 'shuffle' && state.shuffle ? 'rgba(81,245,199,.24)' : 'rgba(255,255,255,.08)';
+    g.strokeStyle = button.key === 'play' ? '#ff7dce' : 'rgba(145,185,220,.4)';
+    g.lineWidth = Math.max(2, w * .002);
+    canvasRoundRect(g, x, y, bw, bh, h * .035); g.fill(); g.stroke();
+    g.fillStyle = '#edf5ff';
+    g.textAlign = 'center';
+    g.font = '800 ' + Math.round(h * (button.key === 'play' ? .075 : .045)) + 'px Arial, sans-serif';
+    g.fillText(button.label, x + bw * .5, y + bh * .52);
+    controller.hitAreas.push({action:button.key, x:x / w, y:y / h, w:bw / w, h:bh / h});
+  });
+  const bassX = w * .055, bassY = h * .905;
+  g.textAlign = 'left'; g.fillStyle = 'rgba(235,245,255,.58)';
+  g.font = '700 ' + Math.round(h * .035) + 'px Arial, sans-serif';
+  g.fillText(
+    'BASS ' + (state.bass || 0) + '/3  ·  VOLUME ' + (state.volume == null ? 10 : state.volume) +
+    '/10  ·  OIL ' + Math.round(state.oilC || 90) + '°C  ·  BOOST ' + Number(state.boostBar || 0).toFixed(1) + ' BAR',
+    bassX, bassY
+  );
+  controller.hitAreas.push({action:'bass', x:.04, y:.86, w:.34, h:.11});
+  controller.texture.needsUpdate = true;
+}
+
+function parseYouTubeSurfaceUrl(value){
+  const raw = String(value || '').trim();
+  if(!raw) return null;
+  try {
+    const url = new URL(raw, location.href);
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+    let videoId = '';
+    if(host === 'youtu.be') videoId = url.pathname.split('/').filter(Boolean)[0] || '';
+    else if(host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com')){
+      videoId = url.searchParams.get('v') || '';
+      if(!videoId){
+        const parts = url.pathname.split('/').filter(Boolean);
+        const marker = parts.findIndex(part => part === 'embed' || part === 'shorts' || part === 'live');
+        if(marker >= 0) videoId = parts[marker + 1] || '';
+      }
+    }
+    videoId = videoId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+    const playlistId = String(url.searchParams.get('list') || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+    if(!videoId && !playlistId) return null;
+    return {videoId, playlistId};
+  } catch(_err){
+    return null;
+  }
+}
+
+function drawDynamicYouTubeSurface(controller){
+  const parsed = parseYouTubeSurfaceUrl(controller.props.dynamicVideoUrl || controller.props.dynamicYoutubeUrl);
+  controller.youtube = parsed;
+  const c = controller.canvas, g = controller.ctx, w = c.width, h = c.height;
+  g.clearRect(0, 0, w, h);
+  const bg = g.createLinearGradient(0, 0, w, h);
+  bg.addColorStop(0, '#17191f'); bg.addColorStop(1, '#050609');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  g.fillStyle = parsed ? '#ff0033' : '#7a2637';
+  canvasRoundRect(g, w * .38, h * .22, w * .24, h * .34, h * .07); g.fill();
+  g.fillStyle = '#fff'; g.beginPath();
+  g.moveTo(w * .475, h * .3); g.lineTo(w * .475, h * .48); g.lineTo(w * .56, h * .39); g.closePath(); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#f5f7fb'; g.font = '800 ' + Math.round(h * .095) + 'px Arial, sans-serif';
+  g.fillText(parsed ? 'YOUTUBE' : 'YOUTUBE URL NON VALIDO', w * .5, h * .69);
+  g.fillStyle = 'rgba(235,240,250,.62)'; g.font = '600 ' + Math.round(h * .052) + 'px Arial, sans-serif';
+  g.fillText(parsed ? 'CLICCA LA SUPERFICIE PER APRIRE IL PLAYER' : 'INCOLLA UN LINK VIDEO O PLAYLIST', w * .5, h * .82);
+  controller.texture.needsUpdate = true;
+}
+
+let dynamicYouTubeDialog = null;
+let dynamicYouTubePlayer = null;
+let dynamicYouTubeController = null;
+let youtubeIframeApiPromise = null;
+
+function pauseRuntimeMusicExcept(exceptAudio){
+  const game = typeof window !== 'undefined' && window.LOT_KING;
+  const systems = game && game.systems || {};
+  ['radio','menuMusic','loadingMusic','editorMenuMusic','gameMenuMusic'].forEach(key => {
+    const system = systems[key];
+    if(!system || system.audio === exceptAudio) return;
+    if(system.pauseForExternalMedia) system.pauseForExternalMedia();
+    else if(system.pause) system.pause();
+    else if(system.audio && system.audio.pause) system.audio.pause();
+  });
+}
+
+function dynamicVideoIsAudible(video){
+  return !!(video && !video.muted && Number(video.volume) > 0);
+}
+
+function pauseDynamicMediaExcept(exceptController){
+  dynamicMaterialTextures.forEach(controller => {
+    if(!controller || controller === exceptController) return;
+    if(dynamicVideoIsAudible(controller.video) && !controller.video.paused){
+      controller.audioFocusPaused = true;
+      controller.video.pause();
+    }
+  });
+  if(dynamicYouTubeController && dynamicYouTubeController !== exceptController){
+    if(dynamicYouTubePlayer && dynamicYouTubePlayer.pauseVideo){
+      try { dynamicYouTubePlayer.pauseVideo(); } catch(_err){}
+    } else if(dynamicYouTubeDialog){
+      const frame = dynamicYouTubeDialog.querySelector('iframe');
+      if(frame && frame.contentWindow){
+        frame.contentWindow.postMessage(JSON.stringify({event:'command', func:'pauseVideo', args:[]}), 'https://www.youtube-nocookie.com');
+      }
+    }
+  }
+}
+
+const dynamicMediaAudioFocus = {
+  owner:null,
+  claim(kind, source){
+    this.owner = {kind:String(kind || 'media'), source:source || null};
+    if(kind === 'surface-video' && source) source.audioFocusPaused = false;
+    const sourceAudio = source && source.tagName === 'AUDIO' ? source : null;
+    pauseRuntimeMusicExcept(sourceAudio);
+    if(kind === 'radio' || kind === 'menu-music') pauseDynamicMediaExcept(null);
+    else pauseDynamicMediaExcept(source && source.type ? source : null);
+    return this.owner;
+  },
+  pauseSurfaces(){ pauseDynamicMediaExcept(null); },
+};
+window.LK_MEDIA_AUDIO_FOCUS = dynamicMediaAudioFocus;
+
+function ensureYouTubeIframeApi(){
+  if(window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if(youtubeIframeApiPromise) return youtubeIframeApiPromise;
+  youtubeIframeApiPromise = new Promise((resolve, reject) => {
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function(){
+      if(typeof previousReady === 'function') try { previousReady(); } catch(_err){}
+      if(window.YT && window.YT.Player) resolve(window.YT);
+      else reject(new Error('YouTube IFrame API unavailable'));
+    };
+    let script = document.querySelector('script[data-lk-youtube-api]');
+    if(!script){
+      script = document.createElement('script');
+      script.src = 'https://www.youtube.com/iframe_api';
+      script.async = true;
+      script.dataset.lkYoutubeApi = '1';
+      script.addEventListener('error', () => reject(new Error('YouTube IFrame API failed to load')), {once:true});
+      document.head.appendChild(script);
+    }
+  });
+  return youtubeIframeApiPromise;
+}
+
+function ensureDynamicYouTubeFrame(root){
+  let frame = root && root.querySelector('iframe');
+  if(frame) return frame;
+  const panel = root && root.querySelector('.lk-dynamic-youtube-panel');
+  if(!panel) return null;
+  frame = document.createElement('iframe');
+  frame.title = 'YouTube embedded player';
+  frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  frame.allowFullscreen = true;
+  frame.referrerPolicy = 'strict-origin-when-cross-origin';
+  panel.appendChild(frame);
+  return frame;
+}
+
+function closeDynamicYouTubePlayer(){
+  if(!dynamicYouTubeDialog) return;
+  if(dynamicYouTubePlayer){
+    try { dynamicYouTubePlayer.destroy(); } catch(_err){}
+    dynamicYouTubePlayer = null;
+  }
+  dynamicYouTubeController = null;
+  const frame = ensureDynamicYouTubeFrame(dynamicYouTubeDialog);
+  if(frame) frame.src = 'about:blank';
+  dynamicYouTubeDialog.hidden = true;
+  document.body.classList.remove('lk-dynamic-player-open');
+}
+
+function ensureDynamicYouTubeDialog(){
+  if(dynamicYouTubeDialog && dynamicYouTubeDialog.isConnected) return dynamicYouTubeDialog;
+  const root = document.createElement('div');
+  root.className = 'lk-dynamic-youtube-player';
+  root.hidden = true;
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-label', 'YouTube player');
+  const panel = document.createElement('div');
+  panel.className = 'lk-dynamic-youtube-panel';
+  const bar = document.createElement('div');
+  bar.className = 'lk-dynamic-youtube-bar';
+  const title = document.createElement('strong');
+  title.textContent = 'YOUTUBE · VEHICLE DISPLAY';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'lk-dynamic-youtube-close';
+  close.textContent = '×';
+  close.setAttribute('aria-label', 'Close YouTube player');
+  bar.append(title, close);
+  panel.appendChild(bar);
+  root.appendChild(panel);
+  ensureDynamicYouTubeFrame(root);
+  close.addEventListener('click', closeDynamicYouTubePlayer);
+  root.addEventListener('pointerdown', event => {
+    if(event.target === root) closeDynamicYouTubePlayer();
+  });
+  document.addEventListener('keydown', event => {
+    if(event.key === 'Escape' && !root.hidden) closeDynamicYouTubePlayer();
+  });
+  document.body.appendChild(root);
+  dynamicYouTubeDialog = root;
+  return root;
+}
+
+function openDynamicYouTubePlayer(controller){
+  const parsed = controller && (controller.youtube || parseYouTubeSurfaceUrl(controller.props.dynamicVideoUrl || controller.props.dynamicYoutubeUrl));
+  if(!parsed) return false;
+  const root = ensureDynamicYouTubeDialog();
+  const frame = ensureDynamicYouTubeFrame(root);
+  if(!frame) return false;
+  const params = new URLSearchParams({playsinline:'1', rel:'0', enablejsapi:'1'});
+  if(location.origin && location.origin !== 'null') params.set('origin', location.origin);
+  let path = parsed.videoId ? '/embed/' + encodeURIComponent(parsed.videoId) : '/embed/videoseries';
+  if(parsed.playlistId) params.set('list', parsed.playlistId);
+  frame.src = 'https://www.youtube-nocookie.com' + path + '?' + params.toString();
+  dynamicYouTubeController = controller;
+  dynamicMediaAudioFocus.claim('youtube', controller);
+  ensureYouTubeIframeApi().then(YT => {
+    if(root.hidden || dynamicYouTubeController !== controller) return;
+    if(dynamicYouTubePlayer) try { dynamicYouTubePlayer.destroy(); } catch(_err){}
+    dynamicYouTubePlayer = new YT.Player(frame, {
+      events:{
+        onStateChange:event => {
+          if(event.data === YT.PlayerState.PLAYING) dynamicMediaAudioFocus.claim('youtube', controller);
+        },
+      },
+    });
+  }).catch(error => {
+    console.warn('LotKing YouTube audio focus: player state API unavailable; open-time exclusivity remains active', error);
+  });
+  root.hidden = false;
+  document.body.classList.add('lk-dynamic-player-open');
+  if(document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+  const close = root.querySelector('.lk-dynamic-youtube-close');
+  if(close) close.focus({preventScroll:true});
+  return true;
+}
+
+function disposeDynamicMaterialTexture(controller){
+  if(!controller) return;
+  releaseDynamicRadioSurface(controller);
+  dynamicMaterialTextures.delete(controller);
+  if(controller.surfaceProxy){
+    const proxy = controller.surfaceProxy;
+    if(proxy.parent) proxy.parent.remove(proxy);
+    const materials = Array.isArray(proxy.material) ? proxy.material : [proxy.material];
+    materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+    controller.surfaceProxy = null;
+    controller.surfaceMesh = null;
+    controller.surfaceMaterial = null;
+  }
+  if(controller === dynamicYouTubeController) closeDynamicYouTubePlayer();
+  if(controller.ownerMaterial && controller.disposeListener && controller.ownerMaterial.removeEventListener){
+    controller.ownerMaterial.removeEventListener('dispose', controller.disposeListener);
+  }
+  controller.ownerMaterial = null;
+  controller.disposeListener = null;
+  if(controller.video){
+    try { controller.video.pause(); controller.video.removeAttribute('src'); controller.video.load(); } catch(_err){}
+  }
+  if(controller.texture && controller.texture.dispose) controller.texture.dispose();
+}
+
+function bindDynamicMaterialTexture(controller, material){
+  if(!controller || !material || controller.ownerMaterial === material) return;
+  if(controller.ownerMaterial && controller.disposeListener && controller.ownerMaterial.removeEventListener){
+    controller.ownerMaterial.removeEventListener('dispose', controller.disposeListener);
+  }
+  controller.ownerMaterial = material;
+  controller.disposeListener = () => controller.dispose();
+  if(material.addEventListener) material.addEventListener('dispose', controller.disposeListener);
+}
+
+function bindDynamicSurfaceProxy(controller, mesh, material){
+  if(!controller || !mesh || !mesh.isMesh || !mesh.geometry || !material) return;
+  if(controller.surfaceProxy && controller.surfaceMesh === mesh && controller.surfaceMaterial === material) return;
+  if(controller.surfaceProxy){
+    const previous = controller.surfaceProxy;
+    if(previous.parent) previous.parent.remove(previous);
+    const previousMaterials = Array.isArray(previous.material) ? previous.material : [previous.material];
+    previousMaterials.forEach(entry => { if(entry && entry.dispose) entry.dispose(); });
+  }
+  const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const selectedIndices = new Set();
+  sourceMaterials.forEach((entry, index) => { if(entry === material) selectedIndices.add(index); });
+  if(!selectedIndices.size) selectedIndices.add(0);
+  // Raycaster honours geometry groups and material.visible. Reusing the exact
+  // source geometry with only the authored slot raycast-visible creates a
+  // precise interaction surface without duplicating vertex/index buffers.
+  const proxyMaterials = sourceMaterials.map((_entry, index) => new THREE.MeshBasicMaterial({
+    visible:selectedIndices.has(index),
+    side:THREE.DoubleSide,
+    transparent:true,
+    opacity:0,
+    depthTest:false,
+    depthWrite:false,
+    colorWrite:false,
+    fog:false,
+    toneMapped:false,
+  }));
+  const proxy = new THREE.Mesh(mesh.geometry, Array.isArray(mesh.material) ? proxyMaterials : proxyMaterials[0]);
+  proxy.name = (mesh.name || 'Material screen') + ' · Interaction Surface';
+  proxy.frustumCulled = false;
+  proxy.renderOrder = 100000;
+  proxy.userData = {
+    lkDynamicSurfaceProxy:true,
+    lkDynamicSurfaceController:controller,
+    nonExportable:true,
+    logicElementInternal:true,
+  };
+  mesh.add(proxy);
+  controller.surfaceProxy = proxy;
+  controller.surfaceMesh = mesh;
+  controller.surfaceMaterial = material;
+}
+
+function ensureDynamicScreenUv(mesh, controller){
+  const texture = controller && controller.texture;
+  if(!texture) return;
+  if(!mesh || !mesh.geometry || controller.props.dynamicAutoUv === false){
+    texture.channel = 0;
+    return;
+  }
+  const geometry = mesh.geometry;
+  geometry.userData = geometry.userData || {};
+  const cached = geometry.userData.lkDynamicScreenUv;
+  if(cached && geometry.getAttribute(cached.attributeName)){
+    texture.channel = cached.channel;
+    return;
+  }
+  const position = geometry.getAttribute && geometry.getAttribute('position');
+  if(!position || !position.count){
+    texture.channel = 0;
+    return;
+  }
+  const available = [
+    {attributeName:'uv3', channel:3},
+    {attributeName:'uv2', channel:2},
+    {attributeName:'uv1', channel:1},
+  ].find(entry => !geometry.getAttribute(entry.attributeName));
+  if(!available){
+    texture.channel = 0;
+    return;
+  }
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for(let index = 0; index < position.count; index++){
+    const values = [position.getX(index), position.getY(index), position.getZ(index)];
+    for(let axis = 0; axis < 3; axis++){
+      if(values[axis] < min[axis]) min[axis] = values[axis];
+      if(values[axis] > max[axis]) max[axis] = values[axis];
+    }
+  }
+  const axes = [0, 1, 2].sort((a, b) => (max[b] - min[b]) - (max[a] - min[a]));
+  const uAxis = axes[0];
+  const vAxis = axes[1];
+  const uSpan = max[uAxis] - min[uAxis];
+  const vSpan = max[vAxis] - min[vAxis];
+  if(!(uSpan > 1e-7 && vSpan > 1e-7)){
+    texture.channel = 0;
+    return;
+  }
+  const uv = new Float32Array(position.count * 2);
+  const padding = .015;
+  const range = 1 - padding * 2;
+  for(let index = 0; index < position.count; index++){
+    const values = [position.getX(index), position.getY(index), position.getZ(index)];
+    uv[index * 2] = padding + ((values[uAxis] - min[uAxis]) / uSpan) * range;
+    uv[index * 2 + 1] = padding + ((values[vAxis] - min[vAxis]) / vSpan) * range;
+  }
+  geometry.setAttribute(available.attributeName, new THREE.Float32BufferAttribute(uv, 2));
+  geometry.userData.lkDynamicScreenUv = available;
+  texture.channel = available.channel;
+}
+
+function applyDynamicTextureTransform(controller){
+  const texture = controller && controller.texture;
+  if(!texture) return;
+  const props = controller.props || {};
+  texture.repeat.set(
+    props.dynamicRepeatX == null ? 1 : Number(props.dynamicRepeatX) || 1,
+    props.dynamicRepeatY == null ? 1 : Number(props.dynamicRepeatY) || 1
+  );
+  texture.offset.set(
+    props.dynamicOffsetX == null ? 0 : Number(props.dynamicOffsetX) || 0,
+    props.dynamicOffsetY == null ? 0 : Number(props.dynamicOffsetY) || 0
+  );
+  texture.center.set(.5, .5);
+  texture.rotation = props.dynamicRotation == null ? 0 : Number(props.dynamicRotation) || 0;
+}
+
+function installDynamicSaturationShader(material, controller){
+  if(!material || !controller) return;
+  const saturation = Math.max(0, Math.min(2, Number(controller.props.dynamicSaturation == null ? 1 : controller.props.dynamicSaturation)));
+  if(controller.saturationUniform) controller.saturationUniform.value = saturation;
+  if(controller.shaderMaterial === material) return;
+  const baseCompile = controller.baseOnBeforeCompile;
+  const baseCacheKey = controller.baseCustomProgramCacheKey;
+  const baseSignature = baseCompile ? String(baseCompile) : '';
+  material.onBeforeCompile = function(shader, renderer){
+    if(typeof baseCompile === 'function') baseCompile.call(this, shader, renderer);
+    const currentSaturation = Math.max(0, Math.min(2,
+      Number(controller.props.dynamicSaturation == null ? 1 : controller.props.dynamicSaturation)));
+    shader.uniforms.lkDynamicScreenSaturation = {value:currentSaturation};
+    controller.saturationUniform = shader.uniforms.lkDynamicScreenSaturation;
+    shader.fragmentShader = 'uniform float lkDynamicScreenSaturation;\n' + shader.fragmentShader;
+    const output = '#include <opaque_fragment>';
+    if(shader.fragmentShader.includes(output)){
+      shader.fragmentShader = shader.fragmentShader.replace(output, [
+        'float lkDynamicScreenLuma = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));',
+        'outgoingLight = max(vec3(0.0), mix(vec3(lkDynamicScreenLuma), outgoingLight, lkDynamicScreenSaturation));',
+        output,
+      ].join('\n'));
+    }
+  };
+  material.customProgramCacheKey = function(){
+    return baseSignature + '|lk-dynamic-screen-saturation-v1';
+  };
+  controller.shaderMaterial = material;
+  controller.baseCustomProgramCacheKey = baseCacheKey;
+  material.needsUpdate = true;
+}
+
+function applyDynamicMaterialOverride(material, controller, screenEmission, mesh){
+  if(!material || !controller || !controller.texture) return;
+  const previousChannel = controller.texture.channel;
+  const shaderFeaturesChanged =
+    material.map !== controller.texture ||
+    ('vertexColors' in material && material.vertexColors !== false) ||
+    (material.emissive && material.emissiveMap !== controller.texture) ||
+    (material.roughness != null && material.roughnessMap != null) ||
+    (material.metalness != null && material.metalnessMap != null);
+  ensureDynamicScreenUv(mesh, controller);
+  applyDynamicTextureTransform(controller);
+  material.map = controller.texture;
+  // Three.js multiplies every color map by material.color and optional vertex
+  // colors. Dark imported GLB tints made a correctly assigned HUD/video map
+  // look black, so the screen layer temporarily uses a neutral white base.
+  if(material.color) material.color.set(0xffffff);
+  if('vertexColors' in material) material.vertexColors = false;
+  if(material.emissive){
+    material.emissive.set(0xffffff);
+    material.emissiveMap = controller.texture;
+    const authored = screenEmission != null
+      ? Number(screenEmission)
+      : (controller.props.dynamicScreenEmission != null ? Number(controller.props.dynamicScreenEmission) : 1);
+    material.emissiveIntensity = Math.max(0, Number.isFinite(authored) ? authored : 1);
+  }
+  if(material.roughness != null){
+    material.roughness = Math.max(0, Math.min(1,
+      Number(controller.props.dynamicRoughness == null ? .72 : controller.props.dynamicRoughness)));
+    material.roughnessMap = null;
+  }
+  if(material.metalness != null){
+    material.metalness = Math.max(0, Math.min(1,
+      Number(controller.props.dynamicMetalness == null ? 0 : controller.props.dynamicMetalness)));
+    material.metalnessMap = null;
+  }
+  installDynamicSaturationShader(material, controller);
+  bindDynamicSurfaceProxy(controller, mesh, material);
+  if(shaderFeaturesChanged || previousChannel !== controller.texture.channel) material.needsUpdate = true;
+}
+
+function restoreDynamicMaterialBase(material, base){
+  if(!material || !base) return;
+  material.map = base.map || null;
+  material.emissiveMap = base.emissiveMap || null;
+  if(material.color && base.color) material.color.copy(base.color);
+  if(material.emissive && base.emissive) material.emissive.copy(base.emissive);
+  if(material.emissiveIntensity != null) material.emissiveIntensity = base.emissiveIntensity;
+  if('vertexColors' in material && base.vertexColors != null) material.vertexColors = base.vertexColors;
+  if(material.roughness != null && base.roughness != null) material.roughness = base.roughness;
+  if(material.metalness != null && base.metalness != null) material.metalness = base.metalness;
+  if('roughnessMap' in material) material.roughnessMap = base.roughnessMap || null;
+  if('metalnessMap' in material) material.metalnessMap = base.metalnessMap || null;
+  if(typeof base.onBeforeCompile === 'function') material.onBeforeCompile = base.onBeforeCompile;
+  if(typeof base.customProgramCacheKey === 'function') material.customProgramCacheKey = base.customProgramCacheKey;
+  material.needsUpdate = true;
+}
+
+function createDynamicMaterialTexture(props){
+  if(props.dynamicMapEnabled === false) return null;
+  let type = props.dynamicMapType || 'none';
+  const requestedUrl = String(props.dynamicVideoUrl || props.dynamicYoutubeUrl || '').trim();
+  if(type === 'video' && /(?:youtube\.com|youtu\.be|youtube-nocookie\.com)/i.test(requestedUrl)) type = 'youtube';
+  if(type !== 'vehicle-hud' && type !== 'radio-hud' && type !== 'youtube' && type !== 'video') return null;
+  if(type === 'video'){
+    const src = requestedUrl;
+    if(!src) return null;
+    const video = document.createElement('video');
+    video.crossOrigin = 'anonymous';
+    video.preload = 'metadata';
+    video.playsInline = true;
+    video.loop = props.dynamicVideoLoop !== false;
+    video.muted = props.dynamicVideoMuted !== false;
+    video.src = src;
+    const texture = new THREE.VideoTexture(video);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    const controller = {
+      type, props:Object.assign({}, props), texture, video, lastPaint:0,
+      audioFocusPaused:false, dispose:null, activate:null,
+    };
+    controller.dispose = () => disposeDynamicMaterialTexture(controller);
+    controller.activate = () => {
+      controller.audioFocusPaused = false;
+      if(dynamicVideoIsAudible(video)) dynamicMediaAudioFocus.claim('surface-video', controller);
+      video.play().catch(() => {});
+      return true;
+    };
+    dynamicMaterialTextures.add(controller);
+    const claimVideoFocus = () => {
+      if(dynamicVideoIsAudible(video) && !video.paused) dynamicMediaAudioFocus.claim('surface-video', controller);
+    };
+    video.addEventListener('play', claimVideoFocus);
+    video.addEventListener('volumechange', claimVideoFocus);
+    if(dynamicVideoIsAudible(video)) dynamicMediaAudioFocus.claim('surface-video', controller);
+    video.play().catch(() => {});
+    return controller;
+  }
+  const size = Math.max(256, Math.min(2048, Number(props.dynamicResolution) || 1024));
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = Math.max(128, Math.round(size / 2));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  const controller = {
+    type, props:Object.assign({}, props), canvas, ctx:canvas.getContext('2d'),
+    texture, video:null, lastPaint:0, signature:'', hitAreas:[], dispose:null, activate:null,
+  };
+  retainDynamicRadioSurface(controller);
+  controller.dispose = () => disposeDynamicMaterialTexture(controller);
+  if(type === 'radio-hud'){
+    controller.activate = (x, y) => {
+      const hit = controller.hitAreas.find(area => x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h);
+      const radio = dynamicRadioRuntime();
+      if(!radio) return false;
+      if(hit && radio.surfaceAction && radio.surfaceAction(hit.action)){
+        drawDynamicRadioHud(controller, true);
+        return true;
+      }
+      // The whole authored display is interactive, not only its small painted
+      // buttons. A click on artwork/title opens the full Radio TAB as a clear,
+      // accessible fallback while the in-world controls remain direct.
+      if(radio.toggleOpen){
+        radio.toggleOpen(true);
+        return true;
+      }
+      return false;
+    };
+  } else if(type === 'youtube'){
+    controller.activate = () => openDynamicYouTubePlayer(controller);
+  }
+  dynamicMaterialTextures.add(controller);
+  if(type === 'vehicle-hud') drawDynamicVehicleHud(controller, true);
+  else if(type === 'radio-hud') drawDynamicRadioHud(controller, true);
+  else drawDynamicYouTubeSurface(controller);
+  return controller;
 }
 
 function applyMatProps(obj, p){
@@ -3398,11 +4242,19 @@ function applyMatProps(obj, p){
     if(m.emissiveIntensity != null && next.emissiveIntensity != null) next.emissiveIntensity = m.emissiveIntensity;
     if(m.normalScale && next.normalScale) next.normalScale.copy(m.normalScale);
     if(m.userData) next.userData = cloneData(m.userData);
+    if(m.lkDynamicTextureController){
+      next.lkDynamicTextureController = m.lkDynamicTextureController;
+      bindDynamicMaterialTexture(next.lkDynamicTextureController, next);
+      delete m.lkDynamicTextureController;
+    }
     next.needsUpdate = true;
     return next;
   };
   const convertToStandard = m => {
-    if(m && (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial)) return m;
+    // MeshPhysicalMaterial is derived from Standard and may expose both flags.
+    // It still has transmission/clearcoat state, so it must really be replaced
+    // when the author selects the Standard material kind.
+    if(m && m.isMeshStandardMaterial && !m.isMeshPhysicalMaterial) return m;
     return preserveMaterialMeta(new THREE.MeshStandardMaterial({
       color: m && m.color ? m.color.clone() : new THREE.Color(0xffffff),
       map: m ? m.map || null : null,
@@ -3437,11 +4289,173 @@ function applyMatProps(obj, p){
       side: base.side != null ? base.side : THREE.FrontSide,
     }), base);
   };
+  const captureCarPaintBase = material => {
+    if(!material || material.lkCarPaintBase) return;
+    material.lkCarPaintBase = {
+      color:material.color && material.color.clone(),
+      map:material.map || null,
+      roughnessMap:material.roughnessMap || null,
+      metalnessMap:material.metalnessMap || null,
+      roughness:material.roughness,
+      metalness:material.metalness,
+      clearcoat:material.clearcoat,
+      clearcoatRoughness:material.clearcoatRoughness,
+      iridescence:material.iridescence,
+      iridescenceIOR:material.iridescenceIOR,
+      iridescenceThicknessRange:Array.isArray(material.iridescenceThicknessRange) ? material.iridescenceThicknessRange.slice() : null,
+      specularIntensity:material.specularIntensity,
+      envMapIntensity:material.envMapIntensity,
+      transmission:material.transmission,
+      ior:material.ior,
+      opacity:material.opacity,
+      transparent:material.transparent,
+      depthWrite:material.depthWrite,
+    };
+  };
+  const restoreCarPaintBase = material => {
+    const base = material && material.lkCarPaintBase;
+    if(!base) return material;
+    if(material.color && base.color) material.color.copy(base.color);
+    material.map = base.map;
+    material.roughnessMap = base.roughnessMap;
+    material.metalnessMap = base.metalnessMap;
+    const restore = key => { if(base[key] != null && key in material) material[key] = base[key]; };
+    ['roughness','metalness','clearcoat','clearcoatRoughness','iridescence','iridescenceIOR',
+      'specularIntensity','envMapIntensity','transmission','ior','opacity'].forEach(restore);
+    if(base.iridescenceThicknessRange && 'iridescenceThicknessRange' in material){
+      material.iridescenceThicknessRange = base.iridescenceThicknessRange.slice();
+    }
+    material.transparent = !!base.transparent;
+    material.depthWrite = base.depthWrite !== false;
+    delete material.lkCarPaintBase;
+    material.needsUpdate = true;
+    return material;
+  };
+  const restoreOriginalCarPaintMaterial = material => {
+    if(!material || !material.lkCarPaintOriginalMaterial) return restoreCarPaintBase(material);
+    const original = material.lkCarPaintOriginalMaterial;
+    const dynamicController = material.lkDynamicTextureController;
+    if(dynamicController){
+      original.lkDynamicTextureController = dynamicController;
+      original.map = material.map;
+      if(original.emissiveMap === dynamicController.baseEmissiveMap || material.emissiveMap === dynamicController.texture){
+        original.emissiveMap = material.emissiveMap;
+      }
+      bindDynamicMaterialTexture(dynamicController, original);
+      delete material.lkDynamicTextureController;
+    }
+    original.needsUpdate = true;
+    return original;
+  };
+  const applyCarPaintLayer = (material, settings) => {
+    if(!material || !settings) return;
+    captureCarPaintBase(material);
+    const featureState = {
+      map:!!material.map,
+      clearcoat:Number(material.clearcoat) > 0,
+      iridescence:Number(material.iridescence) > 0,
+    };
+    const clamp01 = value => Math.max(0, Math.min(1, Number(value) || 0));
+    const mix = (a, b, t) => a + (b - a) * t;
+    const kind = settings.kind === 'vinyl' ? 'vinyl' : 'paint';
+    const metallic = clamp01(settings.metallic == null ? (kind === 'paint' ? .58 : .05) : settings.metallic);
+    const finish = clamp01(settings.finish == null ? .82 : settings.finish);
+    const coat = clamp01(settings.clearcoat == null ? (kind === 'paint' ? .9 : .55) : settings.clearcoat);
+    const pearl = clamp01(settings.pearl || 0);
+    if(material.color) material.color.set(settings.color == null ? 0xc20d19 : settings.color);
+    material.map = settings.preserveBaseMap === true ? material.lkCarPaintBase.map : null;
+    material.roughnessMap = null;
+    material.metalnessMap = null;
+    material.roughness = mix(kind === 'paint' ? .58 : .72, kind === 'paint' ? .075 : .14, finish);
+    material.metalness = kind === 'paint' ? (.025 + metallic * .58) : (metallic * .18);
+    if('clearcoat' in material) material.clearcoat = coat;
+    if('clearcoatRoughness' in material) material.clearcoatRoughness = mix(.36, .025, finish);
+    if('specularIntensity' in material) material.specularIntensity = mix(.55, 1, finish);
+    if('envMapIntensity' in material) material.envMapIntensity = mix(.7, 1.85, finish) * (1 + metallic * .22);
+    if('ior' in material) material.ior = kind === 'paint' ? 1.52 : 1.47;
+    if('iridescence' in material) material.iridescence = pearl * .42;
+    if('iridescenceIOR' in material) material.iridescenceIOR = 1.3;
+    if('iridescenceThicknessRange' in material) material.iridescenceThicknessRange = [180, 460];
+    if('transmission' in material) material.transmission = 0;
+    material.opacity = 1;
+    material.transparent = false;
+    material.depthWrite = true;
+    material.userData = material.userData || {};
+    material.userData.lkCarPaintActive = true;
+    if(featureState.map !== !!material.map ||
+      featureState.clearcoat !== (Number(material.clearcoat) > 0) ||
+      featureState.iridescence !== (Number(material.iridescence) > 0)){
+      material.needsUpdate = true;
+    }
+  };
   const applyFlat = (patch, targetSlot) => {
     if(!patch) return;
+    // glTF commonly reuses one Material instance on multiple meshes. A
+    // per-slot edit must first split that reference, otherwise editing a
+    // second dashboard silently replaces/disposes the first one's live map.
+    if(targetSlot && targetSlot !== 'all'){
+      const uses = new Map();
+      obj.traverse(node => {
+        if(!node || !node.isMesh || !node.material) return;
+        (Array.isArray(node.material) ? node.material : [node.material]).forEach(material => {
+          if(material) uses.set(material, (uses.get(material) || 0) + 1);
+        });
+      });
+      let splitMeshIndex = 0;
+      obj.traverse(node => {
+        if(!node || !node.isMesh || !node.material) return;
+        const source = Array.isArray(node.material) ? node.material.slice() : [node.material];
+        let changed = false;
+        source.forEach((material, materialIndex) => {
+          if(!material || !materialSlotMatches(node, splitMeshIndex, materialIndex, targetSlot) || (uses.get(material) || 0) < 2) return;
+          const clone = material.clone();
+          clone.userData = Object.assign({}, clone.userData || {}, {lkMaterialSlotInstance:targetSlot});
+          const existing = material.lkDynamicTextureController;
+          if(existing && !Object.prototype.hasOwnProperty.call(patch, 'dynamicMapType')){
+            const copied = createDynamicMaterialTexture(existing.props || {});
+            if(copied){
+              copied.baseMap = existing.baseMap || null;
+              copied.baseEmissiveMap = existing.baseEmissiveMap || null;
+              copied.baseColor = existing.baseColor && existing.baseColor.clone ? existing.baseColor.clone() : null;
+              copied.baseEmissive = existing.baseEmissive && existing.baseEmissive.clone ? existing.baseEmissive.clone() : null;
+              copied.baseEmissiveIntensity = existing.baseEmissiveIntensity;
+              copied.baseVertexColors = existing.baseVertexColors;
+              copied.baseRoughness = existing.baseRoughness;
+              copied.baseMetalness = existing.baseMetalness;
+              copied.baseRoughnessMap = existing.baseRoughnessMap || null;
+              copied.baseMetalnessMap = existing.baseMetalnessMap || null;
+              copied.baseOnBeforeCompile = existing.baseOnBeforeCompile;
+              copied.baseCustomProgramCacheKey = existing.baseCustomProgramCacheKey;
+              clone.lkDynamicTextureController = copied;
+              bindDynamicMaterialTexture(copied, clone);
+              applyDynamicMaterialOverride(clone, copied, null, node);
+            }
+          }
+          source[materialIndex] = clone;
+          changed = true;
+        });
+        if(changed) node.material = Array.isArray(node.material) ? source : source[0];
+        splitMeshIndex++;
+      });
+    }
     let meshIndex = 0;
     obj.traverse(o => {
       if(!o.isMesh || !o.material) return;
+      if(o.userData && o.userData.lkDynamicSurfaceProxy) return;
+      if(patch.carPaintOverride && patch.carPaintOverride.enabled === true){
+        const makePaintPhysical = (m, i) => {
+          if(!materialSlotMatches(o, meshIndex, i, targetSlot) || !m) return m;
+          if(m.isMeshPhysicalMaterial) return m;
+          const original = m;
+          const physical = convertToPhysical(m);
+          physical.lkCarPaintOriginalMaterial = original;
+          return physical;
+        };
+        o.material = Array.isArray(o.material) ? o.material.map(makePaintPhysical) : makePaintPhysical(o.material, 0);
+      } else if(patch.carPaintOverride && patch.carPaintOverride.enabled === false){
+        const restorePaint = (m, i) => materialSlotMatches(o, meshIndex, i, targetSlot) ? restoreOriginalCarPaintMaterial(m) : m;
+        o.material = Array.isArray(o.material) ? o.material.map(restorePaint) : restorePaint(o.material, 0);
+      }
       if(patch.materialKind === 'standard'){
         const convert = (m, i) => materialSlotMatches(o, meshIndex, i, targetSlot) ? convertToStandard(m) : m;
         o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material, 0);
@@ -3471,14 +4485,114 @@ function applyMatProps(obj, p){
         if(patch.transmission != null && m.transmission != null) m.transmission = patch.transmission;
         if(patch.thickness != null && m.thickness != null) m.thickness = patch.thickness;
         if(patch.ior != null && m.ior != null) m.ior = patch.ior;
+        if(patch.carPaintOverride && patch.carPaintOverride.enabled === true) applyCarPaintLayer(m, patch.carPaintOverride);
+        else if(patch.carPaintOverride && patch.carPaintOverride.enabled === false && m.userData){
+          delete m.userData.lkCarPaintActive;
+        }
+        if(Object.prototype.hasOwnProperty.call(patch, 'dynamicMapType')){
+          const previous = m.lkDynamicTextureController;
+          const baseMap = previous && Object.prototype.hasOwnProperty.call(previous, 'baseMap') ? previous.baseMap : m.map;
+          const baseEmissiveMap = previous && Object.prototype.hasOwnProperty.call(previous, 'baseEmissiveMap') ? previous.baseEmissiveMap : m.emissiveMap;
+          const baseColor = previous && previous.baseColor
+            ? previous.baseColor.clone()
+            : (m.color && m.color.clone ? m.color.clone() : null);
+          const baseEmissive = previous && previous.baseEmissive ? previous.baseEmissive.clone() : (m.emissive ? m.emissive.clone() : null);
+          const baseEmissiveIntensity = previous && previous.baseEmissiveIntensity != null
+            ? previous.baseEmissiveIntensity : (m.emissiveIntensity != null ? m.emissiveIntensity : 0);
+          const baseVertexColors = previous && previous.baseVertexColors != null
+            ? previous.baseVertexColors : ('vertexColors' in m ? m.vertexColors : null);
+          const baseRoughness = previous && previous.baseRoughness != null ? previous.baseRoughness : m.roughness;
+          const baseMetalness = previous && previous.baseMetalness != null ? previous.baseMetalness : m.metalness;
+          const baseRoughnessMap = previous && Object.prototype.hasOwnProperty.call(previous, 'baseRoughnessMap')
+            ? previous.baseRoughnessMap : m.roughnessMap;
+          const baseMetalnessMap = previous && Object.prototype.hasOwnProperty.call(previous, 'baseMetalnessMap')
+            ? previous.baseMetalnessMap : m.metalnessMap;
+          const baseOnBeforeCompile = previous && previous.baseOnBeforeCompile
+            ? previous.baseOnBeforeCompile : m.onBeforeCompile;
+          const baseCustomProgramCacheKey = previous && previous.baseCustomProgramCacheKey
+            ? previous.baseCustomProgramCacheKey : m.customProgramCacheKey;
+          const nextType = patch.dynamicMapType || 'none';
+          const dynamicEnabled = patch.dynamicMapEnabled !== false && nextType !== 'none';
+          const nextResolution = Math.max(256, Math.min(2048, Number(patch.dynamicResolution) ||
+            previous && previous.canvas && previous.canvas.width || 1024));
+          const effectiveNextType = !dynamicEnabled
+            ? 'none'
+            : (nextType === 'video' && /(?:youtube\.com|youtu\.be|youtube-nocookie\.com)/i.test(String(patch.dynamicVideoUrl || '').trim())
+              ? 'youtube' : nextType);
+          const canReuseHud = previous && previous.type === 'vehicle-hud' && effectiveNextType === 'vehicle-hud' &&
+            previous.canvas && previous.canvas.width === nextResolution;
+          const canReuseRadio = previous && previous.type === 'radio-hud' && effectiveNextType === 'radio-hud' &&
+            previous.canvas && previous.canvas.width === nextResolution;
+          const canReuseYoutube = previous && previous.type === 'youtube' && effectiveNextType === 'youtube' &&
+            String(previous.props.dynamicVideoUrl || previous.props.dynamicYoutubeUrl || '') === String(patch.dynamicVideoUrl || patch.dynamicYoutubeUrl || '');
+          const canReuseVideo = previous && previous.type === 'video' && effectiveNextType === 'video' &&
+            previous.video &&
+            String(previous.props.dynamicVideoUrl || '') === String(patch.dynamicVideoUrl || '');
+          let controller = null;
+          if(canReuseHud || canReuseRadio || canReuseYoutube || canReuseVideo){
+            controller = previous;
+            Object.assign(controller.props, patch);
+            if(canReuseHud) drawDynamicVehicleHud(controller, true);
+            if(canReuseRadio) drawDynamicRadioHud(controller, true);
+            if(canReuseYoutube) drawDynamicYouTubeSurface(controller);
+            if(canReuseVideo){
+              controller.video.loop = patch.dynamicVideoLoop !== false;
+              controller.video.muted = patch.dynamicVideoMuted !== false;
+            }
+          } else {
+            if(previous && previous.dispose) previous.dispose();
+            delete m.lkDynamicTextureController;
+            if(dynamicEnabled) controller = createDynamicMaterialTexture(patch);
+          }
+          if(controller){
+            controller.baseMap = baseMap;
+            controller.baseEmissiveMap = baseEmissiveMap;
+            controller.baseColor = baseColor;
+            controller.baseEmissive = baseEmissive;
+            controller.baseEmissiveIntensity = baseEmissiveIntensity;
+            controller.baseVertexColors = baseVertexColors;
+            controller.baseRoughness = baseRoughness;
+            controller.baseMetalness = baseMetalness;
+            controller.baseRoughnessMap = baseRoughnessMap;
+            controller.baseMetalnessMap = baseMetalnessMap;
+            controller.baseOnBeforeCompile = baseOnBeforeCompile;
+            controller.baseCustomProgramCacheKey = baseCustomProgramCacheKey;
+            // Runtime-only: keeping DOM/canvas objects out of userData makes
+            // material cloning and project JSON serialization deterministic.
+            m.lkDynamicTextureController = controller;
+            bindDynamicMaterialTexture(controller, m);
+            applyDynamicMaterialOverride(m, controller, patch.dynamicScreenEmission, o);
+          } else {
+            restoreDynamicMaterialBase(m, {
+              map:baseMap,
+              emissiveMap:baseEmissiveMap,
+              color:baseColor,
+              emissive:baseEmissive,
+              emissiveIntensity:baseEmissiveIntensity,
+              vertexColors:baseVertexColors,
+              roughness:baseRoughness,
+              metalness:baseMetalness,
+              roughnessMap:baseRoughnessMap,
+              metalnessMap:baseMetalnessMap,
+              onBeforeCompile:baseOnBeforeCompile,
+              customProgramCacheKey:baseCustomProgramCacheKey,
+            });
+          }
+        }
         const setMap = (prop, srcKey, dbKey, colorData, onSet) => {
           const hasSrc = Object.prototype.hasOwnProperty.call(patch, srcKey);
           const hasDb = Object.prototype.hasOwnProperty.call(patch, dbKey);
           const wantsClear = (hasSrc || hasDb) && (!hasSrc || patch[srcKey] === null) && (!hasDb || patch[dbKey] === null);
           if(wantsClear){
-            m[prop] = null;
+            const activeDynamic = m.lkDynamicTextureController;
+            if(activeDynamic && prop === 'map') activeDynamic.baseMap = null;
+            else if(activeDynamic && prop === 'emissiveMap') activeDynamic.baseEmissiveMap = null;
+            else if(activeDynamic && prop === 'roughnessMap') activeDynamic.baseRoughnessMap = null;
+            else if(activeDynamic && prop === 'metalnessMap') activeDynamic.baseMetalnessMap = null;
+            else m[prop] = null;
             delete m[srcKey];
             delete m[dbKey];
+            if(activeDynamic) applyDynamicMaterialOverride(m, activeDynamic, null, o);
             m.needsUpdate = true;
             return;
           }
@@ -3491,8 +4605,14 @@ function applyMatProps(obj, p){
               if(!url) return;
               const tx = loadTexture(url, colorData);
               applyTextureTransform(tx, patch);
-              m[prop] = tx;
+              const activeDynamic = m.lkDynamicTextureController;
+              if(activeDynamic && prop === 'map') activeDynamic.baseMap = tx;
+              else if(activeDynamic && prop === 'emissiveMap') activeDynamic.baseEmissiveMap = tx;
+              else if(activeDynamic && prop === 'roughnessMap') activeDynamic.baseRoughnessMap = tx;
+              else if(activeDynamic && prop === 'metalnessMap') activeDynamic.baseMetalnessMap = tx;
+              else m[prop] = tx;
               if(onSet) onSet();
+              if(activeDynamic) applyDynamicMaterialOverride(m, activeDynamic, null, o);
               m.needsUpdate = true;
             }).catch(err => console.warn('LotKing store: material texture not loaded', err));
           }
@@ -3503,7 +4623,7 @@ function applyMatProps(obj, p){
         setMap('metalnessMap', 'metalnessMapSrc', 'metalnessMapDbKey', false);
         setMap('alphaMap', 'alphaMapSrc', 'alphaMapDbKey', false, () => { m.transparent = true; });
         setMap('emissiveMap', 'emissiveMapSrc', 'emissiveMapDbKey', true);
-        applyTextureTransform(m.map, patch);
+        if(!m.lkDynamicTextureController) applyTextureTransform(m.map, patch);
         applyTextureTransform(m.normalMap, patch);
         applyTextureTransform(m.roughnessMap, patch);
         applyTextureTransform(m.metalnessMap, patch);
@@ -3513,7 +4633,12 @@ function applyMatProps(obj, p){
         // scalars in both directions of the round trip and the result is stable
         // no matter how many times the same props are re-applied.
         if(Object.prototype.hasOwnProperty.call(patch, 'surfaceTexture')) applySurfaceTexture(obj, m, patch.surfaceTexture, null);
-        m.needsUpdate = true;
+        if(m.lkDynamicTextureController){
+          applyDynamicMaterialOverride(m, m.lkDynamicTextureController, null, o);
+        }
+        const dynamicShaderPatch = ['side','transparent','alphaTest','depthWrite','materialKind','transmission']
+          .some(key => Object.prototype.hasOwnProperty.call(patch, key));
+        if(!m.lkDynamicTextureController || dynamicShaderPatch) m.needsUpdate = true;
       });
       if(patch.castShadow != null) o.castShadow = patch.castShadow;
       meshIndex++;
@@ -3854,6 +4979,14 @@ function normalizeTextureProps(props){
     specular:.35,
     emissive:0x000000,
     emissiveIntensity:0,
+    surfaceInfluence:0,
+    surfaceBaseInfluence:.18,
+    surfaceProbeDistance:1.5,
+    surfaceReceiverId:null,
+    surfaceReceiverName:'',
+    surfaceRoughness:null,
+    surfaceMetalness:null,
+    surfaceSpecular:null,
   }, props || {});
 }
 
@@ -3865,6 +4998,15 @@ function textureBlending(kind){
 }
 
 function createTextureMaterial(props){
+  const surfaceLayer = props.blending === 'surface';
+  const influence = Math.max(0, Math.min(1, props.surfaceInfluence == null ? 0 : props.surfaceInfluence));
+  const inherited = (key, fallback) => {
+    const sampled = Number(props['surface' + key.charAt(0).toUpperCase() + key.slice(1)]);
+    const authored = Number(props[key]);
+    const base = Number.isFinite(sampled) ? sampled : fallback;
+    const target = Number.isFinite(authored) ? authored : fallback;
+    return base + (target - base) * influence;
+  };
   const common = {
     color: props.color,
     map: placeholderTexture(),
@@ -3874,27 +5016,210 @@ function createTextureMaterial(props){
     side: props.doubleSide === false ? THREE.FrontSide : THREE.DoubleSide,
     depthWrite:false,
     depthTest: props.depthTest !== false,
-    blending:textureBlending(props.blending),
+    blending:textureBlending(surfaceLayer ? 'normal' : props.blending),
     polygonOffset:true,
     polygonOffsetFactor:-4,
     polygonOffsetUnits:-4,
   };
-  if(props.materialModel === 'lit'){
+  if(props.materialModel === 'lit' || surfaceLayer){
     const Mat = THREE.MeshPhysicalMaterial || THREE.MeshStandardMaterial;
     const mat = new Mat(Object.assign({}, common, {
-      roughness:Math.max(0, Math.min(1, props.roughness == null ? .65 : props.roughness)),
-      metalness:Math.max(0, Math.min(1, props.metalness == null ? 0 : props.metalness)),
+      roughness:Math.max(0, Math.min(1, surfaceLayer ? inherited('roughness', .65) : (props.roughness == null ? .65 : props.roughness))),
+      metalness:Math.max(0, Math.min(1, surfaceLayer ? inherited('metalness', 0) : (props.metalness == null ? 0 : props.metalness))),
       emissive:new THREE.Color(props.emissive == null ? 0x000000 : props.emissive),
       emissiveIntensity:Math.max(0, Math.min(3, props.emissiveIntensity == null ? 0 : props.emissiveIntensity)),
     }));
-    const specular = Math.max(0, Math.min(1, props.specular == null ? .35 : props.specular));
+    const specular = Math.max(0, Math.min(1, surfaceLayer ? inherited('specular', .35) : (props.specular == null ? .35 : props.specular)));
     if('reflectivity' in mat) mat.reflectivity = specular;
     if('specularIntensity' in mat) mat.specularIntensity = specular;
     if('clearcoat' in mat) mat.clearcoat = Math.max(0, specular - .65) / .35;
-    if('clearcoatRoughness' in mat) mat.clearcoatRoughness = Math.max(0, Math.min(1, props.roughness == null ? .65 : props.roughness));
+    if('clearcoatRoughness' in mat) mat.clearcoatRoughness = mat.roughness;
+    mat.userData.lkSurfaceLayer = surfaceLayer;
+    if(surfaceLayer) installTextureSurfaceShader(mat, props);
     return mat;
   }
   return new THREE.MeshBasicMaterial(common);
+}
+
+function installTextureSurfaceShader(mat, props){
+  if(!mat) return;
+  const state = mat.userData.lkSurfaceMaps = {
+    baseMap:null,
+    baseInfluence:Math.max(0, Math.min(1, Number(props && props.surfaceBaseInfluence) || 0)),
+    shader:null,
+  };
+  mat.onBeforeCompile = shader => {
+    state.shader = shader;
+    shader.uniforms.lkSurfaceBaseMap = {value:state.baseMap || placeholderTexture()};
+    shader.uniforms.lkSurfaceBaseInfluence = {value:state.baseInfluence};
+    shader.uniforms.lkSurfaceHasBaseMap = {value:state.baseMap ? 1 : 0};
+    shader.fragmentShader = [
+      'uniform sampler2D lkSurfaceBaseMap;',
+      'uniform float lkSurfaceBaseInfluence;',
+      'uniform float lkSurfaceHasBaseMap;',
+      shader.fragmentShader,
+    ].join('\n').replace(
+      '#include <map_fragment>',
+      [
+        '#include <map_fragment>',
+        '#ifdef USE_MAP',
+        '  vec3 lkSurfaceBase = texture2D(lkSurfaceBaseMap, vMapUv).rgb;',
+        '  diffuseColor.rgb *= mix(vec3(1.0), lkSurfaceBase, lkSurfaceBaseInfluence * lkSurfaceHasBaseMap);',
+        '#endif',
+      ].join('\n')
+    );
+  };
+  mat.customProgramCacheKey = () => 'lotking-surface-layer-pbr-v2';
+}
+
+function applyTextureSurfaceMaps(mat, receiverMat, props){
+  if(!mat || !receiverMat || !mat.userData || !mat.userData.lkSurfaceMaps) return false;
+  const state = mat.userData.lkSurfaceMaps;
+  state.baseMap = receiverMat.map || null;
+  state.baseInfluence = Math.max(0, Math.min(1, Number(props.surfaceBaseInfluence) || 0));
+  // The same GPU texture objects are referenced, never cloned. The decal keeps
+  // its own color/alpha map while receiver micro-surface maps shade that color.
+  if('normalMap' in mat) mat.normalMap = receiverMat.normalMap || null;
+  if('normalScale' in mat && receiverMat.normalScale && mat.normalScale && mat.normalScale.copy){
+    mat.normalScale.copy(receiverMat.normalScale);
+  }
+  if('roughnessMap' in mat) mat.roughnessMap = receiverMat.roughnessMap || null;
+  if('metalnessMap' in mat) mat.metalnessMap = receiverMat.metalnessMap || null;
+  if('aoMap' in mat) mat.aoMap = receiverMat.aoMap || null;
+  if('aoMapIntensity' in mat && Number.isFinite(Number(receiverMat.aoMapIntensity))) mat.aoMapIntensity = receiverMat.aoMapIntensity;
+  if('envMap' in mat) mat.envMap = receiverMat.envMap || null;
+  if(state.shader){
+    state.shader.uniforms.lkSurfaceBaseMap.value = state.baseMap || placeholderTexture();
+    state.shader.uniforms.lkSurfaceBaseInfluence.value = state.baseInfluence;
+    state.shader.uniforms.lkSurfaceHasBaseMap.value = state.baseMap ? 1 : 0;
+  }
+  return true;
+}
+
+function textureSurfaceMaterial(object, intersection){
+  if(!object || !object.material) return null;
+  if(!Array.isArray(object.material)) return object.material;
+  const index = intersection && intersection.face && Number.isFinite(intersection.face.materialIndex)
+    ? intersection.face.materialIndex
+    : 0;
+  return object.material[index] || object.material[0] || null;
+}
+
+function textureSurfaceOwner(object){
+  let current = object;
+  while(current){
+    if(current.userData && current.userData.editorId) return current;
+    current = current.parent;
+  }
+  return object || null;
+}
+
+function textureSurfaceCandidates(gp){
+  const game = window.LOT_KING;
+  const registry = game && game.world && game.world.registry;
+  if(!registry) return [];
+  return Array.from(registry).filter(root => {
+    if(!root || root === gp || root.visible === false) return false;
+    const ud = root.userData || {};
+    if(ud.editorType === 'texture' || ud.editorType === 'helper' || ud.helper) return false;
+    return true;
+  });
+}
+
+function textureSurfaceMeshes(candidates){
+  const meshes = [];
+  const seen = new Set();
+  (candidates || []).forEach(root => {
+    if(!root) return;
+    const add = object => {
+      if(!object || !object.isMesh || !object.material || object.visible === false || seen.has(object)) return;
+      seen.add(object);
+      meshes.push(object);
+    };
+    add(root);
+    if(root.traverse) root.traverse(add);
+  });
+  return meshes;
+}
+
+function applyTextureSurfaceSample(gp, mat, props, receiver, receiverMat){
+  if(!mat || !props || !receiverMat) return false;
+  const scalar = (key, fallback) => {
+    const value = Number(receiverMat[key]);
+    props['surface' + key.charAt(0).toUpperCase() + key.slice(1)] = Number.isFinite(value) ? value : fallback;
+    return props['surface' + key.charAt(0).toUpperCase() + key.slice(1)];
+  };
+  const influence = Math.max(0, Math.min(1, props.surfaceInfluence == null ? 0 : props.surfaceInfluence));
+  const mix = (base, authored) => base + (authored - base) * influence;
+  const roughness = scalar('roughness', .65);
+  const metalness = scalar('metalness', 0);
+  let specular = Number(receiverMat.specularIntensity);
+  if(!Number.isFinite(specular)) specular = Number(receiverMat.reflectivity);
+  if(!Number.isFinite(specular)) specular = .35;
+  props.surfaceSpecular = Math.max(0, Math.min(1, specular));
+  props.surfaceReceiverId = receiver && receiver.userData && receiver.userData.editorId || null;
+  props.surfaceReceiverName = receiver && (receiver.userData && receiver.userData.editorName || receiver.name) || '';
+  mat.roughness = Math.max(0, Math.min(1, mix(roughness, Number.isFinite(Number(props.roughness)) ? Number(props.roughness) : .65)));
+  mat.metalness = Math.max(0, Math.min(1, mix(metalness, Number.isFinite(Number(props.metalness)) ? Number(props.metalness) : 0)));
+  const finalSpecular = Math.max(0, Math.min(1, mix(props.surfaceSpecular, Number.isFinite(Number(props.specular)) ? Number(props.specular) : .35)));
+  if('reflectivity' in mat) mat.reflectivity = finalSpecular;
+  if('specularIntensity' in mat) mat.specularIntensity = finalSpecular;
+  if('envMapIntensity' in mat && Number.isFinite(Number(receiverMat.envMapIntensity))) mat.envMapIntensity = receiverMat.envMapIntensity;
+  if('clearcoat' in mat) mat.clearcoat = Math.max(0, finalSpecular - .65) / .35;
+  if('clearcoatRoughness' in mat) mat.clearcoatRoughness = mat.roughness;
+  applyTextureSurfaceMaps(mat, receiverMat, props);
+  mat.needsUpdate = true;
+  gp.userData.textureProps = props;
+  return true;
+}
+
+function matchTextureSurface(gp, forceProbe){
+  if(!gp || !gp.userData || !gp.userData.textureProps || gp.userData.textureProps.blending !== 'surface') return false;
+  const props = gp.userData.textureProps;
+  const mesh = gp.children && gp.children.find(child => child && child.isMesh);
+  const mat = mesh && mesh.material;
+  if(!mesh || !mat) return false;
+  const candidates = textureSurfaceCandidates(gp);
+  if(!candidates.length) return false;
+  let receiver = null;
+  let receiverMat = null;
+  if(!forceProbe && props.surfaceReceiverId){
+    receiver = candidates.find(root => root.userData && root.userData.editorId === props.surfaceReceiverId) || null;
+    if(receiver){
+      let found = null;
+      receiver.traverse(child => { if(!found && child.isMesh && child.material) found = child; });
+      receiverMat = textureSurfaceMaterial(found);
+    }
+  }
+  if(!receiverMat){
+    gp.updateWorldMatrix(true, false);
+    const origin = gp.getWorldPosition(new THREE.Vector3());
+    const quaternion = gp.getWorldQuaternion(new THREE.Quaternion());
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion).normalize();
+    const bias = Math.max(.002, Number(props.depthBias) || 0);
+    origin.addScaledVector(normal, bias + .025);
+    const raycaster = new THREE.Raycaster(
+      origin,
+      normal.multiplyScalar(-1),
+      0,
+      Math.max(.05, Number(props.surfaceProbeDistance) || 1.5)
+    );
+    // Raycast only renderable mesh receivers. Sprite/flare raycasters require a
+    // camera and could otherwise abort matching before the road mesh is tested.
+    const hits = raycaster.intersectObjects(textureSurfaceMeshes(candidates), false);
+    const hit = hits.find(item => item && item.object && item.object.material && item.object.visible !== false);
+    if(!hit) return false;
+    receiver = textureSurfaceOwner(hit.object);
+    receiverMat = textureSurfaceMaterial(hit.object, hit);
+  }
+  return applyTextureSurfaceSample(gp, mat, props, receiver, receiverMat);
+}
+
+function textureSurfaceTransformSignature(gp){
+  const p = gp.position;
+  const q = gp.quaternion;
+  const s = gp.scale;
+  return [p.x,p.y,p.z,q.x,q.y,q.z,q.w,s.x,s.y,s.z].map(value => Number(value).toFixed(5)).join('|');
 }
 
 function isAnimatedTextureProps(props){
@@ -4210,10 +5535,27 @@ function updateTextureObject(gp, patch){
   mesh.receiveShadow = false;
   gp.add(mesh);
   applyTextureMapFromSource(gp, mat, props);
-  if(isAnimatedTextureProps(props)){
+  const animatedTexture = isAnimatedTextureProps(props);
+  const surfaceLayer = props.blending === 'surface';
+  gp.userData.textureSurfaceSignature = '';
+  gp.userData.textureSurfaceElapsed = 0;
+  if(animatedTexture || surfaceLayer){
     gp.userData.effectUpdate = dt => {
-      if(gp.userData.textureFrameUpdate) gp.userData.textureFrameUpdate(dt);
-      else if(mat.map) mat.map.needsUpdate = true;
+      if(animatedTexture){
+        if(gp.userData.textureFrameUpdate) gp.userData.textureFrameUpdate(dt);
+        else if(mat.map) mat.map.needsUpdate = true;
+      }
+      if(surfaceLayer){
+        gp.userData.textureSurfaceElapsed += Number(dt) || 0;
+        const signature = textureSurfaceTransformSignature(gp);
+        const moved = signature !== gp.userData.textureSurfaceSignature;
+        const needsFirstMatch = !gp.userData.textureProps.surfaceReceiverId && gp.userData.textureSurfaceElapsed >= .5;
+        if(moved || needsFirstMatch){
+          gp.userData.textureSurfaceSignature = signature;
+          gp.userData.textureSurfaceElapsed = 0;
+          matchTextureSurface(gp, true);
+        }
+      }
     };
   } else if(gp.userData.effectUpdate && gp.userData.editorType === 'texture'){
     delete gp.userData.effectUpdate;
@@ -4564,6 +5906,9 @@ function createEmitter(kind, params){
 }
 
 // ------------------------------------------------ factory: GLB import
+// Kept outside Object3D.userData: embedding BufferGeometry there would make
+// ordinary Three.js clones serialize a complete hidden geometry payload.
+const UV_BASE_GEOMETRIES = new WeakMap();
 function normalizeMeshEdits(value){
   const edits = value && typeof value === 'object' ? cloneData(value) : {};
   edits.version = 1;
@@ -4572,12 +5917,127 @@ function normalizeMeshEdits(value){
   edits.transforms = edits.transforms && typeof edits.transforms === 'object' ? edits.transforms : {};
   edits.properties = edits.properties && typeof edits.properties === 'object' ? edits.properties : {};
   edits.splits = edits.splits && typeof edits.splits === 'object' ? edits.splits : {};
+  edits.uvMappings = edits.uvMappings && typeof edits.uvMappings === 'object' ? edits.uvMappings : {};
   edits.joins = Array.isArray(edits.joins) ? edits.joins.filter(join => join && join.id && Array.isArray(join.parts) && join.parts.length > 1).map(join => ({
     id:String(join.id),
     name:String(join.name || 'Joined Mesh'),
     parts:Array.from(new Set(join.parts.map(String))),
   })) : [];
   return edits;
+}
+
+function normalizedUvMapping(value){
+  const input = value && typeof value === 'object' ? value : {};
+  const allowed = ['planar-x','planar-y','planar-z','cube','cylindrical','spherical','smart'];
+  return {
+    mode:allowed.includes(input.mode) ? input.mode : 'smart',
+    offset:Array.isArray(input.offset) ? [Number(input.offset[0]) || 0, Number(input.offset[1]) || 0] : [0,0],
+    scale:Array.isArray(input.scale) ? [Math.max(.001, Number(input.scale[0]) || 1), Math.max(.001, Number(input.scale[1]) || 1)] : [1,1],
+    rotation:Number(input.rotation) || 0,
+    padding:Math.max(0, Math.min(.12, Number(input.padding) || .018)),
+  };
+}
+function restoreUvBaseGeometry(mesh){
+  const base = mesh && UV_BASE_GEOMETRIES.get(mesh);
+  if(!base || !base.clone) return false;
+  if(mesh.geometry && mesh.geometry !== base && mesh.geometry.dispose) mesh.geometry.dispose();
+  mesh.geometry = base.clone();
+  return true;
+}
+function applyUvMapping(mesh, value){
+  if(!mesh || !mesh.geometry || !mesh.geometry.attributes || !mesh.geometry.attributes.position) return false;
+  const THREERef = window.THREE;
+  if(!THREERef || !THREERef.Float32BufferAttribute) return false;
+  const map = normalizedUvMapping(value);
+  if(!UV_BASE_GEOMETRIES.has(mesh)) UV_BASE_GEOMETRIES.set(mesh, mesh.geometry.clone());
+  else restoreUvBaseGeometry(mesh);
+  let geometry = mesh.geometry;
+  const faceMapping = map.mode === 'cube' || map.mode === 'smart';
+  const hasMorphs = mesh.morphTargetInfluences || Object.keys(geometry.morphAttributes || {}).length;
+  if(faceMapping && geometry.index && !mesh.isSkinnedMesh && !hasMorphs){
+    const expanded = geometry.toNonIndexed();
+    if(geometry !== UV_BASE_GEOMETRIES.get(mesh) && geometry.dispose) geometry.dispose();
+    geometry = expanded;
+    mesh.geometry = geometry;
+  }
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  const pos = geometry.attributes.position;
+  const normal = geometry.attributes.normal;
+  const size = new THREERef.Vector3();
+  if(box && box.getSize) box.getSize(size);
+  size.set(Math.max(size.x, 1e-6), Math.max(size.y, 1e-6), Math.max(size.z, 1e-6));
+  const uv = new Float32Array(pos.count * 2);
+  const project = (axis, x, y, z) => {
+    if(axis === 0) return [(z - box.min.z) / size.z, (y - box.min.y) / size.y];
+    if(axis === 1) return [(x - box.min.x) / size.x, (z - box.min.z) / size.z];
+    return [(x - box.min.x) / size.x, (y - box.min.y) / size.y];
+  };
+  const write = (index, u, v, group) => {
+    if(map.mode === 'smart'){
+      const col = group % 3, row = Math.floor(group / 3);
+      const pad = map.padding;
+      u = (col + pad + u * (1 - pad * 2)) / 3;
+      v = (row + pad + v * (1 - pad * 2)) / 2;
+    }
+    const angle = map.rotation * Math.PI / 180;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const cx = (u - .5) * map.scale[0], cy = (v - .5) * map.scale[1];
+    uv[index * 2] = cx * cos - cy * sin + .5 + map.offset[0];
+    uv[index * 2 + 1] = cx * sin + cy * cos + .5 + map.offset[1];
+  };
+  const triMapped = faceMapping && !geometry.index;
+  if(triMapped){
+    const a = new THREERef.Vector3(), b = new THREERef.Vector3(), c = new THREERef.Vector3();
+    const ab = new THREERef.Vector3(), ac = new THREERef.Vector3(), face = new THREERef.Vector3();
+    for(let start = 0; start + 2 < pos.count; start += 3){
+      a.fromBufferAttribute(pos, start); b.fromBufferAttribute(pos, start + 1); c.fromBufferAttribute(pos, start + 2);
+      face.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a)).normalize();
+      const abs = [Math.abs(face.x), Math.abs(face.y), Math.abs(face.z)];
+      const axis = abs[0] > abs[1] && abs[0] > abs[2] ? 0 : (abs[1] > abs[2] ? 1 : 2);
+      const sign = axis === 0 ? face.x : (axis === 1 ? face.y : face.z);
+      const group = axis * 2 + (sign < 0 ? 1 : 0);
+      for(let corner = 0; corner < 3; corner++){
+        const index = start + corner;
+        const pair = project(axis, pos.getX(index), pos.getY(index), pos.getZ(index));
+        write(index, sign < 0 ? 1 - pair[0] : pair[0], pair[1], group);
+      }
+    }
+  } else {
+    for(let index = 0; index < pos.count; index++){
+      const x = pos.getX(index), y = pos.getY(index), z = pos.getZ(index);
+      let u = 0, v = 0, group = 0;
+      if(map.mode === 'spherical'){
+        const nx = (x - (box.min.x + box.max.x) * .5) / size.x;
+        const ny = (y - (box.min.y + box.max.y) * .5) / size.y;
+        const nz = (z - (box.min.z + box.max.z) * .5) / size.z;
+        const length = Math.hypot(nx, ny, nz) || 1;
+        u = .5 + Math.atan2(nz, nx) / (Math.PI * 2);
+        v = .5 - Math.asin(Math.max(-1, Math.min(1, ny / length))) / Math.PI;
+      } else if(map.mode === 'cylindrical'){
+        const nx = x - (box.min.x + box.max.x) * .5;
+        const nz = z - (box.min.z + box.max.z) * .5;
+        u = .5 + Math.atan2(nz, nx) / (Math.PI * 2);
+        v = (y - box.min.y) / size.y;
+      } else {
+        let axis = map.mode === 'planar-x' ? 0 : (map.mode === 'planar-z' ? 2 : 1);
+        let sign = 1;
+        if(faceMapping && normal){
+          const values = [Math.abs(normal.getX(index)), Math.abs(normal.getY(index)), Math.abs(normal.getZ(index))];
+          axis = values[0] > values[1] && values[0] > values[2] ? 0 : (values[1] > values[2] ? 1 : 2);
+          sign = axis === 0 ? normal.getX(index) : (axis === 1 ? normal.getY(index) : normal.getZ(index));
+        }
+        const pair = project(axis, x, y, z); u = sign < 0 ? 1 - pair[0] : pair[0]; v = pair[1];
+        group = axis * 2 + (sign < 0 ? 1 : 0);
+      }
+      write(index, u, v, group);
+    }
+  }
+  geometry.setAttribute('uv', new THREERef.Float32BufferAttribute(uv, 2));
+  geometry.attributes.uv.needsUpdate = true;
+  geometry.computeBoundingSphere();
+  mesh.userData.lkUvMapping = map;
+  return true;
 }
 function assignMeshEditIds(root){
   let index = 0;
@@ -4785,6 +6245,9 @@ function joinMeshesForEditing(root, definition, meshes){
 function applyMeshEdits(root, value){
   if(!root) return root;
   const edits = normalizeMeshEdits(value);
+  root.traverse(node => {
+    if(node.isMesh && node.userData && !node.userData.lkMeshEditGenerated) restoreUvBaseGeometry(node);
+  });
   const generated = [];
   root.traverse(node => { if(node.userData && node.userData.lkMeshEditGenerated && node.parent) generated.push(node); });
   generated.filter(node => !(node.parent && node.parent.userData && node.parent.userData.lkMeshEditGenerated)).forEach(node => {
@@ -4859,6 +6322,10 @@ function applyMeshEdits(root, value){
     if(typeof p.receiveShadow === 'boolean') mesh.receiveShadow = p.receiveShadow;
     if(typeof p.frustumCulled === 'boolean') mesh.frustumCulled = p.frustumCulled;
     if(Number.isFinite(Number(p.renderOrder))) mesh.renderOrder = Number(p.renderOrder);
+  });
+  Object.keys(edits.uvMappings).forEach(id => {
+    const mesh = joinedMeshes.get(id);
+    if(mesh) applyUvMapping(mesh, edits.uvMappings[id]);
   });
   edits.deleted.forEach(id => {
     const mesh = joinedMeshes.get(id);
@@ -5305,10 +6772,174 @@ function snapshotAddedEntry(obj, baseEntry){
 
 // ------------------------------------------------ effects hook (game + editor loops)
 let _hooked = false;
+let _dynamicSurfaceInteractionInstalled = false;
+function installDynamicSurfaceInteraction(GAME){
+  if(_dynamicSurfaceInteractionInstalled || !GAME || !GAME.core) return;
+  const renderer = GAME.core.renderer;
+  const canvas = renderer && renderer.domElement;
+  const scene = GAME.core.scene;
+  if(!canvas || !scene) return;
+  _dynamicSurfaceInteractionInstalled = true;
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const localPoint = new THREE.Vector3();
+  const triangleA = new THREE.Vector3();
+  const triangleB = new THREE.Vector3();
+  const triangleC = new THREE.Vector3();
+  const barycentric = new THREE.Vector3();
+  const mappedUv = new THREE.Vector2();
+  let down = null;
+  const interactionRect = () => {
+    if(GAME.player && typeof GAME.player.runtimeInteractionRect === 'function'){
+      const runtimeRect = GAME.player.runtimeInteractionRect();
+      if(runtimeRect && runtimeRect.w > 0 && runtimeRect.h > 0) return runtimeRect;
+    }
+    const rect = canvas.getBoundingClientRect();
+    return {x:rect.left, y:rect.top, w:rect.width, h:rect.height};
+  };
+  const interactionEnabled = () => {
+    if(GAME.player && typeof GAME.player.surfaceInteractionEnabled === 'function'){
+      return GAME.player.surfaceInteractionEnabled();
+    }
+    return document.body.classList.contains('lk-game-ui-cursor');
+  };
+  const runtimeUiTarget = target => {
+    if(!target || target === canvas || !target.closest) return false;
+    return !!target.closest(
+      'input, textarea, select, button, [role="button"], ' +
+      '#lkAppMenuBar, #lkTopbar, #lkLeft, #lkRight, #lkAssetsDock, #lkStatus, ' +
+      '#lkViewportToolbar, #settingsOverlay, #tunePanel, #radio, #overlay, ' +
+      '#lkCinemaTimeline, #lkCinemaPreviewFrame, #lkPipFrame, .lk-win, .lk-movable'
+    );
+  };
+  const pointInside = (event, rect) => !!(rect && rect.w > 0 && rect.h > 0 &&
+    event.clientX >= rect.x && event.clientX <= rect.x + rect.w &&
+    event.clientY >= rect.y && event.clientY <= rect.y + rect.h);
+  const hitUvForTexture = (hit, texture) => {
+    const channel = Math.max(0, Math.min(3, Number(texture && texture.channel) || 0));
+    if(channel === 0 && hit.uv) return mappedUv.copy(hit.uv);
+    const object = hit.object;
+    const geometry = object && object.geometry;
+    const face = hit.face;
+    const attributeName = channel === 1 ? 'uv1' : (channel === 2 ? 'uv2' : (channel === 3 ? 'uv3' : 'uv'));
+    const uvAttribute = geometry && geometry.getAttribute && geometry.getAttribute(attributeName);
+    const baseUvAttribute = geometry && geometry.getAttribute && geometry.getAttribute('uv');
+    const position = geometry && geometry.getAttribute && geometry.getAttribute('position');
+    if(!face || !uvAttribute || !position || !hit.point) return hit.uv ? mappedUv.copy(hit.uv) : mappedUv.set(.5, .5);
+    // Raycaster's primary UV already contains the correct barycentric result
+    // for morph/skinned geometry. Recover those weights in UV space when
+    // possible, then apply them to the separate auto-screen channel.
+    if(hit.uv && baseUvAttribute){
+      localPoint.set(hit.uv.x, hit.uv.y, 0);
+      triangleA.set(baseUvAttribute.getX(face.a), baseUvAttribute.getY(face.a), 0);
+      triangleB.set(baseUvAttribute.getX(face.b), baseUvAttribute.getY(face.b), 0);
+      triangleC.set(baseUvAttribute.getX(face.c), baseUvAttribute.getY(face.c), 0);
+    } else {
+      localPoint.copy(hit.point);
+      object.worldToLocal(localPoint);
+      triangleA.fromBufferAttribute(position, face.a);
+      triangleB.fromBufferAttribute(position, face.b);
+      triangleC.fromBufferAttribute(position, face.c);
+    }
+    THREE.Triangle.getBarycoord(localPoint, triangleA, triangleB, triangleC, barycentric);
+    if(!Number.isFinite(barycentric.x + barycentric.y + barycentric.z)){
+      return hit.uv ? mappedUv.copy(hit.uv) : mappedUv.set(.5, .5);
+    }
+    mappedUv.set(
+      uvAttribute.getX(face.a) * barycentric.x + uvAttribute.getX(face.b) * barycentric.y + uvAttribute.getX(face.c) * barycentric.z,
+      uvAttribute.getY(face.a) * barycentric.x + uvAttribute.getY(face.b) * barycentric.y + uvAttribute.getY(face.c) * barycentric.z
+    );
+    return mappedUv;
+  };
+  const recordInteraction = (stage, extra) => {
+    GAME.state.dynamicSurfaceInteraction = Object.assign({
+      stage,
+      at:Date.now(),
+    }, extra || {});
+  };
+  const pointerDown = event => {
+    const rect = interactionRect();
+    down = null;
+    if(event.button !== 0 || runtimeUiTarget(event.target) || !interactionEnabled() || !pointInside(event, rect)) return;
+    down = {x:event.clientX, y:event.clientY, at:performance.now()};
+    recordInteraction('pointer-down', {x:event.clientX, y:event.clientY});
+  };
+  const pointerUp = event => {
+    if(event.button !== 0 || !down) return;
+    const start = down;
+    down = null;
+    if(runtimeUiTarget(event.target)) return;
+    if(Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6 || performance.now() - start.at > 700) return;
+    const camera = GAME.core.camera;
+    const rect = interactionRect();
+    if(!camera || !interactionEnabled() || !pointInside(event, rect)) return;
+    pointer.x = ((event.clientX - rect.x) / rect.w) * 2 - 1;
+    pointer.y = -((event.clientY - rect.y) / rect.h) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(scene.children, true);
+    recordInteraction('raycast', {hits:hits.length, x:event.clientX, y:event.clientY});
+    // Interactive proxies are exact copies of the authored material faces and
+    // therefore take priority over a coplanar source mesh or transparent
+    // cockpit glass returned first by the raycaster.
+    const orderedHits = hits.slice().sort((a, b) => {
+      const ap = !!(a.object && a.object.userData && a.object.userData.lkDynamicSurfaceController);
+      const bp = !!(b.object && b.object.userData && b.object.userData.lkDynamicSurfaceController);
+      return ap === bp ? a.distance - b.distance : (ap ? -1 : 1);
+    });
+    for(const hit of orderedHits){
+      const object = hit.object;
+      if(!object || object.visible === false || object.userData && (object.userData.helperOnly || object.userData.lkRaycastIgnore)) continue;
+      // Lines, flare sprites and editor adornments are not solid occluders for
+      // an authored material screen. Only an opaque mesh may stop the ray.
+      if(!object.isMesh || !object.material) continue;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      const materialIndex = hit.face && hit.face.materialIndex != null ? hit.face.materialIndex : 0;
+      const material = materials[materialIndex] || materials[0];
+      const controller = object.userData && object.userData.lkDynamicSurfaceController ||
+        material && material.lkDynamicTextureController;
+      if(!controller || typeof controller.activate !== 'function'){
+        // A transparent windscreen may legitimately sit between the cockpit
+        // camera and its display. It must not make the screen behind it inert.
+        if(material && (material.transparent === true || Number(material.opacity) < .98 || Number(material.transmission) > .01)) continue;
+        recordInteraction('blocked', {object:object.name || object.uuid || 'mesh', material:material && material.name || ''});
+        break;
+      }
+      const uv = hitUvForTexture(hit, controller.texture);
+      // transformUv includes repeat/offset/rotation and CanvasTexture flipY,
+      // so hit regions stay aligned after the author adapts the UI to a mesh.
+      if(controller.texture && controller.texture.transformUv) controller.texture.transformUv(uv);
+      if(controller.activate(uv.x, uv.y, {event, hit, GAME})){
+        recordInteraction('activated', {
+          object:object.name || object.uuid || 'mesh',
+          material:controller.surfaceMaterial && controller.surfaceMaterial.name || material.name || '',
+          type:controller.type,
+          u:uv.x,
+          v:uv.y,
+        });
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      break;
+    }
+  };
+  // Editor chrome can leave a transparent DOM element as the event target even
+  // though the rendered game is the canvas below it. Window capture makes
+  // interaction independent from that target while runtimeUiTarget protects
+  // every real editor/game control.
+  window.addEventListener('pointerdown', pointerDown, true);
+  window.addEventListener('pointerup', pointerUp, true);
+}
+
 function ensureEffectHook(GAME){
+  installDynamicSurfaceInteraction(GAME);
   if(_hooked) return;
   _hooked = true;
   GAME.hooks.frame.push(dt => {
+    dynamicMaterialTextures.forEach(controller => {
+      if(controller.type === 'vehicle-hud') drawDynamicVehicleHud(controller, false);
+      else if(controller.type === 'radio-hud') drawDynamicRadioHud(controller, false);
+      else if(controller.video && controller.video.paused && !controller.audioFocusPaused && !document.hidden) controller.video.play().catch(() => {});
+    });
     for(const o of GAME.world.registry){
       if(o.userData.effectUpdate) o.userData.effectUpdate(dt);
       if(o.userData.logicAnimationUpdate) o.userData.logicAnimationUpdate(dt);
@@ -5546,6 +7177,7 @@ function apply(GAME, sceneOverride, options){
     GAME.settings.setVideoProject(data.ui.video);
   }
   if(data.ui && data.ui.radioHud && GAME.ui && GAME.ui.setRadioHud) GAME.ui.setRadioHud(data.ui.radioHud);
+  if(data.ui && data.ui.vehicleRadar && GAME.ui && GAME.ui.setVehicleRadar) GAME.ui.setVehicleRadar(data.ui.vehicleRadar);
   const musicLibraries = data.ui && data.ui.musicLibraries;
   if(musicLibraries && GAME.systems){
     if(GAME.systems.radio && GAME.systems.radio.restoreTracks && Array.isArray(musicLibraries.radio)){
@@ -5581,6 +7213,9 @@ function apply(GAME, sceneOverride, options){
   }
   // player blueprint
   if(data.player){
+    if(data.player.steeringWheel && GAME.player.setSteeringWheelConfig){
+      GAME.player.setSteeringWheelConfig(data.player.steeringWheel);
+    }
     if(GAME.player.setModelShading) GAME.player.setModelShading(data.player.modelShading || 'original');
     const playerTransform = data.player.transform || (data.transforms && data.transforms.player);
     if(playerTransform && playerTransform.r && GAME.player.setVisualBaseRotation) GAME.player.setVisualBaseRotation(playerTransform.r[0], playerTransform.r[2]);
@@ -5658,9 +7293,12 @@ function apply(GAME, sceneOverride, options){
       }
     }
     if(data.player.cam){
-      Object.assign(GAME.player.cameraCfg, data.player.cam, {
-        dof: Object.assign({}, GAME.player.cameraCfg.dof, data.player.cam.dof),
-        grade: Object.assign({}, GAME.player.cameraCfg.grade, data.player.cam.grade),
+      const loadedCamera = window.LK_RUNTIME_PLAYER_CAMERA && window.LK_RUNTIME_PLAYER_CAMERA.migrateConfig
+        ? window.LK_RUNTIME_PLAYER_CAMERA.migrateConfig(data.player.cam)
+        : data.player.cam;
+      Object.assign(GAME.player.cameraCfg, loadedCamera, {
+        dof: Object.assign({}, GAME.player.cameraCfg.dof, loadedCamera.dof),
+        grade: Object.assign({}, GAME.player.cameraCfg.grade, loadedCamera.grade),
       });
       GAME.player.applyCameraCfg();
     }
@@ -5816,6 +7454,7 @@ function collect(GAME){
     ? cloneData(GAME.state.editorPreviewManualEnvironment || old && old.env || collectEnvironment(GAME))
     : collectEnvironment(GAME);
   if(GAME.ui && GAME.ui.radioHud) d.ui.radioHud = JSON.parse(JSON.stringify(GAME.ui.radioHud));
+  if(GAME.ui && GAME.ui.vehicleRadar) d.ui.vehicleRadar = JSON.parse(JSON.stringify(GAME.ui.vehicleRadar));
   if(GAME.settings && GAME.settings.getVideoProject) d.ui.video = cloneData(GAME.settings.getVideoProject());
   if(GAME.systems){
     const radioTracks = GAME.systems.radio && GAME.systems.radio.getStoredTracks ? GAME.systems.radio.getStoredTracks() : [];
@@ -6000,7 +7639,7 @@ window.LK_STORE = {
   refreshSurfaceTiling, applySurfaceTexture, isSharedSurfaceTexture,
   lightProps, applyLightProps, applyMatProps, stageMatProps, snapshotAddedEntry,
   verifyPersistenceRoundTrip, persistenceDifferences,
-	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createDriftTrack, rebuildDriftTrack, syncDriftTrackColliders, removeDriftTrackColliders, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded,
+	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, matchTextureSurface, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createDriftTrack, rebuildDriftTrack, syncDriftTrackColliders, removeDriftTrackColliders, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded, normalizeStoredMatProps,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, ensureMenuBackgroundApplied, findMenuBackgroundLevel, collect, nextId,
   ensureBundledDemoProject,

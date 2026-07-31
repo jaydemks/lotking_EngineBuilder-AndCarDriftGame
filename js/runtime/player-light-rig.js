@@ -9,9 +9,10 @@
 
 const DEFAULT_CONFIG = Object.freeze({
   front: {enabled:true, auto:true, autoOnHour:18, autoOffHour:7, count:2, color:0xfff0c8, intensity:1.55, distance:42, angle:.50, penumbra:.55,
-    glow:true, bloom:true, bloomIntensity:.55, flare:true, flareIntensity:.24, flareBloomIntensity:.19, flareOcclusion:true, glowSize:.62, flareSize:.42},
+    emissive:true, emissiveMaterial:'', emissiveIntensity:15, highBeamEmissiveIntensity:24, emissiveColorMix:.22,
+    previewEmissive:true, previewGlow:true, glow:false, bloom:true, bloomIntensity:.55, flare:true, flareIntensity:.24, flareBloomIntensity:.19, flareOcclusion:true, glowSize:.62, flareSize:.42},
   rear: {enabled:true, color:0xc91410, brakeColor:0xff2418, baseIntensity:.45, brakeIntensity:2.8, reverseColor:0xf3f4ff, reverseIntensity:2.2,
-    glow:true, bloom:true, bloomIntensity:.55, flare:true, flareIntensity:.16, flareBloomIntensity:.12, flareOcclusion:true, glowSize:.55, flareSize:.34},
+    glow:false, bloom:true, bloomIntensity:.55, flare:true, flareIntensity:.16, flareBloomIntensity:.12, flareOcclusion:true, glowSize:.55, flareSize:.34},
   neon: {enabled:false, dummyVisible:true, layout:'all', colorA:0x19f7ff, colorB:0xff3df2, intensity:1.25, spill:2.8, shadows:false, animation:'pulse', speed:1.0},
   aux: [
     {enabled:false, condition:'always', color:0xffd166, intensity:1.0, glow:true, flare:false, size:.42},
@@ -52,6 +53,106 @@ function create(opts){
   let highBeams = false;
   let headlight = null;
   let built = false;
+  const lampMaterialBase=new WeakMap();
+  let lampMaterials=[];
+  let lampMaterialScanAt=0;
+
+  function restoreLampMaterial(material){
+    const base=lampMaterialBase.get(material);
+    if(!material||!base)return;
+    material.color.copy(base.color);
+    material.emissive.copy(base.emissive);
+    material.emissiveIntensity=base.intensity;
+  }
+
+  function scanLampMaterials(force){
+    if(!car||(!force&&performance.now()<lampMaterialScanAt))return;
+    lampMaterialScanAt=performance.now()+750;
+    const candidates=[],seen=new Set();
+    car.traverse(node=>{
+      const materials=node&&node.material?(Array.isArray(node.material)?node.material:[node.material]):[];
+      materials.forEach(material=>{
+        if(!material||seen.has(material)||!material.color||!material.emissive)return;
+        const key=((material.name||'')+' '+(node.name||'')).toLowerCase();
+        let role='';
+        if(/reverse|backup|back.?up|retro/.test(key))role='reverse';
+        else if(/tail.?light|rear.?light|inner red light|fanale/.test(key))role='rear';
+        else if(/brake.?light|stop.?light/.test(key))role='brake';
+        else if(/head.?light|front.?light|faro/.test(key))role='front';
+        if(!role)return;
+        seen.add(material);
+        if(!lampMaterialBase.has(material)){
+          lampMaterialBase.set(material,{
+            color:material.color.clone(),
+            emissive:material.emissive.clone(),
+            intensity:Number(material.emissiveIntensity)||0,
+          });
+        }
+        const authoredEmissive=!!material.emissiveMap||
+          Math.max(material.emissive.r,material.emissive.g,material.emissive.b)>.001;
+        candidates.push({material,role,darker:/dark|inner/.test(key),authoredEmissive,
+          name:String(material.name||node.name||role)});
+      });
+    });
+    const selected=[];
+    ['front','rear','brake','reverse'].forEach(role=>{
+      const roleCandidates=candidates.filter(entry=>entry.role===role);
+      const explicit=role==='front'?String(config.front.emissiveMaterial||''):'';
+      let matches=explicit?roleCandidates.filter(entry=>entry.name===explicit):[];
+      if(!matches.length)matches=roleCandidates.filter(entry=>entry.authoredEmissive);
+      if(!matches.length)matches=roleCandidates.filter(entry=>!entry.darker);
+      selected.push(...matches);
+    });
+    const selectedSet=new Set(selected.map(entry=>entry.material));
+    lampMaterials.forEach(entry=>{if(!selectedSet.has(entry.material))restoreLampMaterial(entry.material);});
+    lampMaterials=selected;
+  }
+
+  function lampMaterialOptions(role){
+    scanLampMaterials(true);
+    const names=[];
+    car.traverse(node=>{
+      const materials=node&&node.material?(Array.isArray(node.material)?node.material:[node.material]):[];
+      materials.forEach(material=>{
+        if(!material||!material.name||names.includes(material.name))return;
+        const key=((material.name||'')+' '+(node.name||'')).toLowerCase();
+        const matches=role==='front'?/head.?light|front.?light|faro/.test(key):
+          /tail.?light|rear.?light|brake.?light|stop.?light|reverse|backup|retro|fanale/.test(key);
+        if(matches)names.push(material.name);
+      });
+    });
+    return names.sort((a,b)=>a.localeCompare(b));
+  }
+
+  function updateLampMaterialEmission(frontActive,braking,reversing){
+    scanLampMaterials();
+    const frontColor=new THREE.Color(config.front.color);
+    const rearColor=new THREE.Color(braking?config.rear.brakeColor:config.rear.color);
+    const reverseColor=new THREE.Color(config.rear.reverseColor);
+    lampMaterials.forEach(entry=>{
+      const material=entry.material,base=lampMaterialBase.get(material);
+      if(!base)return;
+      let active=false,color=base.emissive,intensity=base.intensity,saturation=0;
+      if(entry.role==='front'&&frontActive&&config.front.emissive!==false){
+        active=true;color=frontColor;
+        intensity=(highBeams?config.front.highBeamEmissiveIntensity:config.front.emissiveIntensity)*(entry.darker?.62:1);
+        saturation=Math.max(0,Math.min(1,Number(config.front.emissiveColorMix)||0));
+      }else if((entry.role==='rear'||entry.role==='brake')&&config.rear.enabled){
+        active=true;color=rearColor;intensity=(braking?4.1:1.35)*(entry.darker?.72:1);saturation=braking?.38:.2;
+      }else if(entry.role==='reverse'&&config.rear.enabled&&reversing){
+        active=true;color=reverseColor;intensity=3.2;saturation=.32;
+      }
+      material.color.copy(base.color);
+      material.emissive.copy(base.emissive);
+      material.emissiveIntensity=base.intensity;
+      if(entry.role==='front'&&!active)material.emissiveIntensity=0;
+      if(active){
+        material.color.lerp(color,saturation);
+        material.emissive.copy(color);
+        material.emissiveIntensity=Math.max(base.intensity,intensity);
+      }
+    });
+  }
 
   function configureCinematicFlare(light, enabled, intensity, size, bloomIntensity, occlusion){
     if(!light) return;
@@ -119,6 +220,11 @@ function create(opts){
     });
     const s = new THREE.Sprite(mat);
     s.scale.set(size, size, 1);
+    // Optical billboard only: it must remain in the normal beauty image but
+    // must not become a fake emissive object sampled by screen-space
+    // reflections. The actual lamp mesh and punctual light remain reflective.
+    s.userData.lkSkipSsrBeauty = true;
+    s.userData.lkOpticalSprite = true;
     return s;
   }
 
@@ -289,7 +395,8 @@ function create(opts){
       sp.penumbra = Math.min(1, f.penumbra + highBeamBoost * .18);
       sp.visible = true;
       item.glow.material.color.setHex(f.color);
-      item.glow.material.opacity = frontActive && f.glow ? Math.min(1, (.42 + (f.bloom ? f.bloomIntensity * .45 : 0)) * (1 + highBeamBoost * .55)) : 0;
+      const previewGlow=!!f.enabled&&!!isEditorActive()&&f.previewGlow!==false;
+      item.glow.material.opacity = ((frontActive && f.glow)||previewGlow) ? Math.min(1, (.42 + (f.bloom ? f.bloomIntensity * .45 : 0)) * (1 + highBeamBoost * .55)) : 0;
       // High beams must never alter the authored marker/fixture footprint.
       // Changing child sprite scale also changes the selected anchor bounds and
       // made its editor dummy appear to move even though its origin was fixed.
@@ -352,6 +459,9 @@ function create(opts){
     const engine = getEngine() || {};
     const braking = !!(keys['s'] || keys['arrowdown'] || engine.brake === true || Number(engine.brake) > .08) && !engine.reverseActive && getSpeed() > 2;
     const reversing = !!engine.reverseActive;
+    const frontActive=!!config.front.enabled&&(highBeams||!config.front.auto||isNightTime());
+    const previewEmission=!!config.front.enabled&&!!isEditorActive()&&config.front.previewEmissive!==false;
+    updateLampMaterialEmission(frontActive||previewEmission,braking,reversing);
     const r = config.rear;
     const applyRear = (group, color, intensity, cinematicPair) => {
       for(const item of group){
@@ -397,6 +507,7 @@ function create(opts){
   function setConfig(patch){
     if(!patch) return;
     if(patch.front) Object.assign(config.front, patch.front);
+    if(patch.front&&Object.prototype.hasOwnProperty.call(patch.front,'emissiveMaterial'))scanLampMaterials(true);
     const onHour = Number(config.front.autoOnHour);
     const offHour = Number(config.front.autoOffHour);
     const frontFlareIntensity = Number(config.front.flareIntensity);
@@ -486,6 +597,7 @@ function create(opts){
     syncAnchorTransforms,
     syncTimeOfDay,
     headlight: () => headlight,
+    lampMaterialOptions,
   };
 }
 

@@ -118,6 +118,10 @@ function create(deps){
     clearColliderHelpers();
     const previewActive = ED.playPreview || ED.simulatePreview;
     if(!ED.active || !helperGroup || (previewActive && ED.forceCollisionDummiesInPreview !== true)) return;
+    // Collider data is synchronized by the store/inspector paths that mutate
+    // it. With previews hidden there is no visual work to build, so avoid a
+    // full registry traversal on unrelated editor interactions.
+    if(ED.showCollisionDummies !== true) return;
     if(ED.showCollisionDummies === true && !previewActive) helperGroup.visible = true;
     registry().forEach(o => {
       if(deps.syncCollider && o) deps.syncCollider(o);

@@ -48,7 +48,12 @@ test('published gameplay snapshot is complete on its first cold application', as
   await page.goto('/gameplay.html?cold-gameplay-regression=1', {waitUntil:'domcontentloaded'});
   await page.waitForFunction(() => window.LOT_KING && window.LK_STORE && LK_STORE.ensureApplied, null, {timeout:30000});
   const result = await page.evaluate(async () => {
-    const published = await fetch('demo/demo-project.lkep.json?cold-audit=1', {cache:'no-store'}).then(response => response.json());
+    const publishedUrl = new URL('demo/demo-project.lkep.json?cold-audit=1', location.href).href;
+    const publishedRaw = await fetch(publishedUrl, {cache:'no-store'}).then(response => response.text());
+    const publishedText = window.LK_RUNTIME_SPLIT_PROJECT
+      ? await LK_RUNTIME_SPLIT_PROJECT.resolveText(publishedRaw, publishedUrl)
+      : publishedRaw;
+    const published = JSON.parse(publishedText);
     let loadError = null;
     try { await LK_STORE.ensureApplied(LOT_KING); }
     catch(error){ loadError = String(error && error.message || error); }

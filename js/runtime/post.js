@@ -130,7 +130,49 @@ function createPost(deps){
       const renderSsrTarget = ssrPass._renderPass.bind(ssrPass);
       ssrPass._renderPass = function(nextRenderer, material, target, clearColor, clearAlpha){
         const reflectionTarget = target === this.ssrRenderTarget || target === this.blurRenderTarget || target === this.blurRenderTarget2;
-        return renderSsrTarget(nextRenderer, material, target, reflectionTarget ? 0x000000 : clearColor, reflectionTarget ? 0 : clearAlpha);
+        const state = this.userData && this.userData.lkComposerBuffers;
+        const diffuse = material && material.uniforms && material.uniforms.tDiffuse;
+        const replaceBeautyBase = state && target === state.writeBuffer && material === this.copyMaterial &&
+          diffuse && diffuse.value === this.beautyRenderTarget.texture && state.readBuffer && state.readBuffer.texture;
+        const originalDiffuse = replaceBeautyBase ? diffuse.value : null;
+        if(replaceBeautyBase) diffuse.value = state.readBuffer.texture;
+        try {
+          return renderSsrTarget(nextRenderer, material, target, reflectionTarget ? 0x000000 : clearColor, reflectionTarget ? 0 : clearAlpha);
+        } finally {
+          if(replaceBeautyBase) diffuse.value = originalDiffuse;
+        }
+      };
+    }
+    // Additive glow sprites are an optical camera effect, not luminous
+    // geometry. Stock SSR samples them from its internal beauty buffer and can
+    // therefore mirror a headlight halo even when the real lamp is hidden by
+    // bodywork. Build the SSR ray source without those tagged billboards, then
+    // use the composer's already-rendered beauty image as the final base so the
+    // direct (depth-tested) glow remains visible normally.
+    if(typeof ssrPass.render === 'function'){
+      const renderSsr = ssrPass.render.bind(ssrPass);
+      ssrPass.render = function(nextRenderer, writeBuffer, readBuffer){
+        this.userData.lkComposerBuffers = {writeBuffer, readBuffer};
+        const renderScene = nextRenderer.render;
+        let beautyCaptured = false;
+        nextRenderer.render = function(nextScene, nextCamera){
+          if(nextScene !== scene || beautyCaptured) return renderScene.apply(this, arguments);
+          beautyCaptured = true;
+          const hidden = [];
+          scene.traverseVisible(node => {
+            if(node.userData && node.userData.lkSkipSsrBeauty === true){
+              hidden.push(node);
+              node.visible = false;
+            }
+          });
+          try { return renderScene.apply(this, arguments); }
+          finally { hidden.forEach(node => { node.visible = true; }); }
+        };
+        try { return renderSsr(nextRenderer, writeBuffer, readBuffer); }
+        finally {
+          nextRenderer.render = renderScene;
+          this.userData.lkComposerBuffers = null;
+        }
       };
     }
     // GPU-deformed transparent effects (rain, particles) do not share their
@@ -433,7 +475,7 @@ function createPost(deps){
   }) : null;
   if(volumetricPass) composer.addPass(volumetricPass);
   const cinematicFlarePass = window.LK_RUNTIME_CINEMATIC_LENS_FLARE
-    ? window.LK_RUNTIME_CINEMATIC_LENS_FLARE.createPass(THREE, {dirtTextureUrl:'media/lensflare/lensDirtTexture.jpg'})
+    ? window.LK_RUNTIME_CINEMATIC_LENS_FLARE.createPass(THREE, {dirtTextureUrl:'media/lensflare/lensDirtTexture.jpg',resolutionScale:.5})
     : null;
   if(cinematicFlarePass) composer.addPass(cinematicFlarePass);
   // Reuse one optical shader pool and the same dirt texture. EffectComposer
@@ -441,6 +483,7 @@ function createPost(deps){
   const sceneCinematicFlarePasses = cinematicFlarePass
     ? Array.from({length:MAX_SCENE_CINEMATIC_FLARES}, () => window.LK_RUNTIME_CINEMATIC_LENS_FLARE.createPass(THREE, {
       dirtTexture:cinematicFlarePass.userData.dirtTexture,
+      resolutionScale:.42,
     }))
     : [];
   sceneCinematicFlarePasses.forEach(pass => { if(pass) composer.addPass(pass); });
@@ -519,8 +562,7 @@ function createPost(deps){
     state.value+=(state.target-state.value)*.24;
     return state.value;
   }
-  function collectSceneFlareStates(nextCamera){
-    if(!nextCamera||!nextCamera.matrixWorldInverse) return [];
+  function refreshSceneFlareCandidates(){
     const now=performance.now();
     if(now-sceneFlareScanTime>250){
       sceneFlareCandidates=[];
@@ -530,6 +572,11 @@ function createPost(deps){
       });
       sceneFlareScanTime=now;
     }
+    return sceneFlareCandidates;
+  }
+  function collectSceneFlareStates(nextCamera){
+    if(!nextCamera||!nextCamera.matrixWorldInverse) return [];
+    refreshSceneFlareCandidates();
     const visibleCandidates=[];
     for(const light of sceneFlareCandidates){
       const authored=light.userData.cinematicLensFlare||{};
@@ -567,6 +614,30 @@ function createPost(deps){
       if(states.length>=MAX_SCENE_CINEMATIC_FLARES) break;
     }
     return states;
+  }
+
+  // Volumetric shafts and photographic optics are deliberately independent.
+  // The former performs a 36-tap radial integration; the latter renders only
+  // authored sun/light flare passes. Keep the composer available for cinematic
+  // flare and local-light bloom without silently re-enabling the costly shafts.
+  function cinematicOpticsEnabled(){
+    const active=renderer&&renderer.userData&&renderer.userData.videoSettings;
+    if(active&&active.cinematicLensFlares!=null) return active.cinematicLensFlares===true;
+    return !!(video&&video.cinematicLensFlares);
+  }
+  function needsOpticalPost(nextCamera){
+    if(!cinematicOpticsEnabled()) return false;
+    const opticalState=typeof lensFlareState==='function'?lensFlareState(nextCamera||activeCamera||camera):null;
+    const flare=opticalState&&opticalState.flare||{};
+    const bloom=opticalState&&opticalState.bloom||{};
+    if(opticalState&&opticalState.mode==='cinematic'&&(
+      flare.enabled===true&&Number(flare.intensity)>0 ||
+      bloom.enabled===true&&Number(bloom.intensity)>0
+    )) return true;
+    return refreshSceneFlareCandidates().some(light=>{
+      const authored=light&&light.userData&&light.userData.cinematicLensFlare;
+      return authored&&authored.enabled===true&&hierarchyVisible(light)&&Number(light.intensity)>0;
+    });
   }
 
   addEventListener('resize', () => {
@@ -760,11 +831,11 @@ function createPost(deps){
     }
 
     if(cinematicFlarePass){
-      const state=typeof lensFlareState==='function'?lensFlareState(activeCamera):null;
-      cinematicFlarePass.updateFromState(video&&video.volumetricLighting?state:null,currentSize.width,currentSize.height);
+      const state=cinematicOpticsEnabled()&&typeof lensFlareState==='function'?lensFlareState(activeCamera):null;
+      cinematicFlarePass.updateFromState(state,currentSize.width,currentSize.height);
     }
     if(sceneCinematicFlarePasses.length){
-      const states=video&&video.volumetricLighting?collectSceneFlareStates(activeCamera):[];
+      const states=cinematicOpticsEnabled()?collectSceneFlareStates(activeCamera):[];
       sceneCinematicFlarePasses.forEach((pass,index)=>{
         if(pass) pass.updateFromState(states[index]||null,currentSize.width,currentSize.height);
       });
@@ -778,7 +849,7 @@ function createPost(deps){
     composer.render();
   }
 
-  return {ok:true, compatibility, composer, renderPass, gtaoPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, hasFailed: () => renderFailed};
+  return {ok:true, compatibility, composer, renderPass, gtaoPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, needsOpticalPost, hasFailed: () => renderFailed};
 }
 
 window.LK_RUNTIME_POST = Object.freeze({createPost});

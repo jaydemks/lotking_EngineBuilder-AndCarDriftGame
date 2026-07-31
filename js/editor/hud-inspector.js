@@ -10,6 +10,7 @@ function create(deps){
   const GAME = deps.GAME;
   const ED = deps.ED || GAME && GAME.editor && GAME.editor.state || {};
   const markDirty = deps.markDirty;
+  const buildInspector = deps.buildInspector || function(){};
   const musicLibrarySection = deps.musicLibrarySection;
   const section = deps.section;
   const selectRow = deps.selectRow;
@@ -22,6 +23,48 @@ function create(deps){
   function build(box){
     const hud = GAME.ui && GAME.ui.radioHud;
     const setHud = GAME.ui && GAME.ui.setRadioHud;
+    const radar = GAME.ui && GAME.ui.vehicleRadar;
+    const setRadar = GAME.ui && GAME.ui.setVehicleRadar;
+    box.appendChild(el('<div class="lk-head"><span class="lk-head-ic">▣</span><span class="lk-bp-title">HUD / LEVEL UI</span><span class="lk-head-id">editable runtime overlays</span></div>'));
+
+    if(radar && setRadar){
+      const updRadar = patch => {
+        setRadar(patch);
+        if(GAME.ui.previewVehicleRadar) GAME.ui.previewVehicleRadar(true);
+        markDirty();
+      };
+      const overview = section(tr('VEHICLE RADAR / MINIMAP', 'RADAR VEICOLO / MINIMAPPA'), false);
+      overview.body.appendChild(checkRow(tr('Enabled in vehicle gameplay', 'Attivo nel gameplay veicolo'), radar.enabled !== false, value => updRadar({enabled:value})).root);
+      overview.body.appendChild(btnRow([
+        {label:tr('Show editor preview', 'Mostra anteprima editor'), action:() => GAME.ui.previewVehicleRadar(true)},
+        {label:tr('Hide preview', 'Nascondi anteprima'), action:() => GAME.ui.previewVehicleRadar(false)},
+      ]));
+      overview.body.appendChild(checkRow(tr('Rotate with vehicle', 'Ruota con il veicolo'), radar.rotate !== false, value => updRadar({rotate:value})).root);
+      overview.body.appendChild(checkRow(tr('Circular frame', 'Cornice circolare'), radar.circular !== false, value => updRadar({circular:value})).root);
+      overview.body.appendChild(checkRow(tr('Draw physical obstacles', 'Disegna ostacoli fisici'), radar.showObstacles !== false, value => updRadar({showObstacles:value})).root);
+      overview.body.appendChild(checkRow(tr('Draw items / actors', 'Disegna oggetti / actor'), radar.showItems !== false, value => updRadar({showItems:value})).root);
+      overview.body.appendChild(el('<div class="lk-hint">' + tr(
+        'The map reads the real level colliders and actors on a throttled Canvas 2D layer. It does not create a second 3D camera or render target.',
+        'La mappa legge collider e actor reali del livello su un Canvas 2D a frequenza limitata. Non crea una seconda camera 3D né un render target.'
+      ) + '</div>'));
+      box.appendChild(overview.root);
+
+      const radarLayout = section(tr('RADAR LAYOUT / COST', 'LAYOUT / COSTO RADAR'), true);
+      radarLayout.body.appendChild(btnRow([
+        {label:tr('↖ Snap to top-left', '↖ Porta in alto a sinistra'), action:() => {
+          updRadar({left:0, top:0, layoutVersion:2});
+          buildInspector();
+        }},
+      ]));
+      radarLayout.body.appendChild(sliderRow('Left', radar.left == null ? 0 : radar.left, 0, 90, .1, value => updRadar({left:value,layoutVersion:2}), value => (+value).toFixed(1) + '%').root);
+      radarLayout.body.appendChild(sliderRow('Top', radar.top == null ? 0 : radar.top, 0, 85, .1, value => updRadar({top:value,layoutVersion:2}), value => (+value).toFixed(1) + '%').root);
+      radarLayout.body.appendChild(sliderRow(tr('Size', 'Dimensione'), radar.size || 176, 90, 420, 2, value => updRadar({size:value}), value => Math.round(value) + ' px').root);
+      radarLayout.body.appendChild(sliderRow(tr('World range', 'Raggio mondo'), radar.range || 92, 20, 240, 2, value => updRadar({range:value}), value => Math.round(value) + ' m').root);
+      radarLayout.body.appendChild(sliderRow(tr('Opacity', 'Opacità'), radar.opacity == null ? .9 : radar.opacity, .1, 1, .01, value => updRadar({opacity:value}), value => Math.round(value * 100) + '%').root);
+      radarLayout.body.appendChild(sliderRow(tr('Refresh rate', 'Frequenza aggiornamento'), radar.refreshHz || 15, 5, 30, 1, value => updRadar({refreshHz:Math.round(value)}), value => Math.round(value) + ' Hz').root);
+      box.appendChild(radarLayout.root);
+    }
+
     if(!hud || !setHud){
       box.appendChild(el('<div class="lk-empty">' + tr('Radio HUD unavailable.', 'HUD radio non disponibile.') + '</div>'));
       return;
@@ -31,8 +74,6 @@ function create(deps){
       if(GAME.ui.previewRadioHud) GAME.ui.previewRadioHud(true);
       markDirty();
     };
-    box.appendChild(el('<div class="lk-head"><span class="lk-head-ic">▣</span><span class="lk-bp-title">HUD / RADIO TAB</span><span class="lk-head-id">soundhud.png · dynamic UI</span></div>'));
-
     const sp = section(tr('PREVIEW / STATE', 'PREVIEW / STATO'), false);
     sp.body.appendChild(checkRow(tr('Enabled in game with TAB', 'Attiva in gioco con TAB'), hud.enabled, v => upd({enabled:v})).root);
     sp.body.appendChild(btnRow([

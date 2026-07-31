@@ -45,6 +45,7 @@ function createState(){
     selectedAsset: null,
     selectedAssets: null,
     lastAssetSelectedRef: null,
+    selectionContext: 'scene',
     linkParent: null,
     trackId: 'parking-lot',
     trackName: 'Parking Lot',
@@ -78,6 +79,7 @@ function createState(){
     cinemaTimelineCameraId: null,
     cinemaTimelineFocused: false,
     cinemaForceEditableTargetFrame: false,
+    cinemaExporting: false,
   };
 }
 

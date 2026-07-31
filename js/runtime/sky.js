@@ -54,6 +54,9 @@ function createSky(deps){
   }
   const moon = new THREE.Mesh(new THREE.SphereGeometry(11, 24, 18),
     new THREE.MeshBasicMaterial({map:moonTexture(), fog:false, transparent:true, opacity:0}));
+  // This is an optical sky sprite substitute, not world geometry. If included
+  // in the path-tracing BVH it can appear between buildings and cast shadows.
+  moon.userData.lkPathTracingIgnore = true;
   moon.frustumCulled = false;
   moon.renderOrder = -1; scene.add(moon);
 
@@ -117,6 +120,7 @@ function createSky(deps){
     contrast: .62,
     env: null,
     tex: null,
+    pathTex: null,
     pmrem: null,
     bucket: -1,
   };
@@ -127,6 +131,7 @@ function createSky(deps){
   }
   const hdriGroup = new THREE.Group();
   hdriGroup.name = 'LK_HDRI_SkyBlend';
+  hdriGroup.userData.lkPathTracingIgnore = true;
   hdriGroup.renderOrder = -20;
   scene.add(hdriGroup);
   const hdriSphereGeo = new THREE.SphereGeometry(480, 64, 32);
@@ -183,6 +188,13 @@ function createSky(deps){
     g.fillStyle = sg;
     g.fillRect(0, 0, w, h);
 
+    // Preserve a clean lighting panorama before the decorative star pixels.
+    // Pinpoint stars in a 128x64 importance-sampled map create large fireflies;
+    // the high quality raster star field is composited separately.
+    const pathCanvas = document.createElement('canvas');
+    pathCanvas.width = w; pathCanvas.height = h;
+    pathCanvas.getContext('2d').drawImage(c, 0, 0);
+
     if(nightF > .15){
       g.fillStyle = 'rgba(190,215,255,' + (nightF * .5) + ')';
       for(let i=0;i<70;i++) g.fillRect(Math.random()*w, Math.random()*h*.58, 1, 1);
@@ -190,10 +202,20 @@ function createSky(deps){
 
     if(PROC_ENV.env) PROC_ENV.env.dispose();
     if(PROC_ENV.tex) PROC_ENV.tex.dispose();
+    if(PROC_ENV.pathTex) PROC_ENV.pathTex.dispose();
     PROC_ENV.tex = new THREE.CanvasTexture(c);
     PROC_ENV.tex.colorSpace = THREE.SRGBColorSpace;
     PROC_ENV.tex.mapping = THREE.EquirectangularReflectionMapping;
+    PROC_ENV.pathTex = new THREE.CanvasTexture(pathCanvas);
+    PROC_ENV.pathTex.colorSpace = THREE.SRGBColorSpace;
+    PROC_ENV.pathTex.mapping = THREE.EquirectangularReflectionMapping;
     PROC_ENV.env = PROC_ENV.pmrem.fromEquirectangular(PROC_ENV.tex).texture;
+    // Raster PBR consumes the PMREM CubeUV atlas. The path tracer must sample
+    // the original panorama; interpreting CubeUV as equirectangular creates
+    // tiled skies, false bright spots and invalid light directions.
+    PROC_ENV.env.userData = Object.assign({}, PROC_ENV.env.userData, {
+      lkPathTracingEnvironmentSource:PROC_ENV.pathTex,
+    });
     return true;
   }
   function hdriPairAt(v){
@@ -514,7 +536,7 @@ function createSky(deps){
   const sunDay=new THREE.Color(0xfff2dd), sunDusk=new THREE.Color(0xff8b4a), moonLight=new THREE.Color(0x9db4ff);
   const hemiSkyDay=new THREE.Color(0xb8d8ff), hemiGroundDay=new THREE.Color(0x51483d);
   const hemiSkyNight=new THREE.Color(0x2b4168), hemiGroundNight=new THREE.Color(0x15151b);
-  const LIGHTING_DEFAULTS={daySun:1.3, dayAmbient:.82, moonDirect:.16, moonIndirect:.18};
+  const LIGHTING_DEFAULTS={daySun:1.3, dayAmbient:.82, moonDirect:.16, moonIndirect:.18, nightEnvironment:1};
   const LIGHTING=Object.assign({},LIGHTING_DEFAULTS);
   const bg = new THREE.Color(), cl = new THREE.Color();
   const sunV = new THREE.Vector3();
@@ -630,11 +652,13 @@ function createSky(deps){
     hemi.intensity = LIGHTING.dayAmbient * dayF + LIGHTING.moonIndirect * nightF + twilightAmbient;
     hemi.color.copy(hemiSkyNight).lerp(hemiSkyDay, dayF);
     hemi.groundColor.copy(hemiGroundNight).lerp(hemiGroundDay, dayF);
+    scene.environmentIntensity=1+(LIGHTING.nightEnvironment-1)*nightF;
 
     sunSprite.position.copy(sunV).multiplyScalar(330);
-    // The cinematic post effect follows the heavier Volumetric Lighting option.
-    // With it disabled, keep the cheaper classic sun flare visible.
-    const cinematicMode=FLARE.mode==='cinematic'&&!!window.LK_RUNTIME_CINEMATIC_LENS_FLARE&&document.body.classList.contains('lk-volumetric-lighting');
+    // Cinematic optics are independent from the costly volumetric shaft pass.
+    // Classic sprites remain the fallback only when the authored flare mode is
+    // classic or the cinematic shader is unavailable.
+    const cinematicMode=FLARE.mode==='cinematic'&&!!window.LK_RUNTIME_CINEMATIC_LENS_FLARE&&document.body.classList.contains('lk-cinematic-lens-flares');
     sunSprite.visible = SUN_BLOOM.enabled&&!cinematicMode;
     sunSprite.userData.lkBaseOpacity=clamp01(sunV.y*4+.15)*(0.85+duskF*.3)*clampf(SUN_BLOOM.intensity,0,3);
     sunSprite.material.opacity=sunSprite.userData.lkBaseOpacity;
@@ -768,8 +792,10 @@ function createSky(deps){
         LIGHTING.daySun=clampf(Number(LIGHTING.daySun)||0,0,3);
         LIGHTING.dayAmbient=clampf(Number(LIGHTING.dayAmbient)||0,0,2);
         LIGHTING.moonDirect=clampf(Number(LIGHTING.moonDirect)||0,0,1);
-        LIGHTING.moonIndirect=clampf(Number(LIGHTING.moonIndirect)||0,0,1);
+        LIGHTING.moonIndirect=clampf(Number(LIGHTING.moonIndirect)||0,0,4);
+        LIGHTING.nightEnvironment=clampf(Number(LIGHTING.nightEnvironment)||0,0,5);
         update(0);
+        window.dispatchEvent(new CustomEvent('lotking:environment-lighting-change'));
       },
       defaults: () => Object.assign({}, LIGHTING_DEFAULTS),
     },

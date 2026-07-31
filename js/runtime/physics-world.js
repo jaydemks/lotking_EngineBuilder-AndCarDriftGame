@@ -41,6 +41,11 @@ function create(options){
 
   function cannonVec(x, y, z){ return new CANNONRef.Vec3(x, y, z); }
   function bodyBaseY(){ return playerCollision.bodyY == null ? .55 : playerCollision.bodyY; }
+  function axleValue(front, key){
+    const prefix = front ? 'front' : 'rear';
+    const named = prefix + key.charAt(0).toUpperCase() + key.slice(1);
+    return suspension[named] == null ? suspension[key] : suspension[named];
+  }
 
   function colliderSignature(){
     return worldState.colliderSignature() + '|surfaceWorld:' + (state.surfaceWorldCollision ? '1' : '0');
@@ -113,16 +118,18 @@ function create(options){
     });
     const connY = -bodyBaseY() + suspension.restLength + suspension.radius;
     for(const w of wheelLayout){
+      const front = w.front !== false;
       vehicle.addWheel({
         radius: w.radius || suspension.radius,
+        isFrontWheel: front,
         directionLocal: cannonVec(0, -1, 0),
         axleLocal: cannonVec(-1, 0, 0),
-        suspensionStiffness: suspension.stiffness,
-        suspensionRestLength: suspension.restLength,
-        maxSuspensionTravel: suspension.travel,
+        suspensionStiffness: axleValue(front, 'stiffness'),
+        suspensionRestLength: axleValue(front, 'restLength'),
+        maxSuspensionTravel: axleValue(front, 'travel'),
         maxSuspensionForce: suspension.maxForce,
-        dampingCompression: suspension.compression,
-        dampingRelaxation: suspension.relaxation,
+        dampingCompression: axleValue(front, 'compression'),
+        dampingRelaxation: axleValue(front, 'relaxation'),
         frictionSlip: 1.9,
         rollInfluence: suspension.rollInfluence,
         chassisConnectionPointLocal: cannonVec(w.x, connY, w.z),
@@ -288,8 +295,14 @@ function create(options){
     return 'trimesh';
   }
 
-  function rebuildStatics(){
-    if(!state.world) return;
+  function rebuildStatics(force){
+    if(!state.world) return false;
+    const nextSignature = colliderSignature();
+    // Scene application, the pre-benchmark and the gameplay boundary can all
+    // request a rebuild in quick succession. Rebuilding an unchanged triangle
+    // mesh world is one of the most expensive synchronous operations we can do,
+    // so make the operation idempotent.
+    if(force !== true && state.staticsSignature && state.staticsSignature === nextSignature) return false;
     for(const body of state.staticBodies.slice()) if(body !== state.groundBody) state.world.removeBody(body);
     state.staticBodies.length = 0;
     if(state.surfaceWorldCollision) ensureGroundBody();
@@ -351,7 +364,8 @@ function create(options){
       state.world.addBody(body);
       state.staticBodies.push(body);
     }
-    state.staticsSignature = colliderSignature();
+    state.staticsSignature = nextSignature;
+    return true;
   }
 
   function syncPlayer(){
@@ -376,14 +390,16 @@ function create(options){
   function applySuspension(patch){
     if(patch) Object.assign(suspension, patch);
     if(!state.vehicle) return;
-    for(const w of state.vehicle.wheelInfos){
-      w.suspensionStiffness = suspension.stiffness;
-      w.dampingCompression = suspension.compression;
-      w.dampingRelaxation = suspension.relaxation;
-      w.maxSuspensionTravel = suspension.travel;
+    state.vehicle.wheelInfos.forEach((w, index) => {
+      const front = wheelLayout[index] ? wheelLayout[index].front !== false : w.isFrontWheel === true;
+      w.isFrontWheel = front;
+      w.suspensionStiffness = axleValue(front, 'stiffness');
+      w.dampingCompression = axleValue(front, 'compression');
+      w.dampingRelaxation = axleValue(front, 'relaxation');
+      w.maxSuspensionTravel = axleValue(front, 'travel');
       w.rollInfluence = suspension.rollInfluence;
-      w.suspensionRestLength = suspension.restLength;
-    }
+      w.suspensionRestLength = axleValue(front, 'restLength');
+    });
   }
 
   function dispose(){

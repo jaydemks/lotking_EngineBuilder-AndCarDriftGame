@@ -10,8 +10,15 @@ function create(){
     const wheels = vehicle.wheelInfos;
     const driven = Array.isArray(opts.driven) && opts.driven.length ? opts.driven : [2,3];
     const engineForce = Number(opts.engineForce) || 0;
+    const engineForces = Array.isArray(opts.engineForces) ? opts.engineForces : null;
     for(let index = 0; index < wheels.length; index++) vehicle.applyEngineForce(0, index);
-    driven.forEach(index => { if(wheels[index]) vehicle.applyEngineForce(engineForce / driven.length, index); });
+    if(engineForces){
+      for(let index = 0; index < wheels.length; index++){
+        if(wheels[index]) vehicle.applyEngineForce(Number(engineForces[index]) || 0, index);
+      }
+    } else {
+      driven.forEach(index => { if(wheels[index]) vehicle.applyEngineForce(engineForce / driven.length, index); });
+    }
     const steer = Number(opts.steer) || 0;
     const steering = Array.isArray(opts.steering) ? opts.steering : [0,1];
     for(let index = 0; index < wheels.length; index++) vehicle.setSteeringValue(steering.includes(index) ? steer : 0, index);

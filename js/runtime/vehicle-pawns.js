@@ -121,6 +121,10 @@ function normalizeConfig(source){
   const src = source && typeof source === 'object' ? clone(source) : {};
   const tuning = src.tuning || {};
   const spawn = src.spawn || {};
+  const sourceCamera = src.camera || src.cam || {};
+  const camera = window.LK_RUNTIME_PLAYER_CAMERA && window.LK_RUNTIME_PLAYER_CAMERA.migrateConfig
+    ? window.LK_RUNTIME_PLAYER_CAMERA.migrateConfig(sourceCamera)
+    : sourceCamera;
   const playerId = Object.prototype.hasOwnProperty.call(src, 'playerId')
     ? normalizePlayerId(src.playerId)
     : (src.controllerIndex == null ? null : normalizePlayerId(Number(src.controllerIndex) + 1));
@@ -134,6 +138,9 @@ function normalizeConfig(source){
     modelShading:window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.normalizeShadingMode
       ? window.LK_RUNTIME_PLAYER_MODEL.normalizeShadingMode(src.modelShading)
       : (src.modelShading === 'smooth' || src.modelShading === 'flat' ? src.modelShading : 'original'),
+    steeringWheel:window.LK_RUNTIME_MODEL_ASSETS && window.LK_RUNTIME_MODEL_ASSETS.normalizeSteeringWheelConfig
+      ? window.LK_RUNTIME_MODEL_ASSETS.normalizeSteeringWheelConfig(src.steeringWheel)
+      : Object.assign({enabled:true,pivotName:'steering_wheel_pivot',meshName:'steering_wheel_mesh',driverSide:'auto',axis:'auto',direction:0,inputLockDegrees:0,visualLockDegrees:0,response:12}, src.steeringWheel || {}),
     physicsBackend:String(src.physicsBackend || 'auto'),
     playerId,
     spawn:{
@@ -154,7 +161,9 @@ function normalizeConfig(source){
     effects:Object.assign({exhaustEnabled:true, skidEnabled:true, neonEnabled:true, smokeIntensity:1, skidLife:12}, src.effects || {}),
     exhaust:normalizeExhaustConfig(src.exhaust),
     skids:normalizeTireSmokeConfig(src.skids),
-    camera:Object.assign({mode:'free', arcadeDistance:9, arcadeHeight:3.1, arcadeLag:5.8, fov:70, freePitch:.32, freeYawOffset:0, lookHeight:1.1, lateralOffset:0, helperRange:5, helperSize:.7}, src.camera || src.cam || {}),
+    camera:Object.assign({mode:'free', arcadeDistance:9, arcadeHeight:3.1, arcadeLag:5.8, fov:70, freePitch:.32, freeYawOffset:0, lookHeight:1.1, lateralOffset:0, helperRange:5, helperSize:.7,
+      interiorCameraVersion:3,interiorHeight:1.15,interiorForward:.28,interiorLateral:-.42,interiorLookHeight:.04,interiorFov:72,interiorLag:18,
+      interiorGForceMotion:0,interiorAccelerationMotion:0,interiorRoadShake:0,interiorMotionLimit:.035,interiorSpeedFovGain:.025,interiorSpeedFovMax:4.5}, camera),
     engineAudio:Object.assign({enabled:true, volume:.28, pitch:1, setId:null}, src.engineAudio || {}),
     radio:Object.assign({enabled:true}, src.radio || {}),
     dataWidgets:src.dataWidgets ? clone(src.dataWidgets) : null,
@@ -238,7 +247,7 @@ function createRegistry(GAME, options){
   function makeBase(kind, id, config){
     const cfg = normalizeConfig(config);
     const state = {
-      speed:0, speedKmh:0, rpm:900, gear:1, reverse:false, drift:false, oversteer:false, burnout:false, limiter:false,
+      speed:0, speedKmh:0, rpm:900, boost01:0, gear:1, reverse:false, drift:false, oversteer:false, burnout:false, limiter:false,
       groundedWheels:4, steer:0, throttle:0, brake:0, handbrake:false, slipAngle:0, physicsMode:'none',
     };
     const fallback = {
@@ -299,6 +308,7 @@ function createRegistry(GAME, options){
       this.state.speed = physics.vel && physics.vel.length ? physics.vel.length() : finite(physics.vF, 0);
       this.state.speedKmh = Math.abs(this.state.speed) * 3.6;
       this.state.rpm = finite(engine.rpm, this.state.rpm);
+      this.state.boost01 = clamp(finite(engine.boost01, this.state.boost01), 0, 1);
       this.state.gear = finite(engine.gear, this.state.gear);
       this.state.reverse = engine.reverseActive === true;
       this.state.burnout = engine.burnout === true;
@@ -431,16 +441,22 @@ function createRegistry(GAME, options){
       world.addBody(body);
       const vehicle = new CANNON.RaycastVehicle({chassisBody:body, indexRightAxis:0, indexUpAxis:1, indexForwardAxis:2});
       const layout = Array.isArray(this.config.wheels) && this.config.wheels.length >= 4 ? this.config.wheels : [
-        {x:-.92,z:1.35,front:true,visualId:'wheel_front_left'}, {x:.92,z:1.35,front:true,visualId:'wheel_front_right'},
-        {x:-.92,z:-1.35,front:false,visualId:'wheel_rear_left'}, {x:.92,z:-1.35,front:false,visualId:'wheel_rear_right'},
+        {x:-.92,z:1.35,front:true,driven:false,visualId:'wheel_front_left'}, {x:.92,z:1.35,front:true,driven:false,visualId:'wheel_front_right'},
+        {x:-.92,z:-1.35,front:false,driven:true,visualId:'wheel_rear_left'}, {x:.92,z:-1.35,front:false,driven:true,visualId:'wheel_rear_right'},
       ];
       const connY = -bodyY + suspension.restLength + suspension.radius;
+      const axleValue = (wheel, key) => {
+        const prefix = wheel.front !== false ? 'front' : 'rear';
+        const named = prefix + key.charAt(0).toUpperCase() + key.slice(1);
+        return suspension[named] == null ? suspension[key] : suspension[named];
+      };
       layout.forEach(wheel => vehicle.addWheel({
         radius:Math.max(.05, finite(wheel.radius, suspension.radius)),
+        isFrontWheel:wheel.front !== false,
         directionLocal:new CANNON.Vec3(0,-1,0), axleLocal:new CANNON.Vec3(-1,0,0),
-        suspensionStiffness:suspension.stiffness, suspensionRestLength:suspension.restLength,
-        maxSuspensionTravel:suspension.travel, maxSuspensionForce:suspension.maxForce,
-        dampingCompression:suspension.compression, dampingRelaxation:suspension.relaxation,
+        suspensionStiffness:axleValue(wheel, 'stiffness'), suspensionRestLength:axleValue(wheel, 'restLength'),
+        maxSuspensionTravel:axleValue(wheel, 'travel'), maxSuspensionForce:suspension.maxForce,
+        dampingCompression:axleValue(wheel, 'compression'), dampingRelaxation:axleValue(wheel, 'relaxation'),
         frictionSlip:Math.max(.1, finite(this.config.tuning.frictionSlip, 2.6 * this.config.tuning.grip)),
         rollInfluence:suspension.rollInfluence,
         chassisConnectionPointLocal:new CANNON.Vec3(finite(wheel.x, 0), finite(wheel.y, connY), finite(wheel.z, 0)),
@@ -516,7 +532,13 @@ function createRegistry(GAME, options){
       delete this.owner.userData.vehiclePhysicsFallback;
       return true;
     };
-    pawn.start = function(){ this.started = true; this.sleeping = false; this.setHidden(this.hidden); return this; };
+    pawn.start = function(){
+      this.started = true;
+      this.sleeping = false;
+      if(this.backend && this.backend.body && this.backend.body.wakeUp) this.backend.body.wakeUp();
+      this.setHidden(this.hidden);
+      return this;
+    };
     pawn.setHidden = function(value){
       this.hidden = value === true; this.config.hidden = this.hidden;
       if(this.owner) this.owner.visible = !this.hidden;
@@ -597,10 +619,23 @@ function createRegistry(GAME, options){
       const travel = clamp(finite(setup.travel, 0) / 10, -1, 1);
       const ride = clamp(finite(setup.ride, 0) / 10, -1, 1);
       const roll = clamp(finite(setup.roll, 0) / 10, -1, 1);
+      const frontSuspension = clamp(finite(setup.frontSuspension, 0) / 10, -1, 1);
+      const rearSuspension = clamp(finite(setup.rearSuspension, 0) / 10, -1, 1);
+      const frontDamping = clamp(finite(setup.frontDamping, 0) / 10, -1, 1);
+      const rearDamping = clamp(finite(setup.rearDamping, 0) / 10, -1, 1);
+      const commonStiffness = baseSuspension.stiffness * clamp(1 + suspension * .6, .45, 1.8);
+      const commonCompression = baseSuspension.compression * clamp(1 + damping * .75, .35, 2);
+      const commonRelaxation = baseSuspension.relaxation * clamp(1 + damping * .75, .35, 2);
       this.setSuspension({
-        stiffness:baseSuspension.stiffness * clamp(1 + suspension * .6, .45, 1.8),
-        compression:baseSuspension.compression * clamp(1 + damping * .75, .35, 2),
-        relaxation:baseSuspension.relaxation * clamp(1 + damping * .75, .35, 2),
+        stiffness:commonStiffness,
+        frontStiffness:commonStiffness * clamp(1 + frontSuspension * .55, .5, 1.55),
+        rearStiffness:commonStiffness * clamp(1 + rearSuspension * .55, .5, 1.55),
+        compression:commonCompression,
+        frontCompression:commonCompression * clamp(1 + frontDamping * .6, .45, 1.65),
+        rearCompression:commonCompression * clamp(1 + rearDamping * .6, .45, 1.65),
+        relaxation:commonRelaxation,
+        frontRelaxation:commonRelaxation * clamp(1 + frontDamping * .6, .45, 1.65),
+        rearRelaxation:commonRelaxation * clamp(1 + rearDamping * .6, .45, 1.65),
         restLength:baseSuspension.restLength * clamp(1 + ride * .35, .6, 1.4),
         travel:baseSuspension.travel * clamp(1 + travel * .75 + ride * .25, .45, 1.9),
         rollInfluence:clamp(baseSuspension.rollInfluence * (1 + roll * .8), .04, .42),
@@ -633,12 +668,19 @@ function createRegistry(GAME, options){
       this.config.suspension = Object.assign({}, this.config.suspension || {}, patch || {});
       if(this.backend){
         Object.assign(this.backend.suspension, this.config.suspension);
-        this.backend.vehicle.wheelInfos.forEach(wheel => {
-          wheel.suspensionStiffness = this.backend.suspension.stiffness;
-          wheel.suspensionRestLength = this.backend.suspension.restLength;
-          wheel.maxSuspensionTravel = this.backend.suspension.travel;
-          wheel.dampingCompression = this.backend.suspension.compression;
-          wheel.dampingRelaxation = this.backend.suspension.relaxation;
+        this.backend.vehicle.wheelInfos.forEach((wheel, index) => {
+          const front = this.backend.wheelLayout[index] && this.backend.wheelLayout[index].front !== false;
+          const prefix = front ? 'front' : 'rear';
+          const value = key => {
+            const named = prefix + key.charAt(0).toUpperCase() + key.slice(1);
+            return this.backend.suspension[named] == null ? this.backend.suspension[key] : this.backend.suspension[named];
+          };
+          wheel.isFrontWheel = front;
+          wheel.suspensionStiffness = value('stiffness');
+          wheel.suspensionRestLength = value('restLength');
+          wheel.maxSuspensionTravel = value('travel');
+          wheel.dampingCompression = value('compression');
+          wheel.dampingRelaxation = value('relaxation');
           wheel.rollInfluence = this.backend.suspension.rollInfluence;
         });
       }
@@ -715,10 +757,30 @@ function createRegistry(GAME, options){
         window.LK_RUNTIME_PLAYER_MODEL.applyModelShading(modelRoot, this.config.modelShading, window.THREE);
       }
       const assets = window.LK_RUNTIME_MODEL_ASSETS.create({THREERef:window.THREE, car:this.owner, isFileMode:false});
+      if(assets && assets.rig && assets.rig.setSteeringConfig) assets.rig.setSteeringConfig(this.config.steeringWheel);
       const active = assets && assets.rig && assets.rig.build(modelRoot);
-      this.owner.userData.vehicleModelRigDiagnostics = {root:modelRoot.name || modelRoot.type, active:!!active};
+      this.owner.userData.vehicleModelRigDiagnostics = {
+        root:modelRoot.name || modelRoot.type,
+        active:!!active,
+        steering:assets && assets.rig && assets.rig.steeringStatus ? assets.rig.steeringStatus() : null,
+      };
       if(active) this.modelRigRuntime = assets.rig;
       return this.modelRigRuntime;
+    };
+    pawn.setSteeringWheelConfig = function(values){
+      const api = window.LK_RUNTIME_MODEL_ASSETS;
+      this.config.steeringWheel = api && api.normalizeSteeringWheelConfig
+        ? api.normalizeSteeringWheelConfig(Object.assign({}, this.config.steeringWheel || {}, values || {}))
+        : Object.assign({}, this.config.steeringWheel || {}, values || {});
+      if(this.modelRigRuntime && this.modelRigRuntime.setSteeringConfig){
+        this.modelRigRuntime.setSteeringConfig(this.config.steeringWheel);
+      }
+      if(this.owner && this.owner.userData && this.owner.userData.vehicleModelRigDiagnostics){
+        this.owner.userData.vehicleModelRigDiagnostics.steering = this.modelRigRuntime && this.modelRigRuntime.steeringStatus
+          ? this.modelRigRuntime.steeringStatus()
+          : null;
+      }
+      return clone(this.config.steeringWheel);
     };
     pawn.isNightTime = function(){
       const front = this.config.lights && this.config.lights.front || {};
@@ -851,6 +913,42 @@ function createRegistry(GAME, options){
       low.start(); high.start();
       this.audioRuntime = {kind:'synth', ctx, gain, low, high};
       return this.audioRuntime;
+    };
+    pawn.prepareRuntime = function(){
+      // Safe pre-play materialisation. This intentionally does not consume
+      // input, run graph events or advance physics; it only creates resources
+      // that used to be allocated by the first accelerator frame.
+      const lights = this.ensureNativeLightRig();
+      const physics = this.ensurePhysics();
+      if(!this.engineController && window.LK_RUNTIME_VEHICLE_ENGINE_CONTROLLER){
+        const gearbox = GAME && GAME.player && GAME.player.gearbox || {
+          idle:950,redline:6900,limiter:7600,upshift:7050,downshift:2700,
+          limiterHold:.34,shiftCut:.34,tops:[13,22,31,40,52],
+          torque:[1.55,1.34,1.16,1.02,.92],
+        };
+        this.engineController = window.LK_RUNTIME_VEHICLE_ENGINE_CONTROLLER.create({
+          gearbox,
+          drive:this.config.driveSetup || {},
+          state:{gear:1,rpm:gearbox.idle,rpm01:0,torque01:.6,shiftTimer:0,limiterTimer:0,shiftPulse:0,limiterPulse:0,throttle:0,reverseActive:false,burnout:false,driftShiftSpeed:0},
+        });
+      }
+      this.ensureModelWheelRig();
+      this.effectAnchors();
+      const widgets = this.ensureDataWidgets();
+      if(widgets && widgets.update) widgets.update();
+      const audio = this.ensureEngineAudio();
+      if(this.backend && this.backend.body && this.backend.body.sleep) this.backend.body.sleep();
+      const report = {
+        pawnId:this.id,
+        physics:!!physics,
+        lights:!!lights,
+        widgets:!!widgets,
+        audio:!!audio,
+      };
+      if(audio && audio.kind === 'samples' && audio.manager && audio.manager.prewarm){
+        return Promise.resolve(audio.manager.prewarm()).then(audioReport => Object.assign(report, {audioReport}));
+      }
+      return report;
     };
     pawn.updateAuxRuntime = function(dt){
       const widgets = this.ensureDataWidgets();
@@ -1202,8 +1300,12 @@ function createRegistry(GAME, options){
         const brakeBias = clamp(finite(tune.brakeBias, .56), .48, .62);
         const frontBrake = brakeForce * brakeBias * .5;
         const rearBrake = brakeForce * (1 - brakeBias) * .5 + (handbrake ? backend.mass * 9.82 * .18 * .5 : 0);
-        const driven = backend.wheelLayout.map((wheel, index) => ({wheel,index})).filter(item => item.wheel.driven !== false);
-        const driveTargets = driven.length ? driven : backend.wheelLayout.map((wheel, index) => ({wheel,index}));
+        const frontDriveBias = clamp(finite(this.config.driveSetup && this.config.driveSetup.frontDriveBias, 0), 0, 1);
+        const frontIndices = backend.wheelLayout.map((wheel, index) => wheel.front !== false ? index : null).filter(index => index != null);
+        const rearIndices = backend.wheelLayout.map((wheel, index) => wheel.front === false ? index : null).filter(index => index != null);
+        const engineForces = backend.wheelLayout.map(() => 0);
+        frontIndices.forEach(index => { engineForces[index] = engineForce * frontDriveBias / Math.max(1, frontIndices.length); });
+        rearIndices.forEach(index => { engineForces[index] = engineForce * (1 - frontDriveBias) / Math.max(1, rearIndices.length); });
         const mode = tune.driveMode || this.config.driveSetup && this.config.driveSetup.driveMode || 'custom';
         const lateralSpeed = body.velocity.x * forwardZ - body.velocity.z * forwardX;
         const slipAngle = Math.atan2(Math.abs(lateralSpeed), Math.max(1, Math.abs(forwardSpeed)));
@@ -1223,8 +1325,7 @@ function createRegistry(GAME, options){
         const actuator = actuatorFactory && (this.raycastActuator || (this.raycastActuator = actuatorFactory.create()));
         if(actuator) actuator.apply({
           vehicle,
-          driven:driveTargets.map(item => item.index),
-          engineForce,
+          engineForces,
           steering:backend.wheelLayout.map((wheel,index) => wheel.front ? index : null).filter(index => index != null),
           steer:steeringAngle,
           brakes:backend.wheelLayout.map(wheel => wheel.front ? frontBrake : rearBrake),
@@ -1261,7 +1362,7 @@ function createRegistry(GAME, options){
         });
         const modelRig = this.ensureModelWheelRig();
         if(modelRig){
-          modelRig.drive(forwardSpeed,h,steeringAngle*1.25);
+          modelRig.drive(forwardSpeed,h,steeringAngle*1.25,steer);
           modelRig.setSuspension(vehicle.wheelInfos.map(info => clamp(backend.suspension.restLength-finite(info.suspensionLength,backend.suspension.restLength),-backend.suspension.travel,backend.suspension.travel)));
         }
         this.updateLights(drive, reversing);
@@ -1275,6 +1376,7 @@ function createRegistry(GAME, options){
         this.state.slipAngle = slipAngle;
         this.state.steer = steer; this.state.throttle = throttle; this.state.brake = brake; this.state.handbrake = handbrake;
         this.state.rpm = engineState ? engineState.rpm : 900 + clamp(speedAbs / Math.max(1, tune.maxSpeed), 0, 1) * 6900;
+        this.state.boost01 = engineState ? clamp(finite(engineState.boost01, 0), 0, 1) : 0;
         this.state.gear = this.state.reverse ? -1 : (engineState ? engineState.gear : Math.max(1, Math.min(6, 1 + Math.floor(speedAbs / Math.max(1, tune.maxSpeed / 6)))));
         this.state.shiftPulse = engineState ? finite(engineState.shiftPulse, 0) : 0;
         this.state.limiterPulse = engineState ? finite(engineState.limiterPulse, 0) : 0;

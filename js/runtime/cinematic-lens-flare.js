@@ -62,13 +62,48 @@ function createPass(THREE, options){
     pass.material.fragmentShader = pass.material.fragmentShader.replace(
       'float c2 =  max(0.09/pow(length(p-mouse*dist/.5)*1., .95), 0.0)/20.;',
       'float dotDistance = length(p-mouse*dist/.5); float dotRadius = 0.032 + 0.012 / max(size, 0.5); float c2 = exp(-(dotDistance*dotDistance) / max(0.00001, dotRadius*dotRadius)) * 0.085;'
+    ).replace(
+      'vec3 composed = base.rgb + (enabled ? flareHdr : vec3(0.0)) + bloom;\n        gl_FragColor = vec4(max(composed, vec3(0.0)), base.a);',
+      'vec3 composed = (enabled ? flareHdr : vec3(0.0)) + bloom;\n        gl_FragColor = vec4(max(composed, vec3(0.0)), 1.0);'
     );
   }
+
+  // Preserve the complete cinematic shader, but evaluate its naturally soft
+  // optical response at reduced resolution. The full-resolution scene is
+  // sampled only by a cheap additive composite, so geometry and UI stay sharp.
+  const resolutionScale=Math.max(.35,Math.min(1,Number(options.resolutionScale)||.5));
+  const lowTarget=new THREE.WebGLRenderTarget(1,1,{
+    type:THREE.HalfFloatType,format:THREE.RGBAFormat,
+    minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,
+    depthBuffer:false,stencilBuffer:false,
+  });
+  lowTarget.texture.generateMipmaps=false;
+  const compositePass=new THREE.ShaderPass({
+    // Keep render-target textures out of ShaderPass construction: r185 clones
+    // the uniform template and correctly warns that render targets are owned
+    // resources. The live target is assigned immediately after construction.
+    uniforms:{tDiffuse:{value:null},tOptics:{value:null}},
+    vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader:'uniform sampler2D tDiffuse;uniform sampler2D tOptics;varying vec2 vUv;void main(){vec4 base=texture2D(tDiffuse,vUv);gl_FragColor=vec4(base.rgb+texture2D(tOptics,vUv).rgb,base.a);}',
+  });
+  compositePass.uniforms.tOptics.value=lowTarget.texture;
+  let lowWidth=1,lowHeight=1;
+  pass.render=function(nextRenderer,writeBuffer,readBuffer,deltaTime,maskActive){
+    pass.uniforms[pass.textureID].value=readBuffer.texture;
+    nextRenderer.setRenderTarget(lowTarget);
+    pass.fsQuad.render(nextRenderer);
+    compositePass.uniforms.tOptics.value=lowTarget.texture;
+    compositePass.renderToScreen=pass.renderToScreen;
+    compositePass.render(nextRenderer,writeBuffer,readBuffer,deltaTime,maskActive);
+  };
 
   pass.enabled=false;
   pass.userData={dirtTexture:dirt};
   pass.setSize=function(width,height){
-    pass.uniforms.iResolution.value.set(Math.max(1,width||1),Math.max(1,height||1));
+    lowWidth=Math.max(1,Math.round((width||1)*resolutionScale));
+    lowHeight=Math.max(1,Math.round((height||1)*resolutionScale));
+    lowTarget.setSize(lowWidth,lowHeight);
+    pass.uniforms.iResolution.value.set(lowWidth,lowHeight);
   };
   pass.updateFromState=function(state,width,height){
     const u=pass.uniforms;
@@ -77,7 +112,7 @@ function createPass(THREE, options){
     pass.enabled=!!(state&&state.mode==='cinematic'&&state.visible&&((flare.enabled&&flare.intensity>0)||(bloom.enabled&&bloom.intensity>0)));
     if(!pass.enabled) return;
 
-    pass.setSize(width,height);
+    if(lowWidth<=1&&lowHeight<=1) pass.setSize(width,height);
     u.lensPosition.value.set(Number(state.ndcX)||0,Number(state.ndcY)||0);
     u.visibility.value=Math.max(0,Math.min(1,Number(state.visibility)||0));
     u.iTime.value=performance.now()*.001;
@@ -106,6 +141,8 @@ function createPass(THREE, options){
   };
   pass.disposeCinematic=function(){
     if(ownsDirtTexture) dirt.dispose();
+    lowTarget.dispose();
+    if(compositePass.material) compositePass.material.dispose();
     if(pass.material) pass.material.dispose();
   };
   return pass;

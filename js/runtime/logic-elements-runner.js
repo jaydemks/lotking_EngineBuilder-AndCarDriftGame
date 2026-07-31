@@ -17,6 +17,7 @@ function create(GAME, STORE){
     bindingValues:new Map(),
     objectSignature:'',
     pauseOnBreakpoints:false,
+    preparedSignature:'',
   };
 
   function registry(){
@@ -89,6 +90,45 @@ function create(GAME, STORE){
     state.active = true;
   }
 
+  async function prewarm(context){
+    const results = [];
+    for(const owner of logicObjects()){
+      if(owner.userData.logicEnabled === false) continue;
+      if(GAME.state && GAME.state.editorPreview && owner.userData.logicRunInEditorPreview === false) continue;
+      const graph = window.LK_LOGIC_GRAPH.normalizeGraph(
+        owner.userData.logicGraph,
+        owner.userData.editorName || 'Logic Element',
+        'element'
+      );
+      const checked = validate(graph);
+      if(!checked.ok) continue;
+      // Creating a service context materialises the Pawn but does not start the
+      // graph or dispatch OnStart, so authored logic remains strictly play-only.
+      const runtimeContext = window.LK_LOGIC_SERVICES.createContext({
+        GAME,
+        STORE,
+        THREE:window.THREE,
+        owner,
+        scope:'element',
+        graphName:graph.name || owner.userData.editorName || 'Logic Element',
+        graph,
+      });
+      const pawn = runtimeContext && runtimeContext.services && runtimeContext.services.pawns
+        ? runtimeContext.services.pawns.self()
+        : null;
+      if(!pawn || typeof pawn.prepareRuntime !== 'function') continue;
+      if(context && context.progress){
+        context.progress(.61, 'Preparing Logic Pawn resources',
+          (owner.userData.editorName || owner.name || 'Logic Element') + ' · physics, vehicle rig and widgets');
+      }
+      results.push(await Promise.resolve(pawn.prepareRuntime(context || {})));
+      if(context && context.render) context.render();
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    state.preparedSignature = logicObjectSignature();
+    return results;
+  }
+
   function dispose(){
     state.runtimes.forEach(runtime => {
       runtime.triggerEvent('OnDestroy', {});
@@ -104,6 +144,7 @@ function create(GAME, STORE){
     state.pawnDevices.clear();
     state.bindingValues.clear();
     state.objectSignature = '';
+    state.preparedSignature = '';
   }
 
   function applyPawnBindings(runtime){
@@ -299,7 +340,7 @@ function create(GAME, STORE){
     return true;
   }
 
-  const api = Object.freeze({install, rebuild, dispose, update, trigger, triggerRuntimeEvent, validate, registry, stats, setPauseOnBreakpoints, resumeBreakpoints, stepBreakpoints, clearProfilerTimeline});
+  const api = Object.freeze({install, rebuild, prewarm, dispose, update, trigger, triggerRuntimeEvent, validate, registry, stats, setPauseOnBreakpoints, resumeBreakpoints, stepBreakpoints, clearProfilerTimeline});
   return api;
 }
 

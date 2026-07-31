@@ -29,11 +29,63 @@ function create(deps){
   const maxSamples=240,maxDiagnostics=120;
   let open=false,lastFrame=0,lastUi=0,lastAudit=0,raf=0,auditPending=false;
   let lastShortLog=0,shortLogPending=false;
+  let auditGeneration=0,telemetryWorker=null,workerSequence=0;
+  const workerJobs=new Map();
   let frameAverage=0,frameP95=0,fps=0,maxFrame=0,stutterCount=0;
+  let diagnosticsRevision=0,renderedDiagnosticsRevision=-1;
   let inventory=[];
+  let cleanInventoryCache=[];
+  let renderedInventoryMarkup='';
   let sceneStats={objects:0,meshes:0,lights:0,particleSystems:0,particleCapacity:0,liveParticles:0,sprites:0,visibleSprites:0,shadowCasters:0,transparentMaterials:0};
   const auditBounds=THREERef&&THREERef.Box3?new THREERef.Box3():null;
   const auditSize=THREERef&&THREERef.Vector3?new THREERef.Vector3():null;
+  const auditNodeBounds=THREERef&&THREERef.Box3?new THREERef.Box3():null;
+
+  function ensureTelemetryWorker(){
+    if(telemetryWorker) return telemetryWorker;
+    if(typeof Worker!=='function') return null;
+    try {
+      const url=new URL('js/editor/developer-debugger-worker.js?v=0.7.7-overlay-worker-3',document.baseURI);
+      telemetryWorker=new Worker(url);
+      telemetryWorker.addEventListener('message',event=>{
+        const message=event&&event.data||{};
+        if(message.type==='ready'){ panel.dataset.telemetryWorker='active';return; }
+        const job=workerJobs.get(message.id);
+        if(!job) return;
+        workerJobs.delete(message.id);
+        clearTimeout(job.timer);
+        if(message.ok) job.resolve(message.result);
+        else job.reject(new Error(message.error||'Debugger worker task failed'));
+      });
+      telemetryWorker.addEventListener('error',()=>{
+        const failed=Array.from(workerJobs.values());
+        workerJobs.clear();
+        failed.forEach(job=>{ clearTimeout(job.timer);job.reject(new Error('Debugger worker unavailable')); });
+        try { telemetryWorker.terminate(); } catch(error){}
+        telemetryWorker=null;
+        panel.dataset.telemetryWorker='fallback';
+      });
+      panel.dataset.telemetryWorker='loading';
+      return telemetryWorker;
+    } catch(error){
+      panel.dataset.telemetryWorker='fallback';
+      return null;
+    }
+  }
+  function runWorkerTask(type,payload){
+    const worker=ensureTelemetryWorker();
+    if(!worker) return Promise.reject(new Error('Debugger worker unavailable'));
+    const id=++workerSequence;
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{
+        if(!workerJobs.has(id)) return;
+        workerJobs.delete(id);
+        reject(new Error('Debugger worker task timed out'));
+      },2500);
+      workerJobs.set(id,{resolve,reject,timer});
+      worker.postMessage({id,type,payload});
+    });
+  }
 
   const escapeHtml=value=>String(value==null?'':value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
@@ -56,6 +108,7 @@ function create(deps){
   function record(kind,message,detail){
     diagnostics.unshift({kind,time:clock(),message:String(message||kind),detail:String(detail||'')});
     if(diagnostics.length>maxDiagnostics) diagnostics.length=maxDiagnostics;
+    diagnosticsRevision++;
   }
   function onError(event){
     record('error',event&&event.message||'Uncaught editor error',event&&event.filename?event.filename+':'+(event.lineno||0):'');
@@ -88,12 +141,9 @@ function create(deps){
     }
     lastFrame=time;
     if(open&&time-lastUi>250){ updateMetrics(); drawChart(); renderEvents(); lastUi=time; }
-    if(open&&!auditPending&&time-lastAudit>2500){
-      auditPending=true;lastAudit=time;
-      const runAudit=()=>{ auditPending=false;if(open) auditScene(); };
-      if(typeof requestIdleCallback==='function') requestIdleCallback(runAudit,{timeout:900});
-      else setTimeout(runAudit,0);
-    }
+    // Deep resource audits are editor authoring work. In Play/Simulate the last
+    // completed snapshot remains visible and only realtime frame telemetry runs.
+    if(open&&!auditPending&&reportMode()==='editor'&&time-lastAudit>30000) scheduleAuditScene();
     if(open&&!shortLogPending&&time-lastShortLog>5000) writeShortLog();
     raf=requestAnimationFrame(frame);
   }
@@ -157,6 +207,7 @@ function create(deps){
       bar('JS heap',heapPct,memory?bytes(memory.usedJSHeapSize)+' / '+bytes(memory.jsHeapSizeLimit):'Unavailable');
     frameLabel.textContent=Math.round(fps)+' FPS · '+stutterCount+' hitches';
     mode.textContent=ED&&ED.playPreview?'PLAY PREVIEW':(ED&&ED.simulatePreview?'SIMULATE':'EDITOR');
+    panel.dataset.deepAudit=reportMode()==='editor'?(auditPending?'running':'idle'):'paused';
     const errors=diagnostics.filter(item=>item.kind==='error').length;
     health.className='lk-dbg-health '+(errors?'bad':(frameP95>32?'warn':''));
     health.textContent=errors?errors+' ERRORS':(frameP95>32?'FRAME PRESSURE':'HEALTHY');
@@ -227,55 +278,75 @@ function create(deps){
     const list=Array.isArray(material)?material:[material];
     list.forEach(mat=>Object.keys(mat||{}).forEach(key=>{ const value=mat[key]; if(value&&value.isTexture) set.add(value); }));
   }
-  function analyzeElement(object){
-    const geometries=new Set(),textures=new Set(),materials=new Set();
-    let meshes=0,lights=0,triangles=0,vertices=0,audioSeconds=0,videoSeconds=0,maxResolution='—';
-    let points=0,sprites=0,visibleSprites=0,shadowCasters=0;
-    const visit=node=>{
-      if(node.isMesh||node.isLine||node.isPoints){
-        if(node.isMesh) meshes++;
-        if(node.geometry){
-          geometries.add(node.geometry);
-          const position=node.geometry.attributes&&node.geometry.attributes.position;
-          const count=node.geometry.index?node.geometry.index.count:(position&&position.count||0);
-          vertices+=position&&position.count||0;
-          if(node.isMesh) triangles+=Math.floor(count/3);
-          if(node.isPoints) points+=position&&position.count||0;
-        }
-        const mats=Array.isArray(node.material)?node.material:[node.material];
-        mats.filter(Boolean).forEach(mat=>materials.add(mat));
-        collectTextures(node.material,textures);
-      }
-      if(node.isSprite){ sprites++;if(effectivelyVisible(node)) visibleSprites++; }
-      if(node.isLight) lights++;
-      if(node.castShadow) shadowCasters++;
-      const media=node.userData&&node.userData.mediaElement;
-      if(media&&Number.isFinite(media.duration)){
-        if(String(media.tagName).toLowerCase()==='video') videoSeconds+=media.duration; else audioSeconds+=media.duration;
-      }
+  function beginElementAnalysis(object){
+    const bounds=auditBounds&&THREERef&&THREERef.Box3?new THREERef.Box3().makeEmpty():null;
+    return {
+      object,stack:[object],geometries:new Set(),textures:new Set(),materials:new Set(),bounds,hasBounds:false,
+      meshes:0,lights:0,triangles:0,vertices:0,audioSeconds:0,videoSeconds:0,
+      points:0,sprites:0,visibleSprites:0,shadowCasters:0,
     };
-    if(object&&typeof object.traverse==='function') object.traverse(visit); else visit(object||{});
-    let geoBytes=0,textureBytes=0;
-    geometries.forEach(geometry=>{ geoBytes+=geometryBytes(geometry); });
-    textures.forEach(texture=>{
+  }
+  function visitElementNode(state,node){
+    if(!node) return;
+    if(node.isMesh||node.isLine||node.isPoints){
+      if(node.isMesh) state.meshes++;
+      if(node.geometry){
+        state.geometries.add(node.geometry);
+        const position=node.geometry.attributes&&node.geometry.attributes.position;
+        const count=node.geometry.index?node.geometry.index.count:(position&&position.count||0);
+        state.vertices+=position&&position.count||0;
+        if(node.isMesh) state.triangles+=Math.floor(count/3);
+        if(node.isPoints) state.points+=position&&position.count||0;
+        // Never call Box3.setFromObject during telemetry: it recursively walks
+        // the same subtree and may synchronously scan hundreds of thousands of
+        // vertices. Reuse already-authored geometry bounds one node at a time.
+        const geometryBounds=node.geometry.boundingBox;
+        if(state.bounds&&auditNodeBounds&&geometryBounds&&node.matrixWorld){
+          auditNodeBounds.copy(geometryBounds).applyMatrix4(node.matrixWorld);
+          state.bounds.union(auditNodeBounds);state.hasBounds=true;
+        }
+      }
+      const mats=Array.isArray(node.material)?node.material:[node.material];
+      mats.filter(Boolean).forEach(mat=>state.materials.add(mat));
+      collectTextures(node.material,state.textures);
+    }
+    if(node.isSprite){ state.sprites++;if(effectivelyVisible(node)) state.visibleSprites++; }
+    if(node.isLight) state.lights++;
+    if(node.castShadow) state.shadowCasters++;
+    const media=node.userData&&node.userData.mediaElement;
+    if(media&&Number.isFinite(media.duration)){
+      if(String(media.tagName).toLowerCase()==='video') state.videoSeconds+=media.duration;
+      else state.audioSeconds+=media.duration;
+    }
+    const children=Array.isArray(node.children)?node.children:[];
+    for(let index=children.length-1;index>=0;index--) state.stack.push(children[index]);
+  }
+  function finishElementAnalysis(state){
+    const object=state.object||{};
+    let geoBytes=0,textureBytes=0,maxResolution='—',maxResolutionPixels=0;
+    state.geometries.forEach(geometry=>{ geoBytes+=geometryBytes(geometry); });
+    state.textures.forEach(texture=>{
       const info=textureInfo(texture);textureBytes+=info.bytes;
-      if(info.width&&info.height) maxResolution=maxResolution==='—'||info.width*info.height>Number(maxResolution.split('×')[0])*Number(maxResolution.split('×')[1])?info.width+'×'+info.height:maxResolution;
+      if(info.width&&info.height&&info.width*info.height>maxResolutionPixels){
+        maxResolutionPixels=info.width*info.height;maxResolution=info.width+'×'+info.height;
+      }
       const image=texture&&texture.image;
       if(image&&Number.isFinite(image.duration)){
-        if(String(image.tagName).toLowerCase()==='video') videoSeconds+=image.duration; else audioSeconds+=image.duration;
+        if(String(image.tagName).toLowerCase()==='video') state.videoSeconds+=image.duration;
+        else state.audioSeconds+=image.duration;
       }
     });
     const data=object.userData||{};
     const type=data.editorType||data.type||object.type||'Object';
     const effectParams=data.effectParams;
     const rainInstances=object.name==='LK_GPU_Rain'&&object.geometry?Number(object.geometry.instanceCount)||0:0;
-    const particleCapacity=rainInstances||((effectParams||data.particleSystem)?Math.max(points,sprites,1):points);
-    const particleSystems=(effectParams||data.particleSystem||rainInstances||points)?1:0;
-    const transparentMaterials=Array.from(materials).filter(mat=>mat.transparent===true||Number(mat.opacity)<1).length;
+    const particleCapacity=rainInstances||((effectParams||data.particleSystem)?Math.max(state.points,state.sprites,1):state.points);
+    const particleSystems=(effectParams||data.particleSystem||rainInstances||state.points)?1:0;
+    const transparentMaterials=Array.from(state.materials).filter(mat=>mat.transparent===true||Number(mat.opacity)<1).length;
     const detail=[];
-    if(vertices) detail.push(number(vertices)+' verts');
-    if(materials.size) detail.push(materials.size+' mat');
-    if(lights) detail.push(lights+' lights');
+    if(state.vertices) detail.push(number(state.vertices)+' verts');
+    if(state.materials.size) detail.push(state.materials.size+' mat');
+    if(state.lights) detail.push(state.lights+' lights');
     if(particleSystems) detail.push(number(particleCapacity)+' particles');
     if(effectParams){
       if(effectParams.kind) detail.push(String(effectParams.kind)+' emitter');
@@ -283,21 +354,26 @@ function create(deps){
       if(Number.isFinite(Number(effectParams.life))) detail.push(Number(effectParams.life).toFixed(2)+'s life');
     }
     if(data.editorType==='playerEffect'||data.editorType==='playerSkid') detail.push('particle source');
-    if(shadowCasters) detail.push(shadowCasters+' shadow casters');
+    if(state.shadowCasters) detail.push(state.shadowCasters+' shadow casters');
     if(transparentMaterials) detail.push(transparentMaterials+' transparent mat');
-    if(auditBounds&&auditSize){
-      try {
-        const size=auditBounds.setFromObject(object).getSize(auditSize);
-        if(Number.isFinite(size.x)&&Number.isFinite(size.y)&&Number.isFinite(size.z)&&size.length()>0) detail.push(size.x.toFixed(1)+'×'+size.y.toFixed(1)+'×'+size.z.toFixed(1)+' m');
-      } catch(err){}
+    if(state.hasBounds&&state.bounds&&auditSize){
+      const size=state.bounds.getSize(auditSize);
+      if(Number.isFinite(size.x)&&Number.isFinite(size.y)&&Number.isFinite(size.z)&&size.length()>0){
+        detail.push(size.x.toFixed(1)+'×'+size.y.toFixed(1)+'×'+size.z.toFixed(1)+' m');
+      }
     }
     if(maxResolution!=='—') detail.push('max '+maxResolution);
-    if(audioSeconds) detail.push('audio '+audioSeconds.toFixed(1)+'s');
-    if(videoSeconds) detail.push('video '+videoSeconds.toFixed(1)+'s');
+    if(state.audioSeconds) detail.push('audio '+state.audioSeconds.toFixed(1)+'s');
+    if(state.videoSeconds) detail.push('video '+state.videoSeconds.toFixed(1)+'s');
     if(data.logicGraph&&Array.isArray(data.logicGraph.nodes)) detail.push(data.logicGraph.nodes.length+' nodes');
     const sourceBytes=Number(data.fileSize||data.sourceSize||data.addedEntry&&data.addedEntry.size)||0;
     if(sourceBytes) detail.push('source '+bytes(sourceBytes));
-    return {object,name:data.editorName||object.name||'(unnamed)',type,geoBytes,textureBytes,triangles,meshes,lights,points,sprites,visibleSprites,particleSystems,particleCapacity,shadowCasters,transparentMaterials,detail:detail.join(' · '),total:Math.max(sourceBytes,geoBytes+textureBytes)};
+    return {
+      object,name:data.editorName||object.name||'(unnamed)',type,geoBytes,textureBytes,triangles:state.triangles,
+      meshes:state.meshes,lights:state.lights,points:state.points,sprites:state.sprites,visibleSprites:state.visibleSprites,
+      particleSystems,particleCapacity,shadowCasters:state.shadowCasters,transparentMaterials,
+      detail:detail.join(' · '),total:Math.max(sourceBytes,geoBytes+textureBytes),
+    };
   }
   function sceneElements(){
     const registry=GAME&&GAME.world&&Array.isArray(GAME.world.registry)?GAME.world.registry:[];
@@ -312,45 +388,145 @@ function create(deps){
     });
     return result;
   }
-  function auditScene(){
-    inventory=sceneElements().map(analyzeElement).sort((a,b)=>b.total-a.total||b.triangles-a.triangles);
-    const selected=ED&&ED.selected;
-    let totalGeo=0,totalTextures=0,totalTriangles=0;
-    inventory.forEach(item=>{ totalGeo+=item.geoBytes;totalTextures+=item.textureBytes;totalTriangles+=item.triangles; });
-    const systems=new Set(),transparentMaterials=new Set();
-    sceneStats={objects:0,meshes:0,lights:0,particleSystems:0,particleCapacity:0,liveParticles:0,sprites:0,visibleSprites:0,shadowCasters:0,transparentMaterials:0};
-    scene.traverse(node=>{
-      sceneStats.objects++;
-      if(node.isMesh) sceneStats.meshes++;
-      if(node.isLight) sceneStats.lights++;
-      if(node.castShadow) sceneStats.shadowCasters++;
-      const mats=Array.isArray(node.material)?node.material:[node.material];
-      mats.filter(mat=>mat&&(mat.transparent===true||Number(mat.opacity)<1)).forEach(mat=>transparentMaterials.add(mat));
-      if(node.isSprite){ sceneStats.sprites++;if(effectivelyVisible(node)) sceneStats.visibleSprites++; }
-      const data=node.userData||{};
-      let systemKey=data.particleSystem||data.logicVehicleEffect&&'logic-vehicle-effects'||null;
-      let capacity=0,live=0;
-      if(node.name==='LK_GPU_Rain'&&node.geometry){
-        systemKey='environment-rain';capacity=Number(node.geometry.instanceCount)||0;live=effectivelyVisible(node)?capacity:0;
-      } else if(node.isPoints){
-        const position=node.geometry&&node.geometry.attributes&&node.geometry.attributes.position;
-        capacity=position&&position.count||0;live=effectivelyVisible(node)?capacity:0;
-        systemKey=systemKey||('points-'+(node.uuid||sceneStats.objects));
-      } else if(systemKey&&node.isSprite){ capacity=1;live=effectivelyVisible(node)?1:0; }
-      if(data.effectParams){
-        systemKey='emitter-'+(node.uuid||sceneStats.objects);
-        let emitterSprites=0,visibleEmitterSprites=0;
-        node.traverse(child=>{ if(child.isSprite){ emitterSprites++;if(effectivelyVisible(child)) visibleEmitterSprites++; } });
-        capacity=Math.max(capacity,emitterSprites);live=Math.max(live,visibleEmitterSprites);
-      }
-      if(systemKey){ systems.add(systemKey);sceneStats.particleCapacity+=capacity;sceneStats.liveParticles+=live; }
+  function beginSceneStatsScan(){
+    return {
+      stack:[{node:scene,effectSystem:null}],
+      stats:{objects:0,meshes:0,lights:0,particleSystems:0,particleCapacity:0,liveParticles:0,sprites:0,visibleSprites:0,shadowCasters:0,transparentMaterials:0},
+      systems:new Set(),transparentMaterials:new Set(),
+    };
+  }
+  function visitSceneStatsNode(scan,entry){
+    const node=entry&&entry.node;
+    if(!node) return;
+    const stats=scan.stats,data=node.userData||{};
+    stats.objects++;
+    if(node.isMesh) stats.meshes++;
+    if(node.isLight) stats.lights++;
+    if(node.castShadow) stats.shadowCasters++;
+    const mats=Array.isArray(node.material)?node.material:[node.material];
+    mats.filter(mat=>mat&&(mat.transparent===true||Number(mat.opacity)<1)).forEach(mat=>scan.transparentMaterials.add(mat));
+    if(node.isSprite){ stats.sprites++;if(effectivelyVisible(node)) stats.visibleSprites++; }
+
+    let effectSystem=entry.effectSystem;
+    if(data.effectParams) effectSystem='emitter-'+(node.uuid||stats.objects);
+    let systemKey=data.particleSystem||data.logicVehicleEffect&&'logic-vehicle-effects'||effectSystem||null;
+    let capacity=0,live=0;
+    if(node.name==='LK_GPU_Rain'&&node.geometry){
+      systemKey='environment-rain';capacity=Number(node.geometry.instanceCount)||0;live=effectivelyVisible(node)?capacity:0;
+    } else if(node.isPoints){
+      const position=node.geometry&&node.geometry.attributes&&node.geometry.attributes.position;
+      capacity=position&&position.count||0;live=effectivelyVisible(node)?capacity:0;
+      systemKey=systemKey||('points-'+(node.uuid||stats.objects));
+    } else if(systemKey&&node.isSprite){
+      capacity=1;live=effectivelyVisible(node)?1:0;
+    }
+    if(systemKey){
+      scan.systems.add(systemKey);stats.particleCapacity+=capacity;stats.liveParticles+=live;
+    }
+    const children=Array.isArray(node.children)?node.children:[];
+    for(let index=children.length-1;index>=0;index--) scan.stack.push({node:children[index],effectSystem});
+  }
+  function finishSceneStatsScan(scan){
+    scan.stats.particleSystems=scan.systems.size;
+    scan.stats.transparentMaterials=scan.transparentMaterials.size;
+    return scan.stats;
+  }
+  function plainInventoryItem(item,index){
+    const object=item&&item.object,data=object&&object.userData||{};
+    return {
+      token:object&&object.uuid||data.editorId||('audit-'+index),
+      name:item.name,type:item.type,total:item.total,geoBytes:item.geoBytes,textureBytes:item.textureBytes,
+      triangles:item.triangles,meshes:item.meshes,lights:item.lights,points:item.points,sprites:item.sprites,
+      visibleSprites:item.visibleSprites,particleSystems:item.particleSystems,particleCapacity:item.particleCapacity,
+      shadowCasters:item.shadowCasters,transparentMaterials:item.transparentMaterials,detail:item.detail,
+      id:data.editorId||null,uuid:object&&object.uuid||null,
+    };
+  }
+  function aggregateLocally(items){
+    const sorted=items.slice().sort((a,b)=>b.total-a.total||b.triangles-a.triangles);
+    const totals=sorted.reduce((out,item)=>{
+      out.geometryBytes+=Number(item.geoBytes)||0;out.textureBytes+=Number(item.textureBytes)||0;out.triangles+=Number(item.triangles)||0;return out;
+    },{geometryBytes:0,textureBytes:0,triangles:0});
+    return {items:sorted,totals};
+  }
+  function finishAudit(nextInventory,nextSceneStats,generation){
+    const objectByToken=new Map(),plain=(nextInventory||[]).map((item,index)=>{
+      const value=plainInventoryItem(item,index);objectByToken.set(value.token,item.object);return value;
     });
-    sceneStats.particleSystems=systems.size;
-    sceneStats.transparentMaterials=transparentMaterials.size;
-    sceneTotal.textContent=inventory.length+' elements · '+bytes(totalGeo+totalTextures)+' resident estimate · '+number(totalTriangles)+' tris · '+number(sceneStats.particleSystems)+' particle systems';
-    rows.innerHTML=inventory.length?inventory.map((item,index)=>
-      '<tr role="button" tabindex="0" data-debug-index="'+index+'" class="'+(item.object===selected?'selected':'')+'" title="Select and focus '+escapeHtml(item.name)+'"><td title="'+escapeHtml(item.name)+'">'+escapeHtml(item.name)+'</td><td>'+escapeHtml(item.type)+'</td><td>'+bytes(item.geoBytes)+'</td><td>'+bytes(item.textureBytes)+'</td><td>'+number(item.triangles)+' tris</td><td title="'+escapeHtml(item.detail)+'">'+escapeHtml(item.detail||'—')+'</td></tr>'
-    ).join(''):'<tr><td colspan="6" class="lk-dbg-empty">No authored scene elements detected.</td></tr>';
+    return runWorkerTask('aggregate',{items:plain}).catch(()=>aggregateLocally(plain)).then(result=>{
+      if(generation!==auditGeneration) return false;
+      inventory=(result.items||[]).map(item=>Object.assign({},item,{object:objectByToken.get(item.token)||null}));
+      sceneStats=nextSceneStats||sceneStats;
+      cleanInventoryCache=inventory.map(item=>({
+        id:item.id,uuid:item.uuid,name:item.name,type:item.type,residentBytes:item.total,
+        geometryBytes:item.geoBytes,textureBytes:item.textureBytes,triangles:item.triangles,meshes:item.meshes,
+        lights:item.lights,points:item.points,sprites:item.sprites,particleSystems:item.particleSystems,
+        particleCapacity:item.particleCapacity,shadowCasters:item.shadowCasters,
+        transparentMaterials:item.transparentMaterials,details:item.detail,
+      }));
+      const totals=result.totals||{geometryBytes:0,textureBytes:0,triangles:0};
+      sceneTotal.textContent=inventory.length+' elements · '+bytes(totals.geometryBytes+totals.textureBytes)+' resident estimate · '+number(totals.triangles)+' tris · '+number(sceneStats.particleSystems)+' particle systems';
+      const selected=ED&&ED.selected;
+      const markup=inventory.length?inventory.map((item,index)=>
+        '<tr role="button" tabindex="0" data-debug-index="'+index+'" class="'+(item.object===selected?'selected':'')+'" title="Select and focus '+escapeHtml(item.name)+'"><td title="'+escapeHtml(item.name)+'">'+escapeHtml(item.name)+'</td><td>'+escapeHtml(item.type)+'</td><td>'+bytes(item.geoBytes)+'</td><td>'+bytes(item.textureBytes)+'</td><td>'+number(item.triangles)+' tris</td><td title="'+escapeHtml(item.detail)+'">'+escapeHtml(item.detail||'—')+'</td></tr>'
+      ).join(''):'<tr><td colspan="6" class="lk-dbg-empty">No authored scene elements detected.</td></tr>';
+      if(markup!==renderedInventoryMarkup){ rows.innerHTML=markup;renderedInventoryMarkup=markup; }
+      hardwareRows();
+      return true;
+    }).finally(()=>{ if(generation===auditGeneration) auditPending=false; });
+  }
+  function scheduleAuditScene(){
+    if(auditPending||!open) return false;
+    auditPending=true;
+    const generation=++auditGeneration;
+    const startedMode=reportMode();
+    lastAudit=performance.now();
+    const elements=sceneElements(),nextInventory=[];
+    let elementIndex=0,currentElement=null,sceneScan=null,phase='elements';
+    // Neither requestIdleCallback (starved by a continuously-rendering editor)
+    // nor requestAnimationFrame (very slow under a saturated GPU) is a reliable
+    // scheduler here. Short timer tasks keep progressing independently of FPS
+    // and yield back to input/rendering between every strictly-budgeted slice.
+    const schedule=callback=>setTimeout(()=>callback(null),0);
+    const step=deadline=>{
+      if(!open||generation!==auditGeneration||(startedMode==='editor'&&reportMode()!=='editor')){
+        if(generation===auditGeneration) auditPending=false;
+        return;
+      }
+      const started=performance.now();
+      let processed=0;
+      try {
+        while(processed<24&&performance.now()-started<1.75){
+          if(phase==='elements'){
+            if(!currentElement){
+              if(elementIndex>=elements.length){ phase='scene';sceneScan=beginSceneStatsScan();continue; }
+              currentElement=beginElementAnalysis(elements[elementIndex++]);
+            }
+            const node=currentElement.stack.pop();
+            if(node) visitElementNode(currentElement,node);
+            processed++;
+            if(!currentElement.stack.length){
+              nextInventory.push(finishElementAnalysis(currentElement));currentElement=null;
+            }
+          } else {
+            const entry=sceneScan.stack.pop();
+            if(entry) visitSceneStatsNode(sceneScan,entry);
+            processed++;
+            if(!sceneScan.stack.length){
+              const nextSceneStats=finishSceneStatsScan(sceneScan);
+              finishAudit(nextInventory,nextSceneStats,generation);
+              return;
+            }
+          }
+          if(processed&&deadline&&typeof deadline.timeRemaining==='function'&&deadline.timeRemaining()<1) break;
+        }
+      } catch(error){
+        auditPending=false;record('error','Developer audit failed',error&&error.message||error);return;
+      }
+      schedule(step);
+    };
+    schedule(step);
+    return true;
   }
 
   function revealInOutliner(object){
@@ -374,20 +550,15 @@ function create(deps){
     if(focusSelected&&item.object.isObject3D&&item.object.parent&&!(ED&&ED.playPreview)&&!(ED&&ED.simulatePreview)) requestAnimationFrame(()=>focusSelected());
   }
 
-  function renderEvents(){
+  function renderEvents(force){
+    if(!force&&renderedDiagnosticsRevision===diagnosticsRevision) return;
+    renderedDiagnosticsRevision=diagnosticsRevision;
     eventsBox.innerHTML=diagnostics.length?diagnostics.slice(0,60).map(item=>
       '<div class="lk-dbg-event '+(item.kind==='error'?'error':'')+'"><time>'+escapeHtml(item.time)+'</time><b>'+escapeHtml(item.kind.toUpperCase())+'</b><span>'+escapeHtml(item.message)+(item.detail?' · '+escapeHtml(item.detail):'')+'</span></div>'
     ).join(''):'<div class="lk-dbg-empty">No errors, long tasks or frame hitches captured.</div>';
   }
   function cleanInventory(){
-    return inventory.map(item=>({
-      id:item.object&&item.object.userData&&item.object.userData.editorId||null,
-      uuid:item.object&&item.object.uuid||null,
-      name:item.name,type:item.type,residentBytes:item.total,geometryBytes:item.geoBytes,textureBytes:item.textureBytes,
-      triangles:item.triangles,meshes:item.meshes,lights:item.lights,points:item.points,sprites:item.sprites,
-      particleSystems:item.particleSystems,particleCapacity:item.particleCapacity,shadowCasters:item.shadowCasters,
-      transparentMaterials:item.transparentMaterials,details:item.detail,
-    }));
+    return cleanInventoryCache.slice();
   }
   function reportMode(){ return ED&&ED.playPreview?'play-preview':(ED&&ED.simulatePreview?'simulate':'editor'); }
   function projectContext(){
@@ -401,7 +572,7 @@ function create(deps){
     computeFrames();
     const rs=rendererStats(),gpu=gpuDetails(),memory=performance.memory;
     return {
-      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.6',mode:reportMode(),
+      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.7',mode:reportMode(),
       project:projectContext(),
       performance:{fps,frameAverageMs:frameAverage,frameP95Ms:frameP95,worstRecentFrameMs:maxFrame,stutterCount,sampleCount:samples.length,frameSamplesMs:samples.slice()},
       renderer:Object.assign({},rs,{pixelRatio:renderer.getPixelRatio?renderer.getPixelRatio():devicePixelRatio||1,width:renderer.domElement.width,height:renderer.domElement.height}),
@@ -426,33 +597,59 @@ function create(deps){
   }
   function writeShortLog(force){
     if(shortLogPending||(!force&&performance.now()-lastShortLog<5000)) return Promise.resolve(false);
-    shortLogPending=true;lastShortLog=performance.now();setAutoLogState('','AUTO LOG…');
-    return fetch(shortLogUrl,{method:'PUT',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(briefReport())})
-      .then(response=>{ if(!response.ok) throw new Error('HTTP '+response.status);return response.json(); })
-      .then(result=>{ setAutoLogState('saved','AUTO LOG · SAVED');if(autoLog) autoLog.title=result.file||'.lotking-local/developer-performance-latest.md';return true; })
-      .catch(()=>{ setAutoLogState('unavailable','AUTO LOG · LOCAL ONLY');return false; })
-      .finally(()=>{ shortLogPending=false; });
+    shortLogPending=true;
+    if(panel.dataset.autoLogPhase!=='saved') setAutoLogState('','AUTO LOG…');
+    panel.dataset.autoLogPhase='worker';
+    const report=briefReport();
+    const fallback=()=>fetch(shortLogUrl,{method:'PUT',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(report)})
+      .then(response=>{ if(!response.ok) throw new Error('HTTP '+response.status);return response.json(); });
+    return runWorkerTask('write-log',{url:shortLogUrl,report}).catch(()=>{
+      panel.dataset.autoLogPhase='fallback';return fallback();
+    })
+      .then(result=>{ panel.dataset.autoLogPhase='saved';setAutoLogState('saved','AUTO LOG · SAVED');if(autoLog) autoLog.title=result.file||'.lotking-local/developer-performance-latest.md';return true; })
+      .catch(()=>{ panel.dataset.autoLogPhase='unavailable';setAutoLogState('unavailable','AUTO LOG · LOCAL ONLY');return false; })
+      .finally(()=>{ shortLogPending=false;lastShortLog=performance.now(); });
   }
   function exportFullReport(){
-    refresh();
-    const payload=JSON.stringify(fullReport(),null,2);
-    const blob=new Blob([payload],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');
-    anchor.href=url;anchor.download='lotking-performance-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
-    document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    refreshIncremental();
+    const report=fullReport();
+    runWorkerTask('stringify',{value:report,pretty:true}).then(result=>result.text)
+      .catch(()=>JSON.stringify(report,null,2))
+      .then(payload=>{
+        const blob=new Blob([payload],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');
+        anchor.href=url;anchor.download='lotking-performance-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+        document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      });
     writeShortLog(true);
   }
-  function refresh(){ auditScene();hardwareRows();updateMetrics();drawChart();renderEvents();lastAudit=performance.now(); }
+  function refresh(){ hardwareRows();updateMetrics();drawChart();renderEvents(true);scheduleAuditScene(); }
+  function refreshIncremental(){
+    hardwareRows();updateMetrics();drawChart();renderEvents(true);
+    scheduleAuditScene();
+  }
   function setOpen(value){
     open=value!==false;
     panel.classList.toggle('open',open);panel.setAttribute('aria-hidden',open?'false':'true');
     const toggle=root.querySelector('#lkDevToolsToggle');if(toggle) toggle.classList.toggle('on',open);
-    if(open) requestAnimationFrame(()=>{ refresh();writeShortLog(true); });
+    if(open){
+      // Worker startup is non-blocking and must not depend on the next render
+      // frame, which can be delayed by a hidden/minimized editor window.
+      ensureTelemetryWorker();
+      requestAnimationFrame(()=>{
+      hardwareRows();updateMetrics();drawChart();renderEvents(true);
+      if(reportMode()==='editor') scheduleAuditScene();
+      else if(!inventory.length) sceneTotal.textContent='Deep scene audit paused during Play · use Refresh for an incremental snapshot';
+      writeShortLog(true);
+      });
+    } else {
+      auditGeneration++;auditPending=false;
+    }
   }
-  function clear(){ diagnostics.length=0;stutterCount=0;samples.length=0;renderEvents();updateMetrics();drawChart(); }
+  function clear(){ diagnostics.length=0;diagnosticsRevision++;stutterCount=0;samples.length=0;renderEvents(true);updateMetrics();drawChart(); }
 
   $('#lkDbgClose').addEventListener('click',()=>setOpen(false));
   $('#lkDbgClear').addEventListener('click',clear);
-  $('#lkDbgRefresh').addEventListener('click',refresh);
+  $('#lkDbgRefresh').addEventListener('click',refreshIncremental);
   $('#lkDbgExport').addEventListener('click',exportFullReport);
   rows.addEventListener('click',event=>{ const row=event.target.closest('tr[data-debug-index]');if(row) activateInventoryRow(row); });
   rows.addEventListener('keydown',event=>{

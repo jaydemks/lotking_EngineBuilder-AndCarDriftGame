@@ -395,14 +395,17 @@ test('project rendering authoring is wired to the shared runtime schema', async 
 });
 
 test('Developer Debugger reports live editor telemetry and survives Play Preview', async ({page}) => {
+  test.setTimeout(180000);
   await page.locator('#lkDevToolsToggle').click();
   await expect(page.locator('#lkDevToolsMenu')).toBeVisible();
   await page.locator('#lkOpenPerformanceDebugger').click();
   const debuggerPanel=page.locator('#lkDeveloperDebugger');
   await expect(debuggerPanel).toHaveClass(/open/);
   await expect(debuggerPanel).toHaveAttribute('aria-hidden','false');
-  await expect(page.locator('#lkDbgAutoLog')).toHaveText('AUTO LOG · SAVED');
+  await expect(debuggerPanel).toHaveAttribute('data-telemetry-worker','active');
+  await expect(page.locator('#lkDbgAutoLog')).toHaveText('AUTO LOG · SAVED',{timeout:30000});
   await expect.poll(async()=>page.evaluate(()=>fetch('/__lotking/developer-performance').then(response=>response.text()))).toContain('# LOT KING Developer Performance Snapshot');
+  await expect(debuggerPanel).toHaveAttribute('data-deep-audit','idle', {timeout:30000});
   await expect(page.locator('#lkDbgSummary .lk-dbg-metric')).toHaveCount(8);
   await expect(page.locator('#lkDbgSummary')).toContainText('PARTICLES LIVE');
   await expect(page.locator('#lkDbgSummary')).toContainText('PARTICLE SYSTEMS');
@@ -431,9 +434,10 @@ test('Developer Debugger reports live editor telemetry and survives Play Preview
   await expect(page.locator('#lkDbgEvents')).toContainText('Debugger audit error');
 
   await page.evaluate(()=>document.querySelector('#lkPlay').click());
-  await expect(page.locator('#lkEditor')).toHaveClass(/play-preview/);
+  await expect(page.locator('#lkEditor')).toHaveClass(/play-preview/,{timeout:60000});
   await expect(debuggerPanel).toBeVisible();
   await expect(page.locator('#lkDbgMode')).toHaveText('PLAY PREVIEW');
+  await expect(debuggerPanel).toHaveAttribute('data-deep-audit','paused');
   await page.evaluate(()=>document.querySelector('#lkPlay').click());
   await expect(page.locator('#lkEditor')).not.toHaveClass(/play-preview/);
 });

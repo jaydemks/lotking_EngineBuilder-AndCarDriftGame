@@ -61,7 +61,21 @@ function create(deps){
     pipeline.body.appendChild(deps.selectRow(tr('Renderer', 'Renderer'), cfg.defaults.rendererMode, [
       {value:'webgl', label:tr('Normal (WebGL)', 'Normale (WebGL)')},
       {value:'raytracing', label:tr('Ray lighting', 'Ray lighting')},
+      {value:'pathtracing', label:tr(
+        'Progressive path tracing (Experimental - Not stable)',
+        'Path tracing progressivo (Sperimentale - Non stabile)'
+      )},
     ], value => updateDefault('rendererMode', value, tr('Switching project rendering pipeline…', 'Cambio pipeline rendering progetto…'))).root);
+    const pathTracer=GAME&&GAME.systems&&GAME.systems.pathTracing;
+    if(cfg.defaults.rendererMode==='pathtracing'){
+      const state=pathTracer&&pathTracer.status?pathTracer.status():{supported:false,failure:tr('Path tracer module unavailable','Modulo path tracer non disponibile')};
+      const label=!state.supported?tr('Unavailable','Non disponibile'):
+        state.failure?tr('WebGL fallback','Fallback WebGL'):
+        state.building?tr('Preparing BVH…','Preparazione BVH…'):
+        state.ready?tr('Active','Attivo'):tr('Waiting for pre-benchmark','In attesa del pre-benchmark');
+      const detail=state.failure||((Number(state.samples)||0)+tr(' progressive samples',' sample progressivi'));
+      pipeline.body.appendChild(deps.el('<div class="lk-hint lk-render-backend-warning"><b>Path tracing: '+label+'</b><br>'+detail+'</div>'));
+    }
     pipeline.body.appendChild(deps.selectRow(tr('Default quality', 'Qualita predefinita'), cfg.defaults.quality, [
       {value:'low',label:'Low'}, {value:'medium',label:'Medium'}, {value:'high',label:'High'},
       {value:'superhigh',label:'Super High'}, {value:'extreme',label:'Extreme'},
@@ -79,6 +93,7 @@ function create(deps){
       ['shadows', tr('Dynamic shadows', 'Ombre dinamiche')],
       ['reflections', tr('Material reflections', 'Riflessi materiali')],
       ['volumetricLighting', tr('Volumetric lighting', 'Illuminazione volumetrica')],
+      ['cinematicLensFlares', tr('Cinematic lens flares', 'Lens flare cinematici')],
     ].forEach(item => features.body.appendChild(deps.checkRow(item[1], cfg.defaults[item[0]], value => updateDefault(item[0], value)).root));
     defaultsPanel.appendChild(features.root);
 
@@ -142,6 +157,7 @@ function create(deps){
       ['reflectionQuality', tr('Reflection quality', 'Qualita riflessi')],
       ['reflectionDistance', tr('Reflection ray reach', 'Portata raggi riflessi')],
       ['volumetricLighting', tr('Volumetric lighting', 'Illuminazione volumetrica')],
+      ['cinematicLensFlares', tr('Cinematic lens flares', 'Lens flare cinematici')],
     ].forEach(item => expose.body.appendChild(deps.checkRow(item[1], cfg.exposed[item[0]], value => {
       const next = config();
       next.exposed[item[0]] = value;

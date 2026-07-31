@@ -42,6 +42,9 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 - `js/runtime/rendering-backend.js`
   Central GPU capability and renderer registry. It owns the Auto/WebGPU/WebGL preference, asynchronous adapter probing, effective-backend diagnostics, serialized r185-safe pipeline preparation, live renderer counters, session-only render-scale overrides and creation/telemetry of WebGL fallback and auxiliary editor renderers.
 
+- `js/runtime/path-tracing-renderer.js`
+  Optional progressive path-tracing backend. Its renderer is exported by the primary pinned Three.js bundle so all colors, materials and textures share one module graph. When selected it builds a BVH for the compatible static world and composites a depth-correct responsive raster layer for vehicles, characters, custom shaders, dynamic material displays and transient effects. Unsupported hardware or a build failure returns safely to WebGL.
+
 - `js/runtime/cloth-system.js`
   Renderer-independent Character garment component. It discovers separated skinned cloth meshes, evaluates vertex-color or painted pin masks, follows the animated skeleton, solves structural constraints, wind/gravity and bone-sphere collisions, and exposes a portable CPU backend shared by WebGL, Safari, Pawn Studio, Play Preview and export. The schema keeps the future Three.js WebGPU compute backend behind an explicit parity boundary.
 
@@ -299,6 +302,9 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 - `js/runtime/project-workspace.js`
   Editor-only workspace overlay and hosted-origin gate. It detects hosted versus local execution automatically, then offers Author DEMO or Clean Project. Author DEMO creates an origin-scoped private browser project with normal editor persistence. Folder mirroring and portable LKEP export are optional, and no hosted project/FTP write endpoint is used.
 
+- `js/runtime/split-project.js`
+  Shared Editor/Game transport for repository-safe large LKEP snapshots. It creates and resolves a small pointer plus manifest and checksummed ordered chunks, writes/reads Chromium directory handles, and verifies the exact JSON text before passing it to the normal project parser.
+
 - `js/runtime/ui/window-manager.js`
   Shared floating-window manager for runtime/editor overlays. Supports centered windows, drag, resize, persisted geometry, viewport clamping, magnetic snapping, z-ordering, and attaching to existing panels.
 
@@ -331,7 +337,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Day/night cycle, stars, moon, clouds, procedural environment lighting, global light modulation, classic sun bloom/lens flare state, and volumetric-clouds integration.
 
 - `js/runtime/cinematic-lens-flare.js`
-  Optional fullscreen realistic sun flare for the shared post pipeline, with optical ghosts, chromatic dispersion, aperture rays, lens dirt and selective analytic sun bloom/glow.
+  Optional fullscreen realistic sun flare for the shared post pipeline, with optical ghosts, chromatic dispersion, aperture rays, lens dirt and selective analytic sun bloom/glow. Its expensive optical field is rendered into a reduced-resolution HDR target and upsampled over the full-resolution scene.
 
 - `js/runtime/volumetric-clouds.js`
   Day/night-synchronized raymarched cloud layer with normalized editor-tunable coverage, density, noise scale, edge detail, wind, altitude, thickness, quality, absorption and opacity.
@@ -392,6 +398,9 @@ These files live under `js/editor/`, but they directly coordinate with runtime/s
 
 - `js/editor/cinema-studio.js`
   Runtime-adjacent editor timeline module. Owns Cinema Studio timeline UI, dock/lock state, playhead/ruler controls, real Scene Camera camera cuts, floating preview, Normal/Final preview modes, timeline output evaluation, object transform tracks, camera FOV lens tracks, markers, event tracks, validation, selected-item deletion, undo-aware edits, and the internal play/stop/runtime API. Runtime event triggering and outbound `lotking:timelineevent` dispatch are implemented for Play Preview; advanced curve editing, blend modes, more camera parameters, and full track controls remain future work.
+
+- `js/editor/cinema-video-export.js`
+  Deterministic Cinema Studio footage exporter. Owns the responsive export overlay, exact fixed-step timeline evaluation, shader/camera warm-up, WebGL2 GPU fences, VP9/VP8 WebCodecs encoding, timestamped WebM muxing, cancellation, download and complete editor/renderer state restoration. It intentionally exports silent video for now; realtime audio capture is not presented as frame-accurate.
 
 - `js/editor/playable-export.js`
   Coordinates playable ZIP export.

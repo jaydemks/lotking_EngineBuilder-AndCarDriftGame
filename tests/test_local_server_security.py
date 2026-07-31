@@ -6,7 +6,7 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from serve_local import LocalEditorHandler
+from serve_local import LocalEditorHandler, write_split_demo
 
 
 class LocalBridgeBoundaryTests(unittest.TestCase):
@@ -50,6 +50,26 @@ class LocalBridgeBoundaryTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_split_demo_reconstructs_exact_project_and_keeps_rollback(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            pointer = root / "demo" / "demo-project.lkep.json"
+            pointer.parent.mkdir(parents=True)
+            old_payload = json.dumps({"format":"LKEP", "meta":{"trackName":"Old"}, "scene":{}}).encode("utf-8")
+            pointer.write_bytes(old_payload)
+            project = {"format":"LKEP", "meta":{"trackName":"Nuova città 🚗"}, "scene":{"added":[]}, "savedAt":"now"}
+            payload = json.dumps(project, ensure_ascii=False).encode("utf-8")
+
+            report = write_split_demo(pointer, payload, project)
+
+            descriptor = json.loads(pointer.read_text(encoding="utf-8"))
+            manifest_path = pointer.parent / descriptor["manifest"]
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            reconstructed = b"".join((manifest_path.parent / chunk["file"]).read_bytes() for chunk in manifest["chunks"])
+            self.assertTrue(report["split"])
+            self.assertEqual(reconstructed, payload)
+            self.assertEqual((pointer.parent / "demo-project.previous.lkep.json").read_bytes(), old_payload)
 
 
 if __name__ == "__main__":

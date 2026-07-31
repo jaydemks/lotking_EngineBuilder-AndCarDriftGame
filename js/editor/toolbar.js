@@ -253,6 +253,15 @@ function create(deps){
     pipMin.textContent = ED.pipMinimized ? '+' : '−';
     pipMin.title = ED.pipMinimized ? 'Expand camera preview' : 'Minimize camera preview';
   });
+  const pipClose = $('#lkPipClose');
+  if(pipClose) pipClose.addEventListener('click', e => {
+    e.stopPropagation();
+    ED.pipOn = false;
+    ED.pipMinimized = false;
+    const frame = $('#lkPipFrame');
+    if(frame) frame.classList.remove('on', 'minimized');
+    deps.syncToolbarState();
+  });
   const cinemaPreviewMin = $('#lkCinemaPreviewMinimize');
   if(cinemaPreviewMin) cinemaPreviewMin.addEventListener('click', e => {
     e.stopPropagation();
@@ -293,11 +302,13 @@ function create(deps){
   });
 
   $('#lkExportProject').addEventListener('click', deps.exportProject);
+  $('#lkExportProjectFolder').addEventListener('click', deps.exportProjectFolder);
   $('#lkExportPlayableLegacy').addEventListener('click', () => {
     const playableExport = getPlayableExport();
     if(playableExport) playableExport.exportCurrentPlayableProject();
   });
   $('#lkImportProject').addEventListener('click', () => { deps.setProjectImportTarget('project'); $('#lkProjectInput').click(); });
+  $('#lkImportProjectFolder').addEventListener('click', deps.importProjectFolder);
   $('#lkExportPlayable').addEventListener('click', () => {
     const playableExport = getPlayableExport();
     if(playableExport) playableExport.exportCurrentPlayableProjectZip();

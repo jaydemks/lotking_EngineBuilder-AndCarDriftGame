@@ -77,6 +77,18 @@ function create(options){
     else if(renderer && scene && camera) renderer.render(scene, camera);
   }
 
+  function softwareRenderer(){
+    if(!renderer || !renderer.getContext) return false;
+    try {
+      const gl = renderer.getContext();
+      const debug = gl && gl.getExtension && gl.getExtension('WEBGL_debug_renderer_info');
+      const label = gl && gl.getParameter
+        ? String(gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '')
+        : '';
+      return /swiftshader|llvmpipe|software|microsoft basic/i.test(label);
+    } catch(error){ return false; }
+  }
+
   function collectSceneState(){
     const nodes = [];
     const lights = [];
@@ -141,6 +153,55 @@ function create(options){
     return Array.from(textures);
   }
 
+  function hiddenResourceRepresentatives(state){
+    const geometries = new Set();
+    const materials = new Set();
+    const selected = [];
+    (state.nodes || []).forEach(item => {
+      const node = item && item.node;
+      if(!node || item.visible !== false || !(node.isMesh || node.isLine || node.isPoints || node.isSprite)) return;
+      const data = node.userData || {};
+      if(data.editorOnly || data.nonExportable || data.helperOnly) return;
+      let addsResource = false;
+      if(node.geometry && !geometries.has(node.geometry)){
+        geometries.add(node.geometry);
+        addsResource = true;
+      }
+      const list = node.material ? (Array.isArray(node.material) ? node.material : [node.material]) : [];
+      list.forEach(material => {
+        if(!material || materials.has(material)) return;
+        materials.add(material);
+        addsResource = true;
+      });
+      if(addsResource) selected.push(item);
+    });
+    return selected;
+  }
+
+  async function warmHiddenResources(state){
+    const selected = hiddenResourceRepresentatives(state);
+    const batchSize = 24;
+    let warmed = 0;
+    for(let start = 0; start < selected.length; start += batchSize){
+      const batch = selected.slice(start, start + batchSize);
+      batch.forEach(item => {
+        let node = item.node;
+        while(node && node !== scene){
+          node.visible = true;
+          node = node.parent;
+        }
+      });
+      progress(.665 + Math.min(1, (start + batch.length) / Math.max(1, selected.length)) * .005,
+        'Preparing deferred visual paths',
+        Math.min(selected.length, start + batch.length) + ' / ' + selected.length + ' hidden geometry/material resources rendered');
+      render();
+      warmed += batch.length;
+      await nextFrame();
+      restoreSceneState(state);
+    }
+    return warmed;
+  }
+
   async function uploadTextures(textures, maximumTextures){
     if(!renderer || !renderer.initTexture || !textures.length) return;
     const selected = textures.slice(0, Math.max(0, Math.min(textures.length, Number(maximumTextures) || textures.length)));
@@ -149,7 +210,7 @@ function create(options){
       selected.slice(start, start + batchSize).forEach(texture => {
         try { renderer.initTexture(texture); } catch(err){}
       });
-      progress(.91 + Math.min(1, (start + batchSize) / selected.length) * .035, 'Uploading authored textures', Math.min(selected.length, start + batchSize) + ' / ' + selected.length + ' GPU textures prepared');
+      progress(.67 + Math.min(1, (start + batchSize) / selected.length) * .08, 'Uploading authored textures', Math.min(selected.length, start + batchSize) + ' / ' + selected.length + ' GPU textures prepared');
       await nextFrame();
     }
   }
@@ -169,6 +230,96 @@ function create(options){
     if(camera.updateMatrixWorld) camera.updateMatrixWorld(true);
   }
 
+  function strategicMapStops(state, maximumStops){
+    const THREE = window.THREE;
+    if(!THREE || !scene || !camera) return [];
+    if(scene.updateMatrixWorld) scene.updateMatrixWorld(true);
+    const cells = new Map();
+    const cellSize = 36;
+    const point = new THREE.Vector3();
+    (state.nodes || []).forEach(item => {
+      const node = item && item.node;
+      if(!node || item.visible === false || !(node.isMesh || node.isLine || node.isPoints) || !node.getWorldPosition) return;
+      const ud = node.userData || {};
+      if(ud.helperOnly || ud.editorOnly || ud.nonExportable || ud.runtimeTransient) return;
+      node.getWorldPosition(point);
+      if(!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return;
+      const key = Math.floor(point.x / cellSize) + ':' + Math.floor(point.z / cellSize);
+      let cell = cells.get(key);
+      if(!cell){
+        cell = {sum:new THREE.Vector3(), count:0, key};
+        cells.set(key, cell);
+      }
+      cell.sum.add(point);
+      cell.count++;
+    });
+    const candidates = Array.from(cells.values()).map(cell => ({
+      target:cell.sum.multiplyScalar(1 / Math.max(1, cell.count)),
+      weight:cell.count,
+      key:cell.key,
+    }));
+    if(!candidates.length) return [];
+    const origin = camera.position && camera.position.clone ? camera.position.clone() : new THREE.Vector3();
+    const selected = [];
+    // Farthest-point sampling covers the whole authored map without making the
+    // benchmark duration proportional to mesh count.
+    while(candidates.length && selected.length < Math.max(1, Number(maximumStops) || 10)){
+      let bestIndex = 0;
+      let bestScore = -Infinity;
+      candidates.forEach((candidate, index) => {
+        const anchors = selected.length ? selected.map(item => item.target) : [origin];
+        const nearest = Math.min.apply(null, anchors.map(anchor => candidate.target.distanceToSquared(anchor)));
+        const score = nearest + Math.min(2500, candidate.weight * 18);
+        if(score > bestScore){ bestScore = score; bestIndex = index; }
+      });
+      selected.push(candidates.splice(bestIndex, 1)[0]);
+    }
+    return selected;
+  }
+
+  async function tourStrategicMap(state, snapshot, maximumStops){
+    if(!renderer || !scene || !camera || !camera.lookAt) return 0;
+    const stops = strategicMapStops(state, maximumStops);
+    const THREE = window.THREE;
+    const previousTarget = renderer.getRenderTarget ? renderer.getRenderTarget() : null;
+    const target = THREE && THREE.WebGLRenderTarget ? new THREE.WebGLRenderTarget(320, 180, {depthBuffer:true}) : null;
+    const shadowAutoUpdate = renderer.shadowMap ? renderer.shadowMap.autoUpdate : null;
+    const started = performance.now();
+    let rendered = 0;
+    try {
+      if(target && renderer.setRenderTarget) renderer.setRenderTarget(target);
+      for(let index = 0; index < stops.length; index++){
+        const focus = stops[index].target;
+        const angle = index * 2.399963229728653;
+        const distance = 14 + Math.min(12, Math.sqrt(stops[index].weight) * 1.8);
+        camera.position.set(
+          focus.x + Math.sin(angle) * distance,
+          focus.y + Math.max(5, distance * .38),
+          focus.z + Math.cos(angle) * distance
+        );
+        camera.lookAt(focus);
+        if(camera.updateMatrixWorld) camera.updateMatrixWorld(true);
+        progress(.75 + ((index + 1) / Math.max(1, stops.length)) * .07,
+          'Touring strategic map sectors',
+          'Sector ' + (index + 1) + ' / ' + stops.length + ' · uploading distant geometry before play');
+        // A tiny offscreen target uploads exactly the same geometry/material
+        // resources without paying full viewport fill-rate. One shadow update
+        // is enough to warm shadow programs; subsequent sectors reuse it.
+        renderer.render(scene, camera);
+        rendered++;
+        if(renderer.shadowMap && index === 0) renderer.shadowMap.autoUpdate = false;
+        await nextFrame();
+        if(rendered >= 2 && performance.now() - started > 12000) break;
+      }
+    } finally {
+      if(renderer.shadowMap && shadowAutoUpdate != null) renderer.shadowMap.autoUpdate = shadowAutoUpdate;
+      if(renderer.setRenderTarget) renderer.setRenderTarget(previousTarget || null);
+      if(target) target.dispose();
+      restoreCamera(snapshot);
+    }
+    return rendered;
+  }
+
   async function warmCameraViews(snapshot, maximumViews){
     if(!camera || !snapshot || !snapshot.quaternion || !camera.rotateY) return 0;
     const views = [
@@ -178,17 +329,34 @@ function create(options){
       {yaw:0, pitch:.22},
       {yaw:0, pitch:-.22},
     ].slice(0, Math.max(0, Math.min(5, Number(maximumViews) || 5)));
-    for(let index = 0; index < views.length; index++){
+    const THREE = window.THREE;
+    const previousTarget = renderer && renderer.getRenderTarget ? renderer.getRenderTarget() : null;
+    const target = renderer && THREE && THREE.WebGLRenderTarget ? new THREE.WebGLRenderTarget(320, 180, {depthBuffer:true}) : null;
+    const shadowAutoUpdate = renderer && renderer.shadowMap ? renderer.shadowMap.autoUpdate : null;
+    const started = performance.now();
+    let rendered = 0;
+    try {
+      if(target && renderer.setRenderTarget) renderer.setRenderTarget(target);
+      for(let index = 0; index < views.length; index++){
+        restoreCamera(snapshot);
+        camera.rotateY(views[index].yaw);
+        if(camera.rotateX) camera.rotateX(views[index].pitch);
+        if(camera.updateMatrixWorld) camera.updateMatrixWorld(true);
+        progress(.965 + ((index + 1) / views.length) * .03, 'Preparing camera surroundings', 'View ' + (index + 1) + ' / ' + views.length + ' · preventing first-look shader and geometry stalls');
+        if(renderer && target) renderer.render(scene, camera);
+        else render();
+        rendered++;
+        if(renderer && renderer.shadowMap && index === 0) renderer.shadowMap.autoUpdate = false;
+        await nextFrame();
+        if(rendered >= 2 && performance.now() - started > 8000) break;
+      }
+    } finally {
+      if(renderer && renderer.shadowMap && shadowAutoUpdate != null) renderer.shadowMap.autoUpdate = shadowAutoUpdate;
+      if(renderer && renderer.setRenderTarget) renderer.setRenderTarget(previousTarget || null);
+      if(target) target.dispose();
       restoreCamera(snapshot);
-      camera.rotateY(views[index].yaw);
-      if(camera.rotateX) camera.rotateX(views[index].pitch);
-      if(camera.updateMatrixWorld) camera.updateMatrixWorld(true);
-      progress(.95 + ((index + 1) / views.length) * .04, 'Preparing camera surroundings', 'View ' + (index + 1) + ' / ' + views.length + ' · preventing first-look shader and geometry stalls');
-      render();
-      await nextFrame();
     }
-    restoreCamera(snapshot);
-    return views.length;
+    return rendered;
   }
 
   async function paintedStep(value, stage, mutate, detail){
@@ -229,7 +397,7 @@ function create(options){
       const average = useful.length ? useful.reduce((sum, value) => sum + value, 0) / useful.length : 0;
       const fps = average > 0 ? 1000 / average : null;
       const elapsedRatio = sampleStarted ? Math.min(1, (stamp - sampleStarted) / wallLimitMs) : 0;
-      progress(.75 + Math.max((i + 1) / total, elapsedRatio) * .15, 'Measuring sustained performance', 'Real frames after shader and scene preparation', fps);
+      progress(.84 + Math.max((i + 1) / total, elapsedRatio) * .08, 'Measuring sustained performance', 'Real frames after shader and scene preparation', fps);
       // A fixed 24-frame sample would keep a 1 FPS device blocked for almost
       // half a minute. Four or more rendered deltas across five seconds are
       // already decisive for the <25 FPS fallback, so keep this stage bounded.
@@ -244,17 +412,21 @@ function create(options){
 
   async function execute(runOptions){
     const mode = runOptions && runOptions.mode || 'game';
+    const allowAdaptive = !runOptions || runOptions.adaptive !== false;
     const state = collectSceneState();
+    let warmedState = state;
     const startedAt = performance.now();
     let videoWarm = false;
     let fps = null;
     let adaptive = null;
     let cameraViews = 0;
+    let strategicStops = 0;
+    let hiddenResources = 0;
     let shaderWarmup = null;
     const cameraState = snapshotCamera();
     const renderableNodes = state.nodes.filter(item => item.node && (item.node.isMesh || item.node.isLine || item.node.isPoints || item.node.isSprite));
     const hiddenWarmSet = renderableNodes.filter(item => item.visible === false).slice(0, 32);
-    const textures = collectTextures(state);
+    let textures = collectTextures(state);
     gameStateFlag(true);
     show();
     progress(.01, 'Inspecting project scene', state.nodes.length + ' scene nodes · ' + state.lights.length + ' lights · ' + state.materials.length + ' materials');
@@ -309,40 +481,67 @@ function create(options){
       }
 
       restoreSceneState(state);
+      // Runtime hooks can materialize pawn meshes, data widgets, lights,
+      // particles and their textures. The original snapshot intentionally
+      // predates those hooks so it can restore the authored scene, but using
+      // that same snapshot for GPU upload left every newly created texture to
+      // be uploaded on its first gameplay frame.
+      warmedState = collectSceneState();
+      textures = collectTextures(warmedState);
+      hiddenResources = await warmHiddenResources(warmedState);
 
-      progress(.72, 'Compiling scene shaders', 'Three.js renderer compilation for the complete authored scene');
+      // Slow hardware must not receive a deliberately incomplete PLAY preload:
+      // that simply transfers omitted uploads into gameplay. Editor bootstrap is
+      // intentionally lighter so authoring controls become usable quickly; the
+      // full pass still runs when Play/Simulate is requested.
+      const gameplayWarmup = mode === 'game';
+      const software = softwareRenderer();
+      await uploadTextures(textures, gameplayWarmup ? textures.length : Math.min(textures.length, 16));
+      strategicStops = gameplayWarmup ? await tourStrategicMap(warmedState, cameraState, software ? 2 : 10) : 0;
+
+      progress(.82, 'Compiling scene shaders', 'Three.js renderer compilation for the complete authored scene');
       // Let the 72% stage paint before synchronous WebGL compilation. The
       // backend deliberately avoids r185.1 compileAsync because its internal
       // material polling can throw outside the Promise and leave loading stuck.
       await nextFrame();
       shaderWarmup = await compileScene();
-      progress(.74, shaderWarmup.state === 'failed' ? 'Shader warm-up completed with fallback' : 'Scene shaders prepared', shaderWarmup.state === 'failed' ? 'The editor will continue and compile remaining paths on first use' : 'GPU programs prepared without a background compilation race');
+      progress(.84, shaderWarmup.state === 'failed' ? 'Shader warm-up completed with fallback' : 'Scene shaders prepared', shaderWarmup.state === 'failed' ? 'The editor will continue and compile remaining paths on first use' : 'GPU programs prepared without a background compilation race');
       restoreSceneState(state);
       restoreCamera(cameraState);
-      render();
-      fps = document.hidden ? null : await sampleFrames(24);
+      if(!software) render();
+      if(software){
+        // A software WebGL implementation is already a decisive Low-profile
+        // signal. Sampling several full project frames can take minutes and
+        // teaches us nothing that the renderer identity did not already prove.
+        fps = 1;
+        progress(.92, 'Software renderer detected', 'Skipping full-resolution sustained sampling · Low profile recommended', fps);
+      } else {
+        fps = document.hidden ? null : await sampleFrames(24);
+      }
 
-      if(shouldUseLowProfile(fps, 25) && opts.applyAdaptiveLow){
-        progress(.905, 'Applying a safer video profile', Math.round(fps) + ' FPS sustained · Low profile recommended', fps);
+      if(allowAdaptive && shouldUseLowProfile(fps, 25) && opts.applyAdaptiveLow){
+        progress(.93, 'Applying a safer video profile', Math.round(fps) + ' FPS sustained · Low profile recommended', fps);
         adaptive = await Promise.resolve(opts.applyAdaptiveLow({fps, threshold:25, mode}));
       }
 
-      const slowProfile = !Number.isFinite(fps) || shouldUseLowProfile(fps, 25);
-      await uploadTextures(textures, slowProfile ? 8 : textures.length);
-      if(!document.hidden){
-        cameraViews = await warmCameraViews(cameraState, slowProfile ? 1 : 5);
+      if(!document.hidden && !software){
+        cameraViews = await warmCameraViews(cameraState, gameplayWarmup ? (software ? 2 : 5) : 1);
       }
 
       lastReport = {
         mode,
+        reason:runOptions&&runOptions.reason||'session-start',
         fps:Number.isFinite(fps) ? fps : null,
         threshold:25,
         adaptive:adaptive || null,
-        nodes:state.nodes.length,
-        lights:state.lights.length,
-        materials:state.materials.length,
+        nodes:warmedState.nodes.length,
+        lights:warmedState.lights.length,
+        materials:warmedState.materials.length,
         textures:textures.length,
+        hiddenResources,
         cameraViews,
+        strategicStops,
+        softwareRenderer:software,
         shaderWarmup,
         durationMs:performance.now() - startedAt,
         completedAt:new Date().toISOString(),

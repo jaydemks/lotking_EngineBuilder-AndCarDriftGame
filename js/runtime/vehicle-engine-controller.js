@@ -6,9 +6,9 @@ function create(options){
   const opts=options||{};
   const gearbox=opts.gearbox;
   const drive=opts.drive||{};
-  const state=opts.state||{gear:1,rpm:gearbox.idle,rpm01:0,torque01:.6,shiftTimer:0,limiterTimer:0,shiftPulse:0,limiterPulse:0,throttle:0,reverseActive:false,burnout:false,driftShiftSpeed:0};
+  const state=opts.state||{gear:1,rpm:gearbox.idle,rpm01:0,torque01:.6,boost01:0,shiftTimer:0,limiterTimer:0,shiftPulse:0,limiterPulse:0,throttle:0,reverseActive:false,burnout:false,driftShiftSpeed:0};
   const sample=(key,rpm,fallback)=>typeof opts.sampleCurve==='function'?opts.sampleCurve(key,rpm,fallback):fallback;
-  function reset(){ Object.assign(state,{gear:1,rpm:gearbox.idle,rpm01:0,torque01:.6,shiftTimer:0,limiterTimer:0,shiftPulse:0,limiterPulse:0,throttle:0,reverseActive:false,driftShiftSpeed:0}); return state; }
+  function reset(){ Object.assign(state,{gear:1,rpm:gearbox.idle,rpm01:0,torque01:.6,boost01:0,shiftTimer:0,limiterTimer:0,shiftPulse:0,limiterPulse:0,throttle:0,reverseActive:false,burnout:false,driftShiftSpeed:0}); return state; }
   function update(vF,throttle,sliding,dt,driftCtx){
     driftCtx=driftCtx||{};
     const speed=Math.abs(vF), driftSpeed=Number.isFinite(driftCtx.speedTot)?Math.abs(driftCtx.speedTot):speed;
@@ -39,10 +39,27 @@ function create(options){
     }
     if(state.rpm>gearbox.limiter||state.limiterTimer>0) state.rpm=gearbox.redline+Math.sin((typeof performance!=='undefined'?performance.now():Date.now())*.075)*520;
     const rev01=clamp((state.rpm-gearbox.idle)/(gearbox.redline-gearbox.idle),0,1.12);
-    const low=clamp((state.rpm-gearbox.idle)/1150,0,1), mid=clamp((6700-state.rpm)/900,.28,1);
-    let curve=clamp(.58+low*.92*mid+rev01*.05,.46,1.34);
+    const riseX=clamp((state.rpm-gearbox.idle)/3000,0,1), rise=riseX*riseX*(3-2*riseX);
+    const fallX=clamp((state.rpm-5600)/1500,0,1), highFalloff=1-(fallX*fallX*(3-2*fallX))*.27;
+    let curve=clamp((.62+rise*.58+rev01*.06)*highFalloff,.46,1.30);
     if(throttle>.05&&sliding) curve=Math.max(curve,.84+clamp((3200-state.rpm)/2200,0,1)*.18);
     curve*=clamp(sample('torque',rev01,1),.35,1.8); if(throttle>.05&&sliding) curve*=clamp(sample('driftTorque',rev01,1),.35,1.8);
+    // Boost is a stateful pressure curve, not an RPM switch. Threshold says
+    // where useful spool begins; the wide smoothstep and asymmetric time
+    // constant make the extra torque progressive and throttle-dosable.
+    const authoredThreshold=Number(drive.turboThreshold), authoredRange=Number(drive.turboRange);
+    const boostThreshold=clamp(Number.isFinite(authoredThreshold)?authoredThreshold:2400,1000,6000);
+    const boostRange=clamp(Number.isFinite(authoredRange)?authoredRange:2300,500,4200);
+    const boostX=clamp((state.rpm-boostThreshold)/boostRange,0,1);
+    const boostRpm=boostX*boostX*(3-2*boostX);
+    const boostTarget=boostRpm*Math.pow(clamp(throttle,0,1),1.15);
+    const authoredSpool=Number(drive.turboSpool);
+    const spoolSeconds=clamp(Number.isFinite(authoredSpool)?authoredSpool:.8,.08,3);
+    const boostRate=boostTarget>state.boost01?1/spoolSeconds:1/Math.max(.06,spoolSeconds*.55);
+    state.boost01=clamp((Number(state.boost01)||0)+(boostTarget-(Number(state.boost01)||0))*(1-Math.exp(-boostRate*Math.max(0,dt))),0,1);
+    const authoredStrength=Number(drive.turboStrength);
+    const boostStrength=clamp(Number.isFinite(authoredStrength)?authoredStrength:.28,0,1.5);
+    curve*=1+state.boost01*boostStrength;
     state.rpm01=clamp(rev01,0,1.12);
     const shiftTorque=driftActive?clamp(.38+driftAngle01*.20+Math.max(0,(drive.powerScale||1)-1)*.09,.34,.74):.25;
     const limiterTorque=driftActive?clamp(.96+driftAngle01*.06,.94,1.04):.82;

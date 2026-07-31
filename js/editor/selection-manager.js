@@ -38,7 +38,7 @@ function create(deps){
   function isBlueprintPart(o){
     return !o || !o.userData || o.userData.logicElementInternal || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
       o.userData.editorType === 'playerEffect' || o.userData.editorType === 'playerSkid' ||
-      o.userData.editorType === 'playerDataWidget';
+      o.userData.editorType === 'playerDataWidget' || o.userData.editorType === 'playerCamera';
   }
 
   function syncSelectedGizmo(o){
@@ -56,6 +56,20 @@ function create(deps){
   function syncOutlinerSelection(){
     if(deps.syncOutlinerSelection) deps.syncOutlinerSelection();
     else deps.refreshOutliner();
+  }
+  function openSelectedCameraPreview(o){
+    let current = o;
+    while(current){
+      const data = current.userData || {};
+      if(data.editorType === 'playerCamera' || (data.editorType === 'camera' && data.sceneCamera)){
+        ED.pipOn = true;
+        ED.pipMinimized = false;
+        if(deps.syncToolbarState) deps.syncToolbarState();
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
   }
   function rebuildPhysics(){
     if(deps.requestPhysicsRebuild) deps.requestPhysicsRebuild();
@@ -100,6 +114,8 @@ function create(deps){
   function selectObject(o, opts){
     opts = opts || {};
     o = selectableObject(o);
+    openSelectedCameraPreview(o);
+    ED.selectionContext = 'scene';
     if(ED.selected === o && ED.special === null && !ED.colliderEdit && !ED.playerColliderEdit && !(ED.multiSelected && ED.multiSelected.length)){
       // An asynchronous scene/Logic Element rebuild can preserve the selected
       // object while clearing or replacing the Inspector DOM. Treat an
@@ -127,6 +143,7 @@ function create(deps){
   }
 
   function selectSpecial(kind){
+    ED.selectionContext = 'scene';
     deps.clearHoverPickHelper();
     ED.multiSelected = null;
     ED.colliderEdit = false;
@@ -155,6 +172,7 @@ function create(deps){
 
   function selectCollider(o){
     if(!o || !(o.userData && o.userData.collider && o.userData.collider.ref)) return selectObject(o);
+    ED.selectionContext = 'scene';
     deps.clearHoverPickHelper();
     ED.multiSelected = null;
     ED.special = null;
@@ -173,6 +191,7 @@ function create(deps){
 
   function selectColliderPart(o, index){
     if(!o || !(o.userData && o.userData.collider && o.userData.collider.ref)) return selectObject(o);
+    ED.selectionContext = 'scene';
     STORE.syncCollider(o);
     const parts = o.userData.collider.ref.parts || [];
     if(!parts[index]) return selectCollider(o);
@@ -223,6 +242,7 @@ function create(deps){
     const unique = [];
     list.forEach(o => { if(!unique.includes(o)) unique.push(o); });
     if(!unique.length) return;
+    ED.selectionContext = 'scene';
     deps.clearHoverPickHelper();
     ED.special = null;
     ED.selected = unique[0];
@@ -269,7 +289,8 @@ function create(deps){
     const car = GAME.player && GAME.player.car;
     let o = ED.selected;
     while(o){
-      if(o === car || (o.userData && o.userData.editorType === 'camera' && o.userData.sceneCamera)) return true;
+      if(o === car || (o.userData && (o.userData.editorType === 'playerCamera' ||
+        (o.userData.editorType === 'camera' && o.userData.sceneCamera)))) return true;
       o = o.parent;
     }
     return false;
@@ -835,6 +856,9 @@ function create(deps){
       return;
     }
     deps.applyZUpProxyToSelected();
+    if(o.userData.editorType === 'playerCamera' && GAME.player && GAME.player.syncCameraDummy){
+      GAME.player.syncCameraDummy(o);
+    }
     if(o.userData.editorType === 'player'){
       if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();
       else {
