@@ -37,7 +37,7 @@ test('first-person modules, templates and level load in the browser runtime', as
       targetValid:window.LK_LOGIC_VALIDATOR.validateGraph(target.graph, registry).ok,
       rigEnabled:player.graph.characterPawn.firstPerson.enabled,
       weaponPreset:player.graph.characterPawn.firstPerson.weapon.preset,
-      // The generic third-person character must be unaffected by the addition.
+      // The default Character is the complete same-body player contract too.
       normalHasRig:!!normal.graph.characterPawn.firstPerson,
       normalInputMode:normal.graph.characterPawn.movement.inputMode,
       levelId:level.template.id,
@@ -57,8 +57,8 @@ test('first-person modules, templates and level load in the browser runtime', as
     targetValid:true,
     rigEnabled:true,
     weaponPreset:'rifle',
-    normalHasRig:false,
-    normalInputMode:'camera',
+    normalHasRig:true,
+    normalInputMode:'heading',
     levelId:'fps-shooter-test',
     targetCount:12,
     playerCount:1,
@@ -95,7 +95,7 @@ test('the first-person rig produces a usable eye transform with real Three.js', 
   });
 
   expect(result.eyeY).toBe(1.7);
-  expect(result.eyeX).toBe(3);
+  expect(result.eyeX).toBe(3.28,'the same-body eye stays forward of the face instead of entering the mesh');
   expect(result.forwardX).toBeCloseTo(1, 1);
   expect(result.forwardY).toBeCloseTo(0, 1);
   expect(result.ownerYaw).toBeCloseTo(Math.PI / 2, 2);
@@ -136,6 +136,98 @@ test('the camera looks exactly where the character walks', async ({page}) => {
   });
 
   rows.forEach(row => expect(row.dot, 'yaw ' + row.yaw + ' walks away from the view').toBeCloseTo(1, 2));
+});
+
+// The regression this guards is the whole first-person feature going missing at
+// once. `logic-services.js` routes EVERY authored `characterPawn` through the
+// character implementation registry, and the registry translated the descriptor
+// even when it was already in the shape the target backend wanted. The rebuilt
+// descriptor only carried the fields the OTHER backend understands, so the FPS
+// player spawned with no weapon, no inventory, no traversal moves and no view
+// rig — which also made the Camera Mode key fall through to the vehicle chase
+// cameras instead of swapping first and third person. Nothing in the offline
+// suite covered the path from a level template through the registry to a live
+// Pawn, so it passed while the game was unplayable.
+test('the FPS player spawns armed through the real Logic Element path', async ({page}) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await openEditorPage(page, 'fps-implementation-e2e');
+  await page.waitForFunction(() => !!(window.LK_RUNTIME_CHARACTER_IMPLEMENTATIONS
+    && window.LK_RUNTIME_FIRST_PERSON && window.LK_RUNTIME_ITEMS
+    && window.LK_RUNTIME_FPS_ENEMY_OUTPOST_LEVEL_TEMPLATE));
+
+  const result = await page.evaluate(() => {
+    // FPS Enemy Outpost is the FPS arena plus its enemy squad, so one build
+    // covers the player Pawn and the AI Pawns together.
+    const scene = window.LK_RUNTIME_FPS_ENEMY_OUTPOST_LEVEL_TEMPLATE.buildScene(
+      {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, ui:{}, logic:{}});
+    const logic = scene.added.filter(entry => entry.kind === 'logicElement' && entry.graph && entry.graph.characterPawn);
+    const playerEntry = logic.find(entry => entry.graph.characterPawn.firstPerson);
+    const enemyEntry = logic.find(entry => entry.graph.characterPawn.enemyAi);
+    if(!playerEntry || !enemyEntry) return {built:false};
+
+    const GAME = {state:{}, systems:{}};
+    window.LK_RUNTIME_VEHICLE_PAWNS.install(GAME);
+    window.LK_RUNTIME_ITEMS.install(GAME);
+    const spawn = descriptor => {
+      const owner = new THREE.Group();
+      // The Logic service hands the registry a bound clone and lets it read the
+      // backend from that clone, which is what is reproduced here.
+      const bound = JSON.parse(JSON.stringify(descriptor));
+      return window.LK_RUNTIME_CHARACTER_IMPLEMENTATIONS.createCharacter(GAME, owner, bound, {}, bound.implementation);
+    };
+    const player = spawn(playerEntry.graph.characterPawn);
+    const enemy = spawn(enemyEntry.graph.characterPawn);
+    if(!player) return {built:true, playerSpawned:false};
+
+    const ammo = player.firstPerson ? player.firstPerson.ammo() : null;
+    const startView = player.firstPerson ? player.firstPerson.viewMode() : null;
+    const toggled = player.firstPerson ? player.firstPerson.toggleViewMode() : null;
+    const toggledBack = player.firstPerson ? player.firstPerson.toggleViewMode() : null;
+    return {
+      built:true,
+      playerSpawned:true,
+      backend:player.characterImplementation,
+      hasRig:!!player.firstPerson,
+      rigEnabled:!!(player.firstPerson && player.firstPerson.enabled()),
+      hasAbilities:!!player.abilities,
+      hasVitals:!!player.vitals,
+      hasInventory:!!player.inventory,
+      armed:!!(ammo && ammo.armed),
+      // The starting rifle plus the four loadout slots the template authors.
+      weaponsHeld:player.inventory ? player.inventory.slots().map(entry => entry.weapon.name).sort().join(', ') : null,
+      startView, toggled, toggledBack,
+      // A Character Pawn owning the camera is what makes the Camera Mode key
+      // reach the rig at all instead of cycling the vehicle cameras.
+      ownsCamera:!!(player.firstPerson && window.LK_RUNTIME_FIRST_PERSON.activeController(
+        Object.assign({}, GAME, {state:{runtimeVehicleCameraPawnIds:{1:player.id}}, pawns:GAME.pawns}), 1)),
+      // The enemy squad hangs its behaviour off a block no backend maps.
+      enemyKeepsAi:!!(enemy && enemy.config && enemy.config.enemyAi && enemy.config.enemyAi.enabled),
+      enemyTeam:enemy && enemy.config && enemy.config.vitals && enemy.config.vitals.team,
+    };
+  });
+
+  expect(result).toEqual({
+    built:true,
+    playerSpawned:true,
+    backend:'native',
+    hasRig:true,
+    rigEnabled:true,
+    hasAbilities:true,
+    hasVitals:true,
+    hasInventory:true,
+    armed:true,
+    weaponsHeld:'Assault Rifle, Combat Knife, Fists, Frag Grenade, Sidearm',
+    // Enemy Outpost deliberately starts over the shoulder; the dedicated FPS
+    // arena still starts at the eye. Both use the same toggle and body.
+    startView:'third',
+    toggled:'first',
+    toggledBack:'third',
+    ownsCamera:true,
+    enemyKeepsAi:true,
+    enemyTeam:'enemy',
+  });
+  expect(pageErrors).toEqual([]);
 });
 
 test('the FPS Shooter Test level is offered when creating a new level', async ({page}) => {

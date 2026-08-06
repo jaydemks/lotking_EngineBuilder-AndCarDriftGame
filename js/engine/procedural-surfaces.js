@@ -643,6 +643,142 @@ define('sand', {
   },
 });
 
+// ---------------- sport / stadium family
+
+// Grass blades. Short wrapping strokes leaning off vertical read as turf far
+// better than noise alone, which stays flat once the camera drops to head
+// height. Shared by both turf kinds so plain and mown pitches match.
+function grassBlades(ctx, size, rng, count, style, width){
+  const total = density(size, count);
+  for(let i = 0; i < total; i++){
+    const x = rng() * size, y = rng() * size;
+    const lean = (rng() - .5) * .55;
+    const length = size * (.012 + rng() * .022);
+    wrapStroke(ctx, size, walk(rng, x, y, -Math.PI / 2 + lean, length, 2, .35), style(rng), width * (.6 + rng() * .8));
+  }
+}
+function turfBase(ctx, size, rng, brightness){
+  const clump = fbm(rng.stream('clump'), 5, 5, 4, .55);
+  const wear = fbm(rng.stream('wear'), 2, 3, 3, .6);
+  const fine = fbm(rng.stream('fine'), 40, 40, 2, .5);
+  paint(ctx, size, (u, v) => brightness
+    + (clump(u, v) - .5) * .14
+    + (fine(u, v) - .5) * .10
+    - Math.pow(clamp01(wear(u, v)), 2.2) * .10);
+}
+
+define('turf', {
+  label:'Pitch turf', labelIt:'Erba del campo', group:'sport',
+  tile:2.2, roughness:.93, metalness:0, normal:.85,
+  draw(ctx, size, rng){
+    turfBase(ctx, size, rng, .92);
+    grassBlades(ctx, size, rng.stream('blades'), 1500, r => greyA(r() < .5 ? 1 : .74, .16 + r() * .2), 1.1);
+    speckle(ctx, size, rng.stream('divot'), 40, .8, 2.4, (t, r) => greyA(.62, .1 + r() * .16));
+  },
+  height(ctx, size, rng){
+    turfBase(ctx, size, rng, .52);
+    grassBlades(ctx, size, rng.stream('blades'), 1500, r => greyA(r() < .5 ? .85 : .3, .22 + r() * .26), 1.1);
+  },
+});
+
+// A mown pitch is the single strongest "this is a real stadium" cue. The tile
+// is the full light+dark period so a 68 m pitch lands on ~5 m stripes; authors
+// change the mowing direction with the surface `rotate` option.
+define('turfStriped', {
+  label:'Pitch turf (mown stripes)', labelIt:'Erba del campo (strisce)', group:'sport',
+  tile:10, roughness:.93, metalness:0, normal:.8,
+  draw(ctx, size, rng){
+    turfBase(ctx, size, rng, .90);
+    // Soft-edged banding: a hard edge aliases badly at grazing angles.
+    const edge = fbm(rng.stream('edge'), 1, 6, 2, .5);
+    ctx.globalCompositeOperation = 'source-over';
+    for(let y = 0; y < size; y++){
+      const band = Math.sin((y / size + (edge(0, y / size) - .5) * .012) * Math.PI * 2) * .5 + .5;
+      ctx.fillStyle = greyA(band > .5 ? 1 : .55, Math.abs(band - .5) * .34);
+      ctx.fillRect(0, y, size, 1);
+    }
+    grassBlades(ctx, size, rng.stream('blades'), 900, r => greyA(r() < .5 ? 1 : .76, .13 + r() * .16), 1);
+    speckle(ctx, size, rng.stream('divot'), 30, .8, 2.4, (t, r) => greyA(.64, .09 + r() * .14));
+  },
+  height(ctx, size, rng){
+    // Stripes are mown nap, not relief: height stays plain turf so the bands
+    // never carve fake ridges into the pitch normal map.
+    turfBase(ctx, size, rng, .52);
+    grassBlades(ctx, size, rng.stream('blades'), 900, r => greyA(r() < .5 ? .82 : .32, .2 + r() * .24), 1);
+  },
+});
+
+define('stadiumSeat', {
+  label:'Stadium seating', labelIt:'Sedute dello stadio', group:'sport',
+  tile:1.1, roughness:.62, metalness:.04, normal:1.15,
+  draw(ctx, size, rng){
+    paint(ctx, size, () => .9);
+    // Moulded plastic shells in rows: a bright crown, a shaded gap between
+    // seats and a dark rail line so a stand reads as seating, not a slab.
+    const cols = 6, rows = 4;
+    for(let r = 0; r < rows; r++){
+      for(let c = 0; c < cols; c++){
+        const x = size * (c + .5) / cols, y = size * (r + .58) / rows;
+        blob(ctx, size, x, y, size * .38 / cols, size * .3 / rows, 0, greyA(1, .5));
+        blob(ctx, size, x, y - size * .06 / rows, size * .3 / cols, size * .16 / rows, 0, greyA(1, .35));
+      }
+      const railY = size * r / rows;
+      ctx.fillStyle = 'rgba(0,0,0,.42)';
+      ctx.fillRect(0, railY, size, Math.max(1, size * .022));
+    }
+    speckle(ctx, size, rng.stream('grime'), 220, .4, 1.4, (t, r) => greyA(.6, .1 + r() * .18));
+  },
+  height(ctx, size, rng){
+    paint(ctx, size, () => .42);
+    const cols = 6, rows = 4;
+    for(let r = 0; r < rows; r++){
+      for(let c = 0; c < cols; c++){
+        blob(ctx, size, size * (c + .5) / cols, size * (r + .58) / rows, size * .38 / cols, size * .3 / rows, 0, greyA(.9, .7));
+      }
+      ctx.fillStyle = 'rgba(0,0,0,.85)';
+      ctx.fillRect(0, size * r / rows, size, Math.max(1, size * .03));
+    }
+  },
+});
+
+define('runningTrack', {
+  label:'Running track', labelIt:'Pista di atletica', group:'sport',
+  tile:2.4, roughness:.88, metalness:0, normal:.7,
+  draw(ctx, size, rng){
+    const base = fbm(rng.stream('base'), 5, 5, 3, .5);
+    paint(ctx, size, (u, v) => .88 + (base(u, v) - .5) * .08);
+    // Vulcanised rubber granulate: dense, rounded, tightly packed.
+    speckle(ctx, size, rng.stream('granule'), 2200, .5, 1.5, (t, r) => greyA(t < .4 ? 1 : t < .75 ? .8 : .62, .3 + r() * .34));
+  },
+  height(ctx, size, rng){
+    const base = fbm(rng.stream('base'), 5, 5, 3, .5);
+    paint(ctx, size, (u, v) => .5 + (base(u, v) - .5) * .12);
+    speckle(ctx, size, rng.stream('granule'), 2200, .5, 1.5, (t, r) => greyA(t < .5 ? .82 : .34, .32 + r() * .3));
+  },
+});
+
+define('advertBoard', {
+  label:'Advertising board', labelIt:'Cartellone pubblicitario', group:'sport',
+  tile:3.2, roughness:.32, metalness:.05, normal:.25,
+  draw(ctx, size, rng){
+    // Perimeter boards are glossy panels: the read is the seam and a broad
+    // diagonal sheen, not surface grain, so keep detail low and let the
+    // authored colour carry. The sheen is baked into the single paint pass —
+    // every kind here stays inside the shared drawing vocabulary.
+    const haze = fbm(rng.stream('haze'), 2, 4, 2, .5);
+    paint(ctx, size, (u, v) => {
+      const sweep = Math.sin((u * .5 + v * .5) * Math.PI);
+      return .93 + sweep * .07 + (haze(u, v) - .5) * .04;
+    });
+    panelSeams(ctx, size, {line:'rgba(0,0,0,.3)', width:Math.max(1, size * .012), cols:2, rows:1});
+    speckle(ctx, size, rng.stream('dust'), 120, .3, .9, (t, r) => greyA(.7, .06 + r() * .1));
+  },
+  height(ctx, size){
+    paint(ctx, size, () => .5);
+    panelSeams(ctx, size, {line:'rgba(0,0,0,.8)', width:Math.max(1, size * .014), cols:2, rows:1});
+  },
+});
+
 // ---------------- metal family
 
 // Rivets and panel seams are shared by several metal kinds.
@@ -1147,6 +1283,233 @@ define('rubber', {
     const wide = fbm(rng.stream('wide'), 4, 4, 3, .5);
     paint(ctx, size, (u, v) => .5 + (pebble(u, v) - .5) * .5 + (wide(u, v) - .5) * .12);
     speckle(ctx, size, rng.stream('grain'), 600, .4, 1.3, (t, r) => greyA(t < .5 ? .9 : .3, .15 + r() * .2));
+  },
+});
+
+// ---------------- snow family
+//
+// ADDITIVE BLOCK. Nothing above this comment changed; the snowboarding level
+// template (js/runtime/snowboarding-level-template.js) needs a snow that is not
+// one flat blue-white, and a flat colour is exactly what made the old run read
+// as a paper cut-out.
+//
+// The five kinds below are ONE material ladder, ordered the way the mountain
+// itself is ordered - from what falls out of the sky to what the mountain is
+// made of - and the terrain picks between them by altitude and by how much
+// traffic a sector has taken:
+//
+//   snowPowder   untouched off-piste, above the tree line and outside the ropes
+//   snowGroomed  the corduroy a piste basher leaves overnight, on the piste
+//   snowPacked   skied-out hardpack: scallops and chatter, the middle of the run
+//   snowIce      boilerplate: scraped-off, refrozen, in the fall line of a steep
+//   snowRock     the schist that shows through where the cover is too thin
+//
+// WHY SNOW IS DRAWN THE WAY IT IS
+// Snow is the hardest surface in this module because it is almost white: the
+// usual trick of separating features by VALUE has almost no range left to work
+// with. So every kind here separates by RELIEF and by SPARKLE instead.
+//  * The albedo stays in a narrow 0.90..1.0 band. Anything darker reads as dirty
+//    snow the moment the sun hits it.
+//  * The relief carries the whole read - sastrugi, corduroy ribs, scallops - and
+//    it is authored much stronger than on any other kind (`normal` >= 1.2).
+//  * SPARKLE is a two-scale feature, not one: a dense field of sub-pixel grains
+//    that survives into the mip chain as a faint shimmer, plus a sparse field of
+//    big bright specular flakes. That is the CPU half of the glint model the
+//    literature describes (stochastic microfacet glints, evaluated as an
+//    additive term inside direct specular); the view-dependent half - the flake
+//    that only flares at one angle - cannot live in a static texture and is done
+//    in the shell shader injection in js/runtime/snow-trail.js.
+//  * Snow is a DIELECTRIC. metalness stays 0 on every kind here, including ice:
+//    ice reads as ice through low roughness, not through metalness.
+
+// Sparkle for a snow albedo: a dense grain field the mips average into a
+// shimmer, plus sparse hot flakes that survive as individual glints up close.
+// Shared by every snow kind so a groomed piste and the powder beside it sparkle
+// as the same material in the same light.
+function snowSparkle(ctx, size, rng, grains, flakes){
+  speckle(ctx, size, rng.stream('grain'), grains, .3, .8, (t, r) => greyA(t < .5 ? 1 : .84, .18 + r() * .3));
+  speckle(ctx, size, rng.stream('flake'), flakes, .5, 1.5, (t, r) => greyA(1, .45 + r() * .55));
+}
+// The same flakes as relief, so a glint sits on a facet that is actually tilted
+// toward the light rather than on flat ground.
+function snowSparkleHeight(ctx, size, rng, grains, flakes){
+  speckle(ctx, size, rng.stream('grain'), grains, .3, .8, (t, r) => greyA(t < .5 ? .9 : .35, .2 + r() * .3));
+  speckle(ctx, size, rng.stream('flake'), flakes, .5, 1.5, (t, r) => greyA(1, .5 + r() * .5));
+}
+
+define('snowPowder', {
+  label:'Snow (fresh powder)', labelIt:'Neve (fresca)', group:'snow',
+  tile:2.6, roughness:.97, metalness:0, normal:1.2,
+  draw(ctx, size, rng){
+    const drift = fbm(rng.stream('drift'), 3, 3, 5, .55);
+    const settle = fbm(rng.stream('settle'), 26, 26, 3, .5);
+    // Sastrugi: wind-carved ridges. Same wrapping-sine-pushed-by-noise trick the
+    // sand kind uses for ripples, but longer wavelength and softer, because wind
+    // packs snow into dunes rather than into corrugation.
+    const wind = fbm(rng.stream('wind'), 2, 8, 2, .5);
+    paint(ctx, size, (u, v) => {
+      const sastrugi = Math.sin((v * 5 + wind(u, v) * 2.6) * Math.PI * 2) * .5 + .5;
+      return .965 + (drift(u, v) - .5) * .05 + (settle(u, v) - .5) * .03 + (sastrugi - .5) * .022;
+    });
+    snowSparkle(ctx, size, rng, 2600, 90);
+  },
+  height(ctx, size, rng){
+    const drift = fbm(rng.stream('drift'), 3, 3, 5, .55);
+    const settle = fbm(rng.stream('settle'), 26, 26, 3, .5);
+    const wind = fbm(rng.stream('wind'), 2, 8, 2, .5);
+    paint(ctx, size, (u, v) => {
+      const sastrugi = Math.sin((v * 5 + wind(u, v) * 2.6) * Math.PI * 2) * .5 + .5;
+      return .5 + (drift(u, v) - .5) * .42 + (settle(u, v) - .5) * .2 + (sastrugi - .5) * .3;
+    });
+    snowSparkleHeight(ctx, size, rng, 2600, 90);
+  },
+});
+
+define('snowGroomed', {
+  label:'Snow (groomed corduroy)', labelIt:'Neve (battuta a corduroy)', group:'snow',
+  // The tile is the width of ONE pass of the tiller so a 24 m piste lands on
+  // ribs the eye can count; authors turn the grooming direction with `rotate`.
+  tile:1.8, roughness:.94, metalness:0, normal:1.35,
+  draw(ctx, size, rng){
+    const bed = fbm(rng.stream('bed'), 4, 4, 4, .5);
+    const fine = fbm(rng.stream('fine'), 34, 34, 2, .5);
+    // 12 ribs per tile: an integer count is what keeps the corduroy seamless.
+    paint(ctx, size, (u, v) => {
+      const rib = Math.sin(u * Math.PI * 2 * 12) * .5 + .5;
+      return .955 + rib * .04 + (bed(u, v) - .5) * .035 + (fine(u, v) - .5) * .02;
+    });
+    // Track marks the cat leaves between passes: faint, and only every few ribs.
+    const t = rng.stream('track');
+    for(let i = 0; i < 6; i++){
+      const x = Math.round(t() * 12) / 12 * size;
+      wrapStroke(ctx, size, [x, -size * .1, x + (t() - .5) * size * .02, size * 1.1], greyA(.86, .1 + t() * .1), 1 + t() * 2);
+    }
+    snowSparkle(ctx, size, rng, 1800, 60);
+  },
+  height(ctx, size, rng){
+    const bed = fbm(rng.stream('bed'), 4, 4, 4, .5);
+    paint(ctx, size, (u, v) => {
+      const rib = Math.sin(u * Math.PI * 2 * 12) * .5 + .5;
+      return .3 + rib * .55 + (bed(u, v) - .5) * .16;
+    });
+    snowSparkleHeight(ctx, size, rng, 1800, 60);
+  },
+});
+
+define('snowPacked', {
+  label:'Snow (skied-out hardpack)', labelIt:'Neve (battuta dura)', group:'snow',
+  tile:2.2, roughness:.9, metalness:0, normal:1.3, roughDetail:true,
+  draw(ctx, size, rng){
+    const bed = fbm(rng.stream('bed'), 5, 5, 4, .55);
+    const grit = fbm(rng.stream('grit'), 40, 40, 2, .5);
+    paint(ctx, size, (u, v) => .945 + (bed(u, v) - .5) * .07 + (grit(u, v) - .5) * .03);
+    // Scallops: the shallow dishes an edge leaves. Drawn as an overlapping pair
+    // of blobs - a bright pushed-up lip and the darker dish inside it - which is
+    // the same two-part read a chip in painted metal gets.
+    const s = rng.stream('scallop');
+    for(let i = 0; i < 70; i++){
+      const x = s() * size, y = s() * size, r = size * (.02 + s() * .05);
+      blob(ctx, size, x, y, r * 1.25, r * .7, s() * 3, greyA(1, .16));
+      blob(ctx, size, x, y + r * .2, r, r * .55, s() * 3, greyA(.86, .14));
+    }
+    // Chatter: the short parallel scrapes an edge chatters across hardpack.
+    const c = rng.stream('chatter');
+    for(let i = 0; i < 40; i++){
+      const points = walk(c, c() * size, c() * size, Math.PI / 2 + (c() - .5) * .3, size * (.04 + c() * .1), 3, .12);
+      wrapStroke(ctx, size, points, c() < .5 ? greyA(1, .2) : greyA(.82, .16), .8 + c() * 1.4);
+    }
+    snowSparkle(ctx, size, rng, 1200, 34);
+  },
+  height(ctx, size, rng){
+    const bed = fbm(rng.stream('bed'), 5, 5, 4, .55);
+    paint(ctx, size, (u, v) => .58 + (bed(u, v) - .5) * .2);
+    const s = rng.stream('scallop');
+    for(let i = 0; i < 70; i++){
+      const x = s() * size, y = s() * size, r = size * (.02 + s() * .05);
+      blob(ctx, size, x, y, r * 1.25, r * .7, s() * 3, greyA(1, .28));
+      blob(ctx, size, x, y + r * .2, r, r * .55, s() * 3, 'rgba(0,0,0,.3)');
+    }
+    const c = rng.stream('chatter');
+    for(let i = 0; i < 40; i++){
+      const points = walk(c, c() * size, c() * size, Math.PI / 2 + (c() - .5) * .3, size * (.04 + c() * .1), 3, .12);
+      wrapStroke(ctx, size, points, 'rgba(0,0,0,.35)', .8 + c() * 1.4);
+    }
+    snowSparkleHeight(ctx, size, rng, 1200, 34);
+  },
+});
+
+define('snowIce', {
+  label:'Snow (boilerplate ice)', labelIt:'Neve (lastra di ghiaccio)', group:'snow',
+  // Ice is the one place a snow kind may leave the near-white band: refrozen
+  // scrape holds the sky rather than scattering it, so it reads darker and
+  // glossier, and its roughness map is what tells the two apart at a glance.
+  tile:3, roughness:.26, metalness:0, normal:.75, roughDetail:true,
+  draw(ctx, size, rng){
+    const sheet = fbm(rng.stream('sheet'), 3, 3, 4, .55);
+    const cloud = fbm(rng.stream('cloud'), 12, 12, 3, .5);
+    paint(ctx, size, (u, v) => .90 + (sheet(u, v) - .5) * .1 + (cloud(u, v) - .5) * .05);
+    // Long edge scrapes down the fall line, plus the crazing a refreeze leaves.
+    const s = rng.stream('scrape');
+    for(let i = 0; i < 26; i++){
+      const x = s() * size;
+      wrapStroke(ctx, size, [x, -size * .1, x + (s() - .5) * size * .06, size * 1.1], s() < .5 ? greyA(1, .16) : greyA(.8, .12), .6 + s() * 2.2);
+    }
+    crackNetwork(ctx, size, rng.stream('craze'), 6, 'rgba(255,255,255,.22)', .9, .5);
+    speckle(ctx, size, rng.stream('bubble'), 220, .4, 1.4, (t, r) => greyA(t < .5 ? 1 : .74, .12 + r() * .2));
+  },
+  height(ctx, size, rng){
+    const sheet = fbm(rng.stream('sheet'), 3, 3, 4, .55);
+    paint(ctx, size, (u, v) => .62 + (sheet(u, v) - .5) * .22);
+    const s = rng.stream('scrape');
+    for(let i = 0; i < 26; i++){
+      const x = s() * size;
+      wrapStroke(ctx, size, [x, -size * .1, x + (s() - .5) * size * .06, size * 1.1], 'rgba(0,0,0,.4)', .6 + s() * 2.2);
+    }
+    crackNetwork(ctx, size, rng.stream('craze'), 6, 'rgba(0,0,0,.6)', 1, .5);
+  },
+  rough(ctx, size, rng){
+    // Wet-looking polished lanes where an edge has scraped, matte where the
+    // snow survived. This contrast IS the ice, so it gets a hand-authored map
+    // rather than one derived from the relief.
+    const sheet = fbm(rng.stream('sheet'), 3, 3, 4, .55);
+    paint(ctx, size, (u, v) => clamp01(.55 + (sheet(u, v) - .5) * .7));
+    const s = rng.stream('scrape');
+    for(let i = 0; i < 26; i++){
+      const x = s() * size;
+      wrapStroke(ctx, size, [x, -size * .1, x + (s() - .5) * size * .06, size * 1.1], 'rgba(20,20,20,.55)', .6 + s() * 2.2);
+    }
+  },
+});
+
+define('snowRock', {
+  label:'Snow (rock outcrop)', labelIt:'Neve (roccia affiorante)', group:'snow',
+  tile:2.8, roughness:.96, metalness:0, normal:1.45,
+  draw(ctx, size, rng){
+    const strata = fbm(rng.stream('strata'), 2, 16, 4, .55);
+    const face = fbm(rng.stream('face'), 7, 7, 5, .55);
+    // Schist: bedding planes running one way, broken by fracture. Authored dark
+    // so it survives being multiplied by the pale authored rock colour.
+    paint(ctx, size, (u, v) => .72 + (strata(u, v) - .5) * .3 + (face(u, v) - .5) * .16);
+    crackNetwork(ctx, size, rng.stream('fracture'), 9, 'rgba(30,30,30,.5)', 1.3, .7);
+    // Snow caught in the ledges: bright, only ever in the flat-lying cracks, and
+    // the single feature that says "rock in winter" rather than "rock".
+    const w = rng.stream('windblown');
+    for(let i = 0; i < 26; i++){
+      const y = w() * size;
+      wrapStroke(ctx, size, walk(w, 0, y, (w() - .5) * .25, size * 1.2, 6, .18), greyA(1, .3 + w() * .35), 1.5 + w() * 4);
+    }
+    speckle(ctx, size, rng.stream('quartz'), 320, .4, 1.6, (t, r) => greyA(t < .4 ? 1 : .5, .18 + r() * .3));
+  },
+  height(ctx, size, rng){
+    const strata = fbm(rng.stream('strata'), 2, 16, 4, .55);
+    const face = fbm(rng.stream('face'), 7, 7, 5, .55);
+    paint(ctx, size, (u, v) => .5 + (strata(u, v) - .5) * .5 + (face(u, v) - .5) * .3);
+    crackNetwork(ctx, size, rng.stream('fracture'), 9, 'rgba(0,0,0,.85)', 1.6, .7);
+    const w = rng.stream('windblown');
+    for(let i = 0; i < 26; i++){
+      const y = w() * size;
+      wrapStroke(ctx, size, walk(w, 0, y, (w() - .5) * .25, size * 1.2, 6, .18), greyA(1, .3 + w() * .3), 1.5 + w() * 4);
+    }
   },
 });
 

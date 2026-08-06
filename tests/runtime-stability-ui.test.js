@@ -22,6 +22,7 @@ const thumbnails = read('js/editor/thumbnail-manager.js');
 const materialEditor = read('js/editor/material-editor.js');
 const assetImports = read('js/editor/asset-imports.js');
 const lotKing = read('js/lot-king.js');
+const editorRuntime = read('js/editor/editor-runtime.js');
 
 assert.match(benchmark, /Touring strategic map sectors/,
   'pre-benchmark visits distant map sectors before play');
@@ -97,6 +98,16 @@ assert.match(developerDebugger, /runWorkerTask\('write-log'/,
   'debugger autolog serialization and transport run outside the main thread');
 assert.match(developerDebuggerWorker, /self\.onmessage=async[\s\S]*aggregate[\s\S]*write-log/,
   'the dedicated debugger worker supports aggregation and local autolog writes');
+assert.match(lotKing, /pagehide[\s\S]*releaseFinalPageResources/,
+  'closing the runtime explicitly releases renderer-owned GPU resources');
+assert.match(lotKing, /finalPage[\s\S]*renderer\.forceContextLoss/,
+  'a final WebGL page close also releases the native driver context');
+assert.match(editorRuntime, /EDITOR_IDLE_AFTER_MS[\s\S]*EDITOR_IDLE_FRAME_MS[\s\S]*cinemaPlaying/,
+  'idle authoring is paced without throttling an active Cinema timeline');
+assert.match(developerDebugger, /lotking:runtime-dispose[\s\S]*telemetryWorker\.terminate/,
+  'debugger observers and worker are disposed with the runtime');
+assert.doesNotMatch(developerDebugger, /samples\.shift\(\)/,
+  'frame telemetry does not shift an array on every frame indefinitely');
 assert.doesNotMatch(lotKing, /let look = new THREE\.Vector3|const behind = camFocus\.clone|wheelSuspVis\.map/,
   'the camera and vehicle suspension hot paths do not allocate Three.js objects or arrays every frame');
 assert.doesNotMatch(lotKing, /position:P\.pos\.clone\(\)|\.map\(\(rig, i\) => \(\{rig/,

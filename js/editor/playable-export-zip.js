@@ -30,6 +30,10 @@ function create(deps){
     'models/car1.glb',
     'models/car2.glb',
     'models/cone.glb',
+    'models/sketchbook/LICENSE-Sketchbook-MIT.txt',
+    // Ships with the bundled mannequins for the same reason the Sketchbook notice
+    // does: the provenance travels with the content.
+    'models/characters/PROVENANCE.md',
     'musics/02 - Num0 - Getting serious.mp3',
     'musics/01 - Num0 - Block Road.mp3',
     'musics/03 - Num0 - Look into the mirror.mp3',
@@ -99,7 +103,12 @@ function create(deps){
   function collectAssetPathsFromObject(node, bag, seen){
     if(!node || seen.has(node)) return;
     if(typeof node === 'string'){
-      if(/\.(?:glb|gltf|wav|mp3|png|jpg|jpeg|webp|hdr)$/i.test(node.trim()) && isRelativePlayableAssetPath(node.trim())){
+      // FBX belongs here: the bundled default characters and every motion clip
+      // bound to them are FBX, and the gameplay shell ships the FBX plugin. Without
+      // the extension the walker skipped them and an exported game started with no
+      // character at all - silently, because a reference nobody collects raises no
+      // warning either.
+      if(/\.(?:glb|gltf|fbx|wav|mp3|png|jpg|jpeg|webp|hdr)$/i.test(node.trim()) && isRelativePlayableAssetPath(node.trim())){
         bag.add(normalizeExportPath(node.trim()));
       }
       return;
@@ -289,7 +298,10 @@ function create(deps){
       setProgress(done(), 'Copiamento vendor (' + doneCount + '/' + (totalToPack - 1) + ')');
     }));
     referencedAssets.forEach(asset => packTasks.push(async () => {
-      await addFileToZip(zip, asset, asset, warnings, false);
+      // Bundled content is REQUIRED: a missing default body or motion clip has to
+      // be reported, not quietly dropped like an optional decorative asset.
+      await addFileToZip(zip, asset, asset, warnings,
+        asset.indexOf('models/sketchbook/') === 0 || asset.indexOf('models/characters/') === 0);
       setProgress(done(), 'Copiamento asset (' + doneCount + '/' + (totalToPack - 1) + ')');
     }));
     await runExportQueue(packTasks, 6);

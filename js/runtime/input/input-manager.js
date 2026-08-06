@@ -50,6 +50,7 @@ function create(deps){
   function snapshotOverride(){
     // capture the parts the player can change (allowedDevices stays project-owned)
     userOverride = {
+      version: ACT.CONFIG_VERSION,
       touchMode: config.touchMode,
       autoAssign: config.autoAssign,
       activeContext: config.activeContext,
@@ -185,9 +186,8 @@ function create(deps){
     else if(inst.type === 'gamepad') d = ACT.resolveGamepad(scheme, src);
     else if(inst.type === 'touch') d = ACT.resolveTouch(src);
     else return false;
-    return Math.abs(d.steer) > 0.4 || d.throttle > 0.4 || d.brake > 0.4 || d.handbrake || d.reset ||
-      d.pauseMenu || d.highBeams || d.radioToggle || d.radioPlay || d.radioNext || d.radioPrev ||
-      d.cameraMode || d.lookBack || d.tuningMenu || d.mute || d.legend ||
+    const digitalActive = Object.keys(d).some(action => typeof d[action] === 'boolean' && d[action]);
+    return digitalActive || Math.abs(d.steer) > 0.4 || d.throttle > 0.4 || d.brake > 0.4 ||
       Math.abs(d.cameraLookX || 0) > 0.35 || Math.abs(d.cameraLookY || 0) > 0.35;
   }
   function deviceActive(inst){
@@ -223,11 +223,20 @@ function create(deps){
   }
 
   // ------------------------------------------------ drive read
+  // Reading a context must never claim it. Before v15 every explicit
+  // `drive('vehicle')`/`drive('character')` query also mutated the Player's
+  // remembered context, so whichever subsystem happened to run last owned the
+  // next no-argument read. Possession now calls setContext explicitly; queries
+  // are deterministic and side-effect free.
   function contextForPlayer(playerIndex, requestedContext){
     const requested = typeof requestedContext === 'string' && config.contexts[requestedContext] ? requestedContext : null;
-    if(requested) playerContexts[playerIndex] = requested;
     const configured = config.players[playerIndex] && config.players[playerIndex].context;
     return requested || playerContexts[playerIndex] || (config.contexts[configured] ? configured : null) || config.activeContext;
+  }
+  function setPlayerContext(playerIndex, contextId){
+    const requested = typeof contextId === 'string' && config.contexts[contextId] ? contextId : null;
+    if(requested) playerContexts[playerIndex] = requested;
+    return contextForPlayer(playerIndex);
   }
   function driveFor(playerIndex, requestedContext){
     if(!enabled) return ACT.neutralDrive();
@@ -255,7 +264,7 @@ function create(deps){
     if(!playerViews[i]) playerViews[i] = Object.freeze({
       index: i,
       drive: contextId => driveFor(i, contextId),
-      setContext: contextId => contextForPlayer(i, contextId),
+      setContext: contextId => setPlayerContext(i, contextId),
       context: () => contextForPlayer(i),
       device: () => assignments[i] || null,
       deviceType: () => { const inst = ACT.deviceInstance(config, assignments[i]); return inst ? inst.type : null; },

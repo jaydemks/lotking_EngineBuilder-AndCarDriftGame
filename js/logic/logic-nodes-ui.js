@@ -1,0 +1,35 @@
+/* =========================================================
+   LOT KING - Authorable UI Logic node pack
+   ========================================================= */
+(function(){
+'use strict';
+const execIn={name:'exec',kind:'exec',direction:'input'},thenOut={name:'completed',kind:'exec',direction:'output'};
+const dataIn=(name,type,value,extra)=>Object.assign({name,kind:'data',direction:'input',type:type||'any',defaultValue:value},extra||{});
+const dataOut=(name,type)=>({name,kind:'data',direction:'output',type:type||'any'});
+function service(api){return api&&api.services&&api.services.ui;}
+function remember(api,value){api.node.data.__uiHandle=value||null;return {exec:'completed'};}
+function output(api){return api.node.data.__uiHandle||null;}
+function registerUiNodes(registry){
+  registry.register({type:'event.onUiAction',title:'On UI Action',category:'UI / Events',description:'Runs when one Button owned by this Logic Element is clicked/tapped. It is semantic UI input and never leaks into Pawn controls.',event:'OnUiAction',inputs:[dataIn('elementId','string',''),dataIn('action','string','')],outputs:[{name:'then',kind:'exec',direction:'output'},dataOut('elementId','string'),dataOut('action','string'),dataOut('value','any')]});
+  registry.register({type:'ui.mountAuthored',title:'Mount Authored UI',category:'UI / Elements',description:'Creates the Canvas/Panel/Text/Image/Button/Progress tree stored by this reusable Logic Element.',inputs:[execIn],outputs:[thenOut,dataOut('element','uiElement')],run(api){return remember(api,service(api)&&service(api).mountAuthored());},evaluate:output});
+  registry.register({type:'ui.getElement',title:'Get UI Element',category:'UI / Elements',description:'Gets one authored UI element by ID inside this Logic Element only.',inputs:[dataIn('elementId','string','')],outputs:[dataOut('element','uiElement')],evaluate(api){return service(api)&&service(api).find(api.getInput('elementId'));}});
+  const layout=[dataIn('anchor','string','center'),dataIn('x','number',0),dataIn('y','number',0),dataIn('width','any',280),dataIn('height','any','auto'),dataIn('zOrder','number',0),dataIn('visible','boolean',true),dataIn('enabled','boolean',true)];
+  const layoutProps={anchor:'anchor',zOrder:'zOrder',visible:'visible',enabled:'enabled'};
+  function patchLayout(value,api){value.offset={x:api.getInput('x'),y:api.getInput('y'),unit:'px'};value.size={width:api.getInput('width'),height:api.getInput('height'),unit:'px'};return value;}
+  registry.register({type:'ui.createCanvas',title:'Create Canvas',category:'UI / Elements',description:'Creates a responsive safe-area Canvas.',inputs:[execIn,dataIn('id','string','canvas'),dataIn('zOrder','number',0),dataIn('safeArea','boolean',true)],outputs:[thenOut,dataOut('element','uiElement')],run(api){return remember(api,service(api)&&service(api).create('canvas',{id:api.getInput('id'),anchor:'stretch',zOrder:api.getInput('zOrder'),safeArea:api.getInput('safeArea')}));},evaluate:output});
+  function layoutCreator(type,title,extraInputs,extraProps){registry.register({type:'ui.create'+title.replace(/\s/g,''),title:'Create '+title,category:'UI / Elements',description:'Creates an authored responsive '+title+'.',inputs:[execIn,dataIn('parent','uiElement',null),dataIn('id','string',type)].concat(layout,extraInputs||[]),outputs:[thenOut,dataOut('element','uiElement')],run(api){let value={id:api.getInput('id')};Object.keys(layoutProps).forEach(key=>value[key]=api.getInput(layoutProps[key]));Object.keys(extraProps||{}).forEach(key=>value[key]=api.getInput(extraProps[key]));patchLayout(value,api);return remember(api,service(api)&&service(api).create(type,value,api.getInput('parent')));},evaluate:output});}
+  layoutCreator('panel','Panel',[dataIn('background','string','rgba(8,15,30,.82)'),dataIn('radius','number',14),dataIn('padding','number',16)],{background:'background',radius:'radius',padding:'padding'});
+  layoutCreator('text','Text',[dataIn('text','string','Text'),dataIn('color','string','#ffffff'),dataIn('fontSize','number',22),dataIn('fontFamily','string','system-ui'),dataIn('fontWeight','string','600')],{text:'text',color:'color',fontSize:'fontSize',fontFamily:'fontFamily',fontWeight:'fontWeight'});
+  layoutCreator('image','Image',[dataIn('asset','assetRef','',{assetKind:'texture'}),dataIn('fit','string','contain'),dataIn('placeholder','string','Image asset missing')],{asset:'asset',fit:'fit',placeholder:'placeholder'});
+  layoutCreator('button','Button',[dataIn('text','string','Button'),dataIn('action','string','confirm'),dataIn('value','any',true),dataIn('background','string','#2563eb'),dataIn('color','string','#ffffff'),dataIn('fontSize','number',18),dataIn('radius','number',10)],{text:'text',action:'action',value:'value',background:'background',color:'color',fontSize:'fontSize',radius:'radius'});
+  layoutCreator('progress','Progress',[dataIn('value','number',50),dataIn('max','number',100),dataIn('trackColor','string','rgba(255,255,255,.18)'),dataIn('fillColor','string','#38bdf8'),dataIn('radius','number',8)],{value:'value',max:'max',trackColor:'trackColor',fillColor:'fillColor',radius:'radius'});
+  layoutCreator('value','Value',[dataIn('value','number',0),dataIn('prefix','string',''),dataIn('suffix','string',''),dataIn('decimals','number',0),dataIn('color','string','#ffffff'),dataIn('fontSize','number',22)],{value:'value',prefix:'prefix',suffix:'suffix',decimals:'decimals',color:'color',fontSize:'fontSize'});
+  registry.register({type:'ui.setValue',title:'Set UI Value',category:'UI / Elements',description:'Updates Text, Value or Progress without rebuilding the UI.',inputs:[execIn,dataIn('element','uiElement',null),dataIn('value','any',0)],outputs:[thenOut],run(api){const ui=service(api);if(ui)ui.set(api.getInput('element'),{value:api.getInput('value'),text:api.getInput('value')});return {exec:'completed'};}});
+  registry.register({type:'ui.setVisible',title:'Set UI Visible',category:'UI / Elements',description:'Shows or hides one UI Element.',inputs:[execIn,dataIn('element','uiElement',null),dataIn('visible','boolean',true)],outputs:[thenOut],run(api){const ui=service(api);if(ui)ui.set(api.getInput('element'),{visible:api.getInput('visible')});return {exec:'completed'};}});
+  registry.register({type:'ui.setEnabled',title:'Set UI Enabled',category:'UI / Elements',description:'Enables or disables interaction with one UI Element.',inputs:[execIn,dataIn('element','uiElement',null),dataIn('enabled','boolean',true)],outputs:[thenOut],run(api){const ui=service(api);if(ui)ui.set(api.getInput('element'),{enabled:api.getInput('enabled')});return {exec:'completed'};}});
+  registry.register({type:'ui.remove',title:'Remove UI Element',category:'UI / Elements',description:'Removes one UI element and its children.',inputs:[execIn,dataIn('element','uiElement',null)],outputs:[thenOut],run(api){const ui=service(api);if(ui)ui.remove(api.getInput('element'));return {exec:'completed'};}});
+  return registry;
+}
+const packs=window.LK_LOGIC_NODE_PACKS||(window.LK_LOGIC_NODE_PACKS=[]);packs.push(registerUiNodes);
+window.LK_LOGIC_NODES_UI=Object.freeze({register:registerUiNodes});
+})();

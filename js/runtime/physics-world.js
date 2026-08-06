@@ -13,6 +13,7 @@ function create(options){
   const playerCollision = opts.playerCollision || {};
   const colliders = opts.colliders || {};
   const worldState = opts.worldState;
+  const terrainProvider = typeof opts.terrainProvider === 'function' ? opts.terrainProvider : () => null;
   const wheelLayout = opts.wheelLayout || [
     {x: -.92, z: 1.35, front: true}, {x: .92, z: 1.35, front: true},
     {x: -.92, z: -1.35, front: false}, {x: .92, z: -1.35, front: false},
@@ -31,6 +32,7 @@ function create(options){
     carMaterial: null,
     groundMaterial: null,
     groundBody: null,
+    terrainBody: null,
     surfaceWorldCollision: true,
     staticBodies: [],
     mass: 1200,
@@ -48,11 +50,18 @@ function create(options){
   }
 
   function colliderSignature(){
-    return worldState.colliderSignature() + '|surfaceWorld:' + (state.surfaceWorldCollision ? '1' : '0');
+    const terrain=terrainDescriptor();
+    return worldState.colliderSignature() + '|surfaceWorld:' + (state.surfaceWorldCollision ? '1' : '0') + '|terrain:' + (terrain&&terrain.signature||'none');
+  }
+
+  function terrainDescriptor(){
+    const provider=terrainProvider();
+    return provider&&typeof provider.physicsDescriptor==='function'?provider.physicsDescriptor():null;
   }
 
   function ensureGroundBody(){
     if(!state.world || !state.groundMaterial) return;
+    if(terrainDescriptor()){removeGroundBody();return;}
     if(state.groundBody){
       if(!state.staticBodies.includes(state.groundBody)) state.staticBodies.unshift(state.groundBody);
       return;
@@ -73,9 +82,22 @@ function create(options){
     state.groundBody = null;
   }
 
+  function addTerrainBody(){
+    const descriptor=terrainDescriptor();
+    if(!descriptor||!CANNONRef.Heightfield||!Array.isArray(descriptor.matrix)||descriptor.matrix.length<2)return false;
+    // Cannon 0.6.2's Heightfield convex-pillar path is noisy and unreliable for
+    // negative local samples (fixed only in later cannon-es). Keep world heights
+    // identical by shifting samples above zero and placing the body at minY.
+    let minY=Infinity;descriptor.matrix.forEach(row=>row.forEach(value=>{if(Number.isFinite(value)&&value<minY)minY=value;}));if(!Number.isFinite(minY))minY=0;
+    const localMatrix=descriptor.matrix.map(row=>row.map(value=>(Number(value)||0)-minY));
+    const shape=new CANNONRef.Heightfield(localMatrix,{elementSize:descriptor.elementSize,minValue:0});
+    const body=new CANNONRef.Body({mass:0,material:state.groundMaterial});
+    body.addShape(shape);body.position.set(descriptor.originX,minY,descriptor.originZ);body.quaternion.setFromEuler(-Math.PI/2,0,0,'XYZ');body.userData={proceduralTerrain:true,worldMinY:minY};state.world.addBody(body);state.terrainBody=body;state.staticBodies.unshift(body);return true;
+  }
+
   function setSurfaceWorldCollision(enabled){
     state.surfaceWorldCollision = enabled !== false;
-    if(state.surfaceWorldCollision) ensureGroundBody();
+    if(state.surfaceWorldCollision&&!terrainDescriptor()) ensureGroundBody();
     else removeGroundBody();
     state.staticsSignature = '';
   }
@@ -158,7 +180,7 @@ function create(options){
       friction: 0.08, restitution: 0.02, contactEquationStiffness: 1e7, contactEquationRelaxation: 4
     }));
 
-    if(state.surfaceWorldCollision) ensureGroundBody();
+    if(state.surfaceWorldCollision&&!terrainDescriptor()) ensureGroundBody();
 
     addPlayerBody();
     state.active = true;
@@ -295,6 +317,17 @@ function create(options){
     return 'trimesh';
   }
 
+  function detachLogicColliderBody(body){
+    if(!body) return;
+    const ref=body.__lkLogicColliderRef;
+    const handler=body.__lkLogicColliderHandler;
+    if(handler&&body.removeEventListener)body.removeEventListener('collide',handler);
+    if(ref&&ref.cannonBody===body)ref.cannonBody=null;
+    body.__lkLogicColliderRef=null;
+    body.__lkLogicColliderHandler=null;
+    body.logicObject=null;
+  }
+
   function rebuildStatics(force){
     if(!state.world) return false;
     const nextSignature = colliderSignature();
@@ -303,9 +336,10 @@ function create(options){
     // mesh world is one of the most expensive synchronous operations we can do,
     // so make the operation idempotent.
     if(force !== true && state.staticsSignature && state.staticsSignature === nextSignature) return false;
-    for(const body of state.staticBodies.slice()) if(body !== state.groundBody) state.world.removeBody(body);
+    for(const body of state.staticBodies.slice()) if(body !== state.groundBody){detachLogicColliderBody(body);state.world.removeBody(body);}
+    state.terrainBody=null;
     state.staticBodies.length = 0;
-    if(state.surfaceWorldCollision) ensureGroundBody();
+    if(state.surfaceWorldCollision){if(terrainDescriptor())removeGroundBody();if(!addTerrainBody())ensureGroundBody();}
     else removeGroundBody();
 
     const bindLogicColliderBody = (body, colliderRef) => {
@@ -313,7 +347,7 @@ function create(options){
       body.logicObject = colliderRef.owner || null;
       colliderRef.cannonBody = body;
       body.userData = Object.assign({}, body.userData || {}, {logicElementCollider:true, logicElementId:colliderRef.logicElementId});
-      body.addEventListener('collide', event => {
+      const collisionHandler=event => {
         if(!window.dispatchEvent || !window.CustomEvent) return;
         window.dispatchEvent(new CustomEvent('lk-logic-collision-begin', {detail:{
           body,
@@ -322,7 +356,10 @@ function create(options){
           otherObject:event && event.body && event.body.logicObject || null,
           contact:event && event.contact || null,
         }}));
-      });
+      };
+      body.__lkLogicColliderRef=colliderRef;
+      body.__lkLogicColliderHandler=collisionHandler;
+      body.addEventListener('collide',collisionHandler);
       return body;
     };
     const addStaticBox = (x, y, z, hx, hy, hz, rotX, rotY, rotZ, colliderRef) => {
@@ -406,11 +443,12 @@ function create(options){
     if(!state.world) return;
     removePlayer();
     const bodies = state.world.bodies ? state.world.bodies.slice() : [];
-    for(const body of bodies) state.world.removeBody(body);
+    for(const body of bodies){detachLogicColliderBody(body);state.world.removeBody(body);}
     state.world = null;
     state.carMaterial = null;
     state.groundMaterial = null;
     state.groundBody = null;
+    state.terrainBody = null;
     state.staticBodies.length = 0;
     state.staticsSignature = '';
     state.lastImpact = 0;

@@ -1,6 +1,6 @@
 # Lot King Browser-Native 3D Engine & Editor Architecture
 
-This document describes the current project architecture through the v0.7.7 release: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, per-Pawn player input contexts, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
+This document describes the current v0.7.8 development architecture: the editor/runtime split, atomic hosted-DEMO loading into an isolated writable browser workspace, granular browser-storage diagnostics and recovery, possession-safe per-Pawn input contexts, reusable Actor Combat/Behavior/Damage/Death foundations, Logic Element and Vehicle Pawn foundations, Three.js r185 migration, source-preserving FBX pipeline, Character/Soccer runtime and the shared Pawn Studio authoring layer.
 
 The project is still intentionally simple at the platform level: plain JavaScript, no bundler, static HTML entrypoints, browser storage, and a static-server workflow. The internal structure is now split into a landing/menu shell, gameplay runtime, standalone editor, persistence layer, Logic Element graph runtime, project workspace chooser, shared UI/input helpers, playable export pipeline, online demo publishing path, and versioned release documentation.
 
@@ -140,7 +140,15 @@ Logic Element visual scripting is split into data, validation, controlled execut
 
 The editor welcome overlay states this experimental boundary before authoring begins. It offers English/Italian selection through the same persisted preference service, can be dismissed permanently and reopened from Interface settings, and directs vehicle projects to the built-in `player_car (Logic)` until the Player Car Logic Element completes manual parity testing.
 
-Pawn architecture is layered. `pawn-core.js` contains only reusable identity, lifecycle, flags, possession callbacks and component factories. `vehicle-pawns.js` adds driving state, Cannon RaycastVehicle, wheels, lights and vehicle effects. A future Human or Animal component should register against Pawn Core and provide its own locomotion/animation state rather than importing Vehicle Pawn or branching on vehicle globals. Logic pin compatibility allows specialized Pawn outputs to feed generic `pawn` inputs, never the unsafe reverse direction.
+Pawn architecture is layered. `pawn-core.js` contains only reusable identity, lifecycle, flags, possession callbacks and component factories. `vehicle-pawns.js` adds driving state, Cannon RaycastVehicle, wheels, lights and vehicle effects. Character, Sketchbook and Animal Pawns register their own locomotion/animation components against Pawn Core rather than importing Vehicle Pawn or branching on vehicle globals. Logic pin compatibility allows specialized Pawn outputs to feed generic `pawn` inputs, never the unsafe reverse direction.
+
+Actor control is split by responsibility rather than by level. A Pawn owns movement, animation, possession and its serializable configuration. `actor-combat.js` is a per-Pawn facade over weapon/loadout state; it lets an AI, player or Logic graph aim, fire, reload and equip the same actor without reading Player 1 globals. `actor-behavior.js` is the decision layer: only Pawns with an explicit enabled `behavior` descriptor are stepped, and possession or death suspends it. The Enemy Outpost is therefore a composition of ordinary armed Character Pawns, not the owner of a private enemy implementation.
+
+Behavior uses faction/hostility, sight and hearing, finite memory, patrol, guard radius, squad intelligence, fear and event reactions. Weapon fire, explosions, damage and death enter the same stimulus stream; Character actors use Actor Combat and the separate bounded `actor-cover-planner.js`, while Animal actors map compatible decisions onto Damage-Contract-backed species verbs such as pounce, chase, bark or startle. The planner evaluates protected collider faces, approach distance and retry/stall state without becoming a baked navigation mesh, global path planner or production cover-authoring system.
+
+Damage and death form a second composition boundary. `damage-contract.js` keeps `owner.userData.damageable` as plain serializable numbers but delegates mutations to the owning vitals controller through runtime-only WeakMap state. Hitscan, explosions, Logic nodes and ordinary props consequently agree on armour, actual damage, lethal transitions and source/impact metadata. Character and Animal vitals emit the shared lifecycle events and gate all Pawn actions while dead.
+
+`pawn-death-physics.js` consumes that lethal transition. In auto mode it snapshots the current pose, maps semantic humanoid or quadruped joints from an imported GLB or procedural placeholder, suspends the Pawn's upright Logic Element collider and runs a lightweight deterministic articulated solver against ground and box colliders. A rig with too few usable joints falls back to a whole-owner physical body; revive restores both pose and collider state. An authored death animation or disabled mode may be selected explicitly. This layer is independent from Cannon vehicle stepping and intentionally is not a full rigid-body-per-bone collision system.
 
 Wheel physics is data-driven through `vehiclePawn.wheels`. Each entry owns its Cannon connection point, steering/driven flags and optional visual ID. Visual IDs may resolve either a Logic Scene element or a stable Mesh Editor ID inside an imported GLB, so models do not require prescribed node names. Engine force, braking, grip and visual suspension iterate the configured wheel collection rather than fixed indices.
 
@@ -227,6 +235,12 @@ The editor now has a first plugin layer intended for future built-in and local e
 - `js/editor/editor-menu-bar.js` provides a software-style top menu bar (`File`, `Edit`, `View`, `Tools`, `Plugins`), a non-modal Plugin Manager panel, and the Logic Profiler panel backed by runtime runner stats and timeline samples.
 - `js/plugins/logic-element-plugin.js` registers `Logic Element (Experimental)` as a built-in plugin and declares its scene type, asset type, inspector provider, runtime hook, export hook, and Level Logic command.
 - `js/plugins/fbx-import-plugin.js` is the reference source-format plugin. Its `assetImporter` preserves FBX plus used sidecars and builds the canonical runtime GLB; its `assetPreviewLoader` lets authoring tools inspect the source directly while source-format handling stays out of runtime and export code.
+- Asset ownership is explicit in the editor catalogue. Shipped Logic templates
+  and bundled model packs are `engine`; imported, project, reusable and scene
+  content is `user`. An enabled plugin may register `api.assetProvider(id,
+  config)` and return browseable descriptors from `config.assets()`: those
+  remain under `Plugin Assets / <plugin name>`, are never merged into Engine or
+  User storage, and disappear automatically when the plugin is disabled.
 
 ## Pawn Studio And Character Animation
 
@@ -250,22 +264,31 @@ This is intentionally a host-first migration. Existing Logic Element code still 
 
 ## Input Architecture
 
-The v0.5.2 input stack separates driving actions from physical devices.
+The input stack separates actions from physical devices and currently stores
+schema v15. The device/context split originated in v0.5.2; v15 makes Pawn
+ownership and action capabilities explicit.
 
 Core ideas:
 
-- An input context is a named action set. `vehicle` and `character` are independent defaults: each possessed Pawn requests its own context per Player, allowing a keyboard Character and a gamepad Vehicle to run together without switching one global mapping. Vehicle keeps trigger throttle/brake and steering controls; Character uses left-stick planar movement, A/Space Jump, L3/Shift Sprint and its own action bindings. Future Pawn types can add contexts such as aircraft controls.
+- An input context is a named action set. `vehicle` and `character` are independent defaults: each possessed Pawn declares `inputContextId`, allowing a keyboard Character and a gamepad Vehicle to run together without switching one global mapping. Vehicle keeps trigger throttle/brake, steering and Reset; Character uses left-stick planar movement, A/Space Jump, L3/Shift Sprint, R Reload and its own action bindings. Future Pawn types can add contexts without borrowing another Pawn family's verbs.
+- Within the on-foot context, the possessed Pawn type applies a semantic command domain. Soccer verbs and Character/Animal traversal, interaction and firearm verbs can share a compact physical layout only when that controller makes them mutually exclusive; they are never delivered together to one Pawn.
+- Input resolution and action dispatch are different phases. `input-manager.js` returns a snapshot for an explicitly requested context without changing remembered state. Possession calls its context setter; `player-action-router.js` then edge-dispatches global-style actions only when the active Pawn advertises the matching `inputCapabilities` entry.
+- A lifecycle method is not automatically a user action. Character and Animal Pawns may implement `reset()` for respawn/teardown, but only a possessed Vehicle with the Vehicle context and Reset capability may receive the mapped Reset action.
+- Edge state belongs to the Player/Pawn/context tuple. Switching possession while a button is held consumes that edge instead of executing it on the newly possessed Pawn.
+- Pawn Logic observes the same semantic boundary through `On Input Action Down/Up`, `On Player Input Action Down/Up` and `Is Input Action Pressed`. Shipped Pawn/NPC templates therefore follow remapping and Player 1–4 possession. Raw DOM `On Key` dispatch remains only for legacy non-Pawn level graphs; saved Pawn key nodes are adapted to semantic actions.
+- Helper runtimes do not resample physical keys. Aircraft wheel braking, Look Back and engine-audio throttle consume the resolved Vehicle command, so remaps cannot execute a second hidden action.
 - A device type is `keyboard`, `gamepad`, or `touch`.
 - A device instance is a numbered slot such as `keyboard-1`, `keyboard-2`, `gamepad-1`, `gamepad-2`, or `touch-1`.
 - A player slot maps to one device instance.
-- A binding scheme resolves actions into a normalized drive command: `steer`, `throttle`, `brake`, `handbrake`, and `reset`.
+- A binding scheme resolves actions into a normalized command. Shared axes coexist with context verbs such as Vehicle `reset` and Character `jump`, `fire`, `aim` and `reload`; absence is represented by a neutral/unbound action rather than another action's name.
 - Shared base schemes live per context/device type; instance overrides store only differences for split local-coop setups.
 
 Runtime input modules:
 
-- `input-actions.js` - pure schema, migration, normalization, effective binding, conflict detection, and drive-command resolution.
+- `input-actions.js` - pure v15 schema, v14 Jump migration, normalization, effective binding, conflict detection and normalized command resolution.
 - `input-devices.js` - keyboard, gamepad, and touch physical source readers.
-- `input-manager.js` - merges project config and user overrides, detects connected gamepads, assigns devices to players, persists remaps, and exposes `GAME.input`.
+- `input-manager.js` - merges project config and user overrides, detects connected gamepads, assigns devices to players, persists remaps and exposes side-effect-free context reads through `GAME.input`.
+- `player-action-router.js` - synchronizes possession-owned contexts for Players 1–4 and capability-gates edge-triggered Pawn actions.
 - `touch-controls.js` - on-screen touch steering/throttle/brake/handbrake UI.
 - `input-menu.js` - in-game Controls tab for device assignment, touch mode, and mapping access.
 - `device-visuals.js` - schematic keyboard/gamepad/touch diagrams.
@@ -361,7 +384,7 @@ Play Preview uses the normal runtime pause/settings overlay. `Esc` opens/closes 
 
 The hosted Author DEMO is writable only inside the visitor's browser profile. Editor Save updates the private project/level records and IndexedDB assets, while Play Preview and Simulate use the same private state. A folder link can mirror the complete snapshot, but server files and the shared GitHub project remain immutable throughout.
 
-`cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. `cinema-video-export.js` is a focused browser-only companion: it takes temporary ownership of the shared renderer, evaluates exact `frame / FPS` timeline times, waits on a WebGL2 fence, encodes VP9 or VP8 through WebCodecs and writes timestamped WebM clusters. It restores renderer, composer, cameras, animated targets and preview state on completion, cancellation or failure. Advanced curve editing, blend modes, more camera/lens parameters, deterministic audio and full track controls remain future work.
+`cinema-studio.js` owns the Cinema Studio timeline surface: dock/lock timeline UI, playhead and ruler controls, camera cuts bound to real Scene Camera objects, floating preview, Normal/Final preview modes, object transform keys, camera FOV lens keys, markers, timeline events, validation, timeline item selection/deletion, undo-aware edits, asset-facing timeline duplication, and the internal play/stop/runtime API. `cinema-video-export.js` is a focused browser-only companion: it takes temporary ownership of the shared renderer, evaluates exact `frame / FPS` timeline times, waits on a WebGL2 fence, encodes VP9 or VP8 through WebCodecs and writes timestamped WebM clusters. It restores renderer, composer, cameras, animated targets and preview state on completion, cancellation or failure. Cinema completion is a persisted Cut or eased live-camera Blend with optional Player/Pawn possession, shared by Editor Play, Logic invocation and standalone runtime. More lens parameters, deterministic audio and full track controls remain future work.
 
 Cinema Studio data is stored on scene timeline/director objects through normalized `cinemaProps` data. `scene-store.js` keeps `cameraCuts`, `objectTracks`, `lensTracks`, `eventTracks`, and `markers` persistent, while maintaining the legacy `movieTrack` alias during migration. Its scene representation is a non-exportable clapperboard helper: it remains an editor selection/authoring handle and never becomes playable geometry. Collision Box trigger settings can call named Cinema Studio runtime events in Play Preview; timeline Event Track playback emits browser `lotking:timelineevent` events for project-specific listeners.
 

@@ -27,6 +27,12 @@ const WEAPON_PRESET_OPTIONS = [
   {value:'rifle',label:'Assault Rifle (automatic)'},
   {value:'marksman',label:'Marksman Rifle (semi-automatic)'},
   {value:'shotgun',label:'Shotgun (spread pellets)'},
+  {value:'pistol',label:'Sidearm (semi-automatic)'},
+  {value:'smg',label:'SMG (automatic)'},
+  {value:'knife',label:'Combat Knife (melee)'},
+  {value:'bat',label:'Baseball Bat (melee)'},
+  {value:'flashbang',label:'Flashbang (throwable)'},
+  {value:'grenade',label:'Frag Grenade (throwable)'},
 ];
 function presetValues(name){
   const runtime = window.LK_RUNTIME_FIRST_PERSON;
@@ -38,12 +44,82 @@ function characterTemplates(){
   return window.LK_LOGIC_TEMPLATES_CHARACTER || null;
 }
 
+// ------------------------------------------------ weapon pickup
+
+const WEAPON_PICKUP_PRESETS = Object.freeze({
+  rifle:{label:'Assault Rifle',color:'#64748b',scale:[.58,.12,.12]},
+  marksman:{label:'Marksman Rifle',color:'#475569',scale:[.72,.11,.11]},
+  shotgun:{label:'Shotgun',color:'#8b5e3c',scale:[.62,.14,.13]},
+  pistol:{label:'Sidearm',color:'#94a3b8',scale:[.28,.16,.07]},
+  smg:{label:'SMG',color:'#334155',scale:[.40,.17,.11]},
+  knife:{label:'Combat Knife',color:'#cbd5e1',scale:[.34,.035,.075]},
+  bat:{label:'Baseball Bat',color:'#8b6f47',scale:[.48,.055,.055]},
+  flashbang:{label:'Flashbang',color:'#e2e8f0',scale:[.10,.15,.10]},
+  grenade:{label:'Frag Grenade',color:'#556b4b',scale:[.12,.15,.12]},
+});
+
+function pickupVariable(name,type,value,label,category,extra){
+  return Object.assign({name,type,value,exposed:true,label,category:category || 'Weapon Pickup'}, extra || {});
+}
+
+function makeWeaponPickupGraph(presetName){
+  const preset = WEAPON_PICKUP_PRESETS[presetName] ? presetName : 'rifle';
+  const visual = WEAPON_PICKUP_PRESETS[preset];
+  const getter = (id, name, x, y) => node(id, 'variable.get', x, y, {name});
+  const variables = [
+    pickupVariable('WeaponName','string',visual.label,'Weapon Name'),
+    pickupVariable('WeaponPreset','string',preset,'Weapon Preset','Weapon Pickup',{ui:'select',options:WEAPON_PRESET_OPTIONS}),
+    pickupVariable('MagazineAmmo','number',-1,'Rounds in Magazine','Ammo',{min:-1,max:500,step:1,description:'-1 uses the selected weapon preset magazine.'}),
+    pickupVariable('ReserveAmmo','number',-1,'Reserve Ammo','Ammo',{min:-1,max:100000,step:1,description:'-1 uses the selected weapon preset reserve.'}),
+    pickupVariable('RespawnSeconds','number',20,'Respawn Delay (s)','Pickup',{min:0,max:600,step:.5}),
+    pickupVariable('PickupRadius','number',1.6,'Pickup Radius (m)','Pickup',{min:.2,max:12,step:.1}),
+    pickupVariable('MassKg','number',2.5,'Mass (kg)','Pickup',{min:.05,max:500,step:.05}),
+    pickupVariable('Carryable','boolean',true,'Can Be Carried','Pickup'),
+    pickupVariable('GeneratedVisual','boolean',false,'Use Generated Weapon Visual','Visual',{description:'Off uses this Logic Element placeholder or the GLB/FBX assigned to Weapon Model. On replaces it at runtime with the engine preset model.'}),
+    pickupVariable('FireAction','string','fire','Character Fire Action','Character Animation Actions',{description:'Character animation slot or clip requested when this weapon fires.'}),
+    pickupVariable('ReloadAction','string','reload','Character Reload Action','Character Animation Actions',{description:'Character animation slot or clip requested while this weapon reloads.'}),
+    pickupVariable('ThrowAction','string','throw','Character Throw Action','Character Animation Actions',{description:'Character animation slot or clip requested when this weapon is thrown.'}),
+  ];
+  const getters = [
+    ['get_name','WeaponName','name'], ['get_preset','WeaponPreset','preset'],
+    ['get_ammo','MagazineAmmo','ammo'], ['get_reserve','ReserveAmmo','reserve'],
+    ['get_respawn','RespawnSeconds','respawn'], ['get_radius','PickupRadius','radius'],
+    ['get_mass','MassKg','mass'], ['get_carryable','Carryable','carryable'],
+    ['get_generated','GeneratedVisual','generatedVisual'], ['get_fire','FireAction','fireAction'],
+    ['get_reload','ReloadAction','reloadAction'], ['get_throw','ThrowAction','throwAction'],
+  ];
+  const nodes = [node('on_start','event.onStart',80,100), node('make_pickup','world.makeItem',700,100,{kind:'weapon'})]
+    .concat(getters.map((entry,index)=>getter(entry[0],entry[1],300+(index%2)*190,40+Math.floor(index/2)*90)));
+  const edges = [edge('pickup_start','on_start','then','make_pickup','exec')]
+    .concat(getters.map(entry=>edge('pickup_'+entry[2],entry[0],'value','make_pickup',entry[2])));
+  return {
+    version:1,
+    name:'Template - Weapon Pickup (' + visual.label + ')',
+    scope:'element',enabled:true,variables,nodes,edges,
+    comments:[
+      {id:'pickup_contract',title:'One reusable world-item contract. Replace Weapon Model with any GLB/FBX; rigged assets and their selected idle clip keep playing while the same pickup feeds inventory, equip, ammo and Character weapon actions.',x:40,y:20,w:1500,h:650,color:'#f59e0b'},
+    ],
+    logicScene:{
+      root:{id:'root',name:visual.label+' Pickup Root',type:'empty',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:visual.color},
+      elements:[sceneElement('weapon_model','Weapon Model / Replace with GLB','cube','root',[0,.14,0],[0,0,0],visual.scale,visual.color)],
+      components:[
+        {id:'pickup_transform',elementId:'root',name:'Transform',type:'transform',linked:true},
+        {id:'weapon_model_render',elementId:'weapon_model',name:'Weapon Model',type:'render',linked:true},
+      ],
+    },
+    weaponPickup:{schemaVersion:1,preset,modelElementId:'weapon_model'},
+  };
+}
+
 // ------------------------------------------------ player (first person)
 
 function makePlayerGraph(){
   const characterApi = characterTemplates();
-  const base = characterApi && characterApi.makeCharacterTemplates
-    ? JSON.parse(JSON.stringify(characterApi.makeCharacterTemplates()[0].graph))
+  // Start from the unarmed structural base.  The public Normal template is a
+  // complete combat Character now; cloning it here would duplicate its TPS
+  // variables before this dedicated first-person preset adds its own controls.
+  const base = characterApi && characterApi.makeGraph
+    ? JSON.parse(JSON.stringify(characterApi.makeGraph('male')))
     : null;
   if(!base) return null;
 
@@ -53,7 +129,11 @@ function makePlayerGraph(){
   // Pawn has no follow distance, and exposing one would be a dead control.
   base.variables = base.variables.filter(variable => !/^camera\./.test(String(variable.binding || '')));
   base.variables = base.variables.concat([
-    {name:'EyeHeight',type:'number',value:1.62,min:.4,max:2.6,step:.01,exposed:true,binding:'firstPerson.eyeHeight',label:'Eye Height (m)',category:'First Person / View',description:'Camera height above the Pawn origin. Match it to the head bone of the Main Mesh.'},
+    {name:'AutoEyeHeight',type:'boolean',value:true,exposed:true,binding:'firstPerson.autoEyeHeight',label:'Use Main Mesh Head Height',category:'First Person / View',description:'Places the camera from the real Head bone of the Character. Disable it to use Eye Height manually.'},
+    {name:'EyeHeight',type:'number',value:1.62,min:.4,max:2.6,step:.01,exposed:true,binding:'firstPerson.eyeHeight',label:'Eye Height / Minimum (m)',category:'First Person / View',description:'Manual height when automatic head height is disabled; otherwise acts as a safe minimum.'},
+    {name:'EyeBoneOffset',type:'number',value:.08,min:-.3,max:.5,step:.01,exposed:true,binding:'firstPerson.eyeBoneOffset',label:'Head Bone → Eyes Offset (m)',category:'First Person / View',description:'Vertical distance from the rig Head bone pivot to the eyes.'},
+    {name:'BodyEyeForward',type:'number',value:.28,min:.18,max:.6,step:.01,exposed:true,binding:'firstPerson.bodyEyeForward',label:'Full-Body Eye Forward (m)',category:'First Person / View',description:'Camera-only clearance beyond the face; keeps the same full-body mesh and never alters the Head bone.'},
+    {name:'BodyEyeSide',type:'number',value:0,min:-.5,max:.5,step:.01,exposed:true,binding:'firstPerson.bodyEyeSide',label:'Full-Body Eye Side Offset (m)',category:'First Person / View'},
     {name:'LookSensitivity',type:'number',value:1,min:.1,max:5,step:.05,exposed:true,binding:'firstPerson.sensitivity',label:'Look Sensitivity',category:'First Person / View'},
     {name:'AdsSensitivityScale',type:'number',value:.55,min:.1,max:1,step:.05,exposed:true,binding:'firstPerson.adsSensitivityScale',label:'ADS Sensitivity Scale',category:'First Person / View',description:'Multiplier applied while aiming down sights, so a zoomed view is not twitchy.'},
     {name:'InvertLookY',type:'boolean',value:false,exposed:true,binding:'firstPerson.invertY',label:'Invert Look Y',category:'First Person / View'},
@@ -62,7 +142,22 @@ function makePlayerGraph(){
     {name:'HipFov',type:'number',value:78,min:40,max:120,step:1,exposed:true,binding:'firstPerson.fov',label:'Hip FOV',category:'First Person / View'},
     {name:'AdsFov',type:'number',value:52,min:20,max:110,step:1,exposed:true,binding:'firstPerson.fovAds',label:'Aim FOV',category:'First Person / View'},
     {name:'SprintFov',type:'number',value:84,min:40,max:130,step:1,exposed:true,binding:'firstPerson.fovSprint',label:'Sprint FOV',category:'First Person / View'},
-    {name:'HideOwnBody',type:'boolean',value:true,exposed:true,binding:'firstPerson.hideOwnBody',label:'Hide Own Body',category:'First Person / View',description:'Hides the character mesh for the owning player. Turn it off once a dedicated first-person arms mesh exists.'},
+    {name:'SurfaceAdaptation',type:'boolean',value:true,exposed:true,binding:'abilities.surfaceAdaptation.enabled',label:'Adapt Traversal To Surface',category:'Traversal / Contact Adaptation'},
+    {name:'TraversalIKWeight',type:'number',value:.82,min:0,max:1,step:.02,exposed:true,binding:'abilities.surfaceAdaptation.ikWeight',label:'Hand / Foot IK Weight',category:'Traversal / Contact Adaptation'},
+    {name:'TraversalRootWarp',type:'number',value:1,min:0,max:1,step:.02,exposed:true,binding:'abilities.surfaceAdaptation.rootWarpWeight',label:'Root Motion Warp Weight',category:'Traversal / Contact Adaptation'},
+    {name:'TraversalHandSpacing',type:'number',value:.52,min:.1,max:1.4,step:.01,exposed:true,binding:'abilities.surfaceAdaptation.handSpacing',label:'Hand Spacing (m)',category:'Traversal / Contact Adaptation'},
+    {name:'TraversalFootSpacing',type:'number',value:.34,min:.08,max:1,step:.01,exposed:true,binding:'abilities.surfaceAdaptation.footSpacing',label:'Foot Spacing (m)',category:'Traversal / Contact Adaptation'},
+    {name:'TraversalDebug',type:'boolean',value:false,exposed:true,binding:'abilities.surfaceAdaptation.debug',label:'Show Probe + IK Dummies (Editor)',category:'Traversal / Contact Adaptation',description:'Visible only in Editor / Play-in-Editor; standalone and exported gameplay never create these helpers.'},
+    // The eye camera normally sees the SAME animated Character used in third
+    // person. A classic arms-only visual remains an explicit author choice for
+    // a dedicated shooter, never an engine default or a second gameplay Pawn.
+    {name:'FirstPersonViewPawn',type:'string',value:'none',exposed:true,binding:'firstPerson.viewPawn.kind',label:'First Person Presentation',category:'First Person / View',ui:'select',
+      options:[
+        {value:'none',label:'Same Character body (recommended)'},
+        {value:'first-person-arms',label:'Separate arms visual (optional)'},
+      ],
+      description:'Default uses the Character full body, its existing weapon and an eye-height camera. Separate arms is an optional presentation visual only.'},
+    {name:'ShowLegs',type:'boolean',value:false,exposed:true,binding:'firstPerson.viewPawn.showLegs',label:'Show Legs (arms view Pawn)',category:'First Person / View',description:'Keeps the Character body and culls only head and shoulders while the arms presentation Pawn is active.'},
     {name:'ViewBobEnabled',type:'boolean',value:true,exposed:true,binding:'firstPerson.viewBob.enabled',label:'View Bob',category:'First Person / View'},
     {name:'ViewBobAmplitude',type:'number',value:.035,min:0,max:.2,step:.005,exposed:true,binding:'firstPerson.viewBob.amplitude',label:'View Bob Amplitude',category:'First Person / View'},
 
@@ -84,17 +179,19 @@ function makePlayerGraph(){
     {name:'RecoilRecovery',type:'number',value:8.5,min:.5,max:40,step:.5,exposed:true,binding:'firstPerson.weapon.recoilRecovery',label:'Recoil Recovery',category:'First Person / Weapon'},
   ]);
 
-  // Movement defaults tuned for a shooter: the body follows the view instead of
-  // turning toward its velocity, so strafing stays perpendicular to the aim.
+  // Keep input in the camera-heading frame. The runtime chooses aim-facing while
+  // aiming/firing/first-person and travel-facing for ordinary third-person motion.
   const movement = base.variables.find(variable => variable.binding === 'movement.inputMode');
   if(movement){
     movement.value = 'heading';
-    movement.description = 'First-person Pawns keep this on Character heading: the rig already aligns the body with the view every frame.';
+    movement.description = 'Uses the Character camera heading for input; facing blends between aim and actual travel according to view and combat state.';
   }
   const walk = base.variables.find(variable => variable.binding === 'movement.walkSpeed');
   if(walk) walk.value = 3.1;
   const run = base.variables.find(variable => variable.binding === 'movement.runSpeed');
-  if(run) run.value = 5.9;
+  if(run) run.value = 4.8;
+  const sprintMultiplier = base.variables.find(variable => variable.binding === 'movement.sprintMultiplier');
+  if(sprintMultiplier) sprintMultiplier.value = 1;
   const turn = base.variables.find(variable => variable.binding === 'movement.turnRate');
   if(turn) turn.value = 22;
 
@@ -102,7 +199,7 @@ function makePlayerGraph(){
     node('on_start','event.onStart',80,110),
     node('get_self','pawn.getSelf',340,30),
     node('get_player','variable.get',340,160,{name:'ControllerPlayerId'}),
-    node('possess','pawn.possess',610,110,{force:true}),
+    node('possess','pawn.possess',610,110,{force:false}),
     // The first-person rig owns the eye transform; setCamera is only used here
     // to claim camera output for this player.
     node('camera','pawn.setCamera',880,110,{mode:'free',possess:true,fov:78}),
@@ -111,9 +208,6 @@ function makePlayerGraph(){
     node('on_update','event.onUpdate',80,420),
     node('move_input','character.getMoveInput',340,400),
     node('set_move','character.setMoveInput',650,420),
-
-    node('on_jump','event.onKeyDown',80,660,{key:' '}),
-    node('jump','character.jump',380,660),
 
     node('on_down','event.onTargetDown',80,860),
     node('score','variable.incrementNumber',380,860,{name:'Score',amount:100}),
@@ -130,7 +224,6 @@ function makePlayerGraph(){
     edge('e_x','move_input','x','set_move','x'),
     edge('e_z','move_input','z','set_move','z'),
     edge('e_sprint','move_input','sprint','set_move','sprint'),
-    edge('e_jump','on_jump','then','jump','exec'),
     edge('e_down','on_down','then','score','exec'),
     edge('e_score_print','score','completed','score_print','exec'),
   ];
@@ -160,7 +253,7 @@ function makePlayerGraph(){
   // therefore sound like two different people.
   base.characterPawn.soundSet = '';
   base.characterPawn.movement = Object.assign({}, base.characterPawn.movement, {
-    walkSpeed:3.1, runSpeed:5.9, sprintMultiplier:1.28, acceleration:18, turnRate:22,
+    walkSpeed:3.1, runSpeed:4.8, sprintMultiplier:1, acceleration:18, turnRate:22,
     jumpHeight:1.05, gravity:22, airControl:.4, inputMode:'heading', facingMode:'heading',
   });
   // The follow camera is never consulted while the rig is active; the block is
@@ -169,6 +262,11 @@ function makePlayerGraph(){
   base.characterPawn.firstPerson = {
     enabled:true,
     eyeHeight:1.62,
+    autoEyeHeight:true,
+    eyeBoneOffset:.08,
+    bodyEyeForward:.28,
+    bodyEyeSide:0,
+    cameraSafetyVersion:1,
     pitchMinDeg:-85,
     pitchMaxDeg:85,
     sensitivity:1,
@@ -177,20 +275,28 @@ function makePlayerGraph(){
     fov:78,
     fovAds:52,
     fovSprint:84,
-    hideOwnBody:true,
+    focusDistance:9,
+    near:.14,
+    // The graph is cloned from the complete Character template and therefore
+    // already carries its body, Motion Set and action bindings. First person is
+    // only an eye camera on that same Pawn; no second arms/weapon visual exists.
+    unifiedBodyCameraVersion:1,
+    unifiedBodyCamera:true,
+    viewPawn:{schemaVersion:1,kind:'none',enabled:false,showLegs:false},
+    presentation:'body',
+    hideOwnBody:false,
+    showLegs:false,
     // Where the weapon sits on the character in third person. Leave `bone` empty
     // to auto-detect a right hand; name it, nudge the offset and turn the helper
     // on to place it by eye on a rig the detector does not recognise.
-    weaponSocket:{bone:'', offset:[0, 0, 0], rotation:[0, 0, 0], scale:1, showHelper:false},
+    weaponSocket:{bone:'', offset:[0, 0, 0], rotation:[0, 0, 0], scale:1, followHandRotation:true, showHelper:false},
     // Every socket field is bindable one component at a time
     // (`firstPerson.weaponSocket.offsetY`, `.rotationX`, `.bone`, `.scale`,
     // `.showHelper`), so a graph or an inspector slider can place the weapon on
     // an imported character without rebuilding the block.
 
-    // Turn this on to keep the body and cull only the head, so looking down
-    // shows real legs. It costs one skinned draw the hidden path does not pay.
-    showLegs:false,
-    // C swaps between the eye and the rig's own over-the-shoulder camera at
+    // The mapped Character Camera Mode action swaps between the eye and the rig's
+    // own over-the-shoulder camera at
     // runtime. Set view:'third' to START behind the shoulder instead; the
     // weapon, the crosshair and every world verb work the same in both.
     view:'first',
@@ -203,7 +309,10 @@ function makePlayerGraph(){
       shoulderAds:.48,
       fov:68,
       fovAds:52,
+      focusDistance:9,
+      near:.1,
       collisionRadius:.34,
+      minimumBodyDistance:.55,
     },
     viewBob:{enabled:true,amplitude:.035,frequency:9.4,sway:.022},
     weapon:Object.assign({id:'primary',preset:'rifle'}, presetValues('rifle')),
@@ -213,12 +322,13 @@ function makePlayerGraph(){
   // deleted to get plain walk/run/jump back.
   base.characterPawn.abilities = {
     enabled:true,
-    crouch:{enabled:true,toggle:false,heightScale:.55,speedScale:.42},
+    crouch:{enabled:true,toggle:false,heightScale:.55,speedScale:.88,speedVersion:2},
     walk:{enabled:true,speedScale:.33},
     slide:{enabled:true,minSpeed:4.2,duration:.85,boost:1.35,cooldown:.6},
     vault:{enabled:true,minHeight:.5,maxHeight:1.25,duration:.52},
     mantle:{enabled:true,maxHeight:2.35,duration:.78},
     climb:{enabled:true,speed:2.4,strafe:1.4},
+    surfaceAdaptation:{enabled:true,ikWeight:.82,rootWarpWeight:1,handSpacing:.52,footSpacing:.34,surfaceOffset:.035,handHeightOffset:.025,footHeight:.42,handsStart:.04,handsEnd:.72,feetStart:.26,feetEnd:.94,debug:false},
   };
   // Health, armour and regeneration. Medkits and armour plates in the level
   // write into this block through the item system.
@@ -366,9 +476,19 @@ function makeFirstPersonTemplates(){
     category:'Gameplay / Shooter',
     graph:makeTargetGraph(),
   });
+  Object.keys(WEAPON_PICKUP_PRESETS).forEach(preset => {
+    const definition = WEAPON_PICKUP_PRESETS[preset];
+    list.push({
+      id:'logic-template-weapon-pickup-' + preset,
+      name:'Weapon Pickup - ' + definition.label,
+      description:'Reusable ' + definition.label + ' pickup. Replace its Weapon Model placeholder with any project GLB/FBX, select an embedded idle animation, and author ammo, respawn, inventory and Character fire/reload/throw actions without level code.',
+      category:'Gameplay / Weapons',
+      graph:makeWeaponPickupGraph(preset),
+    });
+  });
   return list;
 }
 
 if(window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.register) window.LK_LOGIC_TEMPLATES.register(makeFirstPersonTemplates());
-window.LK_LOGIC_TEMPLATES_FPS = Object.freeze({WEAPON_PRESET_OPTIONS,presetValues,makePlayerGraph,makeTargetGraph,makeFirstPersonTemplates});
+window.LK_LOGIC_TEMPLATES_FPS = Object.freeze({WEAPON_PRESET_OPTIONS,WEAPON_PICKUP_PRESETS,presetValues,makeWeaponPickupGraph,makePlayerGraph,makeTargetGraph,makeFirstPersonTemplates});
 })();

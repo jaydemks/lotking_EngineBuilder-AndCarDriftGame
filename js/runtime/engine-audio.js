@@ -707,6 +707,7 @@ function create(deps){
     handlesSkids,
     trigger,
     slotStatus,
+    isRunning: () => running,
     isActive: () => !!cfg && sampleEngineReady(),
     setStatusListener: fn => { onStatusChange = fn; },
     defaultSet,

@@ -6,6 +6,10 @@
  * a mutable global namespace until the application modules are migrated to ESM.
  */
 import * as ThreeCore from 'three';
+import WebGPURenderer from 'three/src/renderers/webgpu/WebGPURenderer.js';
+import RenderPipeline from 'three/src/renderers/common/RenderPipeline.js';
+import WebGPUPMREMGenerator from 'three/src/renderers/common/extras/PMREMGenerator.js';
+import * as TSL from 'three/src/nodes/TSL.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {FBXLoader} from 'three/addons/loaders/FBXLoader.js';
 import {TGALoader} from 'three/addons/loaders/TGALoader.js';
@@ -29,6 +33,8 @@ import {BokehPass} from 'three/addons/postprocessing/BokehPass.js';
 import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js';
 import {OutlineEffect} from 'three/addons/effects/OutlineEffect.js';
 import {RectAreaLightUniformsLib} from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import {RectAreaLightTexturesLib} from 'three/addons/lights/RectAreaLightTexturesLib.js';
+import RectAreaLightNode from 'three/src/nodes/lighting/RectAreaLightNode.js';
 import {WebGLPathTracer} from 'three-gpu-pathtracer';
 
 const EXPECTED_REVISION = '185';
@@ -37,6 +43,10 @@ if(String(ThreeCore.REVISION) !== EXPECTED_REVISION){
 }
 
 const ThreeCompat = Object.assign({}, ThreeCore, {
+  WebGPURenderer,
+  RenderPipeline,
+  WebGPUPMREMGenerator,
+  TSL,
   GLTFLoader,
   FBXLoader,
   TGALoader,
@@ -64,15 +74,19 @@ const ThreeCompat = Object.assign({}, ThreeCore, {
   GTAOPass,
   OutlineEffect,
   RectAreaLightUniformsLib,
+  RectAreaLightTexturesLib,
+  RectAreaLightNode,
 });
 
 // WebGLRenderer needs the LTC lookup textures before the first rectangular
 // light is compiled. Initialising them here keeps every editor/runtime path in
 // sync and avoids a first-use shader hitch when vehicle neon is enabled.
 RectAreaLightUniformsLib.init();
+RectAreaLightNode.setLTC(RectAreaLightTexturesLib.init());
 
 Object.defineProperty(ThreeCompat, '__LOT_KING_BUNDLE__', {
-  value:Object.freeze({version:'0.185.1', revision:EXPECTED_REVISION, format:'iife-compat-v1'}),
+  value:Object.freeze({version:'0.185.1', revision:EXPECTED_REVISION, format:'iife-compat-v3', webgpu:true, tsl:true,
+    externalDepthTextureOwnership:true, deferredWebGPUResourceRetirement:true}),
   enumerable:false,
 });
 

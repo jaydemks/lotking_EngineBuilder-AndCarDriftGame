@@ -165,13 +165,48 @@ function normalizeConfig(source){
       interiorCameraVersion:3,interiorHeight:1.15,interiorForward:.28,interiorLateral:-.42,interiorLookHeight:.04,interiorFov:72,interiorLag:18,
       interiorGForceMotion:0,interiorAccelerationMotion:0,interiorRoadShake:0,interiorMotionLimit:.035,interiorSpeedFovGain:.025,interiorSpeedFovMax:4.5}, camera),
     engineAudio:Object.assign({enabled:true, volume:.28, pitch:1, setId:null}, src.engineAudio || {}),
+    damage:window.LK_RUNTIME_VEHICLE_DAMAGE
+      ? window.LK_RUNTIME_VEHICLE_DAMAGE.normalizeConfig(src.damage, 'car')
+      : mergeConfig({}, src.damage || {}),
+    towing:Object.assign({enabled:true,hitch:{position:[0,.35,-1.8]},attachRadius:1.25,maxAngle:70},src.towing||{},
+      {hitch:Object.assign({position:[0,.35,-1.8]},src.towing&&src.towing.hitch||{})}),
+    towable:Object.assign({enabled:true,coupler:{position:[0,.5,1.8]}},src.towable||{},
+      {coupler:Object.assign({position:[0,.5,1.8]},src.towable&&src.towable.coupler||{})}),
     radio:Object.assign({enabled:true}, src.radio || {}),
     dataWidgets:src.dataWidgets ? clone(src.dataWidgets) : null,
   });
 }
 
 function neutralDrive(){
-  return {throttle:0, brake:0, steer:0, handbrake:false, highBeams:false, reset:false, device:null};
+  return {throttle:0, brake:0, steer:0, handbrake:false, highBeams:false, reset:false, interact:false, towToggle:false, device:null};
+}
+
+function ownVehicleInput(pawn){
+  if(!pawn) return pawn;
+  if(!pawn.pawnType) pawn.pawnType = 'vehicle';
+  pawn.inputContextId = 'vehicle';
+  pawn.inputCapabilities = Object.assign({}, pawn.inputCapabilities || {}, {reset:true,interact:true});
+  return pawn;
+}
+
+function updateOccupancyInput(pawn, drive, dt){
+  if(!pawn)return false;
+  pawn.entryCooldown=Math.max(0,finite(pawn.entryCooldown,0)-Math.max(0,finite(dt,0)));
+  const down=!!(drive&&drive.interact===true),occupancy=window.LK_RUNTIME_VEHICLE_OCCUPANCY;
+  const pressed=occupancy&&typeof occupancy.consumeExitInput==='function'
+    ?occupancy.consumeExitInput(pawn,down)
+    :(down&&pawn.occupancyInteractDown!==true);
+  if(!occupancy||typeof occupancy.consumeExitInput!=='function')pawn.occupancyInteractDown=down;
+  if(!pressed||!pawn.driverPawn||pawn.entryCooldown>0)return false;
+  const driver=pawn.driverPawn;
+  return !!(driver&&(typeof driver.exitVehicle==='function'?driver.exitVehicle(false):typeof driver.exitSeat==='function'&&driver.exitSeat(false)));
+}
+
+function updateTowInput(pawn,drive){
+  if(!pawn)return false;
+  const down=drive&&drive.towToggle===true,pressed=down&&pawn.towToggleDown!==true;
+  pawn.towToggleDown=down;
+  return !!(pressed&&typeof pawn.toggleTow==='function'&&pawn.toggleTow());
 }
 
 function emitPawnEvent(pawn, type, payload){
@@ -197,22 +232,41 @@ function createRegistry(GAME, options){
     if(playerSlots.get(pawn.playerId) === pawn.id) playerSlots.delete(pawn.playerId);
   }
 
+  function releasePawnOutputs(pawn, reason){
+    if(!pawn) return;
+    if(typeof pawn.possessCamera === 'function') pawn.possessCamera(false);
+    if(typeof pawn.clearPlayerControlState === 'function') pawn.clearPlayerControlState(reason || 'unpossess');
+    if(Object.prototype.hasOwnProperty.call(pawn, 'control')) pawn.control = null;
+  }
+
   function claimSlot(pawn, requested, force){
     const playerId = normalizePlayerId(requested);
     const previousPlayerId = pawn && pawn.playerId;
-    releaseSlot(pawn);
     if(playerId == null){
+      releasePawnOutputs(pawn, 'unpossess');
+      releaseSlot(pawn);
       pawn.playerId = null; pawn.possessed = false;
       if(previousPlayerId != null) emitPawnEvent(pawn, 'OnPawnUnpossessed', {playerId:previousPlayerId});
       return true;
     }
     const occupied = playerSlots.get(playerId);
+    // A rejected retarget is transactional: the Pawn keeps its previous Player.
+    // Releasing first left both the Inspector and the action router believing P2
+    // was owned while the registry had already forgotten it.
     if(occupied && occupied !== pawn.id && force !== true) return false;
+    if(occupied === pawn.id && previousPlayerId === playerId){
+      pawn.possessed = true;
+      return true;
+    }
+    releaseSlot(pawn);
     if(occupied && occupied !== pawn.id){
       const previous = pawns.get(occupied);
       if(previous){
+        // Forced transfers are explicit gameplay operations (mount/enter/swap),
+        // and must tear down every output owned by the displaced Pawn just like
+        // a normal unpossess does.
+        releasePawnOutputs(previous, 'forced-transfer');
         previous.playerId = null; previous.possessed = false;
-        if(Object.prototype.hasOwnProperty.call(previous, 'control')) previous.control = null;
         if(previous.onPossessionChanged) previous.onPossessionChanged(null);
         emitPawnEvent(previous, 'OnPawnUnpossessed', {playerId});
       }
@@ -256,30 +310,37 @@ function createRegistry(GAME, options){
       editorOnly:cfg.editorOnly, runtimeOnly:cfg.runtimeOnly, playerId:cfg.playerId,
       started:false, sleeping:false, disposed:false,
       possess(playerId, force){ return claimSlot(this, playerId, force); },
-      unpossess(){ releaseSlot(this); this.playerId = null; this.possessed = false; return true; },
+      unpossess(){ releasePawnOutputs(this, 'unpossess'); releaseSlot(this); this.playerId = null; this.possessed = false; return true; },
       setEnabled(value){ this.enabled = value !== false; this.config.enabled = this.enabled; return this.enabled; },
       setHidden(value){ this.hidden = value === true; this.config.hidden = this.hidden; return this.hidden; },
       sleep(){ this.sleeping = true; return true; },
       wake(){ this.sleeping = false; return true; },
       snapshot(){ return {id:this.id, kind:this.kind, config:clone(this.config), state:clone(this.state)}; },
     };
-    if(!window.LK_RUNTIME_PAWN_CORE) return fallback;
-    return window.LK_RUNTIME_PAWN_CORE.createRecord({
+    if(!window.LK_RUNTIME_PAWN_CORE) return ownVehicleInput(fallback);
+    return ownVehicleInput(window.LK_RUNTIME_PAWN_CORE.createRecord({
       id:fallback.id, kind, config:cfg, state,
       onPossess:(pawn, playerId, force) => claimSlot(pawn, playerId, force),
       onUnpossess:pawn => {
         const playerId = pawn.playerId;
-        releaseSlot(pawn); pawn.playerId = null; pawn.possessed = false;
+        releasePawnOutputs(pawn, 'unpossess'); releaseSlot(pawn); pawn.playerId = null; pawn.possessed = false;
         if(playerId != null) emitPawnEvent(pawn, 'OnPawnUnpossessed', {playerId});
         return true;
       },
-    });
+    }));
+  }
+
+  function syncNativeCollision(pawn, player, config){
+    if(!pawn||!pawn.config)return pawn;
+    const source=player&&player.collision||config&&config.collision;
+    if(source)pawn.config.collision=Object.assign({},pawn.config.collision||{},clone(source));
+    return pawn;
   }
 
   function createNative(player, config){
     if(!player) return null;
     const existing = pawns.get('native-player-car');
-    if(existing) return existing;
+    if(existing){existing.owner=player.car||existing.owner||null;return syncNativeCollision(existing,player,config);}
     const nativeActive = player.enabled !== false && player.hidden !== true;
     const cfg = normalizeConfig(Object.assign({}, config || {}, {
       enabled:nativeActive,
@@ -289,12 +350,49 @@ function createRegistry(GAME, options){
       possessed:nativeActive && player.controllerIndex != null,
       tuning:player.drive || config && config.tuning,
       spawn:player.spawn || config && config.spawn,
+      // The native adapter is the collision authority exposed to on-foot
+      // Characters. Keep it on the exact collider authored for the Player Car;
+      // silently falling back to the generic adapter box made Pawn Studio,
+      // Cannon and Character avoidance describe three different cars.
+      collision:player.collision || config && config.collision,
+      damage:player.damage || config && config.damage,
       radio:player.radio || config && config.radio,
+      // A Character may own P1 while this car waits in the scene. Preserve the
+      // authored Sound Designer bank on that dormant native Pawn.
+      engineAudio:player.engineAudio || config && config.engineAudio,
     }));
     const pawn = makeBase('native-adapter', 'native-player-car', cfg);
     pawn.owner = player.car || null;
-    pawn.onPossessionChanged = function(playerId){ if(player.setControllerIndex) player.setControllerIndex(playerId == null ? null : playerId - 1); };
+    syncNativeCollision(pawn,player,config);
+    // Occupancy and Pawn Studio must use the fitted Player Car model as their
+    // synthetic seat frame, not the outer physics/level-transform container.
+    pawn.assetRoot = function(){ return typeof player.getModel==='function' ? player.getModel() : null; };
+    pawn.assetDescriptor = function(){
+      const data=this.owner&&this.owner.userData||{};
+      return {key:data.modelKey,id:data.modelId,dbKey:data.modelDbKey,src:data.modelSrc,name:data.modelName};
+    };
+    pawn.linearVelocity = function(){
+      const physics=player.physics||{},velocity=physics.vel;
+      if(velocity&&Number.isFinite(Number(velocity.x))&&Number.isFinite(Number(velocity.z)))return velocity;
+      const speed=finite(physics.vF,0),heading=finite(this.owner&&this.owner.rotation&&this.owner.rotation.y,0);
+      return {x:Math.sin(heading)*speed,y:0,z:Math.cos(heading)*speed};
+    };
+    pawn.onPossessionChanged = function(playerId){
+      if(player.setControllerIndex) player.setControllerIndex(playerId == null ? null : playerId - 1);
+      const manager=GAME&&GAME.systems&&GAME.systems.engineAudio;
+      if(!manager)return;
+      if(playerId==null){
+        if(manager.stop)manager.stop();
+        const audio=GAME.systems.audio;
+        if(audio&&audio.stopEngineSynth)audio.stopEngineSynth();
+      }else if(manager.start){
+        // The manager was stopped while the Character owned this Player slot.
+        // Restart its existing sample bank; never replace it with a preset.
+        manager.start();
+      }
+    };
     pawn.readPlayerDrive = function(){
+      if(this.damageRuntime&&this.damageRuntime.destroyed()) return neutralDrive();
       if(!this.possessed || this.playerId == null || !GAME || !GAME.input || !GAME.input.player) return neutralDrive();
       if(GAME.input.ensurePlayerSlot) GAME.input.ensurePlayerSlot(this.playerId - 1);
       const view = GAME.input.player(this.playerId - 1);
@@ -302,7 +400,10 @@ function createRegistry(GAME, options){
       return Object.assign(neutralDrive(), drive || {}, {device:view && view.device ? view.device() : null});
     };
     pawn.start = function(){ this.started = true; return this; };
-    pawn.step = function(){
+    pawn.step = function(dt){
+      const drive=this.readPlayerDrive();
+      updateOccupancyInput(this,drive,dt);
+      updateTowInput(this,drive);
       const physics = player.physics || {};
       const engine = player.engine || {};
       this.state.speed = physics.vel && physics.vel.length ? physics.vel.length() : finite(physics.vF, 0);
@@ -317,6 +418,12 @@ function createRegistry(GAME, options){
       this.hidden = player.hidden === true;
     };
     pawn.reset = function(){ if(player.reset) player.reset(); return true; };
+    pawn.prepareRuntime = function(){
+      const damage=this.damageRuntime&&this.damageRuntime.prewarm?this.damageRuntime.prewarm():null;
+      const occupancy=window.LK_RUNTIME_VEHICLE_OCCUPANCY;
+      const seats=occupancy&&occupancy.seatsOf?occupancy.seatsOf(this):[];
+      return {pawnId:this.id,type:'native-vehicle',physics:!!(player.physics||GAME&&GAME.systems&&GAME.systems.physics),audio:!!(GAME&&GAME.systems&&GAME.systems.engineAudio),damage,seats:seats.length};
+    };
     pawn.setEnabled = function(value){ return player.setEnabled ? player.setEnabled(value) : (player.enabled = value !== false); };
     pawn.setHidden = function(value){ return player.setHidden ? player.setHidden(value) : (player.hidden = value === true); };
     pawn.possess = function(playerId, force){
@@ -324,8 +431,15 @@ function createRegistry(GAME, options){
       this.onPossessionChanged(this.playerId);
       return true;
     };
-    pawn.unpossess = function(){ const playerId = this.playerId; releaseSlot(this); this.playerId = null; this.possessed = false; if(player.setControllerIndex) player.setControllerIndex(null); if(playerId != null) emitPawnEvent(this, 'OnPawnUnpossessed', {playerId}); return true; };
+    pawn.unpossess = function(){ const playerId = this.playerId; releaseSlot(this); this.playerId = null; this.possessed = false; this.onPossessionChanged(null); if(playerId != null) emitPawnEvent(this, 'OnPawnUnpossessed', {playerId}); return true; };
     pawn.dispose = function(){ this.disposed = false; return false; };
+    if(window.LK_RUNTIME_VEHICLE_DAMAGE){
+      window.LK_RUNTIME_VEHICLE_DAMAGE.attach(GAME,pawn,pawn.config.damage);
+      player.damage=pawn.config.damage;
+      player.damageRuntime=pawn.damageRuntime;
+      player.setDamageConfig=function(values){const next=pawn.setDamageConfig?pawn.setDamageConfig(values):pawn.config.damage;this.damage=next;return next;};
+    }
+    if(window.LK_RUNTIME_VEHICLE_TOWING)window.LK_RUNTIME_VEHICLE_TOWING.decorate(GAME,pawn);
     return register(pawn);
   }
 
@@ -933,10 +1047,13 @@ function createRegistry(GAME, options){
         });
       }
       this.ensureModelWheelRig();
+      if(!this.raycastActuator&&window.LK_RUNTIME_VEHICLE_RAYCAST_ACTUATOR)this.raycastActuator=window.LK_RUNTIME_VEHICLE_RAYCAST_ACTUATOR.create();
+      if(!this.visualController&&window.LK_RUNTIME_VEHICLE_VISUAL_CONTROLLER)this.visualController=window.LK_RUNTIME_VEHICLE_VISUAL_CONTROLLER.create();
       this.effectAnchors();
       const widgets = this.ensureDataWidgets();
       if(widgets && widgets.update) widgets.update();
       const audio = this.ensureEngineAudio();
+      const damage=this.damageRuntime&&this.damageRuntime.prewarm?this.damageRuntime.prewarm():null;
       if(this.backend && this.backend.body && this.backend.body.sleep) this.backend.body.sleep();
       const report = {
         pawnId:this.id,
@@ -944,6 +1061,9 @@ function createRegistry(GAME, options){
         lights:!!lights,
         widgets:!!widgets,
         audio:!!audio,
+        steering:!!this.raycastActuator,
+        wheelVisuals:!!this.visualController,
+        damage,
       };
       if(audio && audio.kind === 'samples' && audio.manager && audio.manager.prewarm){
         return Promise.resolve(audio.manager.prewarm()).then(audioReport => Object.assign(report, {audioReport}));
@@ -1223,6 +1343,7 @@ function createRegistry(GAME, options){
       return this.services.input && this.services.input.playerDrive ? this.services.input.playerDrive(this.playerId, 'vehicle') : neutralDrive();
     };
     pawn.readDrive = function(){
+      if(this.damageRuntime&&this.damageRuntime.destroyed()) return neutralDrive();
       if(!this.possessed || this.playerId == null) return neutralDrive();
       if(this.control) return this.control;
       return this.readPlayerDrive();
@@ -1252,6 +1373,8 @@ function createRegistry(GAME, options){
       if(!this.started || this.disposed || !this.enabled || this.sleeping || !this.owner) return;
       const h = clamp(finite(dt, 0), 0, .1);
       const drive = this.readDrive();
+      updateOccupancyInput(this,drive,h);
+      updateTowInput(this,drive);
       const tune = this.config.tuning;
       const throttle = clamp(finite(drive.throttle, 0), 0, 1);
       const brake = clamp(finite(drive.brake, 0), 0, 1);
@@ -1330,6 +1453,7 @@ function createRegistry(GAME, options){
           steer:steeringAngle,
           brakes:backend.wheelLayout.map(wheel => wheel.front ? frontBrake : rearBrake),
           frictionSlip:backend.wheelLayout.map(wheel => wheel.front ? frontGrip : rearGrip),
+          gripMultiplier:window.LK_RUNTIME_WEATHER ? window.LK_RUNTIME_WEATHER.gripMultiplier(GAME, this.config && this.config.surface) : 1,
         });
         // Keep an initiated drift controllable; sustained full throttle progressively
         // removes the safety margin until the car can rotate into a spin.
@@ -1344,7 +1468,11 @@ function createRegistry(GAME, options){
         if(this.owner.position && this.owner.quaternion){
           this.owner.position.set(body.position.x, body.position.y - backend.bodyY, body.position.z);
           this.owner.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
-          this.owner.updateMatrixWorld(true);
+          // Physics changed only the vehicle root. The renderer will update
+          // descendants once; forcing the whole imported GLB here duplicated
+          // its complete matrix/bone walk before every interior-camera frame.
+          if(typeof this.owner.updateWorldMatrix==='function')this.owner.updateWorldMatrix(true,false);
+          else this.owner.updateMatrixWorld(false);
         }
         backend.wheelVisuals.forEach((visual, index) => {
           if(!visual) return;
@@ -1356,6 +1484,7 @@ function createRegistry(GAME, options){
             forwardSpeed, radius:backend.wheelLayout[index] && backend.wheelLayout[index].radius,
             front:backend.wheelLayout[index] && backend.wheelLayout[index].front,
             steerAngle:steeringAngle, steerVisualScale:1.25, baseY:visual.baseY, chassisLift:0,
+            steerPivot:(backend.wheelLayout[index] && backend.wheelLayout[index].front) ? this.config.suspension && this.config.suspension.steerPivot : null,
           });
           const diagnostic = this.owner.userData.vehicleWheelRigStatus && this.owner.userData.vehicleWheelRigStatus[index];
           if(diagnostic && visualState){ diagnostic.rotation = visualState.spin; diagnostic.cannonRotation = Number(wheel.rotation) || 0; diagnostic.steer = visualState.steer; diagnostic.speed = forwardSpeed; }
@@ -1447,6 +1576,8 @@ function createRegistry(GAME, options){
     };
     pawn.dispose = function(){
       if(this.disposed) return;
+      if(typeof this.detachTow==='function')this.detachTow();
+      if(this.towedBy&&typeof this.towedBy.detachTow==='function')this.towedBy.detachTow();
       this.disposed = true; this.started = false; this.control = null;
       this.possessCamera(false);
       if(this.backend){
@@ -1478,6 +1609,8 @@ function createRegistry(GAME, options){
     const defaultDriveSetup = window.LK_RUNTIME_DRIVE_TUNING && window.LK_RUNTIME_DRIVE_TUNING.PRESETS && window.LK_RUNTIME_DRIVE_TUNING.PRESETS.default;
     if(!pawn.config.driveSetup && defaultDriveSetup) pawn.config.driveSetup = clone(defaultDriveSetup);
     if(pawn.config.driveSetup) pawn.setDriveSetup(pawn.config.driveSetup);
+    if(window.LK_RUNTIME_VEHICLE_DAMAGE)window.LK_RUNTIME_VEHICLE_DAMAGE.attach(GAME,pawn,pawn.config.damage);
+    if(window.LK_RUNTIME_VEHICLE_TOWING)window.LK_RUNTIME_VEHICLE_TOWING.decorate(GAME,pawn);
     register(pawn);
     return pawn;
   }
@@ -1502,11 +1635,26 @@ function createRegistry(GAME, options){
   }
 
   function list(){ return Array.from(pawns.values()); }
+  async function prewarmAll(context){
+    const prepared=context&&context.preparedPawns||(context?(context.preparedPawns=new Set()):new Set());
+    const candidates=list().filter(pawn=>pawn&&pawn.enabled!==false&&!pawn.disposed&&typeof pawn.prepareRuntime==='function'&&!prepared.has(pawn)),reports=[];
+    for(let index=0;index<candidates.length;index++){
+      const pawn=candidates[index];
+      if(context&&context.progress)context.progress(.615,'Preparing Pawn interactions',(index+1)+' / '+candidates.length+' · '+(pawn.config&&pawn.config.name||pawn.id||pawn.pawnType||'Pawn'));
+      reports.push(await Promise.resolve(pawn.prepareRuntime(context||{})));
+      prepared.add(pawn);
+      // Yield between imported rigs so asset decode/physics creation cannot
+      // monopolise one long task and make the preparation overlay look frozen.
+      if(typeof requestAnimationFrame==='function')await new Promise(resolve=>requestAnimationFrame(resolve));
+    }
+    return reports;
+  }
   function syncNativeFromPlayer(){
     const pawn = pawns.get('native-player-car');
     if(!pawn || !GAME || !GAME.player) return pawn || null;
     pawn.enabled = GAME.player.enabled !== false;
     pawn.hidden = GAME.player.hidden === true;
+    syncNativeCollision(pawn,GAME.player);
     const nativeActive = GAME.player.enabled !== false && GAME.player.hidden !== true;
     const wanted = !nativeActive || GAME.player.controllerIndex == null ? null : normalizePlayerId(Number(GAME.player.controllerIndex) + 1);
     releaseSlot(pawn);
@@ -1514,7 +1662,7 @@ function createRegistry(GAME, options){
     if(wanted != null) claimSlot(pawn, wanted, true);
     return pawn;
   }
-  function stepAll(dt){ list().forEach(pawn => { if(pawn.step) pawn.step(dt); }); }
+  function stepAll(dt){ const active=list();active.forEach(pawn => { if(pawn.step) pawn.step(dt); });if(window.LK_RUNTIME_VEHICLE_TOWING)window.LK_RUNTIME_VEHICLE_TOWING.update(GAME,active,dt); }
   function disposeLogic(){ list().filter(pawn => pawn.kind === 'logic-element').forEach(pawn => pawn.dispose()); }
   function ensureNative(){ return GAME && GAME.player ? createNative(GAME.player) : null; }
 
@@ -1523,7 +1671,7 @@ function createRegistry(GAME, options){
   function claimPlayerSlot(pawn, playerId, force){ return claimSlot(pawn, playerId, force); }
   function releasePlayerSlot(pawn){ releaseSlot(pawn); }
 
-  const api = Object.freeze({schemaVersion:SCHEMA_VERSION, normalizeConfig, register, unregister, createNative, createLogic, ensureNative, syncNativeFromPlayer, get, getByPlayerId, firstAvailablePlayerId, possessFirstAvailable, list, stepAll, disposeLogic, claimPlayerSlot, releasePlayerSlot});
+  const api = Object.freeze({schemaVersion:SCHEMA_VERSION, normalizeConfig, register, unregister, createNative, createLogic, ensureNative, syncNativeFromPlayer, get, getByPlayerId, firstAvailablePlayerId, possessFirstAvailable, list,prewarmAll, stepAll, disposeLogic, claimPlayerSlot, releasePlayerSlot});
   if(GAME){
     GAME.pawns = api;
     if(GAME.systems) GAME.systems.vehiclePawns = api;

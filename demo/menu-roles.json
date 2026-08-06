@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "levels": [
+    {
+      "id": "test-temp",
+      "name": "MenuEditorLevel",
+      "role": "editor-menu",
+      "visible": false,
+      "sidecar": "demo/menu-levels/editor-menu.lkep.json"
+    }
+  ]
+}

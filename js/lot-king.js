@@ -26,7 +26,7 @@ if(missingRuntimeModules.length){
 }
 
 const GAME = window.LOT_KING = {
-  version: '0.7.7',
+  version: '0.7.8',
   assets: null,
   core: {},
   world: {},
@@ -91,7 +91,8 @@ const RUNTIME_DOM_I18N = [
   ['#controls-list .gameplay-controls span:nth-of-type(24)', 'text', 'Driving setup', 'Setup guida'],
   ['#controls-list .gameplay-controls span:nth-of-type(10)', 'text', 'Look around', 'Guarda intorno'],
   ['#controls-list .gameplay-controls span:nth-of-type(26)', 'text', 'Pause menu', 'Menu pausa'],
-  ['#controls-list .gameplay-controls span:nth-of-type(32)', 'text', 'Flash high beams', 'Lampeggia fari'],
+  ['#controls-list .gameplay-controls span:nth-of-type(32)', 'text', 'Exit vehicle', 'Esci dal veicolo'],
+  ['#controls-list .gameplay-controls span:nth-of-type(34)', 'text', 'Flash high beams', 'Lampeggia fari'],
   ['#controls-list .gameplay-controls span:nth-of-type(12)', 'text', 'Zoom camera', 'Zoom camera'],
   ['#controls-list .gameplay-controls span:nth-of-type(14)', 'text', 'Camera mode', 'Modalità camera'],
   ['#controls-list .gameplay-controls span:nth-of-type(16)', 'text', 'Reset car', 'Ripristina veicolo'],
@@ -118,8 +119,8 @@ const RUNTIME_DOM_I18N = [
   ['#tuneGrip', 'label', 'Tire grip', 'Aderenza gomme'],
   ['#tuneGrip', 'desc', 'Negative is slippier, positive is more planted.', 'Negativo piu scivolosa, positivo piu incollata.'],
   ['.lg-body', 'html',
-    '<b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br><b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> look back · <b>C / R3</b> camera · <b>R / L3</b> reset<br><b>TAB / View</b> radio · <b>P / Y</b> play/pause · <b>N / D-pad right</b> next · <b>Keyboard B / D-pad down</b> prev<br><b>ESC / Start</b> menu · <b>U / D-pad up</b> driving setup · <b>M / LB</b> mute · <b>F / X</b> flash · <b>H</b> help<br><b>Gamepad / touch</b> supported · remap keys from <b>ESC → Controls</b>',
-    '<b>W A S D / frecce</b> guida · <b>SPACE</b> freno a mano (drift)<br><b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> guarda dietro · <b>C / R3</b> camera · <b>R / L3</b> reset<br><b>TAB / View</b> radio · <b>P / Y</b> play/pausa · <b>N / D-pad destra</b> next · <b>B tastiera / D-pad giu</b> prev<br><b>ESC / Start</b> menu · <b>U / D-pad su</b> setup guida · <b>M / LB</b> muto · <b>F / X</b> lampeggia · <b>H</b> aiuto<br><b>Gamepad / touch</b> supportati · rimappa i tasti da <b>ESC → Controlli</b>'
+    '<b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br><b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> look back · <b>C / R3</b> camera · <b>R / L3</b> reset<br><b>TAB / View</b> radio · <b>P / Y</b> play/pause · <b>N / D-pad right</b> next · <b>Keyboard B / D-pad down</b> prev<br><b>ESC / Start</b> menu · <b>U / D-pad up</b> driving setup · <b>M / LB</b> mute · <b>F / X</b> exit · <b>L / D-pad left</b> flash · <b>H</b> help<br><b>Gamepad / touch</b> supported · remap keys from <b>ESC → Controls</b>',
+    '<b>W A S D / frecce</b> guida · <b>SPACE</b> freno a mano (drift)<br><b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> guarda dietro · <b>C / R3</b> camera · <b>R / L3</b> reset<br><b>TAB / View</b> radio · <b>P / Y</b> play/pausa · <b>N / D-pad destra</b> next · <b>B tastiera / D-pad giu</b> prev<br><b>ESC / Start</b> menu · <b>U / D-pad su</b> setup guida · <b>M / LB</b> muto · <b>F / X</b> esci · <b>L / D-pad sinistra</b> lampeggia fari · <b>H</b> aiuto<br><b>Gamepad / touch</b> supportati · rimappa i tasti da <b>ESC → Controlli</b>'
   ],
   ['[data-settings-tab="controls"]', 'text', 'Controls', 'Controlli'],
   ['.settingsRow[data-audio-row="master"]', 'label', 'Master volume', 'Volume generale'],
@@ -138,8 +139,20 @@ const RUNTIME_DOM_I18N = [
   ['#videoTextureSize', 'row-desc', 'Largest texture the engine uploads. Imported maps are downscaled to fit; the source files are never changed.', 'Texture piu grande caricata dal motore. Le mappe importate vengono ridotte per rientrare; i file originali non vengono mai modificati.'],
   ['#videoAA', 'row-label', 'Antialiasing', 'Antialiasing'],
   ['#videoAA', 'row-desc', 'FXAA is mobile-friendly; 2× and 4× supersampling increase internal edge resolution.', 'FXAA è adatto al mobile; il supersampling 2× e 4× aumenta la risoluzione interna dei bordi.'],
+  ['#videoGpuBackend', 'row-label', 'GPU backend', 'Backend GPU'],
+  ['#videoGpuBackend', 'row-desc', 'Graphics API used by the engine. WebGPU remains visible but locked until engine and mobile parity are qualified.', 'API grafica usata dal motore. WebGPU resta visibile ma bloccato finché non supera la parità del motore e i test mobile.'],
   ['#videoRenderer', 'row-label', 'Renderer', 'Renderer'],
   ['#videoRenderer', 'row-desc', 'WebGL, enhanced ray lighting, or progressive path tracing with safe fallback.', 'WebGL, ray lighting migliorato oppure path tracing progressivo con fallback sicuro.'],
+  ['#videoVisualStyle', 'row-label', 'Visual style', 'Stile visivo'],
+  ['#videoVisualStyle', 'row-desc', 'Automatic detailed illustrated rendering for viewport, Play and game.', 'Rendering illustrato dettagliato automatico per viewport, Play e gioco.'],
+  ['#videoSketchStrength', 'row-label', 'Ink strength', 'Forza inchiostro'],
+  ['#videoSketchStrength', 'row-desc', 'Weight of outlines and illustrated tonal shaping.', 'Peso dei contorni e della modellazione tonale illustrata.'],
+  ['#videoSketchDetail', 'row-label', 'Line detail', 'Dettaglio linee'],
+  ['#videoSketchDetail', 'row-desc', 'Fine contours and cross-hatching density.', 'Contorni fini e densità del tratteggio incrociato.'],
+  ['#videoSketchPaper', 'row-label', 'Paper grain', 'Grana carta'],
+  ['#videoSketchPaper', 'row-desc', 'Subtle organic paper variation over the final image.', 'Variazione organica sottile della carta sull’immagine finale.'],
+  ['#videoMonochrome', 'row-label', 'Black & white', 'Bianco e nero'],
+  ['#videoMonochrome', 'row-desc', 'Independent global monochrome filter, also available with Natural rendering.', 'Filtro monocromatico globale indipendente, disponibile anche col rendering Naturale.'],
   ['#videoShadows', 'row-label', 'Dynamic shadows', 'Ombre dinamiche'],
   ['#videoShadows', 'row-desc', 'Quality-scaled realtime scene shadows.', 'Ombre realtime scalate in base alla qualita.'],
   ['#videoReflections', 'row-label', 'Material reflections', 'Riflessi materiali'],
@@ -156,6 +169,7 @@ const RUNTIME_DOM_I18N = [
   ['#videoEditorHud', 'row-desc', 'Shows editor panels and helpers.', 'Mostra pannelli e helper dell\'editor.'],
   ['#videoVolumetricLighting', 'next-label', 'Enabled', 'Abilitato'],
   ['#videoCinematicLensFlares', 'next-label', 'Enabled', 'Abilitati'],
+  ['#videoMonochrome', 'next-label', 'Enabled', 'Abilitato'],
   ['#videoShadows', 'next-label', 'Enabled', 'Abilitate'],
   ['#videoReflections', 'next-label', 'Enabled', 'Abilitati'],
   ['#videoEditorHud', 'next-label', 'Visible', 'Visibile'],
@@ -214,7 +228,57 @@ GAME.assets = {dirs: ASSET_DIR, paths: ASSETS, isFileMode: IS_FILE_MODE};
 const canvas = document.getElementById('c');
 if(canvas && !canvas.hasAttribute('tabindex')) canvas.tabIndex = -1;
 const RENDERING_BACKEND=window.LK_RUNTIME_RENDERING_BACKEND;
-const renderer = RENDERING_BACKEND?RENDERING_BACKEND.createWebGL({canvas,antialias:true,powerPreference:'high-performance'},'main'):new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+const renderer = RENDERING_BACKEND&&RENDERING_BACKEND.createRenderer
+  ? RENDERING_BACKEND.createRenderer({canvas,antialias:true,powerPreference:'high-performance'},'main')
+  : new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+const rendererReady = RENDERING_BACKEND&&RENDERING_BACKEND.initialize
+  ? RENDERING_BACKEND.initialize(renderer)
+  : Promise.resolve({requested:'webgl',effective:'webgl'});
+let rendererContextReleased = false;
+window.addEventListener('lotking:gpu-error-storm',()=>{
+  if(rendererContextReleased)return;
+  GAME.state.webgpuErrorStorm=true;
+  // The backend has already persisted grouped diagnostics and quarantined this
+  // session. Rebuild once on stable WebGL before Chrome disables the GPU
+  // process/context for the whole page (or, in severe cases, until reboot).
+  setTimeout(()=>location.reload(),120);
+},{once:true});
+function releaseRendererContext(options){
+  if(rendererContextReleased) return false;
+  const finalPage = options === true || !!(options && options.finalPage);
+  rendererContextReleased = true;
+  GAME.state.rendererContextReleased = true;
+  // Give editor/runtime services one deterministic teardown point. Relying on
+  // browser garbage collection here leaves workers, observers and GPU handles
+  // alive in the shared browser process after this tab has disappeared.
+  try { window.dispatchEvent(new CustomEvent('lotking:runtime-dispose',{detail:{finalPage}})); } catch(err){}
+  // Release renderer-owned targets before the iframe document goes away. In
+  // particular WebGPU RenderPipeline and path-tracing allocations otherwise
+  // survive until a later browser GC and accumulate across Menu/Editor/Play.
+  try { if(GAME.systems&&GAME.systems.pathTracing&&GAME.systems.pathTracing.dispose) GAME.systems.pathTracing.dispose(); } catch(err){}
+  try { if(GAME.systems&&GAME.systems.post&&GAME.systems.post.dispose) GAME.systems.post.dispose(); } catch(err){}
+  try { if(GAME.systems&&GAME.systems.proceduralWorld&&GAME.systems.proceduralWorld.dispose) GAME.systems.proceduralWorld.dispose(); } catch(err){}
+  try { if(renderer.renderLists) renderer.renderLists.dispose(); } catch(err){}
+  try { renderer.dispose(); } catch(err){}
+  // The parent immediately navigates the same-origin iframe to about:blank,
+  // which releases its document-owned context. Calling forceContextLoss first
+  // emits a fake fatal-looking Context Lost event, and a common WebGPU fallback
+  // canvas may not support WEBGL_lose_context at all. On a final page close,
+  // however, explicitly releasing a WebGL context prevents driver allocations
+  // from surviving in Chrome's GPU process until the machine is restarted.
+  if(finalPage && !renderer.isWebGPURenderer && typeof renderer.forceContextLoss === 'function'){
+    try { renderer.forceContextLoss(); } catch(err){}
+  }
+  return true;
+}
+function releaseFinalPageResources(event){
+  // A page kept in the back/forward cache must remain restorable. Normal iframe
+  // replacement is already released synchronously by the parent shell.
+  if(event && event.type === 'pagehide' && event.persisted) return;
+  releaseRendererContext({finalPage:true});
+}
+window.addEventListener('pagehide',releaseFinalPageResources,{once:true});
+window.addEventListener('beforeunload',releaseFinalPageResources,{once:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -307,9 +371,25 @@ const SKY = window.LK_RUNTIME_SKY.createSky({
   sun, hemi, lampMat, pl1, pl2,
 });
 
+// One worldscape surrounds every authored level without migrating its absolute
+// coordinates. Y=0 remains the construction plateau; coast, water and seabed
+// descend below it. Terrain, water and distant islands own a renderer-safe
+// lifecycle and are never registered as ordinary editable scene objects.
+const PROCEDURAL_WORLD = window.LK_RUNTIME_PROCEDURAL_WORLD.create({
+  THREERef:THREE,
+  scene,
+  world:GAME.world,
+  registry:()=>REGISTRY,
+  focus:()=>camera.position,
+  renderingBackend:RENDERING_BACKEND,
+  onRebuild:()=>{if(GAME.systems&&GAME.systems.physics&&GAME.systems.physics.rebuild)GAME.systems.physics.rebuild(true);},
+});
+PROCEDURAL_WORLD.rebuildFromScene(null);
+GAME.hooks.frame.push(dt=>PROCEDURAL_WORLD.update(dt));
+
 // ------------------------------------------------ rain (environment weather)
 // audio passato come accessor lazy: SFX viene creato piu' in basso nel file
-const RAIN = window.LK_RUNTIME_RAIN ? window.LK_RUNTIME_RAIN.create({scene, audio: {
+const RAIN = window.LK_RUNTIME_RAIN ? window.LK_RUNTIME_RAIN.create({scene, renderer, audio: {
   getContext: () => SFX.getContext(),
   getSfxGain: () => SFX.getSfxGain(),
 }}) : null;
@@ -812,6 +892,12 @@ const DRIVE = {
   turboStrength: .28,         // progressive extra torque at full boost
   turboThreshold: 2400,       // RPM where useful spool starts
   turboSpool: .8,             // seconds to approach requested boost
+  // Front-wheel steering axis. Imported wheels rarely have their origin on the
+  // kingpin, which makes the wheel swing through an arc instead of turning in
+  // place; these move the rotation centre without moving the wheel.
+  steerPivotX: 0,
+  steerPivotY: 0,
+  steerPivotZ: 0,
 };
 const BASE_DRIVE = Object.freeze({...DRIVE});
 const PLAYER_COLLISION = {hx:0.92, hy:0.42, hz:1.85, offsetY:0.45, bodyY:0.55, radius:1.4};
@@ -989,6 +1075,7 @@ const PHYS_WORLD = window.LK_RUNTIME_PHYSICS_WORLD.create({
   playerCollision: PLAYER_COLLISION,
   constants: {LOT, WALL_H},
   colliders: {circle: circleColliders, box: boxColliders},
+  terrainProvider: () => PROCEDURAL_WORLD,
 });
 const PHYS = PHYS_WORLD.state;
 const cannonVec = PHYS_WORLD.cannonVec;
@@ -1395,6 +1482,19 @@ const CANNON_FWD_SIGN = -1;
 const WHEEL_GRIP = 2.6;               // wheel frictionSlip at mu = 1
 const wheelSuspVis = [0, 0, 0, 0];    // smoothed per-wheel suspension offsets
 const wheelSuspRigOffsets = [0, 0, 0, 0];
+let physicsStaticsSignatureAccumulator = 0;
+
+function physicsStaticsNeedRebuild(dt){
+  // Scene/editor mutation paths invalidate the signature explicitly, so those
+  // still rebuild immediately. This low-frequency fallback catches legacy
+  // direct collider edits without serialising every Open World collider at
+  // render frequency.
+  if(!PHYS.staticsSignature){physicsStaticsSignatureAccumulator=0;return true;}
+  physicsStaticsSignatureAccumulator+=Math.max(0,Number(dt)||0);
+  if(physicsStaticsSignatureAccumulator<.25)return false;
+  physicsStaticsSignatureAccumulator%=.25;
+  return PHYS.staticsSignature!==colliderSignature();
+}
 
 function wheelsOnGround(){
   const v = PHYS.vehicle;
@@ -1420,7 +1520,7 @@ function nativeSkidWheelInContact(wheel){
 function updateCarCannon(dt){
   if(GAME.player && GAME.player.enabled === false) return {vF:0, vR:0, drifting:false};
   if(!initPhysicsWorld()) return null;
-  if(PHYS.staticsSignature !== colliderSignature()) rebuildPhysicsStatics();
+  if(physicsStaticsNeedRebuild(dt)) rebuildPhysicsStatics();
 
   const body = PHYS.carBody;
   const vehicle = PHYS.vehicle;
@@ -1575,6 +1675,7 @@ function updateCarCannon(dt){
     steering:[0,1], steer:delta,
     brakes:[frontBrake,frontBrake,rearBrake,rearBrake],
     frictionSlip:[WHEEL_GRIP * muFl,WHEEL_GRIP * muFl,WHEEL_GRIP * muRl,WHEEL_GRIP * muRl],
+    gripMultiplier:window.LK_RUNTIME_WEATHER ? window.LK_RUNTIME_WEATHER.gripMultiplier(GAME) : 1,
   });
 
   // ---- arcade drift assists on top of the raycast model (wheels grounded)
@@ -1723,6 +1824,7 @@ function applyPlayerVisualCannon(vF, vR, steerAngle, dt){
     const state = SHARED_VEHICLE_VISUALS.updateWheel({
       visual:w, wheelInfo:wi, suspension:PHYS.suspension, dt, forwardSpeed:vF,
       radius:.38, front:w.front, steerAngle, steerVisualScale:1.25, baseY:.38, chassisLift,
+      steerPivot:w.front ? {x:DRIVE.steerPivotX||0, y:DRIVE.steerPivotY||0, z:DRIVE.steerPivotZ||0} : null,
     });
     wheelSuspVis[i] = state ? state.suspension : 0;
   }
@@ -2676,9 +2778,12 @@ function timelineTargetById(id){
   return GAME.world.registry.find(item => item && item.userData && item.userData.editorId === value) || null;
 }
 function timelineLerpArray(a, b, t){
-  return a.map((value, index) => value + ((b[index] == null ? value : b[index]) - value) * t);
+  const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
+  return evaluator ? evaluator.lerpArray(a,b,t) : a.map((value, index) => value + ((b[index] == null ? value : b[index]) - value) * t);
 }
 function timelineCurveAlpha(t, mode){
+  const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
+  if(evaluator)return evaluator.curveAlpha(t,mode);
   const x = clamp(Number(t) || 0, 0, 1);
   if(mode === 'ease-in') return x * x;
   if(mode === 'ease-out') return 1 - Math.pow(1 - x, 2);
@@ -2686,6 +2791,8 @@ function timelineCurveAlpha(t, mode){
   return x;
 }
 function timelineKeyPair(keys, time){
+  const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
+  if(evaluator)return evaluator.keyPair(keys,time);
   const sorted = (keys || []).slice().sort((a,b) => (Number(a.time) || 0) - (Number(b.time) || 0));
   if(!sorted.length) return null;
   let prev = sorted[0], next = sorted[sorted.length - 1];
@@ -2713,8 +2820,11 @@ function applyRuntimeObjectTrack(track, time){
     return;
   }
   const alpha = timelineCurveAlpha((time - (Number(prev.time) || 0)) / ((Number(next.time) || 0) - (Number(prev.time) || 0)), prev.curve || 'linear');
+  const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
   applyRuntimeTransformKey(obj, {
-    position:timelineLerpArray(prev.position || [obj.position.x, obj.position.y, obj.position.z], next.position || [obj.position.x, obj.position.y, obj.position.z], alpha),
+    position:evaluator
+      ?evaluator.spatialPosition(track,pair.keys,pair.segmentIndex,alpha)
+      :timelineLerpArray(prev.position || [obj.position.x, obj.position.y, obj.position.z], next.position || [obj.position.x, obj.position.y, obj.position.z], alpha),
     rotation:timelineLerpArray(prev.rotation || [obj.rotation.x, obj.rotation.y, obj.rotation.z], next.rotation || [obj.rotation.x, obj.rotation.y, obj.rotation.z], alpha),
     scale:timelineLerpArray(prev.scale || [obj.scale.x, obj.scale.y, obj.scale.z], next.scale || [obj.scale.x, obj.scale.y, obj.scale.z], alpha),
   });
@@ -2755,6 +2865,89 @@ function runtimePlayerOutput(value){
 function runtimeShouldStartPlayerCinema(props){
   return !!props && runtimePlayerOutput(props.outputPlayerIndex) != null && props.trigger === 'on-play';
 }
+function playerOutputApi(){
+  const api=window.LK_RUNTIME_PLAYER_OUTPUT;
+  if(!api||typeof api.resolve!=='function')throw new Error('LotKing Player Output resolver unavailable');
+  return api;
+}
+function outputSceneCameras(){
+  return GAME.world.registry.filter(item=>item&&item.userData&&item.userData.editorType==='camera'&&item.userData.sceneCamera);
+}
+function levelOutputCamera(playerId){
+  const id=Math.max(1,Math.min(4,Number(playerId)||1)),cameras=outputSceneCameras();
+  if(id===1){
+    const active=cameras.find(item=>(item.userData.cameraProps||{}).activeLevelCamera===true);
+    if(active)return active;
+  }
+  return cameras.find(item=>Number((item.userData.cameraProps||{}).outputPlayerIndex)===id-1)||null;
+}
+function runtimeCinemaCamera(playerId){
+  if(!runtimeCinemaState||runtimeCinemaState.playerId!==playerId)return null;
+  const studio=cinemaStudioHolder(runtimeCinemaState.studioId),props=studio&&timelineProps(studio);
+  const cut=props&&runtimeActiveShot(props,runtimeCinemaState.time);
+  const cameraId=cut&&cut.cameraId||props&&props.previewCamera;
+  return cameraId?sceneCameraHolder(cameraId):null;
+}
+function resolveRuntimePlayerOutput(playerId,overrides){
+  const id=Math.max(1,Math.min(4,Number(playerId)||1)),state=GAME.state||{},opts=overrides||{};
+  const explicitIds=state.runtimeActiveSceneCameraIds||{};
+  const explicitId=explicitIds[id]||(id===1?state.runtimeActiveSceneCameraId:null);
+  const outputs=state.runtimeVehicleCameraPawnIds||{};
+  const aliasId=outputs[id]||(id===1?state.runtimeVehicleCameraPawnId:null);
+  const getPawn=value=>value&&GAME.pawns&&GAME.pawns.get?GAME.pawns.get(value):null;
+  const possessed=GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(id):null;
+  const cinemaCamera=Object.prototype.hasOwnProperty.call(opts,'cinemaCamera')?opts.cinemaCamera:runtimeCinemaCamera(id);
+  const cinemaActive=Object.prototype.hasOwnProperty.call(opts,'cinemaActive')?opts.cinemaActive:!!(runtimeCinemaState&&runtimeCinemaState.playerId===id);
+  return playerOutputApi().resolve({
+    playerId:id,
+    cinemaActive,
+    cinemaCamera,
+    logicCamera:explicitId?sceneCameraHolder(explicitId):null,
+    possessedPawn:possessed,
+    cameraPawn:getPawn(aliasId),
+    nativePlayer:id===1?GAME.player:null,
+    levelCamera:levelOutputCamera(id),
+  });
+}
+function applyResolvedPlayerOutput(output,dt){
+  if(!output)return false;
+  if(output.camera)return copySceneCameraToGame(output.camera);
+  if(output.kind==='pawn')return updateLogicPawnCameraOverride(dt,output.pawn);
+  if(output.kind==='native-player'){updateCamera(dt);return true;}
+  return false;
+}
+function captureRuntimeCamera(){
+  return {position:camera.position.clone(),quaternion:camera.quaternion.clone(),fov:camera.fov,near:camera.near,far:camera.far};
+}
+function restoreRuntimeCamera(frame){
+  if(!frame)return false;
+  camera.position.copy(frame.position);camera.quaternion.copy(frame.quaternion);
+  camera.fov=frame.fov;camera.near=frame.near;camera.far=frame.far;
+  camera.updateProjectionMatrix();camera.updateMatrixWorld(true);
+  return true;
+}
+function cinemaCompletionPawn(config){
+  if(!config||!GAME.pawns)return null;
+  if(config.pawnRef)return config.pawnRef.possess?config.pawnRef:null;
+  if(config.pawnId&&GAME.pawns.get){
+    return GAME.pawns.get(config.pawnId)||null;
+  }
+  return config.playerId&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(config.playerId):null;
+}
+function possessCinemaCompletionTarget(config,fallbackPlayerId){
+  if(!config||(!config.pawnRef&&!config.pawnId))return null;
+  const pawn=cinemaCompletionPawn(config),playerId=config&&config.playerId||fallbackPlayerId||1;
+  if(!pawn||!pawn.possess)return null;
+  pawn.possess(playerId,true);
+  if(pawn.possessCamera)pawn.possessCamera(true);
+  return pawn;
+}
+function runtimeCompletionConfig(props,state){
+  const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
+  return evaluator&&evaluator.resolveCompletion
+    ?evaluator.resolveCompletion(props,state&&state.completionOverride,state&&state.playerId||1)
+    :{mode:'cut',duration:0,curve:'ease-in-out',playerId:state&&state.playerId||1,pawnId:'',pawnRef:null};
+}
 function dispatchRuntimeTimelineEvent(studio, event, state){
   if(!studio || !event || !event.name) return;
   window.dispatchEvent(new CustomEvent('lotking:timelineevent', {detail:{
@@ -2785,6 +2978,53 @@ function applyRuntimeTimeline(studio, time, state){
   props.lensTracks.forEach(track => applyRuntimeLensTrack(track, t));
   return runtimeActiveShot(props, t);
 }
+function completeRuntimeCinema(studio,state,duration){
+  if(!state)return false;
+  if(runtimeCinemaState===state)runtimeCinemaState=null;
+  const detail={
+    studioId:studio&&studio.userData&&studio.userData.editorId||state.studioId,
+    playerId:state.playerId||1,
+    time:duration,
+    source:state.source||'runtime',
+    reason:'completed',
+  };
+  const onComplete=state.onComplete;
+  state.onComplete=null;
+  if(typeof onComplete==='function'){
+    try{onComplete(detail);}catch(err){console.error('Lot King cinema completion callback failed:',err);}
+  }
+  return true;
+}
+function beginRuntimeCinemaCompletion(studio,props,state,duration,cut){
+  const config=runtimeCompletionConfig(props,state);
+  possessCinemaCompletionTarget(config,state.playerId);
+  if(config.mode==='blend'&&config.duration>0&&cut){
+    const holder=sceneCameraHolder(cut.cameraId||props.previewCamera);
+    if(holder)copySceneCameraToGame(holder);
+    state.endBlend={elapsed:0,duration:config.duration,curve:config.curve,from:captureRuntimeCamera(),playerId:config.playerId||state.playerId};
+    return false;
+  }
+  return completeRuntimeCinema(studio,state,duration);
+}
+function updateRuntimeCinemaCompletionBlend(studio,state,dt){
+  const blend=state&&state.endBlend;
+  if(!blend)return false;
+  const output=resolveRuntimePlayerOutput(blend.playerId||state.playerId,{cinemaActive:false,cinemaCamera:null});
+  applyResolvedPlayerOutput(output,dt);
+  const target=captureRuntimeCamera();
+  restoreRuntimeCamera(blend.from);
+  blend.elapsed=Math.min(blend.duration,blend.elapsed+Math.max(0,Number(dt)||0));
+  const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
+  const alpha=evaluator&&evaluator.curveAlpha?evaluator.curveAlpha(blend.elapsed/Math.max(.0001,blend.duration),blend.curve):blend.elapsed/Math.max(.0001,blend.duration);
+  camera.position.lerp(target.position,alpha);
+  camera.quaternion.slerp(target.quaternion,alpha);
+  camera.fov=blend.from.fov+(target.fov-blend.from.fov)*alpha;
+  camera.near=blend.from.near+(target.near-blend.from.near)*alpha;
+  camera.far=blend.from.far+(target.far-blend.from.far)*alpha;
+  camera.updateProjectionMatrix();camera.updateMatrixWorld(true);
+  if(blend.elapsed>=blend.duration)completeRuntimeCinema(studio,state,state.time);
+  return true;
+}
 function updateSceneCameraOverride(dt){
   const levelKey = String(GAME.state && GAME.state.activeLevel || 'default');
   if(levelKey !== runtimeCinemaAutoLevelKey){
@@ -2796,7 +3036,10 @@ function updateSceneCameraOverride(dt){
       if(GAME.state) GAME.state.runtimeActiveSceneCameraId = null;
     }
   }
-  const editorAuthoring = !!(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview);
+  // Editor Runtime owns Cinema evaluation while either authoring or previewing.
+  // Running this second state machine inside stepGameplayPreview would evaluate
+  // the same blend twice (and produce a different curve from standalone Play).
+  const editorAuthoring = !!(GAME.state && GAME.state.editorActive);
   if(!runtimeCinemaState && !editorAuthoring){
     const autoStudio = GAME.world.registry.find(item => {
       if(!item || !item.userData || item.userData.editorType !== 'cinemaStudio') return false;
@@ -2810,55 +3053,77 @@ function updateSceneCameraOverride(dt){
       runtimeCinemaState = {studioId:id, playerId:runtimePlayerOutput(autoStudio.userData.cinemaProps.outputPlayerIndex), time:0, source:'on-play'};
     }
   }
+  let cinemaCamera=null;
   if(runtimeCinemaState){
     const studio = cinemaStudioHolder(runtimeCinemaState.studioId);
-    if(!studio){ runtimeCinemaState = null; return false; }
-    const props = timelineProps(studio);
-    const duration = Math.max(.1, Number(props.duration) || 6);
-    const beforeTime = clamp(Number(runtimeCinemaState.time) || 0, 0, duration);
-    runtimeCinemaState.time += Math.max(0, Number(dt) || 0);
-    if(runtimeCinemaState.time > duration){
-      if(props.playback === 'loop') runtimeCinemaState.time %= duration;
-      else { runtimeCinemaState = null; return false; }
-    }
-    const cut = applyRuntimeTimeline(studio, runtimeCinemaState.time, runtimeCinemaState);
-    if((Number(dt) || 0) > 0){
-      if(props.playback === 'loop' && runtimeCinemaState.time < beforeTime){
-        dispatchRuntimeTimelineEventsBetween(studio, props, beforeTime, duration, runtimeCinemaState, false);
-        dispatchRuntimeTimelineEventsBetween(studio, props, 0, runtimeCinemaState.time, runtimeCinemaState, true);
-      } else {
-        dispatchRuntimeTimelineEventsBetween(studio, props, beforeTime, runtimeCinemaState.time, runtimeCinemaState, false);
+    if(!studio)runtimeCinemaState=null;
+    else{
+      const props = timelineProps(studio);
+      const duration = Math.max(.1, Number(props.duration) || 6);
+      const state=runtimeCinemaState;
+      if(state.endBlend)return updateRuntimeCinemaCompletionBlend(studio,state,dt);
+      const evaluator=window.LK_RUNTIME_CINEMA_SEQUENCE;
+      const advance=evaluator&&evaluator.advancePlayback
+        ?evaluator.advancePlayback(state.time,dt,duration,props.playback,state.playbackOverride)
+        :{previous:clamp(Number(state.time)||0,0,duration),time:Math.min(duration,(Number(state.time)||0)+Math.max(0,Number(dt)||0)),looped:false,completed:(Number(state.time)||0)+Math.max(0,Number(dt)||0)>=duration};
+      const beforeTime=advance.previous;
+      state.time=advance.time;
+      const cut = applyRuntimeTimeline(studio, state.time, state);
+      if((Number(dt) || 0) > 0){
+        if(advance.looped){
+          dispatchRuntimeTimelineEventsBetween(studio, props, beforeTime, duration, state, false);
+          dispatchRuntimeTimelineEventsBetween(studio, props, 0, state.time, state, true);
+        } else {
+          dispatchRuntimeTimelineEventsBetween(studio, props, beforeTime, state.time, state, false);
+        }
+        state.lastEventTime = state.time;
       }
-      runtimeCinemaState.lastEventTime = runtimeCinemaState.time;
+      if(advance.completed){
+        beginRuntimeCinemaCompletion(studio,props,state,duration,cut);
+        if(runtimeCinemaState===state){
+          const cameraId=cut&&cut.cameraId||props.previewCamera;
+          cinemaCamera=cameraId?sceneCameraHolder(cameraId):null;
+        }
+      }else{
+        const cameraId = cut && cut.cameraId || props.previewCamera;
+        cinemaCamera=cameraId?sceneCameraHolder(cameraId):null;
+      }
     }
-    const cameraId = cut && cut.cameraId || props.previewCamera;
-    if(cameraId) return copySceneCameraToGame(sceneCameraHolder(cameraId));
   }
   const runtimeCameraId = GAME.state && GAME.state.runtimeActiveSceneCameraId;
-  if(runtimeCameraId){
-    const runtimeCamera = sceneCameraHolder(runtimeCameraId);
-    if(runtimeCamera) return copySceneCameraToGame(runtimeCamera);
-    GAME.state.runtimeActiveSceneCameraId = null;
-  }
-  const logicCameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
-  const logicCameraPawnId = logicCameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
-  const logicCameraPawn = logicCameraPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(logicCameraPawnId) : null;
-  if(logicCameraPawn && logicCameraPawn.possessed && logicCameraPawn.hidden !== true) return updateLogicPawnCameraOverride(dt);
-  if(logicCameraPawnId && !logicCameraPawn) GAME.state.runtimeVehicleCameraPawnId = null;
-  if(GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true && GAME.player.controllerIndex != null) return false;
-  const cameras = GAME.world.registry.filter(item => item && item.userData && item.userData.editorType === 'camera' && item.userData.cameraProps);
-  const active = cameras.find(item => item.userData.cameraProps.activeLevelCamera === true)
-    || cameras.find(item => item.userData.cameraProps.outputPlayerIndex === 0);
-  return copySceneCameraToGame(active);
+  if(runtimeCameraId&&!sceneCameraHolder(runtimeCameraId))GAME.state.runtimeActiveSceneCameraId=null;
+  const output=resolveRuntimePlayerOutput(1,{cinemaActive:!!(runtimeCinemaState&&runtimeCinemaState.playerId===1),cinemaCamera});
+  return applyResolvedPlayerOutput(output,dt);
 }
 window.addEventListener('lotking:cinemastart', event => {
-  if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview) return;
+  if(GAME.state && GAME.state.editorActive) return;
   const detail = event && event.detail || {};
   const studio = cinemaStudioHolder(detail.studio);
-  if(studio) runtimeCinemaState = {studioId:studio.userData.editorId, playerId:runtimePlayerOutput(studio.userData.cinemaProps && studio.userData.cinemaProps.outputPlayerIndex) || Math.max(1, Math.min(4, Number(detail.playerId) || 1)), time:Math.max(0, Number(detail.time) || 0), source:detail.source || detail.eventName || 'runtime-event'};
+  if(studio){
+    const studioId=studio.userData.editorId||studio.uuid;
+    // An explicit Logic start already satisfies this Studio's On Play trigger.
+    // Without this guard the automatic scanner restarted it on the next frame
+    // after Completed had correctly released the first invocation.
+    const levelKey=String(GAME.state&&GAME.state.activeLevel||'default');
+    if(runtimeCinemaAutoLevelKey!==levelKey){
+      runtimeCinemaAutoLevelKey=levelKey;
+      runtimeCinemaAutoStarted.clear();
+    }
+    runtimeCinemaAutoStarted.add(studioId);
+    runtimeCinemaState = {
+      studioId,
+      playerId:runtimePlayerOutput(studio.userData.cinemaProps && studio.userData.cinemaProps.outputPlayerIndex) || Math.max(1, Math.min(4, Number(detail.playerId) || 1)),
+      time:Math.max(0, Number(detail.time) || 0),
+      source:detail.source || detail.eventName || 'runtime-event',
+      playbackOverride:detail.playbackOverride==='once'?'once':null,
+      onComplete:typeof detail.onComplete==='function'?detail.onComplete:null,
+      completionOverride:detail.completion&&typeof detail.completion==='object'?detail.completion:null,
+      endBlend:null,
+    };
+  }
 });
 window.addEventListener('lotking:cinemastop', event => {
-  if(GAME.state && GAME.state.editorActive && !GAME.state.editorPreview) return;
+  if(GAME.state && GAME.state.editorActive) return;
   const playerId = Number(event && event.detail && event.detail.playerId) || null;
   if(!playerId || !runtimeCinemaState || runtimeCinemaState.playerId === playerId) runtimeCinemaState = null;
 });
@@ -3055,6 +3320,8 @@ let runtimePointerPlayerId = null;
 let runtimePointerLockArmed = false;
 const runtimeInteractionRectScratch = {x:0, y:0, w:0, h:0};
 function activeRuntimePlayerId(){
+  const renderingPlayerId=Number(GAME.state&&GAME.state.runtimeActiveOutputPlayerId);
+  if(Number.isInteger(renderingPlayerId)&&renderingPlayerId>=1&&renderingPlayerId<=4)return renderingPlayerId;
   const cameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
   const pawnId = cameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
   const pawn = pawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(pawnId) : null;
@@ -3138,9 +3405,12 @@ function endFinalGameplayRender(hidden){
   });
 }
 function videoNeedsPost(){
+  if(POST&&POST.webgpu&&POST.needsPost) return POST.needsPost(camera);
   return !!(VIDEO && (
     VIDEO.volumetricLighting ||
     VIDEO.rendererMode === 'raytracing' ||
+    VIDEO.visualStyle === 'illustrated-sketch' ||
+    VIDEO.monochrome === true ||
     VIDEO.quality !== 'high' ||
     VIDEO.antialiasing === 'fxaa' ||
     POST && POST.needsOpticalPost && POST.needsOpticalPost(camera)
@@ -3164,10 +3434,19 @@ function renderPlayerCamera(targetRect){
       render: rect => {
         const pathTracingViewport=targetRect&&GAME.state.editorPreview?{width:area.w,height:area.h}:null;
         const pathTracingSurface=!targetRect||!!pathTracingViewport;
-        if(VIDEO.rendererMode === 'pathtracing' && PATH_TRACING && PATH_TRACING.supported && pathTracingSurface && PATH_TRACING.render(camera, VIDEO, pathTracingViewport)){
+        const illustratedOutput=VIDEO.visualStyle==='illustrated-sketch'||VIDEO.monochrome===true;
+        // Progressive path tracing presents directly to the canvas and cannot
+        // be sampled by the shared post graph yet. Prefer the authored visual
+        // style instead of silently ignoring it; Natural output still uses the
+        // progressive renderer exactly as selected.
+        if(!illustratedOutput && VIDEO.rendererMode === 'pathtracing' && PATH_TRACING && PATH_TRACING.supported && pathTracingSurface && PATH_TRACING.render(camera, VIDEO, pathTracingViewport)){
           return;
         }
-        if(POST.ok && ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || videoNeedsPost())){
+        const scopedPostUnsupported=POST&&POST.webgpu&&POST.supportsScoped===false&&(rect.scoped||targetRect);
+        const postRequested=POST&&POST.webgpu&&POST.needsPost
+          ? POST.needsPost(camera)
+          : ((CAM_CFG.dof && CAM_CFG.dof.enabled) || (CAM_CFG.grade && CAM_CFG.grade.enabled) || videoNeedsPost());
+        if(POST.ok && !scopedPostUnsupported && postRequested){
           if(rect.scoped || targetRect) POST.composer.setSize(rect.w, rect.h);
           POST.render();
           if(rect.scoped || targetRect) POST.composer.setSize(innerWidth, innerHeight);
@@ -3210,51 +3489,50 @@ function localPlayerFrameRects(count){
 function localPlayerCameraPawns(){
   if(!GAME.pawns || !GAME.pawns.list) return [];
   const requested = Math.max(1, Math.min(4, Number(GAME.settings.localPlayerCount) || 4));
-  return GAME.pawns.list().filter(pawn => pawn && pawn.possessed && pawn.playerId != null && pawn.hidden !== true)
+  return GAME.pawns.list().filter(pawn => pawn && pawn.possessed && pawn.playerId != null && pawn.hidden !== true && pawn.enabled !== false && pawn.owner)
     .sort((a,b) => a.playerId - b.playerId).slice(0, requested);
 }
 function localPlayerOutputs(){
   const byPlayer = new Map();
-  localPlayerCameraPawns().forEach(pawn => byPlayer.set(pawn.playerId, {playerId:pawn.playerId, pawn}));
+  const requested=Math.max(1,Math.min(4,Number(GAME.settings.localPlayerCount)||4));
+  if(playerOutputApi().validNativePlayer(GAME.player,1))byPlayer.set(1,true);
+  localPlayerCameraPawns().forEach(pawn => byPlayer.set(pawn.playerId,true));
   GAME.world.registry.forEach(item => {
     if(!item || !item.userData || item.userData.editorType !== 'camera') return;
     const props = item.userData.cameraProps || {};
     const output = props.activeLevelCamera === true ? 0 : props.outputPlayerIndex;
     if(output == null || Number(output) < 0 || Number(output) > 3) return;
-    const playerId = Number(output) + 1;
-    const entry = byPlayer.get(playerId) || {playerId, pawn:null};
-    if(!entry.camera || props.activeLevelCamera === true) entry.camera = item;
-    byPlayer.set(playerId, entry);
+    byPlayer.set(Number(output)+1,true);
   });
-  return Array.from(byPlayer.values()).sort((a,b) => a.playerId - b.playerId)
-    .slice(0, Math.max(1, Math.min(4, Number(GAME.settings.localPlayerCount) || 4)));
+  if(runtimeCinemaState&&runtimeCinemaState.playerId)byPlayer.set(runtimeCinemaState.playerId,true);
+  return Array.from(byPlayer.keys()).sort((a,b)=>a-b).slice(0,requested).map(id=>resolveRuntimePlayerOutput(id));
 }
 function renderLocalMultiplayer(dt){
   const outputs = localPlayerOutputs();
   if(outputs.length < 2) return false;
   const previousPawnId = GAME.state.runtimeVehicleCameraPawnId;
+  const previousOutputPlayerId=GAME.state.runtimeActiveOutputPlayerId;
   const frames = localPlayerFrameRects(outputs.length);
   GAME.state.runtimePlayerFrames = {};
-  outputs.forEach((output, index) => {
-    const pawn = output.pawn;
-    GAME.state.runtimeVehicleCameraPawnId = pawn && pawn.id || null;
-    GAME.state.runtimePlayerFrames[output.playerId] = frames[index];
-    const cinemaOwnsFrame = runtimeCinemaState && runtimeCinemaState.playerId === output.playerId;
-    if(cinemaOwnsFrame){
-      const studio = cinemaStudioHolder(runtimeCinemaState.studioId);
-      const props = studio && timelineProps(studio);
-      const cut = studio && applyRuntimeTimeline(studio, runtimeCinemaState.time, runtimeCinemaState);
-      const cameraId = cut && cut.cameraId || props && props.previewCamera;
-      if(cameraId) copySceneCameraToGame(sceneCameraHolder(cameraId));
-    } else if(output.camera) copySceneCameraToGame(output.camera);
-    else if(pawn && pawn.kind === 'logic-element') updateLogicPawnCameraOverride(dt, pawn);
-    else if(pawn) updateCamera(0);
-    else return;
-    HUD.setActivePlayer(output.playerId);
-    if(RADIO.setActivePlayer) RADIO.setActivePlayer(output.playerId);
-    renderPlayerCamera(frames[index]);
-  });
-  GAME.state.runtimeVehicleCameraPawnId = previousPawnId;
+  try{
+    outputs.forEach((output, index) => {
+      const pawn = output.kind==='pawn'?output.pawn:null;
+      GAME.state.runtimeVehicleCameraPawnId = pawn && pawn.id || null;
+      GAME.state.runtimeActiveOutputPlayerId=output.playerId;
+      GAME.state.runtimePlayerFrames[output.playerId] = frames[index];
+      // Player 1 was already advanced by updateSceneCameraOverride() before the
+      // split-screen render pass. Advancing its spring/look controller again
+      // made damping frame-rate dependent and doubled mouse/stick look. Other
+      // player outputs still need their one update here.
+      if(output.playerId!==1&&!applyResolvedPlayerOutput(output,dt))return;
+      HUD.setActivePlayer(output.playerId);
+      if(RADIO.setActivePlayer) RADIO.setActivePlayer(output.playerId);
+      renderPlayerCamera(frames[index]);
+    });
+  }finally{
+    GAME.state.runtimeVehicleCameraPawnId = previousPawnId;
+    GAME.state.runtimeActiveOutputPlayerId=previousOutputPlayerId;
+  }
   return true;
 }
 function requestRuntimeCameraPointerLock(armForPendingSession){
@@ -3267,6 +3545,28 @@ function requestRuntimeCameraPointerLock(armForPendingSession){
     if(result && result.catch) result.catch(() => { runtimePointerLockArmed = false; });
   } catch(err){ runtimePointerLockArmed = false; }
 }
+let pawnTransitionFocusFrame=0;
+function restoreRuntimeFocusAfterPawnTransition(){
+  if(!canvas||!runtimeSessionActive())return false;
+  try { canvas.focus({preventScroll:true}); }
+  catch(err){ try { canvas.focus(); } catch(err2){} }
+  // The pawn event is emitted synchronously from the Use input gesture, so this
+  // call still has the browser activation needed by requestPointerLock(). The
+  // following frame focuses once more after the camera owner has changed.
+  if(!isEditorSimulationPreview()&&!shouldShowRuntimeCursor())requestRuntimeCameraPointerLock(true);
+  if(pawnTransitionFocusFrame)cancelAnimationFrame(pawnTransitionFocusFrame);
+  pawnTransitionFocusFrame=requestAnimationFrame(()=>{
+    pawnTransitionFocusFrame=0;
+    if(!canvas||!runtimeSessionActive())return;
+    try { canvas.focus({preventScroll:true}); }
+    catch(err){ try { canvas.focus(); } catch(err2){} }
+  });
+  return true;
+}
+addEventListener('lk-pawn-event',event=>{
+  const type=String(event&&event.detail&&event.detail.type||'');
+  if(type==='OnCharacterEnteredVehicle'||type==='OnCharacterExitedVehicle')restoreRuntimeFocusAfterPawnTransition();
+});
 function runtimeInteractionRect(){
   const playerId = activeRuntimePlayerId();
   const playerFrame = GAME.state && GAME.state.runtimePlayerFrames && GAME.state.runtimePlayerFrames[playerId];
@@ -3430,7 +3730,10 @@ function viewportOwnsPointerEvent(e){
 addEventListener('pointermove', e => {
   if(isEditorSimulationPreview()) return;
   const aimingPawn=GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(activeRuntimePlayerId()):null;
-  const shotAiming=!!(aimingPawn&&aimingPawn.pawnType==='soccer'&&aimingPawn.adjustShotAim&&((aimingPawn.wantsShotAimInput&&aimingPawn.wantsShotAimInput())||aimingPawn.state&&aimingPawn.state.shotCharge));
+  // Only an ACTIVE charge claims the pointer. Routing it to the reticle for the
+  // whole penalty ready/aim phase pinned the free camera at a fixed angle: the
+  // player could never look around before deciding where to shoot.
+  const shotAiming=!!(aimingPawn&&aimingPawn.pawnType==='soccer'&&aimingPawn.adjustShotAim&&aimingPawn.state&&aimingPawn.state.shotCharge);
   const firstPersonRig = activeFirstPersonRig();
   const freeMouseLook = !dragging && (activeCameraMode() === 'free' || !!firstPersonRig) && ((SESSION && SESSION.isStarted && SESSION.isStarted()) || GAME.state.editorPreview) &&
     !(GAME.state.editorActive && !GAME.state.editorPreview) && runtimeCameraAllowsMouseLook(e);
@@ -3484,6 +3787,16 @@ addEventListener('wheel', e => {
     e.preventDefault();
     return;
   }
+  // The unified Character rig owns third-person framing too. Wheel zoom writes
+  // its authored arm distance instead of the unrelated vehicle follow camera;
+  // ADS, sprint and nearby animated objects therefore cannot undo the player's
+  // choice on the next frame.
+  if(scopedRig && scopedRig.viewMode && scopedRig.viewMode() === 'third'
+    && scopedRig.adjustThirdPersonDistance && !runtimeWheelBelongsToUi(e.target)){
+    scopedRig.adjustThirdPersonDistance(Math.sign(e.deltaY) * .35);
+    e.preventDefault();
+    return;
+  }
   if(isEditorSimulationPreview()) return;
   if(GAME.state.editorActive && !GAME.state.editorPreview) return;
   if(runtimeWheelBelongsToUi(e.target)) return;
@@ -3503,6 +3816,57 @@ const logicPawnFrameSnapshot = {
   lastCamDrifting:false, driftAngle:0, reverseActive:false,
 };
 let runtimeCameraInputPlayerId = null;
+function updateAdvancedCharacterCameraOverride(dt, pawn, worldPosition){
+  const cfg = pawn && pawn.config && pawn.config.camera || {};
+  const frameDt = clamp(Number(dt) || 0, 0, 1 / 15);
+  const snap = pawn.cameraSnapRequested === true;
+  const minDist = clamp(Number(cfg.minDist) || 2, .5, 40);
+  const maxDist = Math.max(minDist, clamp(Number(cfg.maxDist) || 18, minDist, 80));
+  const authoredDistance = clamp(Number(cfg.distance) || 5.5, minDist, maxDist);
+  const lookHeight = clamp(Number(cfg.lookHeight) || 1.25, .1, 6);
+  if(snap){
+    camFocus.copy(worldPosition);
+    camYaw = (Number(pawn.state && pawn.state.heading) || 0) + Math.PI + THREE.MathUtils.degToRad(Number(cfg.freeYawOffset) || 0);
+    camPitch = clamp(Number(cfg.freePitch) || .32, .05, 1.2);
+    camDist = authoredDistance;
+    pawn.cameraSnapRequested = false;
+  } else {
+    camDist = clamp(camDist, minDist, maxDist);
+  }
+
+  // Mouse deltas already update the shared orbit in the pointer handler. Only
+  // mapped pad/stick look reaches this camera through the input manager.
+  const lookInput = readDriveInput();
+  const lookX = Number(lookInput.cameraLookX) || 0;
+  const lookY = Number(lookInput.cameraLookY) || 0;
+  if(Math.abs(lookX) > .02 || Math.abs(lookY) > .02){
+    camYaw -= lookX * 2.4 * frameDt;
+    camPitch = clamp(camPitch + lookY * 1.65 * frameDt, .05, 1.2);
+  }
+
+  const cursorVisible = shouldShowRuntimeCursor();
+  const runtimeCameraActive = !isEditorSimulationPreview() && runtimeSessionActive() &&
+    !(GAME.state.editorActive && !GAME.state.editorPreview) && !GAME.state.paused && !cursorVisible;
+  if(runtimeCameraActive) runtimePointerLockArmed = false;
+  document.body.classList.toggle('lk-free-camera-cursor-hidden', runtimeCameraActive);
+  syncRuntimeCursorState();
+
+  camFocus.lerp(worldPosition, snap ? 1 : dampAlpha(13, frameDt));
+  const cy = Math.cos(camPitch), sy = Math.sin(camPitch);
+  const offset = cameraFrameOffset.set(Math.sin(camYaw) * cy, sy, Math.cos(camYaw) * cy).multiplyScalar(camDist);
+  const wanted = cameraFrameWant.copy(camFocus).add(offset);
+  wanted.y = Math.max(1.2, wanted.y);
+  camPos.lerp(wanted, snap ? 1 : dampAlpha(Math.max(1, Number(cfg.lag) || 7), frameDt));
+  const wantedLook = cameraFrameLookTarget.set(camFocus.x, camFocus.y + lookHeight, camFocus.z);
+  camLook.lerp(wantedLook, snap ? 1 : dampAlpha(18, frameDt));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  const targetFov = clamp(Number(cfg.fov) || 65, 20, 120);
+  camera.fov += (targetFov - camera.fov) * (snap ? 1 : dampAlpha(4, frameDt));
+  camera.far = Math.max(20, Number(cfg.far) || Number(CAM_CFG.far) || 1000);
+  camera.updateProjectionMatrix();
+  return true;
+}
 // A first-person Pawn owns the eye transform completely: the follow-camera
 // blending below would fight its yaw/pitch, so that path is bypassed rather
 // than reconfigured. Everything else keeps the pre-existing behaviour.
@@ -3533,6 +3897,14 @@ function updateFirstPersonCameraOverride(dt, pawn){
     camera.position.z += (Math.random() - .5) * shake;
   }
   camera.fov += (transform.fov - camera.fov) * (camSnapNext ? 1 : dampAlpha(14, dt));
+  // Pawn Studio authors an independent focus distance for each Character view.
+  // It becomes the manual DoF focus only when global autofocus is disabled;
+  // otherwise the existing focus target remains authoritative.
+  if(CAM_CFG.dof&&CAM_CFG.dof.autoFocus===false&&Number.isFinite(Number(transform.focusDistance)))CAM_CFG.dof.focus=Number(transform.focusDistance);
+  // The unified full-body eye uses a slightly deeper near plane together with
+  // its camera-only face clearance. This clips any remaining triangles crossing
+  // the lens without hiding/scaling the shared Head bone or adding another rig.
+  camera.near = Math.max(.01, Number(transform.near) || .1);
   camera.far = Math.max(20, Number(CAM_CFG.far) || 500);
   camera.updateProjectionMatrix();
   camSnapNext = false;
@@ -3556,9 +3928,15 @@ function updateLogicPawnCameraOverride(dt, pawnRef){
   if(!pawn || !pawn.owner || !pawn.possessed || pawn.hidden === true) return false;
   if(pawn.firstPerson && pawn.firstPerson.enabled() && updateFirstPersonCameraOverride(dt, pawn)) return true;
   const owner = pawn.owner;
-  owner.updateMatrixWorld(true);
+  if(typeof owner.updateWorldMatrix === 'function') owner.updateWorldMatrix(true, false);
+  else owner.updateMatrixWorld(false);
   owner.getWorldPosition(logicPawnCameraPosition);
   owner.getWorldQuaternion(logicPawnCameraQuaternion);
+  if(pawn.type === 'advanced-character'){
+    runtimeCameraInputPlayerId = pawn.playerId;
+    try { return updateAdvancedCharacterCameraOverride(dt, pawn, logicPawnCameraPosition); }
+    finally { runtimeCameraInputPlayerId = null; }
+  }
   logicPawnCameraForward.set(0,0,1).applyQuaternion(logicPawnCameraQuaternion).setY(0);
   if(logicPawnCameraForward.lengthSq() < .0001) logicPawnCameraForward.set(0,0,1);
   logicPawnCameraForward.normalize();
@@ -3587,6 +3965,18 @@ function updateLogicPawnCameraOverride(dt, pawnRef){
   Object.assign(logicPawnCameraConfigSnapshot, CAM_CFG);
   const pawnCameraConfig = pawn.config && pawn.config.camera || {};
   Object.assign(CAM_CFG, pawnCameraConfig);
+  if(pawn.type === 'advanced-character' && pawn.cameraSnapRequested){
+    // A newly possessed on-foot Pawn must not inherit the previous vehicle/menu
+    // orbit. Start once behind its authored heading; subsequent Free-camera look
+    // remains fully user controlled and no vehicle camera state is changed.
+    camFocus.copy(logicPawnCameraPosition);
+    camLook.set(logicPawnCameraPosition.x, logicPawnCameraPosition.y + clamp(Number(CAM_CFG.lookHeight) || 1.2, .1, 6), logicPawnCameraPosition.z);
+    camYaw = P.heading + Math.PI + THREE.MathUtils.degToRad(Number(CAM_CFG.freeYawOffset) || 0);
+    camPitch = clamp(Number(CAM_CFG.freePitch) || .32, .05, 1.2);
+    camDist = clamp(Number(CAM_CFG.distance) || Number(CAM_CFG.arcadeDistance) || 5.5, Number(CAM_CFG.minDist) || 2, Number(CAM_CFG.maxDist) || 18);
+    camSnapNext = true;
+    pawn.cameraSnapRequested = false;
+  }
   try { updateCamera(dt); }
   finally {
     Object.keys(CAM_CFG).forEach(key => { if(!Object.prototype.hasOwnProperty.call(logicPawnCameraConfigSnapshot,key)) delete CAM_CFG[key]; });
@@ -3677,7 +4067,7 @@ function updateCamera(dt){
   camFocus.lerp(P.pos, focusAlpha);
   camHeading += angleDelta(P.heading, camHeading) * headingAlpha;
   const camInput = readDriveInput();
-  const lookBack = !!(keys['v'] || camInput.lookBack);
+  const lookBack = !!camInput.lookBack;
   if(mode === 'free'){
     const lookX = camInput.cameraLookX || 0;
     const lookY = camInput.cameraLookY || 0;
@@ -3707,7 +4097,6 @@ function updateCamera(dt){
       // the camera transform. Reconstructing position from the visual car but
       // rotation from the physics heading lets the two references diverge
       // after repeated turns and reads as an orbit around a displaced pivot.
-      car.updateMatrixWorld(true);
       interiorDummy.updateWorldMatrix(true, false);
       interiorDummy.getWorldPosition(want);
       interiorDummy.getWorldQuaternion(interiorCameraWorldQuaternion);
@@ -3806,6 +4195,11 @@ function updateCamera(dt){
     ));
     const vehicleYawQuat = externalCameraVehicleYawQuaternion.setFromAxisAngle(interiorCameraUpAxis, P.heading || 0);
     camera.quaternion.copy(vehicleYawQuat.multiply(localCameraQuat));
+    // An authored external camera rotation is a local baseline, not an input
+    // override.  This block runs after lookAt(), so without re-applying the
+    // rear glance here V / gamepad B was visibly accepted but immediately
+    // replaced by the authored forward quaternion on every frame.
+    if(lookBack) camera.rotateY(Math.PI);
   }
   if(mode === 'interior') camera.rotateZ(interiorHeadRoll);
   if(mode === 'cinematic') camera.rotateZ(camCinematicRoll);
@@ -3819,7 +4213,10 @@ function updateCamera(dt){
       )
     : CAM_CFG.fov + Math.min(CAM_CFG.fovSpeedMax, camSpeedForFov * CAM_CFG.fovSpeedGain);
   camera.fov += (targetFov - camera.fov) * (snap ? 1 : dampAlpha(4, dt));
+  camera.near = Math.max(.01, Number(mode==='interior' ? CAM_CFG.interiorNear : CAM_CFG.near) || .1);
   camera.far = Math.max(20, Number(CAM_CFG.far) || 500);
+  const authoredFocus=Number(mode==='interior' ? CAM_CFG.interiorFocusDistance : CAM_CFG.focusDistance);
+  if(CAM_CFG.dof&&CAM_CFG.dof.autoFocus===false&&Number.isFinite(authoredFocus))CAM_CFG.dof.focus=Math.max(.25,authoredFocus);
   camera.updateProjectionMatrix();
 }
 
@@ -3926,12 +4323,23 @@ function syncCharacterSoundSet(){
   return true;
 }
 const PLAYER_ENGINE_AUDIO_CFG = {setId: null, set: null};
-function setPlayerEngineSound(setId){
+function setPlayerEngineSound(setId, embeddedSet){
+  const previousSetId = PLAYER_ENGINE_AUDIO_CFG.setId;
+  const previousSet = PLAYER_ENGINE_AUDIO_CFG.set;
   PLAYER_ENGINE_AUDIO_CFG.setId = setId || null;
   const store = window.LK_STORE;
-  const set = setId && store && store.soundSets ? store.soundSets.get(setId) : null;
+  // During early scene application the public store may not be exposed yet.
+  // The level's embedded bank is authoritative and must not be discarded.
+  const stored = setId && store && store.soundSets ? store.soundSets.get(setId) : null;
+  const retained = previousSetId === setId ? previousSet : null;
+  const embeddedMatches = embeddedSet && (!setId || !embeddedSet.id || embeddedSet.id === setId);
+  const set = stored || (embeddedMatches ? embeddedSet : null) || retained;
   PLAYER_ENGINE_AUDIO_CFG.set = set;
   ENGINE_AUDIO.setConfig(set);
+  const nativePawn=GAME.pawns&&GAME.pawns.get?GAME.pawns.get('native-player-car'):null;
+  if(nativePawn&&nativePawn.config){
+    nativePawn.config.engineAudio=Object.assign({},nativePawn.config.engineAudio||{}, {setId:PLAYER_ENGINE_AUDIO_CFG.setId,set});
+  }
 }
 
 // ------------------------------------------------ input
@@ -3985,32 +4393,16 @@ addEventListener('keydown', e => {
   }
   if(runtimeCinemaState || GAME.state.cinemaInputLocked) return;
   if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
-  if(key === 'u'){
-    e.preventDefault();
-    if(activeLogicTuningPawn() || GAME.player && GAME.player.enabled !== false && GAME.player.hidden !== true) toggleTunePanel();
-    return;
-  }
+  // Runtime commands below are executed from their resolved mapping during
+  // the frame. This listener only reserves browser keys and maintains the
+  // legacy key snapshot used if the input modules fail to load.
+  if(key === 'u') e.preventDefault();
   keys[key] = true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) e.preventDefault();
-  if(key === 'r' && !isEditorSimulationPreview()) resetCar();
-  // The camera-mode key is CONTEXT DEPENDENT: a vehicle keeps C, and on foot it
-  // moved to B because C became crouch. This handler read the raw key and so
-  // bypassed the binding entirely — C still popped the view message while
-  // walking around, and B did nothing.
-  if(key === (activeFirstPersonRig() ? 'b' : 'c')){
-    e.preventDefault();
-    if(!e.repeat) cycleGameplayCameraMode();
-  }
-  if(key === 'm'){ const m = SFX.toggleMute(); popup(m?'MUTED':'SOUND ON','#9aa3b8'); }
-  // F is the Use key on foot, so it must not also flash a vehicle's headlights.
-  if(key === 'f' && !isEditorSimulationPreview() && !activeFirstPersonRig()){
-    PLAYER_LIGHT_RIG.setHighBeams(true);
-  }
-  if(e.key === 'Tab'){ e.preventDefault(); RADIO.toggleOpen(); }
-  if(key === 'p'){ RADIO.togglePlay(); }
-  if(key === 'n'){ RADIO.next(); }
-  if(key === 'b'){ RADIO.prev(); }
-  if(key === 'h'){ document.getElementById('legend').classList.toggle('collapsed'); }
+  if(key === 'b' || key === 'c' || key === 'm') e.preventDefault();
+  // Headlights are sampled from the resolved Vehicle mapping in the frame
+  // loop. A raw F handler cannot know which Pawn type currently owns input.
+  if(e.key === 'Tab') e.preventDefault();
 });
 addEventListener('keyup', e => {
   if(isEditorSimulationPreview()) return;
@@ -4018,18 +4410,29 @@ addEventListener('keyup', e => {
   if(e.target && e.target.closest && e.target.closest('#tunePanel, #settingsOverlay')) return;
   const key = e.key.toLowerCase();
   keys[key] = false;
-  if(key === 'f'){
-    PLAYER_LIGHT_RIG.setHighBeams(false);
-  }
 });
 
 // ------------------------------------------------ input manager (keyboard / gamepad / touch)
 // Abstract driving actions resolved per player from the active device.
 // Project rules (allowed devices, default bindings) come from meta.input;
 // the player's in-game remaps layer on top. See js/runtime/input/*.
-const INPUT = window.LK_RUNTIME_INPUT_MANAGER ? window.LK_RUNTIME_INPUT_MANAGER.create({}) : null;
-GAME.input = INPUT;
-let lastResetHeld = false;
+let INPUT = null;
+let PLAYER_ACTION_ROUTER = null;
+let inputRuntimeSetupReady = false;
+function ensurePlayerInputRuntime(){
+  if(!INPUT && window.LK_RUNTIME_INPUT_MANAGER){
+    INPUT=window.LK_RUNTIME_INPUT_MANAGER.create({});
+    GAME.input=INPUT;
+  }
+  if(!PLAYER_ACTION_ROUTER&&INPUT&&window.LK_RUNTIME_PLAYER_ACTION_ROUTER){
+    PLAYER_ACTION_ROUTER=window.LK_RUNTIME_PLAYER_ACTION_ROUTER.create({GAME,input:INPUT});
+  }
+  GAME.systems.playerActionRouter=PLAYER_ACTION_ROUTER;
+  if(inputRuntimeSetupReady)installPlayerInputSurfaces();
+  return !!(INPUT&&PLAYER_ACTION_ROUTER);
+}
+GAME.systems.ensurePlayerInputRuntime=ensurePlayerInputRuntime;
+ensurePlayerInputRuntime();
 let lastGamepadActions = {};
 let lastUiGamepadActions = {};
 let lastCameraModeHeld = false;
@@ -4048,6 +4451,7 @@ function neutralPlayerDrive(){
     throttle: 0,
     brake: 0,
     handbrake: false,
+    wheelBrake: false,
     reset: false,
     pauseMenu: false,
     highBeams: false,
@@ -4073,19 +4477,27 @@ function playerControllerIndex(){
     ? Math.max(0, Math.min(3, Number(GAME.player.controllerIndex) | 0)) : 0;
 }
 
+function playerInputSnapshot(playerId, requestedContext){
+  const id = Math.max(1, Math.min(4, Number(playerId) || 1));
+  if(PLAYER_ACTION_ROUTER) return PLAYER_ACTION_ROUTER.read(id, requestedContext);
+  if(!INPUT || !INPUT.player) return {playerId:id, pawn:null, contextId:requestedContext || null, view:null, drive:neutralPlayerDrive()};
+  if(INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(id - 1);
+  const view = INPUT.player(id - 1);
+  const drive = view && view.drive ? view.drive(requestedContext) : neutralPlayerDrive();
+  return {playerId:id, pawn:null, contextId:requestedContext || (view && view.context ? view.context() : null), view, drive};
+}
+
 function readDriveInput(){
   if(GAME.state.paused) return neutralPlayerDrive();
   if(runtimeCinemaState || GAME.state.cinemaInputLocked) return neutralPlayerDrive();
   if(runtimeCameraInputPlayerId != null && INPUT && INPUT.player){
     const cameraPlayer = Math.max(1, Math.min(4, Number(runtimeCameraInputPlayerId) || 1));
-    if(INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(cameraPlayer - 1);
-    return INPUT.player(cameraPlayer - 1).drive('vehicle');
+    return playerInputSnapshot(cameraPlayer).drive || neutralPlayerDrive();
   }
   if(!GAME.player || GAME.player.enabled === false || playerControllerIndex() < 0) return neutralPlayerDrive();
   if(isEditorSimulationPreview()) return neutralPlayerDrive();
   if(INPUT){
-    const drive = INPUT.player(playerControllerIndex()).drive('vehicle');
-    return drive;
+    return playerInputSnapshot(playerControllerIndex() + 1).drive || neutralPlayerDrive();
   }
   // fallback if the input modules failed to load: legacy keyboard
   const legacyDrive = {
@@ -4095,7 +4507,8 @@ function readDriveInput(){
     handbrake: !!keys[' '],
     reset: false,
     pauseMenu: false,
-    highBeams: !!keys['f'],
+    highBeams: !!keys['l'],
+    interact: !!keys['f'],
     radioToggle: false,
     radioPlay: false,
     radioNext: false,
@@ -4113,11 +4526,10 @@ function readDriveInput(){
 function gamepadActions(){
   if(isEditorSimulationPreview()) return null;
   if(!INPUT) return null;
-  const index = playerControllerIndex();
-  if(index < 0) return null;
-  const p = INPUT.player(index);
+  const snapshot = playerInputSnapshot(activeRuntimePlayerId());
+  const p = snapshot.view;
   if(!p || p.deviceType() !== 'gamepad') return null;
-  return p.drive('vehicle');
+  return snapshot.drive;
 }
 function gamepadEdge(state, key, previous){
   return !!(state && state[key] && !(previous || lastGamepadActions)[key]);
@@ -4129,17 +4541,24 @@ function handleGamepadActions(){
     lastCameraModeHeld = false;
     return;
   }
-  const controllerIndex = playerControllerIndex();
-  const mappedPlayer = !runtimeCinemaState && !GAME.state.cinemaInputLocked && INPUT && INPUT.player && controllerIndex >= 0 ? INPUT.player(controllerIndex) : null;
-  const mappedState = mappedPlayer && mappedPlayer.drive ? mappedPlayer.drive('vehicle') : null;
-  const cameraModeHeld = !!(mappedPlayer && mappedPlayer.deviceType && mappedPlayer.deviceType() === 'gamepad' && mappedState && mappedState.cameraMode);
+  const mappedSnapshot = !runtimeCinemaState && !GAME.state.cinemaInputLocked ? playerInputSnapshot(activeRuntimePlayerId()) : null;
+  const mappedPlayer = mappedSnapshot && mappedSnapshot.view;
+  const mappedState = mappedSnapshot && mappedSnapshot.drive;
+  // Camera Mode is context-mapped for every device: Vehicle uses C/R3 while
+  // Character uses B/R3. Sampling keyboard here too prevents raw C from also
+  // changing camera while a Character crouches.
+  const cameraModeHeld = !!(mappedState && mappedState.cameraMode);
   if(!GAME.state.paused && cameraModeHeld && !lastCameraModeHeld) cycleGameplayCameraMode();
   lastCameraModeHeld = cameraModeHeld;
   const state = gamepadActions();
-  const uiPlayer = INPUT && INPUT.player ? INPUT.player(LOCAL_MULTIPLAYER_POLICY.uiOwnerPlayerIndex) : null;
-  const uiState = uiPlayer && uiPlayer.deviceType && uiPlayer.deviceType() === 'gamepad' && uiPlayer.drive ? uiPlayer.drive() : null;
+  const uiSnapshot = INPUT && INPUT.player ? playerInputSnapshot(LOCAL_MULTIPLAYER_POLICY.uiOwnerPlayerIndex + 1) : null;
+  const uiPlayer = uiSnapshot && uiSnapshot.view;
+  const uiDeviceType = uiPlayer && uiPlayer.deviceType ? uiPlayer.deviceType() : null;
+  const uiState = uiSnapshot && uiSnapshot.drive || null;
   if(uiState){
-    if(!GAME.state.paused && gamepadEdge(uiState, 'pauseMenu', lastUiGamepadActions)) toggleSettingsMenu('game', {source: 'gamepad', playerIndex:LOCAL_MULTIPLAYER_POLICY.uiOwnerPlayerIndex});
+    // Keyboard Escape still closes focused Settings controls in the DOM
+    // listener above. Gamepad Start has no DOM event and is handled here.
+    if(uiDeviceType === 'gamepad' && !GAME.state.paused && gamepadEdge(uiState, 'pauseMenu', lastUiGamepadActions)) toggleSettingsMenu('game', {source: 'gamepad', playerIndex:LOCAL_MULTIPLAYER_POLICY.uiOwnerPlayerIndex});
     if(!GAME.state.paused){
       if(gamepadEdge(uiState, 'radioToggle', lastUiGamepadActions)) RADIO.toggleOpen();
       if(gamepadEdge(uiState, 'radioPlay', lastUiGamepadActions)) RADIO.togglePlay();
@@ -4156,16 +4575,18 @@ function handleGamepadActions(){
       }
     }
   }
-  PLAYER_LIGHT_RIG.setHighBeams(!GAME.state.paused && !isEditorSimulationPreview() && !!(keys['f'] || (state && state.highBeams)));
+  // This is a Pawn-owned action, not a global UI shortcut. Reading only the
+  // resolved Vehicle context keeps old/custom Character bindings harmless and
+  // sends keyboard and gamepad remaps through the exact same execution path.
+  const vehicleHighBeams = !!(mappedSnapshot && mappedSnapshot.contextId === 'vehicle' && mappedState && mappedState.highBeams);
+  PLAYER_LIGHT_RIG.setHighBeams(!GAME.state.paused && !isEditorSimulationPreview() && vehicleHighBeams);
   lastGamepadActions = state ? Object.assign({}, state) : {};
   lastUiGamepadActions = uiState ? Object.assign({}, uiState) : {};
 }
-function checkResetEdge(){
-  if(!INPUT) return;
-  const index = playerControllerIndex();
-  const held = index >= 0 && !isEditorSimulationPreview() && !!INPUT.player(index).drive('vehicle').reset;
-  if(held && !lastResetHeld) resetCar();
-  lastResetHeld = held;
+function dispatchPossessedPlayerActions(){
+  if(!PLAYER_ACTION_ROUTER) return [];
+  const enabled = !GAME.state.paused && !isEditorSimulationPreview() && !runtimeCinemaState && !GAME.state.cinemaInputLocked;
+  return PLAYER_ACTION_ROUTER.update(enabled);
 }
 function applyProjectInputConfig(){
   if(!INPUT) return;
@@ -4179,6 +4600,10 @@ function applyProjectInputConfig(){
   INPUT.setConfig(cfg);
 }
 let MAPPING = null;
+let inputTouchInstalled=false;
+let inputMappingInstalled=false;
+let inputMenuInstalled=false;
+let inputConfigApplied=false;
 function touchControlsRuntimeVisible(){
   const settings = document.getElementById('settingsOverlay');
   if(settings && settings.classList.contains('open')) return false;
@@ -4189,16 +4614,18 @@ function touchControlsRuntimeVisible(){
 function refreshTouchControls(){
   if(TOUCH_CONTROLS && TOUCH_CONTROLS.refresh) TOUCH_CONTROLS.refresh();
 }
-if(INPUT){
-  if(window.LK_RUNTIME_TOUCH_CONTROLS){
+function installPlayerInputSurfaces(){
+  if(!INPUT)return false;
+  if(!inputTouchInstalled&&window.LK_RUNTIME_TOUCH_CONTROLS){
     TOUCH_CONTROLS = window.LK_RUNTIME_TOUCH_CONTROLS.create({
       manager: INPUT,
       mount: document.body,
       isRuntimeVisible: touchControlsRuntimeVisible,
     });
+    inputTouchInstalled=true;
   }
   // draggable/resizable Mapping window shared by the in-game Controls menu
-  if(window.LK_RUNTIME_WINDOW_MANAGER && window.LK_RUNTIME_MAPPING_OVERLAY){
+  if(!inputMappingInstalled&&window.LK_RUNTIME_WINDOW_MANAGER && window.LK_RUNTIME_MAPPING_OVERLAY){
     const WM = window.LK_RUNTIME_WINDOW_MANAGER.create({storageKey: 'lotking.windows.game.v1'});
     const session = {
       getConfig: () => INPUT.getConfig(),
@@ -4212,11 +4639,33 @@ if(INPUT){
     };
     MAPPING = window.LK_RUNTIME_MAPPING_OVERLAY.create({wm: WM, session, lang: () => GAME.i18n.lang, windowId: 'lk-mapping-game'});
     GAME.input.openMapping = () => MAPPING && MAPPING.open();
+    inputMappingInstalled=true;
   }
-  if(window.LK_RUNTIME_INPUT_MENU){
+  if(!inputMenuInstalled&&window.LK_RUNTIME_INPUT_MENU){
     window.LK_RUNTIME_INPUT_MENU.create({manager: INPUT, body: document.getElementById('lkControlsBody'), lang: GAME.i18n.lang, openMapping: () => MAPPING && MAPPING.open()});
+    inputMenuInstalled=true;
   }
-  applyProjectInputConfig();
+  if(!inputConfigApplied){applyProjectInputConfig();inputConfigApplied=true;}
+  return true;
+}
+inputRuntimeSetupReady=true;
+ensurePlayerInputRuntime();
+
+function possessedPlayerPawn(){
+  const pawns = GAME.pawns;
+  if(!pawns || typeof pawns.getByPlayerId !== 'function') return null;
+  return pawns.getByPlayerId(1) || null;
+}
+// The native car has had a "fell out of the world" net since forever; a Pawn had
+// none, so a vehicle that clipped through the ground fell for ever.
+const PAWN_FALL_THROUGH_Y = -30;
+function guardPawnFallThrough(){
+  const pawn = possessedPlayerPawn();
+  const position = pawn && pawn.owner && pawn.owner.position;
+  if(!position || !(position.y < PAWN_FALL_THROUGH_Y)) return false;
+  if(typeof pawn.reset !== 'function') return false;
+  pawn.reset();
+  return true;
 }
 
 function resetCar(){
@@ -4291,29 +4740,31 @@ function setPlayerModel(sceneRoot){
 PLAYER_MODEL.bindDrop(window);
 
 // ------------------------------------------------ RADIO (soundhud) + slow-motion
-function radioBindingActor(actorId){
-  const wanted = String(actorId || '').trim();
-  if(!wanted || !GAME.world || !GAME.world.registry) return null;
-  let match = null;
-  GAME.world.registry.forEach(object => {
-    if(match || !object) return;
-    const data = object.userData || {};
-    if(String(data.editorId || data.logicInstanceId || data.entityId || data.id || '') === wanted) match = object;
-  });
-  return match;
+function runtimePawnUiActive(pawn){
+  if(!pawn || pawn.possessed === false || pawn.enabled === false || pawn.hidden === true) return false;
+  const owner = pawn.owner || null;
+  const ownerData = owner && owner.userData || {};
+  if(owner && (owner.visible === false || ownerData.hidden === true || ownerData.logicEnabled === false)) return false;
+  return true;
 }
-function radioRuntimeAvailable(config){
-  const cfg = config || {};
-  const mode = cfg.bindingMode === 'global' || cfg.bindingMode === 'actor' ? cfg.bindingMode : 'vehicle';
-  if(mode === 'global') return true;
-  if(mode === 'actor'){
-    const actor = radioBindingActor(cfg.bindingActorId);
-    return !!(actor && actor.visible !== false && !(actor.userData && actor.userData.hidden === true));
-  }
-  const pawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
-  if(!pawn || pawn.enabled === false || pawn.hidden === true || pawn.possessed === false) return false;
-  const isVehicle = pawn.pawnType === 'vehicle' || pawn.kind === 'native-adapter' || pawn.id === 'native-player-car';
-  return !!(isVehicle && (!pawn.config || !pawn.config.radio || pawn.config.radio.enabled !== false));
+function isRuntimeVehiclePawn(pawn){
+  return !!(pawn && (pawn.pawnType === 'vehicle' || pawn.kind === 'native-adapter' || pawn.id === 'native-player-car'));
+}
+function runtimePawnHudContext(pawn){
+  if(!runtimePawnUiActive(pawn)) return 'none';
+  if(pawn.pawnType === 'soccer') return 'soccer';
+  if(pawn.pawnType === 'character') return 'character';
+  return isRuntimeVehiclePawn(pawn) ? 'vehicle' : 'none';
+}
+function activeRuntimeVehiclePawn(playerId){
+  const pawn = GAME.pawns && GAME.pawns.getByPlayerId
+    ? GAME.pawns.getByPlayerId(Math.max(1, Math.min(4, Number(playerId) || 1)))
+    : null;
+  return runtimePawnUiActive(pawn) && isRuntimeVehiclePawn(pawn) ? pawn : null;
+}
+function radioRuntimeAvailable(config, playerId){
+  const pawn = activeRuntimeVehiclePawn(playerId);
+  return !!(pawn && (!pawn.config || !pawn.config.radio || pawn.config.radio.enabled !== false));
 }
 const RADIO = window.LK_RUNTIME_RADIO_HUD.create({
   paths: ASSETS,
@@ -4366,19 +4817,35 @@ function cockpitInteractionSlowMotionRequested(){
   return !!(GAME.state.playPreviewCursorVisible && shouldShowRuntimeCursor() &&
     runtimeInteriorVehicleActive());
 }
+/** Charging a shot drops the world into slow motion so the player actually has
+ *  time to pick a corner, a height and an amount of curve. Works the same from
+ *  a penalty spot and at a full sprint, because it keys off the charge itself
+ *  rather than off any match phase. Returns the requested scale, or 0. */
+function soccerShotSlowMotionRequested(){
+  const pawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(activeRuntimePlayerId()) : null;
+  if(!pawn || pawn.pawnType !== 'soccer' || !pawn.state || !pawn.state.shotCharge) return 0;
+  const ball = pawn.config && pawn.config.ball || {};
+  if(ball.aimSlowMotion === false) return 0;
+  const scale = Number(ball.aimTimeScale);
+  return Number.isFinite(scale) && scale > 0 && scale < 1 ? scale : .18;
+}
 
 // Runtime UI keeps real-time input and painting while vehicle simulation slows.
 // Multiplayer is intentionally excluded because peers must never disagree on dt.
 const TS = {
   cur:1,
   update(dt){
-    const requested = RADIO.isOpen() || cockpitInteractionSlowMotionRequested();
+    const shotScale = soccerShotSlowMotionRequested();
+    const requested = RADIO.isOpen() || cockpitInteractionSlowMotionRequested() || shotScale > 0;
     if(requested && !runtimeSinglePlayer()){
       this.cur = 1;
       return this.cur;
     }
-    const target = requested ? 0.1 : 1;
-    this.cur += (target - this.cur) * Math.min(1, dt * 4);
+    const target = requested ? (shotScale > 0 ? shotScale : 0.1) : 1;
+    // Drop into aiming faster than it recovers: the bite should feel immediate,
+    // while the return to full speed reads as the strike being released.
+    const rate = shotScale > 0 && this.cur > target ? 9 : 4;
+    this.cur += (target - this.cur) * Math.min(1, dt * rate);
     return this.cur;
   },
 };
@@ -4734,7 +5201,6 @@ function preloadMenuShell(){
     });
   };
   setMenuProgress(8, 'loading menu');
-  setMenuProgress(46, 'loading menu background');
   window.addEventListener('lotking:bundled-demo-progress', event => {
     const detail = event && event.detail || {};
     setMenuProgress(detail.progress == null ? 46 : detail.progress, detail.step || 'loading role menu level', detail);
@@ -4877,9 +5343,14 @@ RUNTIME_LOADER = window.LK_RUNTIME_RUNTIME_LOADER.create({
     const hooks = GAME.hooks && Array.isArray(GAME.hooks.warmup) ? GAME.hooks.warmup.slice() : [];
     const logic = GAME.systems && GAME.systems.logic;
     const prepareLogic = logic && logic.prewarm ? logic.prewarm(context) : null;
-    return Promise.resolve(prepareLogic).then(() =>
-      hooks.reduce((chain, hook) => chain.then(() => typeof hook === 'function' ? hook(context) : null), Promise.resolve())
-    );
+    return Promise.resolve(prepareLogic).then(async() => {
+      // Logic prewarm creates/adopts its Pawn records first. The shared registry
+      // then sees native, Character, Logic Vehicle and Sketchbook families in
+      // one inventory-driven pass, including types added by future plugins.
+      const pawns=GAME.pawns||GAME.systems&&GAME.systems.vehiclePawns;
+      if(pawns&&pawns.prewarmAll)await pawns.prewarmAll(context);
+      return hooks.reduce((chain, hook) => chain.then(() => typeof hook === 'function' ? hook(context) : null), Promise.resolve());
+    });
   },
   setVideoWarmProfile:active => VIDEO_SETTINGS.setWarmProfile(active),
   applyAdaptiveLow:report => VIDEO_SETTINGS.applyAdaptiveLow(report),
@@ -4936,9 +5407,21 @@ GAME_FLOW = window.LK_RUNTIME_GAME_FLOW.create({
   },
   currentLevelRole: () => {
     const editorRole = GAME.editor && GAME.editor.state && GAME.editor.state.levelRole;
-    if(GAME.state && (GAME.state.editorActive || GAME.state.editorPreview) && editorRole) return editorRole;
     const current = TRACK_CATALOG.current();
-    if(current && current.levelRole) return current.levelRole;
+    const editorTrackId = GAME.editor && GAME.editor.state && GAME.editor.state.trackId;
+    const store=window.LK_STORE,activeId=store&&store.levels&&store.levels.activeId?store.levels.activeId():null;
+    const activeProject=activeId&&store.levels&&store.levels.get?store.levels.get(activeId):null;
+    const templateId=activeProject&&activeProject.scene&&activeProject.scene.template&&String(activeProject.scene.template.id||'');
+    if(templateId==='fps-shooter-test'||templateId==='fps-enemy-outpost')return 'gameplay';
+    // During Editor Play the prepared runtime track is authoritative when it
+    // represents the open editor level. Gameplay catalog entries explicitly
+    // carry `gameplay`; a stale menu role can no longer win simply because the
+    // previous project happened to be an Editor/Game Menu.
+    if(GAME.state && (GAME.state.editorActive || GAME.state.editorPreview)){
+      if(current&&current.levelRole&&(!editorTrackId||String(current.id)===String(editorTrackId)))return current.levelRole;
+      if(editorRole)return editorRole;
+    }
+    if(current&&current.levelRole)return current.levelRole;
     const background = GAME.state && GAME.state.menuBackgroundLevel;
     return background && background.role || 'gameplay';
   },
@@ -5064,10 +5547,14 @@ function setPlayerCollisionConfig(values){
     if(Number.isFinite(n)) PLAYER_COLLISION.bodyY = clamp(n, 0.05, 5);
   }
   if(PHYS.world && rebuildPlayerPhysicsBody) rebuildPlayerPhysicsBody();
+  // The adapter can already exist while a local project is still being
+  // restored. Publish collision edits immediately so on-foot avoidance never
+  // spends a frame on the bootstrap/default chassis dimensions.
+  if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer();
   return PLAYER_COLLISION;
 }
 
-Object.assign(GAME.core, {canvas, renderer, scene, camera, lights: {hemi, sun, pl1, pl2}});
+Object.assign(GAME.core, {canvas, renderer, rendererReady, scene, camera, lights: {hemi, sun, pl1, pl2}});
 Object.assign(GAME.world, {
   state: WORLD_STATE,
   generator: WORLD_GENERATOR,
@@ -5087,7 +5574,7 @@ Object.assign(GAME.player, {
   setControllerIndex(index){
     this.controllerIndex = index == null || index === 'none' ? null : Math.max(0, Math.min(3, Number(index) | 0));
     if(this.controllerIndex != null && INPUT && INPUT.ensurePlayerSlot) INPUT.ensurePlayerSlot(this.controllerIndex);
-    lastGamepadActions = {}; lastResetHeld = false; lastCameraModeHeld = false;
+    lastGamepadActions = {}; lastCameraModeHeld = false;
     if(GAME.pawns && GAME.pawns.syncNativeFromPlayer) GAME.pawns.syncNativeFromPlayer();
     return this.controllerIndex;
   },
@@ -5220,6 +5707,7 @@ Object.assign(GAME.systems, {
   editorMenuMusic: EDITOR_MENU_MUSIC,
   gameMenuMusic: GAME_MENU_MUSIC,
   sky: SKY,
+  proceduralWorld: PROCEDURAL_WORLD,
   rig: RIG,
   post: POST,
   pathTracing: PATH_TRACING,
@@ -5259,6 +5747,7 @@ Object.assign(GAME.actions, {
   renderGameplayCameraRect: renderPlayerCamera,
   localPlayerFrameRects,
   setLocalPlayerCount: count => (GAME.settings.localPlayerCount = Math.max(1, Math.min(4, Number(count) || 1))),
+  releaseRendererContext,
   unloadLevel: unloadCurrentLevel,
   prepareEditorLevel,
   backToMenu: backToMainMenu,
@@ -5328,10 +5817,14 @@ const skidFallbackPosition = new THREE.Vector3();
 const skidFallbackWheelIndices = [2, 3, 0, 1];
 
 function stepGameplayFrame(dt, shouldRender){
+  const activeUiPawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+  if(HUD.setContext) HUD.setContext(runtimePawnHudContext(activeUiPawn));
+  if(RADIO.syncAvailability) RADIO.syncAvailability();
   if(GAME.state.paused){
     if(SFX.stopEngineSynth) SFX.stopEngineSynth();
     ENGINE_AUDIO.setMuted(true);
     ENGINE_AUDIO.update(dt);
+    if(VEHICLE_RADAR) VEHICLE_RADAR.update(0);
     if(shouldRender) renderPlayerCamera();
     return;
   }
@@ -5345,6 +5838,9 @@ function stepGameplayFrame(dt, shouldRender){
   GAME.state.timeScale = TS.cur;
   const sdt = dt * TS.cur;
   const nativePlayerActive = nativePlayerRuntimeActive();
+  // Entering from an on-foot Pawn occurs after normal game-start audio setup.
+  // Recover a stopped sample manager without changing its authored bank.
+  if(nativePlayerActive&&ENGINE_AUDIO.isRunning&&!ENGINE_AUDIO.isRunning()) ENGINE_AUDIO.start({silent:true});
   if(PHYS.world && nativePhysicsRuntimeActive !== nativePlayerActive){
     setPhysicsPlayerActive(nativePlayerActive);
     nativePhysicsRuntimeActive = nativePlayerActive;
@@ -5473,19 +5969,14 @@ function stepGameplayFrame(dt, shouldRender){
   updateSkids(sdt);
   updateWind(sdt, speedKmh);
   if(GAME.systems && GAME.systems.logic && GAME.systems.logic.update) GAME.systems.logic.update(sdt);
-  for(const h of GAME.hooks.frame) h(sdt);   // editor-added effects (emitters, ...)
-  const playerCameraOutputs = GAME.state && GAME.state.runtimeVehicleCameraPawnIds || {};
-  const playerOneLogicCameraId = playerCameraOutputs[1] || (GAME.state && GAME.state.runtimeVehicleCameraPawnId);
-  const playerOneLogicCameraPawn = playerOneLogicCameraId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(playerOneLogicCameraId) : null;
-  if(nativePlayerActive && !(playerOneLogicCameraPawn && playerOneLogicCameraPawn.kind === 'logic-element' && playerOneLogicCameraPawn.possessed && playerOneLogicCameraPawn.hidden !== true)){
-    updateCamera(dt);                     // native camera only when it owns Player 1
-  }
-  updateSceneCameraOverride(dt);          // level/cinema camera owns the final Player 1 frame
+  runFrameHooks(sdt);   // editor-added effects (emitters, ...)
+  guardPawnFallThrough();
+  updateSceneCameraOverride(dt);          // one resolver owns the final Player 1 frame
   SKY.update(sdt);                        // day/night cycle (slows down with slow-mo)
 
   // sound
   const rpm01 = ENGINE.rpm01 || Math.min(1, Math.abs(vF)/CFG.maxSpeed);
-  const throttle = (keys['w']||keys['arrowup']) ? 1 : 0;
+  const throttle = clamp(Number(driveFx.throttle) || 0, 0, 1);
   // sgommate → engine audio: stessi flag delle skid mark, cosi' suono e segni
   // partono e finiscono insieme; lo screech del synth resta come fallback
   const skidByEngineAudio = ENGINE_AUDIO.handlesSkids();
@@ -5501,9 +5992,11 @@ function stepGameplayFrame(dt, shouldRender){
   ENGINE_AUDIO.update(sdt);
 
   const hudPawnId = GAME.state && GAME.state.runtimeVehicleCameraPawnId;
-  const cameraHudPawn = hudPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(hudPawnId) : null;
-  const possessedHudPawn = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
-  const hudPawn = cameraHudPawn && cameraHudPawn.possessed && cameraHudPawn.hidden !== true ? cameraHudPawn : possessedHudPawn;
+  const cameraHudPawnCandidate = hudPawnId && GAME.pawns && GAME.pawns.get ? GAME.pawns.get(hudPawnId) : null;
+  const possessedHudPawnCandidate = GAME.pawns && GAME.pawns.getByPlayerId ? GAME.pawns.getByPlayerId(1) : null;
+  const cameraHudPawn = runtimePawnUiActive(cameraHudPawnCandidate) ? cameraHudPawnCandidate : null;
+  const possessedHudPawn = runtimePawnUiActive(possessedHudPawnCandidate) ? possessedHudPawnCandidate : null;
+  const hudPawn = cameraHudPawn || possessedHudPawn;
   const hudState = hudPawn && hudPawn.state || null;
   const hudPlayerId = hudPawn && hudPawn.playerId || (playerControllerIndex() >= 0 ? playerControllerIndex() + 1 : 1);
   const hudSpeedKmh = hudState ? Number(hudState.speedKmh) || 0 : speedKmh;
@@ -5513,9 +6006,7 @@ function stepGameplayFrame(dt, shouldRender){
     : ((ENGINE.reverseActive || vF < -.3) ? 'R' : String(ENGINE.gear || 1));
   const modeLabel = DRIVE_TUNING.getMode ? DRIVE_TUNING.getMode() : 'custom';
   const playerTelemetry = hudState ? Object.assign({}, hudState, {speedKmh:hudSpeedKmh}) : null;
-  const hudContext = hudPawn && hudPawn.pawnType === 'soccer'
-    ? 'soccer'
-    : (hudPawn && hudPawn.pawnType === 'character' ? 'character' : 'vehicle');
+  const hudContext = runtimePawnHudContext(hudPawn);
   HUD.setActivePlayer(hudPlayerId);
   if(HUD.setContext) HUD.setContext(hudContext);
   if(hudContext === 'soccer' && HUD.setSoccerData){
@@ -5533,7 +6024,13 @@ function stepGameplayFrame(dt, shouldRender){
         shotScreen={reticleX:frame.x+(point.x*.5+.5)*frame.w,reticleY:frame.y+(-point.y*.5+.5)*frame.h};
       }
     }
-    const shotHud={shootout:true,role:hudPawn&&hudPawn.config&&hudPawn.config.role,aiming:!!activeAim,charge:shotCharge&&shotCharge.normalized,aimX:activeAim&&activeAim.aimX,aimY:activeAim&&activeAim.aimY,aimReticle:!(hudPawn&&hudPawn.config&&hudPawn.config.ball&&hudPawn.config.ball.aimReticle===false)};
+    const shotHud={shootout:true,role:hudPawn&&hudPawn.config&&hudPawn.config.role,aiming:!!activeAim,
+      charge:shotCharge&&shotCharge.normalized,aimX:activeAim&&activeAim.aimX,aimY:activeAim&&activeAim.aimY,
+      // Power, height and curve are three separate decisions; the meter has to
+      // show all three or the player is charging blind.
+      curve:shotCharge?Number(shotCharge.curve)||0:null,
+      slowMotion:!!shotCharge&&(GAME.state.timeScale||1)<.9,
+      aimReticle:!(hudPawn&&hudPawn.config&&hudPawn.config.ball&&hudPawn.config.ball.aimReticle===false)};
     if(shotScreen)Object.assign(shotHud,shotScreen);
     HUD.setSoccerData(penaltyState && penaltyState.phase !== 'idle'
       ? Object.assign(shotHud,penaltyState)
@@ -5549,11 +6046,30 @@ function stepGameplayFrame(dt, shouldRender){
   if(shouldRender && !renderLocalMultiplayer(dt)) renderPlayerCamera();
 }
 
+// Frame hooks come from level templates, plugins and Logic Elements, so any one
+// of them can be third-party code. Running them unguarded means a single throw
+// stops the loop and blanks the canvas, which reads as a renderer crash and
+// hides the real culprit. A hook that throws is reported once, then retired for
+// the session; every other system keeps running and the frame still presents.
+const FAILED_FRAME_HOOKS = new WeakSet();
+function runFrameHooks(sdt){
+  const hooks = GAME.hooks.frame;
+  for(let i = 0; i < hooks.length; i++){
+    const hook = hooks[i];
+    if(FAILED_FRAME_HOOKS.has(hook)) continue;
+    try { hook(sdt); }
+    catch(err){
+      FAILED_FRAME_HOOKS.add(hook);
+      console.error('LotKing: a frame hook threw and was retired for this session', err);
+    }
+  }
+}
+
 function stepMenuBackgroundFrame(dt){
   if(!(GAME.state && GAME.state.menuBackgroundLevel) || GAME.state.editorActive) return false;
   const sdt = Math.max(0, Number(dt) || 0);
   if(GAME.systems && GAME.systems.logic && GAME.systems.logic.update) GAME.systems.logic.update(sdt);
-  for(const h of GAME.hooks.frame) h(sdt);
+  runFrameHooks(sdt);
   updateSceneCameraOverride(sdt);
   SKY.update(sdt);
   renderPlayerCamera();
@@ -5561,13 +6077,14 @@ function stepMenuBackgroundFrame(dt){
 }
 
 function loop(now){
+  if(rendererContextReleased) return;
   requestAnimationFrame(loop);
   if(GAME.state.preBenchmarkRunning){ prevT = now; return; }
   if(INPUT) INPUT.update();              // poll gamepads / refresh device assignments each frame
   handleGamepadActions();
   let dt = (now - prevT)/1000; prevT = now;
   if(dt > .05) dt = .05;                 // clamp: no physics explosions on tab-back
-  if(!GAME.state.paused && (SESSION.isStarted() || GAME.state.editorPreview)) checkResetEdge();
+  if(SESSION.isStarted() || GAME.state.editorPreview) dispatchPossessedPlayerActions();
   if(GAME.hooks.frameOverride){ GAME.hooks.frameOverride(dt); return; }   // editor takes over
   if(!SESSION.isStarted()){
     if(!stepMenuBackgroundFrame(dt)) renderPlayerCamera();
@@ -5575,6 +6092,25 @@ function loop(now){
   }
   stepGameplayFrame(dt, true);
 }
-requestAnimationFrame(loop);
+rendererReady.then(report=>{
+  try{sessionStorage.removeItem('lotking.rendererRecovery.v1');}catch(recoveryError){}
+  // Backend fallback is visible in Video Settings/diagnostics. It is a normal
+  // capability decision, not a console warning the author can act on here.
+  if(!rendererContextReleased)requestAnimationFrame(loop);
+}).catch(error=>{
+  console.error('LotKing: renderer initialization failed before the first frame.',error);
+  if(RENDERING_BACKEND&&RENDERING_BACKEND.preference&&RENDERING_BACKEND.preference()==='webgpu'){
+    // WebGPURenderer normally performs this fallback internally. This final
+    // guard handles a failure that also prevents its WebGL fallback from
+    // initializing and recovers on a fresh canvas/context.
+    RENDERING_BACKEND.setPreference('webgl');
+    try{
+      if(!sessionStorage.getItem('lotking.rendererRecovery.v1')){
+        sessionStorage.setItem('lotking.rendererRecovery.v1','1');
+        location.reload();
+      }
+    }catch(recoveryError){}
+  }
+});
 
 })();

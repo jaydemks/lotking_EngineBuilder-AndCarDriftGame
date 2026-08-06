@@ -71,6 +71,17 @@ function create(deps){
     finishAdd(obj);
   }
 
+  function addProceduralAsset(type, at, overrides){
+    const api=window.LK_ENGINE_PROCEDURAL_ASSETS;
+    if(!api||!STORE.createProceduralAsset){status(tr('Procedural Asset library unavailable','Libreria Procedural Asset non disponibile'));return null;}
+    const point=at||spawnPointAhead(),entry=api.entry(type,overrides||{});
+    entry.id=STORE.nextId();entry.t.p=[point.x,point.y||0,point.z];
+    const obj=STORE.createProceduralAsset(entry.procedural);
+    STORE.registerAdded(GAME,obj,entry);
+    obj.userData.assetKey=entry.asset.key;obj.userData.assetName=entry.asset.name;obj.userData.assetSource=entry.asset.source;
+    finishAdd(obj);return obj;
+  }
+
   function addLight(kind, at){
     const id = STORE.nextId();
     const obj = STORE.createLight(kind);
@@ -390,7 +401,7 @@ function create(deps){
 
   bindInputs();
 
-  return Object.freeze({addPrimitive, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, addSoccerStadium, addDriftTrack, finishAdd, openGlbImportAt, beginReplaceObject});
+  return Object.freeze({addPrimitive, addProceduralAsset, addLight, addEffect, addText, addTexture, addCamera, addCinemaStudio, addLogicElement, addSoccerStadium, addDriftTrack, finishAdd, openGlbImportAt, beginReplaceObject});
 }
 
 window.LK_EDITOR_ADD_ACTIONS = Object.freeze({create});

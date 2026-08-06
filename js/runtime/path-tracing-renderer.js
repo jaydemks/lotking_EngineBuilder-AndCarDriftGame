@@ -25,6 +25,7 @@ function create(options){
   if(!THREE||!renderer||!scene){
     return unsupported('Renderer or scene unavailable');
   }
+  if(renderer.isWebGPURenderer)return unsupported('Path tracing currently requires the stable WebGLRenderer backend');
   const gl=renderer.getContext&&renderer.getContext();
   const webgl2=!!(renderer.capabilities&&renderer.capabilities.isWebGL2)||
     (typeof WebGL2RenderingContext!=='undefined'&&gl instanceof WebGL2RenderingContext);

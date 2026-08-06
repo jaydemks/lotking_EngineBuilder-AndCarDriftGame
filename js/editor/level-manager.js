@@ -104,17 +104,16 @@ function create(deps){
       okText:tr('Continue', 'Continua'),
     });
     if(!levelRole) return;
+    // Templates self-register in LK_LEVEL_TEMPLATES, so a new game mode appears
+    // here without editing this dialog.
+    const templateRegistry = window.LK_LEVEL_TEMPLATES;
+    const templateOptions = templateRegistry && templateRegistry.options ? templateRegistry.options(tr) : [];
+    if(!templateOptions.length){ status(tr('⚠ No level templates registered', '⚠ Nessun template livello registrato')); return; }
     const levelTemplate = await promptEditorAction({
       title:tr('Level template', 'Template livello'),
       message:tr('Choose a starting point for this level:', 'Scegli una base di partenza per questo livello:'),
-      value:'character-movement-playground',
-      options:[
-        {value:'character-movement-playground', label:tr('Sketch Street - Character Movement', 'Sketch Street - Movimento personaggio')},
-        {value:'fps-shooter-test', label:tr('FPS Shooter Test (First Person)', 'FPS Shooter Test (Prima persona)')},
-        {value:'penalty-shootout-stadium', label:tr('Penalty Shootout Stadium (Soccer)', 'Stadio Rigori (Calcio)')},
-        {value:'drift-track-minami', label:tr('Drift Track - Minami Drift Park', 'Tracciato Drift - Minami Drift Park')},
-        {value:'empty', label:tr('Empty Level', 'Livello vuoto')},
-      ],
+      value:templateRegistry.defaultId(),
+      options:templateOptions,
       okText:tr('Continue', 'Continua'),
     });
     if(!levelTemplate) return;

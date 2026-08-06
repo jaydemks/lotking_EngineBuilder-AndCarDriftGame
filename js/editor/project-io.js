@@ -30,12 +30,20 @@ function create(deps){
   const BROWSER_PROJECT_INDEX = 'lk.editor.projects.v1';
   const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
   const BROWSER_PROJECT_MARKER = 'lk.editor.browserProject.v1';
+  const BROWSER_PROJECT_DB = 'lotking-editor-projects';
+  const BROWSER_PROJECT_DB_STORE = 'projects';
+  const BROWSER_PROJECT_DB_VERSION = 1;
+  const BROWSER_PROJECT_INLINE_LIMIT = 1024 * 1024;
   const PROJECT_IDENTITY_VERSION = 4;
   const LOCAL_BRIDGE_URL = '/__lotking/project-state';
+  const LOCAL_HISTORY_URL = '/__lotking/project-history';
+  const LOCAL_HISTORY_RESTORE_URL = '/__lotking/project-history/restore';
   const LOCAL_DEMO_PUBLISH_URL = '/__lotking/publish-demo';
   const LOCAL_BRIDGE_MARKER = 'lk.localProjectBridge.v1';
   const LOCAL_BRIDGE_ETAG = 'lk.localProjectBridge.etag.v1';
   const LOCAL_BRIDGE_DUPLICATE_FIX = 'lk.localProjectBridgeDuplicateFix.v1';
+  const LOCAL_BRIDGE_SOURCE = 'local-disk';
+  const AUTHOR_DEMO_SOURCE = 'author-demo';
   const projectExportAssets = window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS && window.LK_EDITOR_PLAYABLE_EXPORT_ASSETS.create({
     assetLibraryLoad: deps.assetLibraryLoad || function(){ return []; },
   });
@@ -45,6 +53,7 @@ function create(deps){
   let workspaceProjectSyncBusy = false;
   let startupProjectsShown = false;
   let projectsLanguageBound = false;
+  let projectHistoryRequest = 0;
   let projectImportTarget = 'project';
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   const isOnlineDemo = () => window.LK_PROJECT_WORKSPACE && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
@@ -99,9 +108,23 @@ function create(deps){
       const LV = levelsApi();
       const loadedId = project && project.meta && (project.meta.trackId || project.meta.levelId);
       if(LV && LV.reconcileActive && loadedId) LV.reconcileActive(loadedId);
-      setTrackMeta(project.meta);
+      const activeId=LV&&LV.activeId?LV.activeId():loadedId;
+      const activeEntry=LV&&LV.list?LV.list({includeHidden:true}).find(level=>level&&level.id===activeId):null;
+      // Loading a complete project is not a partial metadata edit. Old
+      // projects without levelRole are gameplay by definition; retaining the
+      // previous Editor Menu role here hid HUD/camera in unrelated FPS levels.
+      const loadedMeta=Object.assign({levelRole:activeEntry&&activeEntry.levelRole||'gameplay'},project&&project.meta||{});
+      if(!loadedMeta.levelRole)loadedMeta.levelRole='gameplay';
+      const templateId=project&&project.scene&&project.scene.template&&String(project.scene.template.id||'');
+      const officialFpsGameplay=templateId==='fps-shooter-test'||templateId==='fps-enemy-outpost';
+      if(officialFpsGameplay&&(loadedMeta.levelRole==='editor-menu'||loadedMeta.levelRole==='game-menu')){
+        loadedMeta.levelRole='gameplay';
+        if(LV&&LV.setRole&&activeId)LV.setRole(activeId,'gameplay');
+        console.warn('LotKing editor: repaired stale menu role on official FPS gameplay level',activeId,templateId);
+      }
+      setTrackMeta(loadedMeta);
     } else {
-      setTrackMeta({trackName:'Parking Lot', trackId:'parking-lot'});
+      setTrackMeta({trackName:'Parking Lot', trackId:'parking-lot', levelRole:'gameplay'});
     }
     ensureBrowserProjectSeed(project);
     showStartupProjectsOverlay();
@@ -188,19 +211,44 @@ function create(deps){
     return importProjectAsBrowserProject({name:name || 'p2p-collaboration.lkep.json'}, raw, progressToken);
   }
 
-  function localBridgeEligible(){
-    if(window.LK_PROJECT_WORKSPACE
-      && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo
-      && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo()) return false;
-    return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  function localBridgeAvailable(){
+    const host = String(location.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0'
+      || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
   }
 
-  async function saveLocalBridgeProject(project){
+  function localBridgeEligible(){
+    if(window.LK_PROJECT_WORKSPACE
+      && ((window.LK_PROJECT_WORKSPACE.isPrivateBrowserProject && window.LK_PROJECT_WORKSPACE.isPrivateBrowserProject())
+        || (window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo()))) return false;
+    return localBridgeAvailable();
+  }
+
+  function activeLocalBridgeRecord(){
+    const idx=browserProjectIndex();
+    const marker=getBrowserMarker&&getBrowserMarker();
+    const id=slugifyTrackName(activeBrowserProjectId||idx.activeId||marker&&marker.id||'');
+    const record=browserProjectRecord(idx,id);
+    return record&&record.source===LOCAL_BRIDGE_SOURCE?record:null;
+  }
+
+  async function saveLocalBridgeProject(project, options){
+    options=options||{};
     if(!localBridgeEligible() || !project) return null;
+    // Browser projects, Author DEMO and temporary/test scenes are separate
+    // authorities. Only the selected LOCAL DISK card may update its bridge;
+    // an explicit import is the sole operation allowed to claim that role.
+    if(!options.claimLocalAuthority&&!activeLocalBridgeRecord()){
+      console.info('LotKing local bridge: skipped save from a non-local project authority');
+      return null;
+    }
     const result = await preparePortableProject(project);
+    const headers={'Content-Type':'application/json','X-LotKing-Project-Authority':'local-disk'};
+    if(options.confirmed===true)headers['X-LotKing-Confirm-Overwrite']='1';
+    if(options.allowShrink===true)headers['X-LotKing-Allow-Project-Shrink']='1';
     const response = await fetch(LOCAL_BRIDGE_URL, {
       method:'PUT',
-      headers:{'Content-Type':'application/json'},
+      headers,
       body:JSON.stringify(result.project),
     });
     if(!response.ok) throw new Error('Local project bridge HTTP ' + response.status);
@@ -215,14 +263,18 @@ function create(deps){
   }
 
   async function restoreLocalBridgeProject(){
-    if(!localBridgeEligible()) return false;
+    if(!localBridgeAvailable()) return false;
     let progressToken = null;
     try {
       let etag = '';
       try { etag = localStorage.getItem(LOCAL_BRIDGE_ETAG) || ''; } catch(err){}
+      // Installations created before the local-disk Projects card need one
+      // complete read even when the scene ETag is unchanged, so the catalog can
+      // be connected to its authoritative LKEP bridge.
+      const bridgeRecordReady = hasLocalBridgeBrowserProject();
       const response = await fetch(LOCAL_BRIDGE_URL, {
         cache:'no-store',
-        headers:etag ? {'If-None-Match':etag} : {},
+        headers:etag && bridgeRecordReady ? {'If-None-Match':etag} : {},
       });
       if(response.status === 304){
         try { sessionStorage.setItem(LOCAL_BRIDGE_MARKER, etag || 'confirmed'); } catch(err){}
@@ -238,6 +290,17 @@ function create(deps){
       updateStatusWork(progressToken, 22, tr('Parsing levels', 'Analisi livelli'), 'loading');
       const project = STORE.parseProject ? STORE.parseProject(await response.text()) : await response.json();
       const stamp = String(project.savedAt || 'project');
+      const privateBrowserProject = !!(window.LK_PROJECT_WORKSPACE
+        && ((window.LK_PROJECT_WORKSPACE.isPrivateBrowserProject && window.LK_PROJECT_WORKSPACE.isPrivateBrowserProject())
+          || (window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo())));
+      const localRecord = syncLocalBridgeBrowserProject(project, stamp, {active:!privateBrowserProject});
+      if(ED.projectsOpen) refreshProjectsOverlay();
+      // Discover the disk project while an Author DEMO is open, but keep that
+      // deliberately selected DEMO scene active until Local Project is loaded.
+      if(privateBrowserProject){
+        finishStatusWork(progressToken, tr('Local project connected', 'Progetto locale collegato'), localRecord && localRecord.name || 'Local Project', 'success');
+        return false;
+      }
       // SessionStorage gives quota recovery a tiny independent proof even when
       // LocalStorage was already too full to record the previous bridge marker.
       try { sessionStorage.setItem(LOCAL_BRIDGE_MARKER, stamp); } catch(err){}
@@ -255,10 +318,10 @@ function create(deps){
       updateStatusWork(progressToken, 82, tr('Installing all project levels', 'Installazione di tutti i livelli'), 'loading');
       STORE.importProject(JSON.stringify(project));
       localStorage.setItem(LOCAL_BRIDGE_MARKER, stamp);
-      finishStatusWork(progressToken, tr('Project restored from disk', 'Progetto ripristinato dal disco'), browserProjectName(project), 'success');
+      finishStatusWork(progressToken, tr('Project restored from disk', 'Progetto ripristinato dal disco'), localRecord && localRecord.name || browserProjectName(project), 'success');
       if(LV && LV.syncCatalog) LV.syncCatalog();
       if(ED.levelsOpen) refreshLevelsOverlay();
-      window.dispatchEvent(new CustomEvent('lotking:local-project-restored', {detail:{project, levelCount:bridgeCount}}));
+      window.dispatchEvent(new CustomEvent('lotking:local-project-restored', {detail:{project, record:localRecord, levelCount:bridgeCount}}));
       return true;
     } catch(err){
       if(progressToken) finishStatusWork(progressToken, tr('Project restore failed', 'Ripristino progetto fallito'), err && err.message || String(err || 'error'), 'error');
@@ -695,6 +758,78 @@ function create(deps){
     return (idx.projects || []).find(item => item && slugifyTrackName(item.id) === id) || null;
   }
 
+  function hasLocalBridgeBrowserProject(){
+    const idx = browserProjectIndex();
+    return !!(idx.projects || []).find(record => record && record.source === LOCAL_BRIDGE_SOURCE);
+  }
+
+  function isAuthorDemoBrowserRecord(record){
+    return !!(record && (record.source===AUTHOR_DEMO_SOURCE || /(?:author\s+demo|demo\s+autore|demo\s+project)/i.test(String(record.name || ''))));
+  }
+
+  function localBridgeProjectName(project, record){
+    const meta = project && project.meta || {};
+    const candidate = String(meta.projectName || record && record.name || '').trim();
+    const inheritedFromLevel = candidate && projectLevelNames(project).has(slugifyTrackName(candidate));
+    const genericDemoName = /^demo project(?:\s+playground\b.*)?$/i.test(candidate);
+    if(candidate && !inheritedFromLevel && !genericDemoName) return candidate;
+    return 'Local Project';
+  }
+
+  function syncLocalBridgeBrowserProject(project, marker, options){
+    options = options || {};
+    const idx = browserProjectIndex();
+    let record = (idx.projects || []).find(item => item && item.source === LOCAL_BRIDGE_SOURCE) || null;
+    if(!record){
+      const id = uniqueBrowserProjectId(idx, 'local-project');
+      record = {id};
+      idx.projects.push(record);
+    }
+    const stale = (idx.projects || []).filter(item => item && item !== record && item.source === LOCAL_BRIDGE_SOURCE);
+    stale.forEach(item => localStorage.removeItem(browserProjectKey(item.id)));
+    idx.projects = (idx.projects || []).filter(item => item && (item === record || item.source !== LOCAL_BRIDGE_SOURCE));
+    record.name = localBridgeProjectName(project, record);
+    record.savedAt = project && project.savedAt || marker || new Date().toISOString();
+    record.source = LOCAL_BRIDGE_SOURCE;
+    delete record.storage;
+    localStorage.setItem(browserProjectKey(record.id), JSON.stringify(bridgeProjectManifest(project, record, marker)));
+    if(options.active !== false){
+      idx.activeId = record.id;
+      activeBrowserProjectId = record.id;
+      setBrowserMarker(record);
+    }
+    writeBrowserProjectIndex(idx);
+    return record;
+  }
+
+  async function resolveBrowserProjectPayload(record, project){
+    const authorDemoBacked = record && record.source === AUTHOR_DEMO_SOURCE
+      || project && project.browserStorage && project.browserStorage.mode === 'author-demo';
+    if(authorDemoBacked){
+      const url='demo/demo-project.lkep.json';
+      const response=await fetch(url,{cache:'no-store'});
+      if(!response.ok)throw new Error('Author DEMO HTTP '+response.status);
+      let text=await response.text();
+      const splitProject=window.LK_RUNTIME_SPLIT_PROJECT;
+      if(splitProject&&splitProject.resolveText)text=await splitProject.resolveText(text,new URL(url,location.href).href);
+      return STORE.parseProject?STORE.parseProject(text):JSON.parse(text);
+    }
+    const indexedBacked = record && record.storage === 'indexeddb'
+      || project && project.browserStorage && project.browserStorage.mode === 'indexeddb-project';
+    if(indexedBacked){
+      const dbKey = project && project.browserStorage && project.browserStorage.dbKey || record && record.id;
+      const projectText = await readIndexedBrowserProject(dbKey);
+      if(!projectText) throw new Error('IndexedDB project payload not found');
+      return STORE.parseProject ? STORE.parseProject(projectText) : JSON.parse(projectText);
+    }
+    const bridgeBacked = record && record.source === LOCAL_BRIDGE_SOURCE
+      || project && project.browserStorage && project.browserStorage.mode === 'local-bridge-manifest';
+    if(!bridgeBacked) return project;
+    const response = await fetch(LOCAL_BRIDGE_URL, {cache:'no-store'});
+    if(!response.ok) throw new Error('Local project bridge HTTP ' + response.status);
+    return STORE.parseProject ? STORE.parseProject(await response.text()) : await response.json();
+  }
+
   function projectLevelNames(project){
     const names = [];
     const add = value => {
@@ -782,6 +917,96 @@ function create(deps){
     } catch(err){ return null; }
   }
 
+  function openBrowserProjectDb(){
+    return new Promise((resolve, reject) => {
+      if(!window.indexedDB){ reject(new Error('IndexedDB unavailable')); return; }
+      const request = indexedDB.open(BROWSER_PROJECT_DB, BROWSER_PROJECT_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if(!db.objectStoreNames.contains(BROWSER_PROJECT_DB_STORE)) db.createObjectStore(BROWSER_PROJECT_DB_STORE, {keyPath:'id'});
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+      request.onblocked = () => reject(new Error('IndexedDB project store is blocked by another tab'));
+    });
+  }
+
+  async function writeIndexedBrowserProject(id, projectText, savedAt){
+    const db = await openBrowserProjectDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(BROWSER_PROJECT_DB_STORE, 'readwrite');
+        tx.objectStore(BROWSER_PROJECT_DB_STORE).put({id:String(id), text:String(projectText), savedAt:savedAt || null});
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB project write failed'));
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB project write aborted'));
+      });
+    } finally { db.close(); }
+  }
+
+  async function readIndexedBrowserProject(id){
+    const db = await openBrowserProjectDb();
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = db.transaction(BROWSER_PROJECT_DB_STORE, 'readonly').objectStore(BROWSER_PROJECT_DB_STORE).get(String(id));
+        request.onsuccess = () => resolve(request.result && request.result.text || null);
+        request.onerror = () => reject(request.error || new Error('IndexedDB project read failed'));
+      });
+    } finally { db.close(); }
+  }
+
+  async function removeIndexedBrowserProject(id){
+    const db = await openBrowserProjectDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(BROWSER_PROJECT_DB_STORE, 'readwrite');
+        tx.objectStore(BROWSER_PROJECT_DB_STORE).delete(String(id));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB project delete failed'));
+      });
+    } finally { db.close(); }
+  }
+
+  function indexedProjectManifest(project, record, byteLength){
+    const source = project || {};
+    return {
+      format:source.format || 'LKEP',
+      version:source.version || STORE.PROJECT_VERSION || '0.7.8',
+      name:source.name || STORE.PROJECT_NAME || 'Lot King Engine Project',
+      savedAt:source.savedAt || record.savedAt || new Date().toISOString(),
+      meta:Object.assign({}, source.meta || {}, {projectName:record.name}),
+      browserStorage:{mode:'indexeddb-project', dbKey:record.id, byteLength:Number(byteLength) || 0},
+    };
+  }
+
+  async function compactOversizedBrowserProjects(){
+    const idx = browserProjectIndex();
+    let changed = false;
+    for(const record of idx.projects || []){
+      if(!record || !record.id) continue;
+      const key = browserProjectKey(record.id);
+      const raw = localStorage.getItem(key);
+      if(!raw || raw.length <= BROWSER_PROJECT_INLINE_LIMIT) continue;
+      let project = null;
+      try { project = JSON.parse(raw); } catch(err){ continue; }
+      if(project && project.browserStorage) continue;
+      const marker = localBridgeMarker();
+      if(record.source === LOCAL_BRIDGE_SOURCE && marker){
+        localStorage.removeItem(key);
+        localStorage.setItem(key, JSON.stringify(bridgeProjectManifest(project, record, marker)));
+        delete record.storage;
+      } else {
+        await writeIndexedBrowserProject(record.id, raw, project && project.savedAt || record.savedAt);
+        record.storage = 'indexeddb';
+        localStorage.removeItem(key);
+        localStorage.setItem(key, JSON.stringify(indexedProjectManifest(project, record, raw.length)));
+      }
+      changed = true;
+    }
+    if(changed) writeBrowserProjectIndex(idx);
+    return changed;
+  }
+
   function localBridgeMarker(){
     if(!localBridgeEligible()) return '';
     try {
@@ -798,7 +1023,7 @@ function create(deps){
     const name = record && record.name || sourceMeta.projectName || ED.projectName || STORE.PROJECT_NAME || 'Lot King Engine Project';
     return {
       format:source.format || 'LKEP',
-      version:source.version || STORE.PROJECT_VERSION || '0.7.7',
+      version:source.version || STORE.PROJECT_VERSION || '0.7.8',
       name:source.name || STORE.PROJECT_NAME || 'Lot King Engine Project',
       savedAt:source.savedAt || record && record.savedAt || new Date().toISOString(),
       meta:Object.assign({}, currentTrackMeta(), sourceMeta, {
@@ -818,9 +1043,13 @@ function create(deps){
     if(!marker) return false;
     try {
       const idx = browserProjectIndex();
-      const activeId = slugifyTrackName(activeBrowserProjectId || idx.activeId || (getBrowserMarker() && getBrowserMarker().id) || '');
+      const diskRecord = (idx.projects || []).find(record => record && record.source === LOCAL_BRIDGE_SOURCE);
+      const activeId = slugifyTrackName(diskRecord && diskRecord.id || activeBrowserProjectId || idx.activeId || (getBrowserMarker() && getBrowserMarker().id) || '');
       const record = browserProjectRecord(idx, activeId);
       if(!record) return false;
+      if(record.source !== LOCAL_BRIDGE_SOURCE && window.LK_PROJECT_WORKSPACE
+        && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo
+        && window.LK_PROJECT_WORKSPACE.isPrivateBrowserDemo()) return false;
       const key = browserProjectKey(record.id);
       const raw = localStorage.getItem(key);
       if(!raw) return false;
@@ -842,7 +1071,7 @@ function create(deps){
     }
   }
 
-  function writeBrowserProject(project, opts){
+  function prepareBrowserProjectWrite(project, opts){
     opts = opts || {};
     const idx = browserProjectIndex();
     const now = new Date().toISOString();
@@ -866,20 +1095,64 @@ function create(deps){
         projectIdentityExplicit:sourceMeta.projectIdentityExplicit === true || opts.explicitName === true,
       }),
     });
-    const marker = localBridgeMarker();
-    const bridgeBacked = !!(marker && makeActive && !opts.newProject);
-    localStorage.setItem(
-      browserProjectKey(id),
-      JSON.stringify(bridgeBacked ? bridgeProjectManifest(saved, record, marker) : saved)
-    );
     record.id = id;
     record.name = name;
     record.savedAt = now;
+    return {idx, id, record, saved, makeActive, marker:localBridgeMarker()};
+  }
+
+  function finishBrowserProjectWrite(write){
+    const {idx, id, record, makeActive} = write;
     if(!browserProjectRecord(idx, id)) idx.projects.push(record);
     if(makeActive) idx.activeId = id;
     writeBrowserProjectIndex(idx);
     if(makeActive) setBrowserMarker(record);
     return record;
+  }
+
+  function writeBrowserProject(project, opts){
+    const write = prepareBrowserProjectWrite(project, opts);
+    const bridgeBacked = !!(write.marker && write.makeActive && !(opts && opts.newProject));
+    if(write.record.storage === 'indexeddb' && !bridgeBacked){
+      const projectText = JSON.stringify(write.saved);
+      localStorage.setItem(browserProjectKey(write.id), JSON.stringify(indexedProjectManifest(write.saved, write.record, projectText.length)));
+      writeIndexedBrowserProject(write.id, projectText, write.saved.savedAt).catch(err => console.warn('LotKing IndexedDB project update failed', err));
+    } else {
+      localStorage.setItem(
+        browserProjectKey(write.id),
+        JSON.stringify(bridgeBacked ? bridgeProjectManifest(write.saved, write.record, write.marker) : write.saved)
+      );
+      if(bridgeBacked) delete write.record.storage;
+    }
+    return finishBrowserProjectWrite(write);
+  }
+
+  async function writeBrowserProjectDurable(project, opts){
+    await compactOversizedBrowserProjects();
+    const write = prepareBrowserProjectWrite(project, opts);
+    const bridgeBacked = !!(write.marker && write.makeActive && !(opts && opts.newProject));
+    const projectText = JSON.stringify(write.saved);
+    if(bridgeBacked){
+      localStorage.setItem(browserProjectKey(write.id), JSON.stringify(bridgeProjectManifest(write.saved, write.record, write.marker)));
+      delete write.record.storage;
+      return finishBrowserProjectWrite(write);
+    }
+    if(projectText.length <= BROWSER_PROJECT_INLINE_LIMIT){
+      try {
+        localStorage.setItem(browserProjectKey(write.id), projectText);
+        delete write.record.storage;
+        return finishBrowserProjectWrite(write);
+      } catch(err){
+        if(!(err && (err.name === 'QuotaExceededError' || err.code === 22))) throw err;
+      }
+    }
+    await writeIndexedBrowserProject(write.id, projectText, write.saved.savedAt);
+    write.record.storage = 'indexeddb';
+    // The full snapshot is durable before replacing any previous browser value.
+    // Keeping only this manifest frees LocalStorage for the active level data.
+    localStorage.removeItem(browserProjectKey(write.id));
+    localStorage.setItem(browserProjectKey(write.id), JSON.stringify(indexedProjectManifest(write.saved, write.record, projectText.length)));
+    return finishBrowserProjectWrite(write);
   }
 
   function embeddedLevelIds(project){
@@ -915,22 +1188,43 @@ function create(deps){
     }
   }
 
+  function syncAuthorDemoBrowserProject(project){
+    if(!project)return null;
+    const idx=browserProjectIndex();
+    let record=(idx.projects||[]).find(item=>item&&item.source===AUTHOR_DEMO_SOURCE)||null;
+    if(!record){record={id:uniqueBrowserProjectId(idx,'author-demo')};idx.projects.push(record);}
+    const meta=project.meta||{};
+    record.name=meta.trackName||meta.levelName||'Parking Lot First Ever Level Test Source';
+    record.savedAt=project.savedAt||new Date().toISOString();
+    record.source=AUTHOR_DEMO_SOURCE;
+    delete record.storage;
+    const manifest={
+      format:project.format||'LKEP',
+      version:project.version||STORE.PROJECT_VERSION||'0.7.8',
+      name:project.name||STORE.PROJECT_NAME||'Lot King Engine Project',
+      savedAt:record.savedAt,
+      meta:Object.assign({},meta,{projectName:record.name,onlineDemo:true}),
+      browserStorage:{mode:'author-demo',completeProject:'demo/demo-project.lkep.json'},
+    };
+    localStorage.setItem(browserProjectKey(record.id),JSON.stringify(manifest));
+    idx.activeId=record.id;
+    activeBrowserProjectId=record.id;
+    writeBrowserProjectIndex(idx);
+    setBrowserMarker(record);
+    return record;
+  }
+
   function ensureBrowserProjectSeed(project){
     if(isOnlineDemo()) return;
     const workspace = window.LK_PROJECT_WORKSPACE;
     const seedPrivateDemo = !!(project && workspace && workspace.consumeDemoSeedPending && workspace.consumeDemoSeedPending());
-    if(seedPrivateDemo){
+    const bundledAuthorDemo=!!(project&&project.meta&&project.meta.onlineDemo&&workspace&&workspace.isPrivateBrowserDemo&&workspace.isPrivateBrowserDemo());
+    if(seedPrivateDemo||bundledAuthorDemo){
       try {
-        const copy = JSON.parse(JSON.stringify(project));
-        copy.meta = Object.assign({}, copy.meta || {}, {onlineDemo:false});
-        writeBrowserProject(copy, {
-          name:tr('Author DEMO · Private Copy', 'DEMO autore · Copia privata'),
-          newProject:true,
-          explicitName:true,
-        });
+        syncAuthorDemoBrowserProject(project);
         status(tr(
-          'Private DEMO ready · Save stays in this browser. Use a folder or Export LKEP for a portable copy.',
-          'DEMO privato pronto · Salva resta in questo browser. Usa una cartella o Esporta LKEP per una copia portabile.'
+          'Author DEMO ready · Save creates a separate working copy; LOCAL DISK remains untouched.',
+          'DEMO autore pronto · Salva crea una copia di lavoro separata; DISCO LOCALE resta intatto.'
         ));
       } catch(err){
         console.warn('LotKing private DEMO project seed failed', err);
@@ -1095,26 +1389,73 @@ function create(deps){
     if(active.blur && active.isConnected) active.blur();
   }
 
-  function importProjectAsBrowserProject(file, raw, progressToken){
+  async function importProjectAsBrowserProject(file, raw, progressToken){
     if(isOnlineDemo()) throw new Error('Online demo is read-only');
     const project = STORE.parseProject ? STORE.parseProject(raw) : JSON.parse(raw);
     const name = importedProjectName(file, project);
+    const confirmed = await confirmEditorAction({
+      title:tr('Replace the active local project?', 'Sostituire il progetto locale attivo?'),
+      message:tr(
+        'Importing "',
+        'Importando "'
+      ) + name + tr(
+        '" will make it the active LOCAL DISK project. The current project will first be preserved in Project History. Continue?',
+        '" diventerà il progetto DISCO LOCALE attivo. Il progetto corrente verrà prima conservato nella Cronologia progetti. Continuare?'
+      ),
+      okText:tr('Import and preserve current', 'Importa e conserva attuale'),
+      danger:false,
+    });
+    if(!confirmed){
+      if(progressToken) finishStatusWork(progressToken, tr('Import cancelled', 'Importazione annullata'), tr('Nothing was changed', 'Nessuna modifica effettuata'), 'warning');
+      return false;
+    }
     updateStatusWork(progressToken, 42, tr('Preparing local assets', 'Preparazione asset locali'), 'loading');
-    return prepareImportedProjectText(JSON.stringify(project)).then(projectText => {
-      STORE.importProject(projectText);
+    return prepareImportedProjectText(JSON.stringify(project)).then(async projectText => {
       const imported = STORE.parseProject ? STORE.parseProject(projectText) : JSON.parse(projectText);
-      writeBrowserProject(imported, {name, newProject:true, explicitName:true});
+      const importedRecord = await writeBrowserProjectDurable(imported, {name, newProject:true, explicitName:true});
+      const importedFromIndexedDb = importedRecord.storage === 'indexeddb';
+      // The disk bridge is the port-independent authority. Update it before
+      // reloading, otherwise a new browser origin would restore the old active
+      // project even though this import had just succeeded.
+      let bridgeResult = null;
+      try { bridgeResult = await saveLocalBridgeProject(imported,{claimLocalAuthority:true,allowShrink:true,confirmed:true}); }
+      catch(err){ console.warn('LotKing import: port-independent disk bridge unavailable; keeping the IndexedDB copy', err); }
+      if(bridgeResult){
+        syncLocalBridgeBrowserProject(bridgeResult.project, bridgeResult.project.savedAt || imported.savedAt || 'imported');
+        if(importedFromIndexedDb) await removeIndexedBrowserProject(importedRecord.id);
+      }
+      STORE.importProject(projectText);
       finishStatusWork(progressToken, tr('Import complete', 'Importazione completata'), tr('Loading project', 'Caricamento progetto'), 'success');
       reopenEditorAndReload('Project imported', name);
     });
   }
 
-  function saveScene(opts){
+  async function saveScene(opts){
     if(isOnlineDemo()){
-      requestOnlineDemoSave();
-      return false;
+      return requestOnlineDemoSave();
     }
     opts = opts || {};
+    const confirmed = await confirmEditorAction({
+      title:tr('Save this project?', 'Salvare questo progetto?'),
+      message:tr(
+        'The current LOCAL DISK version will be preserved in Project History before the new version is written.',
+        'La versione corrente su DISCO LOCALE verrà conservata nella Cronologia progetti prima di scrivere la nuova versione.'
+      ),
+      okText:tr('Save new version', 'Salva nuova versione'),
+      danger:false,
+    });
+    if(!confirmed){
+      status(tr('Save cancelled · nothing changed', 'Salvataggio annullato · nessuna modifica'));
+      return false;
+    }
+    return saveSceneConfirmed(Object.assign({}, opts, {confirmed:true}));
+  }
+
+  function saveSceneConfirmed(opts){
+    opts = opts || {};
+    const projectIndexBeforeSave=browserProjectIndex();
+    const activeRecordBeforeSave=browserProjectRecord(projectIndexBeforeSave,activeBrowserProjectId||projectIndexBeforeSave.activeId||'');
+    const savingAuthorDemo=!!(activeRecordBeforeSave&&activeRecordBeforeSave.source===AUTHOR_DEMO_SOURCE);
     const progressToken = beginStatusWork(tr('Saving level', 'Salvataggio livello'), tr('Checking current state', 'Verifica stato corrente'), 'loading');
     updateStatusWork(progressToken, 10, tr('Preparing data', 'Preparazione dati'), 'loading');
     commitActiveEditorControl();
@@ -1123,6 +1464,22 @@ function create(deps){
     if(input && input.value.trim()){
       ED.trackName = input.value.trim();
     }
+    // The rendered editor scene is the authority for a manual Save. Repair a
+    // stale catalog selection before the first write, then pin the target for
+    // the whole synchronous browser-store transaction. This prevents a level
+    // switch/catalog race from writing the open scene under another level id.
+    const LV = levelsApi();
+    const editorLevelId = String(ED.trackId || '').trim();
+    if(LV && LV.reconcileActive && editorLevelId) LV.reconcileActive(editorLevelId);
+    const saveTargetId = String(LV && LV.activeId ? LV.activeId() : editorLevelId).trim();
+    if(!saveTargetId || (editorLevelId && saveTargetId !== editorLevelId)){
+      ED.dirty = true;
+      $('#lkDirty').classList.add('show');
+      finishStatusWork(progressToken, tr('Save failed', 'Salvataggio fallito'), tr('Active level could not be verified', 'Impossibile verificare il livello attivo'), 'error');
+      status(tr('⚠ Save stopped: active level could not be verified', '⚠ Salvataggio interrotto: impossibile verificare il livello attivo'));
+      return false;
+    }
+    const saveMeta = Object.assign({}, currentTrackMeta(), {trackId:saveTargetId});
     updateStatusWork(progressToken, 45, tr('Writing catalog', 'Scrittura catalogo'), 'loading');
     const sceneData = STORE.collect(GAME);
     // A previous complete multi-level browser-project snapshot can consume the
@@ -1130,7 +1487,7 @@ function create(deps){
     // already on disk. Compact that proven-recoverable duplicate before the
     // level store needs room for the new revision.
     compactActiveBrowserProjectForLocalBridge();
-    const ok = STORE.save(sceneData, currentTrackMeta());
+    const ok = STORE.save(sceneData, saveMeta, {expectedActiveId:saveTargetId});
     if(!ok){
       ED.dirty = true;
       $('#lkDirty').classList.add('show');
@@ -1141,6 +1498,12 @@ function create(deps){
     try {
       requireExactPersistence(sceneData, STORE.load(), tr('Local save verification', 'Verifica salvataggio locale'));
       requireExactPersistence(sceneData, createProjectSnapshot(sceneData), tr('Project snapshot verification', 'Verifica snapshot progetto'));
+      const storedProject = STORE.loadProject ? STORE.loadProject() : null;
+      const storedLevelId = String(storedProject && storedProject.meta && storedProject.meta.trackId || '').trim();
+      const activeLevelId = String(LV && LV.activeId ? LV.activeId() : saveTargetId).trim();
+      if(storedLevelId !== saveTargetId || activeLevelId !== saveTargetId){
+        throw new Error(tr('The active level identity changed during Save', 'L’identità del livello attivo è cambiata durante il salvataggio'));
+      }
     } catch(err){
       ED.dirty = true;
       $('#lkDirty').classList.add('show');
@@ -1149,8 +1512,7 @@ function create(deps){
       return false;
     }
     updateStatusWork(progressToken, 85, tr('Syncing UI', 'Sincronizzazione UI'), 'loading');
-    const LV = levelsApi();
-    const activeId = LV && LV.activeId ? LV.activeId() : ED.trackId;
+    const activeId = saveTargetId;
     setTrackMeta({trackId: activeId || ED.trackId, trackName: ED.trackName});
     ED.dirty = false;
     $('#lkDirty').classList.remove('show');
@@ -1163,9 +1525,14 @@ function create(deps){
     const project = createCompleteProjectSnapshot(sceneData);
     let browserCatalogSaved = false;
     try {
-      writeBrowserProject(project);
+      const workingName=(project.meta&&project.meta.trackName||ED.trackName||'Author DEMO')+tr(' · Working Copy',' · Copia di lavoro');
+      writeBrowserProject(project,savingAuthorDemo?{name:workingName,newProject:true,explicitName:true}:undefined);
+      if(savingAuthorDemo){
+        const workspace=window.LK_PROJECT_WORKSPACE;
+        if(workspace&&workspace.activateBrowserProject)workspace.activateBrowserProject({demo:false});
+      }
       browserCatalogSaved = true;
-      status('Project saved ✓');
+      status(savingAuthorDemo?tr('Working copy created · Author DEMO preserved ✓','Copia di lavoro creata · DEMO autore conservato ✓'):'Project saved ✓');
     } catch(err) {
       saveProjectFileAsync(project, {allowPicker: !!opts.projectFile, allowDownloadFallback: !!opts.projectFile});
       if(!projectFileHandle) status('Track saved locally ✓');
@@ -1174,11 +1541,16 @@ function create(deps){
     // browser project catalog is full. The old ordering returned from the catch
     // before either durable copy had a chance to run.
     saveWorkspaceProjectCopy(project);
-    saveLocalBridgeProject(project).then(result => {
+    saveLocalBridgeProject(project,{confirmed:opts.confirmed===true}).then(result => {
       if(!result || browserCatalogSaved) return;
       try { writeBrowserProject(project); }
       catch(err){}
     }).catch(err => status('⚠ Local disk backup failed: ' + (err && err.message ? err.message : err)));
+    window.dispatchEvent(new CustomEvent('lotking:project-saved', {detail:{
+      source: opts.coworkRemote ? 'cowork' : 'local',
+      trackId: activeId || ED.trackId,
+      trackName: ED.trackName,
+    }}));
     return true;
   }
 
@@ -1411,6 +1783,109 @@ function create(deps){
     if(ED.projectsOpen) refreshProjectsOverlay();
   }
 
+  function projectHistoryBytes(value){
+    const bytes=Math.max(0,Number(value)||0);
+    if(bytes>=1024*1024*1024)return (bytes/(1024*1024*1024)).toFixed(2)+' GB';
+    if(bytes>=1024*1024)return (bytes/(1024*1024)).toFixed(1)+' MB';
+    if(bytes>=1024)return (bytes/1024).toFixed(1)+' KB';
+    return bytes+' B';
+  }
+
+  function downloadLocalProjectVersion(version){
+    if(!version||!version.id)return;
+    const link=document.createElement('a');
+    link.href=LOCAL_HISTORY_URL+'?file='+encodeURIComponent(version.id);
+    link.download=version.file||'lotking-project-version.lkep.json';
+    document.body.appendChild(link);link.click();link.remove();
+  }
+
+  async function restoreLocalProjectVersion(version){
+    if(!version||!version.id)return false;
+    if(ED.dirty){
+      status(tr('Save or discard the current unsaved edits before restoring a version.', 'Salva o annulla le modifiche correnti prima di ripristinare una versione.'));
+      return false;
+    }
+    const label=version.name||version.file||version.id;
+    const confirmed=await confirmEditorAction({
+      title:tr('Restore this project version?', 'Ripristinare questa versione del progetto?'),
+      message:tr(
+        'Restore "',
+        'Ripristinare "'
+      )+label+tr(
+        '"? The current LOCAL DISK project will first be preserved as another immutable history version.',
+        '"? Il progetto DISCO LOCALE corrente verrà prima conservato come un’ulteriore versione immutabile nella cronologia.'
+      ),
+      okText:tr('Preserve current and restore', 'Conserva attuale e ripristina'),
+      danger:false,
+    });
+    if(!confirmed)return false;
+    setProjectsOverlayOpen(false);
+    setLevelLoading(true,label,18,tr('Preserving current project', 'Conservazione progetto corrente'));
+    try{
+      const response=await fetch(LOCAL_HISTORY_RESTORE_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-LotKing-Project-Authority':'local-disk','X-LotKing-Confirm-Restore':'1'},
+        body:JSON.stringify({id:version.id}),
+      });
+      if(!response.ok)throw new Error('Project history HTTP '+response.status);
+      try{
+        localStorage.removeItem(LOCAL_BRIDGE_ETAG);
+        localStorage.removeItem(LOCAL_BRIDGE_MARKER);
+        sessionStorage.removeItem(LOCAL_BRIDGE_MARKER);
+      }catch(err){}
+      const workspace=window.LK_PROJECT_WORKSPACE;
+      if(workspace&&workspace.activateLocalProject)workspace.activateLocalProject();
+      reopenEditorAndReload(tr('Project version restored', 'Versione progetto ripristinata'),label);
+      return true;
+    }catch(err){
+      setLevelLoading(false);
+      status(tr('Version restore failed: ', 'Ripristino versione non riuscito: ')+(err&&err.message||err));
+      setProjectsOverlayOpen(true);
+      return false;
+    }
+  }
+
+  async function refreshLocalProjectHistory(box, requestId){
+    if(!localBridgeAvailable()||!box)return;
+    const section=el('<div class="lk-project-history"></div>');
+    const heading=el('<div class="lk-project-history-head"><b>'+tr('PROJECT HISTORY', 'CRONOLOGIA PROGETTO')+'</b><span>'+tr('append-only disk versions · restore always asks first', 'versioni su disco append-only · il ripristino chiede sempre conferma')+'</span></div>');
+    const list=el('<div class="lk-project-history-list"><div class="lk-empty">'+tr('Reading local versions…', 'Lettura versioni locali…')+'</div></div>');
+    section.append(heading,list);box.appendChild(section);
+    try{
+      const response=await fetch(LOCAL_HISTORY_URL,{cache:'no-store'});
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      const payload=await response.json();
+      if(requestId!==projectHistoryRequest||!section.isConnected)return;
+      list.innerHTML='';
+      const versions=Array.isArray(payload.versions)?payload.versions:[];
+      if(!versions.length){
+        list.appendChild(el('<div class="lk-empty">'+tr('No previous versions yet. The first confirmed Save will preserve the current project here.', 'Nessuna versione precedente. Il primo Salva confermato conserverà qui il progetto corrente.')+'</div>'));
+        return;
+      }
+      versions.forEach(version=>{
+        const row=el('<div class="lk-level-row lk-project-version-row"></div>');
+        const meta=el('<div class="lk-level-meta"></div>');
+        const name=el('<div class="lk-level-name"></div>');
+        name.textContent=version.name||version.file||version.id;
+        const badge=el('<span class="lk-level-badge"></span>');
+        badge.textContent=version.source==='version'?tr('VERSION','VERSIONE'):(version.source==='recovery'?tr('RECOVERY','RECOVERY'):(version.source==='quarantined'?tr('QUARANTINED','IN QUARANTENA'):tr('LEGACY BACKUP','BACKUP PRECEDENTE')));
+        name.appendChild(badge);
+        const date=version.savedAt||version.modifiedAt;
+        const sub=el('<div class="lk-level-sub"></div>');
+        sub.textContent=(date?new Date(date).toLocaleString()+' · ':'')+projectHistoryBytes(version.bytes)+(version.file?' · '+version.file:'');
+        meta.append(name,sub);
+        const actions=el('<div class="lk-level-actions"></div>');
+        const restore=document.createElement('button');restore.className='lk-level-load';restore.textContent=tr('↶ Restore','↶ Ripristina');restore.title=tr('Preserve the current project, then restore this version','Conserva il progetto corrente, poi ripristina questa versione');restore.addEventListener('click',()=>restoreLocalProjectVersion(version));
+        const download=document.createElement('button');download.textContent='⇩';download.title=tr('Export this exact version','Esporta questa versione esatta');download.addEventListener('click',()=>downloadLocalProjectVersion(version));
+        actions.append(restore,download);row.append(meta,actions);list.appendChild(row);
+      });
+    }catch(err){
+      if(requestId!==projectHistoryRequest||!section.isConnected)return;
+      list.innerHTML='';
+      list.appendChild(el('<div class="lk-empty">'+tr('Project History is available after restarting the updated local server.', 'La Cronologia progetti sarà disponibile dopo il riavvio del server locale aggiornato.')+'</div>'));
+    }
+  }
+
   function refreshProjectsOverlay(){
     const box = $('#lkProjectsList');
     if(!box) return;
@@ -1423,7 +1898,6 @@ function create(deps){
     const list = Array.isArray(idx.projects) ? idx.projects.map(project => Object.assign({}, project, {active: project.id === idx.activeId})) : [];
     if(!list.length){
       box.appendChild(el('<div class="lk-empty">' + tr('No saved projects.<br>Create a project or press Save to save the current one.', 'Nessun progetto salvato.<br>Crea un progetto o premi Salva per salvare quello corrente.') + '</div>'));
-      return;
     }
     list.forEach(project => {
       const row = el('<div class="lk-level-row' + (project.active ? ' active' : '') + '"></div>');
@@ -1431,6 +1905,8 @@ function create(deps){
       const nm = el('<div class="lk-level-name"></div>');
       nm.textContent = project.name || project.id;
       if(project.active) nm.appendChild(el('<span class="lk-level-badge">' + tr('ACTIVE', 'ATTIVO') + '</span>'));
+      if(project.source === LOCAL_BRIDGE_SOURCE) nm.appendChild(el('<span class="lk-level-badge">' + tr('LOCAL DISK', 'DISCO LOCALE') + '</span>'));
+      if(project.source === AUTHOR_DEMO_SOURCE) nm.appendChild(el('<span class="lk-level-badge">' + tr('AUTHOR DEMO', 'DEMO AUTORE') + '</span>'));
       const sub = el('<div class="lk-level-sub"></div>');
       sub.textContent = project.id + (project.savedAt ? tr(' · saved ', ' · salvato ') + new Date(project.savedAt).toLocaleString() : '');
       meta.append(nm, sub);
@@ -1452,6 +1928,8 @@ function create(deps){
       row.append(meta, actions);
       box.appendChild(row);
     });
+    const requestId=++projectHistoryRequest;
+    refreshLocalProjectHistory(box,requestId);
   }
 
   async function createBrowserProject(options){
@@ -1469,7 +1947,7 @@ function create(deps){
       if(!ok) return;
     }
     const LV = levelsApi();
-    const sceneData = options.empty ? STORE.blank() : (LV && LV.templateScene ? LV.templateScene(GAME) : STORE.blank());
+    const sceneData = options.empty ? STORE.blank() : (LV && LV.templateScene ? LV.templateScene(GAME, 'open-world-sketchbook') : STORE.blank());
     const meta = {
       projectName:next.trim(),
       projectIdentityVersion:PROJECT_IDENTITY_VERSION,
@@ -1481,6 +1959,8 @@ function create(deps){
     project.meta = Object.assign({}, project.meta || {}, meta);
     try {
       writeBrowserProject(project, {name:next.trim(), newProject:true, explicitName:true});
+      const workspace=window.LK_PROJECT_WORKSPACE;
+      if(workspace&&workspace.activateBrowserProject)workspace.activateBrowserProject({demo:false});
       STORE.importProject(JSON.stringify(project));
       reopenEditorAndReload('Project created', next.trim());
     } catch(err) {
@@ -1501,14 +1981,18 @@ function create(deps){
     setProjectsOverlayOpen(false);
     setLevelLoading(true, name || id, 14, 'Opening project');
     const idx = browserProjectIndex();
+    const workspace = window.LK_PROJECT_WORKSPACE;
     const record = browserProjectRecord(idx, id);
-    const project = readBrowserProject(id);
+    let project = readBrowserProject(id);
     if(!record || !project){
       setLevelLoading(false);
       status('Project load failed: project not found');
       return;
     }
     try {
+      project = await resolveBrowserProjectPayload(record, project);
+      if(record.source === LOCAL_BRIDGE_SOURCE && workspace && typeof workspace.activateLocalProject === 'function')workspace.activateLocalProject();
+      else if(workspace&&typeof workspace.activateBrowserProject==='function')workspace.activateBrowserProject({demo:isAuthorDemoBrowserRecord(record)});
       const projectText = JSON.stringify(project);
       STORE.importProject(projectText);
       idx.activeId = record.id;
@@ -1521,6 +2005,19 @@ function create(deps){
     }
   }
 
+  async function loadLocalBridgeProject(){
+    await restoreLocalBridgeProject();
+    const idx = browserProjectIndex();
+    const record = (idx.projects || []).find(item => item && item.source === LOCAL_BRIDGE_SOURCE);
+    if(!record){
+      setProjectsOverlayOpen(true);
+      status(tr('No disk-backed local project was found; choose a browser project.', 'Nessun progetto locale su disco trovato; scegli un progetto del browser.'));
+      return false;
+    }
+    await loadBrowserProject(record.id, record.name || 'Local Project');
+    return true;
+  }
+
   async function renameBrowserProject(id, currentName){
     if(isOnlineDemo()){ blockOnlineDemoAction(); return; }
     const next = await promptEditorAction({title:tr('Rename project', 'Rinomina progetto'), message:tr('New project name:', 'Nuovo nome progetto:'), value:currentName || '', okText:tr('Rename', 'Rinomina')});
@@ -1528,8 +2025,10 @@ function create(deps){
     try {
       const idx = browserProjectIndex();
       const record = browserProjectRecord(idx, id);
-      const project = readBrowserProject(id);
+      let project = readBrowserProject(id);
       if(!record || !project) throw new Error('project not found');
+      const diskBacked = record.source === LOCAL_BRIDGE_SOURCE;
+      project = await resolveBrowserProjectPayload(record, project);
       record.name = next.trim();
       project.meta = Object.assign({}, project.meta || {}, {
         projectName:next.trim(),
@@ -1537,8 +2036,16 @@ function create(deps){
         projectIdentityExplicit:true,
         projectIdentitySource:'user-rename',
       });
-      localStorage.setItem(browserProjectKey(id), JSON.stringify(project));
-      writeBrowserProjectIndex(idx);
+      await writeBrowserProjectDurable(project, {
+        id,
+        name:record.name,
+        active:record.id === activeBrowserProjectId || record.id === idx.activeId,
+        explicitName:true,
+      });
+      if(diskBacked){
+        const bridgeResult = await saveLocalBridgeProject(project,{claimLocalAuthority:true,confirmed:true});
+        if(bridgeResult) syncLocalBridgeBrowserProject(bridgeResult.project, bridgeResult.project.savedAt || project.savedAt || 'renamed');
+      }
       if(record.id === activeBrowserProjectId || record.id === idx.activeId){
         ED.projectName = record.name;
         setBrowserMarker(record);
@@ -1562,6 +2069,7 @@ function create(deps){
         const idx = browserProjectIndex();
         idx.projects = (idx.projects || []).filter(project => !project || project.id !== id);
         localStorage.removeItem(browserProjectKey(id));
+        removeIndexedBrowserProject(id).catch(err => console.warn('LotKing IndexedDB project cleanup failed', err));
         if(idx.activeId === id) idx.activeId = idx.projects.length ? idx.projects[0].id : null;
         writeBrowserProjectIndex(idx);
         activeBrowserProjectId = idx.activeId || null;
@@ -1579,15 +2087,20 @@ function create(deps){
     });
   }
 
-  function exportBrowserProject(id){
+  async function exportBrowserProject(id){
     const idx = browserProjectIndex();
     const activeId = String(idx.activeId || activeBrowserProjectId || '');
-    const project = String(id || '') === activeId
+    const record = browserProjectRecord(idx, id);
+    let project = String(id || '') === activeId
       ? createCompleteProjectSnapshot(STORE.collect(GAME))
       : readBrowserProject(id);
     if(!project){
       status('Export failed: project not found');
       return;
+    }
+    if(String(id || '') !== activeId && record){
+      try { project = await resolveBrowserProjectPayload(record, project); }
+      catch(err){ status('Export failed: ' + (err && err.message ? err.message : err)); return; }
     }
     preparePortableProject(project).then(result => {
       downloadProject(result.project);
@@ -1609,8 +2122,12 @@ function create(deps){
     const selectedId=String(projectId||activeId);
     const publishingOpenProject=!selectedId||selectedId===activeId;
     const sceneData=publishingOpenProject?STORE.collect(GAME):null;
-    const project=publishingOpenProject?createCompleteProjectSnapshot(sceneData):readBrowserProject(selectedId);
+    const selectedRecord=browserProjectRecord(idx,selectedId);
+    let project=publishingOpenProject?createCompleteProjectSnapshot(sceneData):readBrowserProject(selectedId);
     if(!project){status(tr('DEMO publish failed: project not found','Pubblicazione DEMO fallita: progetto non trovato'));return false;}
+    if(!publishingOpenProject&&selectedRecord){
+      try{project=await resolveBrowserProjectPayload(selectedRecord,project);}catch(err){status(tr('DEMO publish failed: ','Pubblicazione DEMO fallita: ')+(err&&err.message||err));return false;}
+    }
     const meta=project&&project.meta||{};
     const name=meta.trackName||meta.levelName||ED.trackName||'Current project';
     const approved=await confirmEditorAction({
@@ -1628,10 +2145,11 @@ function create(deps){
       if(sceneData)requireExactPersistence(sceneData,project,tr('DEMO snapshot verification','Verifica snapshot DEMO'));
       updateStatusWork(progressToken,28,tr('Embedding portable assets','Incorporamento asset portabili'),'loading');
       const result=await preparePortableProject(project);
+      result.project.meta=Object.assign({},result.project.meta||{}, {projectName:name,authorDemo:true});
       const payload=JSON.stringify(result.project);
       updateStatusWork(progressToken,72,tr('Writing demo project','Scrittura progetto demo'),'loading');
       let response=null;
-      try{response=await fetch(LOCAL_DEMO_PUBLISH_URL,{method:'PUT',headers:{'Content-Type':'application/json'},body:payload});}catch(err){}
+      try{response=await fetch(LOCAL_DEMO_PUBLISH_URL,{method:'PUT',headers:{'Content-Type':'application/json','X-LotKing-Confirm-Demo-Publish':'1'},body:payload});}catch(err){}
       if(response&&response.ok){
         const report=await response.json();
         const splitDetail=report.split?' · '+Number(report.chunks||0)+tr(' GitHub-safe parts',' parti compatibili con GitHub'):'';
@@ -1665,16 +2183,16 @@ function create(deps){
       if(!entries.length) return;
       const before = slugifyTrackName(activeBrowserProjectId || (getBrowserMarker() && getBrowserMarker().id) || browserProjectIndex().activeId || '');
       let imported = 0;
-      entries.forEach(entry => {
-        if(!entry || !entry.text) return;
+      for(const entry of entries){
+        if(!entry || !entry.text) continue;
         let project = null;
         try { project = STORE.parseProject ? STORE.parseProject(entry.text) : JSON.parse(entry.text); }
-        catch(err){ return; }
+        catch(err){ continue; }
         const record = entry.record || {};
         const name = record.name || importedProjectName({name:record.file || 'workspace-project.lkep.json'}, project);
-        writeBrowserProject(project, {id:record.id || (project.meta && project.meta.trackId) || name, name, active:false});
+        await writeBrowserProjectDurable(project, {id:record.id || (project.meta && project.meta.trackId) || name, name, active:false});
         imported += 1;
-      });
+      }
       const idx = browserProjectIndex();
       const activeId = slugifyTrackName((bundle && bundle.activeId) || (entries[0] && entries[0].record && entries[0].record.id) || idx.activeId || '');
       const activeRecord = browserProjectRecord(idx, activeId);
@@ -1686,8 +2204,9 @@ function create(deps){
       if(ED.projectsOpen) refreshProjectsOverlay();
       if(imported) status(tr('Workspace projects linked: ', 'Progetti workspace collegati: ') + imported);
       if(options.openActive && activeRecord && before !== slugifyTrackName(activeRecord.id)){
-        const project = readBrowserProject(activeRecord.id);
+        let project = readBrowserProject(activeRecord.id);
         if(project){
+          project = await resolveBrowserProjectPayload(activeRecord, project);
           STORE.importProject(JSON.stringify(project));
           reopenEditorAndReload('Workspace project loaded', activeRecord.name || activeRecord.id);
         }
@@ -1736,24 +2255,33 @@ function create(deps){
 
   bindWorkspaceProjectImport();
   const workspace = window.LK_PROJECT_WORKSPACE;
+  const openingAuthorDemo=!!(workspace&&workspace.shouldOpenAuthorDemoByDefault&&workspace.shouldOpenAuthorDemoByDefault());
+  if(openingAuthorDemo&&workspace.activateBrowserProject)workspace.activateBrowserProject({demo:true});
   const openingEmptyWorkspace = workspace && workspace.consumeStartupTemplate && workspace.consumeStartupTemplate('empty') === 'empty';
   if(openingEmptyWorkspace){
     setTimeout(() => createBrowserProject({empty:true, name:'New Project'}), 650);
   } else {
-    // Disk recovery has priority over origin-scoped browser/workspace startup.
-    // Sequencing these operations prevents a slow asset migration from being
-    // overwritten by a second startup load while it is still in progress.
+    // The exported Author DEMO is the normal startup authority. LOCAL DISK is
+    // still discovered and listed, but it may become active only after the
+    // author explicitly loads that Projects card.
     setTimeout(async () => {
       const restored = await restoreLocalBridgeProject();
+      if(restored){
+        // The editor may already have applied this origin's empty/stale scene
+        // while the disk LKEP was being read. One controlled reload makes the
+        // restored project the rendered scene; its ETag prevents a reload loop.
+        reopenEditorAndReload(tr('Local project restored', 'Progetto locale ripristinato'), activeBrowserProjectName() || 'Local Project');
+        return;
+      }
       // Startup may refresh the catalog, but opening/switching a project is
       // always an explicit user action from the Projects panel.
-      if(!restored) syncWorkspaceProjectCatalog({openActive:false});
+      syncWorkspaceProjectCatalog({openActive:false});
     }, 180);
   }
 
   return Object.freeze({
     slugifyTrackName, setTrackMeta, currentTrackMeta, loadTrackMeta, saveScene, projectFilename, exportProject, exportProjectFolder, importProjectFile, importProjectFolder,
-    setProjectImportTarget, setProjectsOverlayOpen, refreshProjectsOverlay, createBrowserProject, loadBrowserProject, renameBrowserProject, deleteBrowserProject, exportBrowserProject,
+    setProjectImportTarget, setProjectsOverlayOpen, refreshProjectsOverlay, createBrowserProject, loadBrowserProject, loadLocalBridgeProject, renameBrowserProject, deleteBrowserProject, exportBrowserProject,
     createPortableCollaborationSnapshot, applyPortableCollaborationSnapshot,
     publishProjectAsDemo,
   });

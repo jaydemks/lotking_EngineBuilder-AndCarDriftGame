@@ -158,7 +158,7 @@ function muxWebM(options){
     uintElement(WEBM_IDS.TIMECODE_SCALE, 1000000),
     element(WEBM_IDS.DURATION, float64Bytes(durationUs / 1000)),
     textElement(WEBM_IDS.MUXING_APP, 'Lot King Cinema Studio'),
-    textElement(WEBM_IDS.WRITING_APP, 'Lot King Engine 0.7.7')
+    textElement(WEBM_IDS.WRITING_APP, 'Lot King Engine 0.7.8')
   );
   const video = masterElement(
     WEBM_IDS.VIDEO,

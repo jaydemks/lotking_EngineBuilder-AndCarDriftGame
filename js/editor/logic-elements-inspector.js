@@ -294,25 +294,12 @@ function create(deps){
     const graphView = {x:80, y:60, zoom:1};
     canvasWrap.tabIndex = 0;
     setupLogicElementSidebarResizers(root);
-    // Character camera behavior is configuration on the Pawn, not a spatial
-    // child. Early Character/Soccer templates carried a camera helper several
-    // metres behind the body; Box3 then included that invisible helper and
-    // made the Logic Element dummy look much larger than the actual character.
-    // Migrate only the exact legacy template helper. Vehicle camera anchors
-    // remain authored scene elements because that system exposes anchor sets.
-    let removedLegacyCharacterHelper=false;
-    if(rootGraph.characterPawn||rootGraph.soccerPawn){
-      const scene=rootGraph.logicScene||{};
-      if(Array.isArray(scene.elements)){
-        const before=scene.elements.length;
-        scene.elements=scene.elements.filter(item=>!(item&&item.id==='camera_anchor'&&item.type==='camera'&&String(item.name||'')==='Player Camera Anchor'));
-        removedLegacyCharacterHelper=scene.elements.length!==before;
-      }
-      if(removedLegacyCharacterHelper&&Array.isArray(scene.components))scene.components=scene.components.filter(item=>item&&item.elementId!=='camera_anchor');
-    }
+    // Camera mounts are spatial authoring helpers but editor-only: selecting
+    // them with the viewport gizmo changes the exact config consumed by Play,
+    // without enlarging Pawn bounds or creating colliders.
+    if(window.LK_LOGIC_GRAPH&&window.LK_LOGIC_GRAPH.ensurePawnCameraRigs)window.LK_LOGIC_GRAPH.ensurePawnCameraRigs(rootGraph);
     if(!Array.isArray(graph.comments)) graph.comments = [];
     lastGraphSnapshot = graphSnapshot();
-    if(removedLegacyCharacterHelper)opts.saveGraph(rootGraph);
 
     function syncStatus(saved){
       const checked = validate(graph);
@@ -3371,6 +3358,10 @@ function create(deps){
         Math.max(.01, Number(node.scale.y) || 1),
         Math.max(.01, Number(node.scale.z) || 1),
       ];
+      if(element.cameraRigRole&&window.LK_LOGIC_GRAPH&&window.LK_LOGIC_GRAPH.syncPawnCameraConfigFromElement){
+        element.scale=[1,1,1];
+        window.LK_LOGIC_GRAPH.syncPawnCameraConfigFromElement(rootGraph,element.id);
+      }
     }
 
     function syncViewportGizmo(){
@@ -3836,20 +3827,12 @@ function create(deps){
         node = group;
       } else if(type === 'camera'){
         const group = new THREERef.Group();
-        const mat = viewportElementMaterial(element, {line:true, helper:true});
-        const pts = [
-          new THREERef.Vector3(-.28,-.18,0), new THREERef.Vector3(.28,-.18,0),
-          new THREERef.Vector3(.28,-.18,0), new THREERef.Vector3(.28,.18,0),
-          new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(-.28,.18,0),
-          new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.28,-.18,0),
-          new THREERef.Vector3(-.28,-.18,0), new THREERef.Vector3(-.55,-.35,-.65),
-          new THREERef.Vector3(.28,-.18,0), new THREERef.Vector3(.55,-.35,-.65),
-          new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(.55,.35,-.65),
-          new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.55,.35,-.65),
-        ];
-        const helper = new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat);
-        helper.visible = element && element.dummyVisible === true;
-        group.add(helper);
+        const material=new THREERef.MeshBasicMaterial({color:element&&element.color||'#9db4ff',wireframe:true,depthTest:false,transparent:true,opacity:.9});
+        const body=new THREERef.Mesh(new THREERef.BoxGeometry(.58,.38,.3),material);
+        const lens=new THREERef.Mesh(new THREERef.ConeGeometry(.15,.36,12),material);
+        lens.rotation.x=Math.PI/2;lens.position.z=-.3;
+        body.visible=lens.visible=element&&element.dummyVisible===true;
+        group.add(body,lens);
         node = group;
       } else if(type === 'text'){
         node = createViewportTextNode(element);
@@ -3908,11 +3891,23 @@ function create(deps){
           node.remove(child);
           disposeViewportNode(child);
         });
+        let hiddenAuthoringNodes = 0;
         model.traverse(child => {
           child.userData.logicElementAssetVisual = true;
           child.userData.logicElementType = element.type || 'mesh';
           child.userData.logicSceneElementId = element.id;
+          // Collision hulls, seats and navigation markers are AUTHORING data
+          // that a source GLB ships as real meshes. The scene path already
+          // hides them; without the same rule here the Logic Element viewport
+          // shows a vehicle wrapped in collision boxes and spheres, which is
+          // what makes an imported vehicle look like "a mesh and some balls".
+          const tag = String(child.userData.data || child.userData.kind || '').toLowerCase();
+          if(tag !== 'collision' && tag !== 'physics' && tag !== 'navmesh') return;
+          child.visible = false;
+          child.userData.logicElementAuthoringHidden = true;
+          hiddenAuthoringNodes++;
         });
+        node.userData.logicElementHiddenAuthoringNodes = hiddenAuthoringNodes;
         node.add(model);
         node.userData.logicElementAssetModel = model;
         const clipNames = (model.animations || []).map(clip => clip && clip.name || 'Animation');
@@ -5290,6 +5285,9 @@ function create(deps){
       return [0, 0, 0];
     }
     if(variable.type === 'string') return String(raw == null ? '' : raw);
+    // Objective lists arrive as a real array from their own editor, never as
+    // JSON text, so they must bypass the string-parsing fallback below.
+    if(variable.type === 'objectiveList') return Array.isArray(raw) ? raw : [];
     try { return JSON.parse(raw); }
     catch(err){ return variable.value; }
   }
@@ -5305,12 +5303,14 @@ function create(deps){
     (GAME.world && GAME.world.registry || []).forEach(other => {
       if(!other || other === object || !other.userData || other.userData.editorType !== 'logicElement') return;
       const otherGraph = graphOf(other);
-      if(!otherGraph.vehiclePawn) return;
+      const otherPawn = otherGraph.characterPawn || otherGraph.animalPawn || otherGraph.soccerPawn ||
+        otherGraph.sketchbookPawn || otherGraph.vehiclePawn || otherGraph.playerPawnBlueprint;
+      if(!otherPawn) return;
       const playerVariable = (otherGraph.variables || []).find(variable => variable && (variable.binding === 'playerId' || variable.ui === 'player-id' || variable.name === 'ControllerPlayerId'));
-      const currentPlayerId = playerVariable ? Number(playerVariable.value) : Number(otherGraph.vehiclePawn.playerId);
+      const currentPlayerId = playerVariable ? Number(playerVariable.value) : Number(otherPawn.playerId);
       if(currentPlayerId !== id) return;
-      otherGraph.vehiclePawn.playerId = null;
-      otherGraph.vehiclePawn.possessed = false;
+      otherPawn.playerId = null;
+      otherPawn.possessed = false;
       if(playerVariable) playerVariable.value = -1;
       if(other.userData.logicLinked && other.userData.logicAssetId && STORE.logicElementAssets){
         other.userData.logicVariableOverrides = Object.assign({}, other.userData.logicVariableOverrides || {}, {[playerVariable && playerVariable.name || 'ControllerPlayerId']:-1});
@@ -5336,6 +5336,7 @@ function create(deps){
       object.userData.logicVariableOverrides = Object.assign({}, object.userData.logicVariableOverrides || {}, {[target.name]:parsed});
       const asset = logicAssetForObject(object);
       if(asset) object.userData.logicGraph = resolvedLinkedGraph(object, asset);
+      if(STORE.syncLogicElementSceneObject) STORE.syncLogicElementSceneObject(object, object.userData.logicGraph);
       const entry = object.userData.addedEntry;
       if(entry){
         entry.variableOverrides = window.LK_LOGIC_GRAPH.clone(object.userData.logicVariableOverrides);
@@ -5522,6 +5523,158 @@ function create(deps){
   }
   // Animation-library picker: choose a GLB from the asset library, import a
   // new one from disk, or fall back to the clips inside the model GLB.
+  const OBJECTIVE_KINDS = [
+    ['reach', 'Reach a place', 'Raggiungi un punto'],
+    ['collect', 'Collect items', 'Raccogli oggetti'],
+    ['eliminate', 'Eliminate targets', 'Elimina bersagli'],
+    ['gates', 'Pass gates', 'Supera i cancelli'],
+    ['survive', 'Survive', 'Sopravvivi'],
+    ['timeTrial', 'Finish in time', 'Finisci in tempo'],
+    ['score', 'Reach a score', 'Raggiungi un punteggio'],
+    ['escort', 'Escort', 'Scorta'],
+    ['avoid', 'Never do this', 'Non farlo mai'],
+    ['custom', 'Custom (Logic driven)', 'Personalizzato (da Logic)'],
+  ];
+  // Which numeric fields each objective kind actually uses. Hiding the rest is
+  // what keeps this editor readable next to the generic variable rows.
+  const OBJECTIVE_FIELDS = {
+    reach:['radius','points'], collect:['count','points'], eliminate:['count','points'],
+    gates:['count','points'], survive:['duration','points'], timeTrial:['duration','points'],
+    score:['count','points'], escort:['radius','duration','points'], avoid:['points'], custom:['count','points'],
+  };
+
+  /** Editor for graph.missionDirector objective lists. Writes a plain array
+   *  back through updateVariable, so the mission stays ordinary graph data. */
+  function buildObjectiveListControl(object, variable, row){
+    row.classList.add('lk-objectiveEditor');
+    const list = Array.isArray(variable.value) ? variable.value.map(item => Object.assign({}, item)) : [];
+    const body = el('<div class="lk-objectiveList"></div>');
+    const commit = () => updateVariable(object, variable, list);
+
+    const numberField = (entry, key, label, min, max, step) => {
+      const field = el('<label class="lk-objectiveField"><span>' + label + '</span></label>');
+      const input = el('<input type="number">');
+      input.min = min; input.max = max; input.step = step;
+      input.value = Number(entry[key] || 0);
+      input.addEventListener('change', () => { entry[key] = Number(input.value) || 0; commit(); });
+      field.appendChild(input);
+      return field;
+    };
+
+    list.forEach((entry, index) => {
+      const card = el('<div class="lk-objectiveCard"></div>');
+      const head = el('<div class="lk-objectiveHead"></div>');
+      head.appendChild(el('<b>' + (index + 1) + '</b>'));
+
+      const title = el('<input type="text" class="lk-objectiveTitle">');
+      title.placeholder = tr('Objective title', 'Titolo obiettivo');
+      title.value = String(entry.title == null ? '' : entry.title);
+      title.addEventListener('change', () => { entry.title = title.value; commit(); });
+      head.appendChild(title);
+
+      const up = el('<button type="button" title="' + tr('Move up', 'Sposta su') + '">▲</button>');
+      up.disabled = index === 0;
+      up.addEventListener('click', () => { list.splice(index - 1, 0, list.splice(index, 1)[0]); commit(); rebuildInspector(); });
+      const down = el('<button type="button" title="' + tr('Move down', 'Sposta giu') + '">▼</button>');
+      down.disabled = index === list.length - 1;
+      down.addEventListener('click', () => { list.splice(index + 1, 0, list.splice(index, 1)[0]); commit(); rebuildInspector(); });
+      const remove = el('<button type="button" class="lk-objectiveRemove" title="' + tr('Remove', 'Rimuovi') + '">✕</button>');
+      remove.addEventListener('click', () => { list.splice(index, 1); commit(); rebuildInspector(); });
+      head.append(up, down, remove);
+      card.appendChild(head);
+
+      const grid = el('<div class="lk-objectiveGrid"></div>');
+      const kindField = el('<label class="lk-objectiveField"><span>' + tr('Kind', 'Tipo') + '</span></label>');
+      const kind = document.createElement('select');
+      OBJECTIVE_KINDS.forEach(item => kind.appendChild(new Option(tr(item[1], item[2]), item[0])));
+      kind.value = OBJECTIVE_FIELDS[entry.kind] ? entry.kind : 'custom';
+      kind.addEventListener('change', () => { entry.kind = kind.value; commit(); rebuildInspector(); });
+      kindField.appendChild(kind);
+      grid.appendChild(kindField);
+
+      const idField = el('<label class="lk-objectiveField"><span>' + tr('Id', 'Id') + '</span></label>');
+      const idInput = el('<input type="text">');
+      idInput.value = String(entry.id == null ? '' : entry.id);
+      idInput.placeholder = 'objective_' + (index + 1);
+      idInput.addEventListener('change', () => { entry.id = idInput.value.trim(); commit(); });
+      idField.appendChild(idInput);
+      grid.appendChild(idField);
+
+      const tagField = el('<label class="lk-objectiveField"><span>' + tr('Tag / target', 'Tag / bersaglio') + '</span></label>');
+      const tagInput = el('<input type="text">');
+      tagInput.placeholder = tr('e.g. mouse, enemy, gate', 'es. topo, nemico, cancello');
+      tagInput.value = String(entry.target && entry.target.tag || '');
+      tagInput.addEventListener('change', () => {
+        entry.target = Object.assign({}, entry.target, {tag:tagInput.value.trim()});
+        commit();
+      });
+      tagField.appendChild(tagInput);
+      grid.appendChild(tagField);
+
+      const fields = OBJECTIVE_FIELDS[kind.value] || OBJECTIVE_FIELDS.custom;
+      if(fields.indexOf('count') >= 0) grid.appendChild(numberField(entry, 'count', tr('Amount', 'Quantita'), 1, 100000, 1));
+      if(fields.indexOf('duration') >= 0) grid.appendChild(numberField(entry, 'duration', tr('Seconds', 'Secondi'), 0, 86400, 1));
+      if(fields.indexOf('points') >= 0) grid.appendChild(numberField(entry, 'points', tr('Points', 'Punti'), -10000, 100000, 10));
+      if(fields.indexOf('radius') >= 0){
+        const target = entry.target = Object.assign({radius:2.5, position:{x:0,y:0,z:0}}, entry.target);
+        const radiusField = el('<label class="lk-objectiveField"><span>' + tr('Radius', 'Raggio') + '</span></label>');
+        const radius = el('<input type="number" min=".1" max="5000" step=".1">');
+        radius.value = Number(target.radius || 2.5);
+        radius.addEventListener('change', () => { target.radius = Number(radius.value) || 2.5; commit(); });
+        radiusField.appendChild(radius);
+        grid.appendChild(radiusField);
+
+        const posField = el('<label class="lk-objectiveField lk-objectiveVec"><span>' + tr('Position', 'Posizione') + '</span></label>');
+        const position = target.position = Object.assign({x:0,y:0,z:0}, target.position);
+        ['x','y','z'].forEach(axis => {
+          const input = el('<input type="number" step=".1" title="' + axis.toUpperCase() + '">');
+          input.value = Number(position[axis] || 0);
+          input.addEventListener('change', () => { position[axis] = Number(input.value) || 0; commit(); });
+          posField.appendChild(input);
+        });
+        const pick = el('<button type="button" title="' + tr('Use selected object position', 'Usa la posizione dell\'oggetto selezionato') + '">◎</button>');
+        pick.addEventListener('click', () => {
+          const selected = ED && ED.selected;
+          if(!selected || !selected.getWorldPosition){ status(tr('Select a scene object first.', 'Seleziona prima un oggetto della scena.')); return; }
+          const world = selected.getWorldPosition(new THREE.Vector3());
+          target.position = {x:world.x, y:world.y, z:world.z};
+          if(selected.userData && selected.userData.editorId) target.objectId = selected.userData.editorId;
+          commit();
+          rebuildInspector();
+        });
+        posField.appendChild(pick);
+        grid.appendChild(posField);
+      }
+
+      const optional = el('<label class="lk-objectiveField lk-objectiveToggle"><span>' + tr('Optional', 'Opzionale') + '</span></label>');
+      const optionalInput = el('<input type="checkbox">');
+      optionalInput.checked = entry.optional === true;
+      optionalInput.addEventListener('change', () => { entry.optional = optionalInput.checked; commit(); });
+      optional.appendChild(optionalInput);
+      grid.appendChild(optional);
+
+      card.appendChild(grid);
+      body.appendChild(card);
+    });
+
+    if(!list.length) body.appendChild(el('<div class="lk-hint">' + tr('No objectives yet. Add one to describe what the player has to do.', 'Nessun obiettivo. Aggiungine uno per descrivere cosa deve fare il giocatore.') + '</div>'));
+
+    const add = el('<button type="button" class="lk-objectiveAdd">+ ' + tr('Add objective', 'Aggiungi obiettivo') + '</button>');
+    add.addEventListener('click', () => {
+      list.push({
+        id:'objective_' + (list.length + 1),
+        title:tr('New objective', 'Nuovo obiettivo'),
+        kind:'collect', count:1, points:100, optional:false,
+        target:{tag:'', radius:2.5, position:{x:0,y:0,z:0}},
+      });
+      commit();
+      rebuildInspector();
+    });
+    body.appendChild(add);
+    row.appendChild(body);
+    return row;
+  }
+
   function buildAnimationLibraryControl(object, variable, row){
     const select = document.createElement('select');
     const current = parseStoredAssetRef(variable.value);
@@ -5581,6 +5734,73 @@ function create(deps){
     return row;
   }
 
+  // Sketchbook Pawn models are render/physics assets, not animation libraries.
+  // Keep the full asset identity so IndexedDB imports survive project export,
+  // and let scene-store mirror the selected descriptor into logicScene.
+  function serializeSketchbookModelAsset(asset, current){
+    const fit = Number(current && current.fit);
+    return {
+      id:asset.id || null,
+      key:asset.key || null,
+      dbKey:asset.dbKey || null,
+      src:asset.src || asset.url || null,
+      name:asset.name || asset.source || 'DollBody Pawn GLB',
+      source:asset.source || asset.name || 'Asset Library',
+      kind:'glb',
+      mime:asset.mime || null,
+      fit:Number.isFinite(fit) && fit > 0 ? fit : Number(asset.fit) > 0 ? Number(asset.fit) : 1,
+      clips:Array.isArray(asset.clips) ? asset.clips.slice() : [],
+    };
+  }
+  function buildSketchbookModelAssetControl(object, variable, row){
+    const graph = graphOf(object), definition = graph.sketchbookPawn || {};
+    const current = parseStoredAssetRef(variable.value) || definition.modelAsset || null;
+    const refKey = ref => String(ref && (ref.dbKey || ref.key || ref.id || ref.src) || '');
+    const currentKey = refKey(current), assets = assetLibraryLoad().filter(asset => asset && asset.kind === 'glb');
+    const select = document.createElement('select');
+    let currentListed = false;
+    assets.forEach(asset => {
+      const key = refKey(asset), option = new Option(glbLabelText(asset, key) + ' (GLB)', 'asset:' + key);
+      if(key && key === currentKey){ option.selected = true; currentListed = true; }
+      select.appendChild(option);
+    });
+    if(current && !currentListed){
+      const option = new Option((current.name || tr('Project GLB', 'GLB progetto')) + ' (current)', 'current');
+      option.selected = true; select.appendChild(option);
+    }
+    select.appendChild(new Option(tr('Import GLB/FBX from disk...', 'Importa GLB/FBX da disco...'), '__import__'));
+    const apply = asset => {
+      if(!asset) return;
+      const descriptor = serializeSketchbookModelAsset(asset, current);
+      updateVariable(object, variable, JSON.stringify(descriptor));
+      if(STORE.syncLogicElementSceneObject) STORE.syncLogicElementSceneObject(object, object.userData.logicGraph);
+      if(object.userData.addedEntry) object.userData.addedEntry.graph = window.LK_LOGIC_GRAPH.clone(object.userData.logicGraph);
+      markDirty();
+      status(tr('DollBody Pawn model assigned: ', 'Modello Pawn DollBody assegnato: ') + descriptor.name);
+      rebuildInspector();
+    };
+    select.addEventListener('change', () => {
+      const value = select.value;
+      if(value === 'current') return;
+      if(value === '__import__'){
+        const input = document.createElement('input'); input.type = 'file'; input.multiple = true;
+        input.accept = '.fbx,.glb,.gltf,image/png,image/jpeg,image/webp,image/gif,image/avif,.tga,.bmp';
+        input.addEventListener('change', () => {
+          const files = Array.from(input.files || []); if(!files.length){ rebuildInspector(); return; }
+          importAssetFiles(files).then(imported => {
+            const asset = (imported || []).find(item => item && item.kind === 'glb');
+            if(asset){ apply(asset); refreshAssetsPanel(); }
+            else { status(tr('Pawn model import failed.', 'Importazione modello Pawn fallita.')); rebuildInspector(); }
+          });
+        }, {once:true});
+        input.click(); return;
+      }
+      const key = value.slice(6), asset = assets.find(item => refKey(item) === key); if(asset) apply(asset);
+    });
+    row.appendChild(select);
+    return row;
+  }
+
   function buildVariableControl(object, variable){
     const row = el('<div class="lk-row"></div>');
     const label = document.createElement('label');
@@ -5589,8 +5809,14 @@ function create(deps){
     if(variable.binding && /^animations\./.test(String(variable.binding))){
       return buildAnimationClipControl(object, variable, row);
     }
+    if(variable.ui === 'sketchbook-model-asset' || (variable.ui === 'model-asset' && graphOf(object).sketchbookPawn)){
+      return buildSketchbookModelAssetControl(object, variable, row);
+    }
     if(variable.ui === 'model-asset' || variable.binding === 'animationLibrary'){
       return buildAnimationLibraryControl(object, variable, row);
+    }
+    if(variable.ui === 'objective-list'){
+      return buildObjectiveListControl(object, variable, row);
     }
     if(variable.ui === 'player-id' || variable.name === 'ControllerPlayerId'){
       const input = document.createElement('select');
@@ -5949,6 +6175,41 @@ function create(deps){
       studio.body.appendChild(el('<div class="lk-hint"><b>'+studioAdapter.label+'</b> · '+tr('Main mesh: ','Mesh principale: ')+(model?(model.name||model.source||'GLB'):tr('missing','mancante'))+(motionCount?' · Motion samples: '+motionCount:'')+'</div>'));
       studio.body.appendChild(btnRow([{label:tr('Open Pawn Studio…','Apri Pawn Studio…'),action:()=>pawnStudio.open(object,graph)}]));
       box.appendChild(studio.root);
+      const vehicleDefinition=graph.sketchbookPawn&&graph.sketchbookPawn.kind!=='advanced-character'
+        ?graph.sketchbookPawn:(graph.vehiclePawn||graph.playerPawnBlueprint||null);
+      if(vehicleDefinition&&deps.playerSetupInspector){
+        const definition=vehicleDefinition;
+        const vehicleType=String(definition.kind||'car').replace(/^sketchbook-/,'');
+        const damageApi=window.LK_RUNTIME_VEHICLE_DAMAGE;
+        definition.damage=damageApi&&damageApi.normalizeConfig?damageApi.normalizeConfig(definition.damage,vehicleType):definition.damage||{};
+        const livePawn=()=>GAME.pawns&&GAME.pawns.list?GAME.pawns.list().find(item=>item&&item.owner===object)||null:null;
+        const scene=graph.logicScene||(graph.logicScene={root:{id:'root',name:'Vehicle Root',type:'empty',linked:true},elements:[],components:[]});scene.elements=Array.isArray(scene.elements)?scene.elements:[];
+        const ensureAnchor=(id,name,role,target)=>{let anchor=scene.elements.find(item=>item&&item.id===id);if(!anchor){anchor={id,name,type:'empty',parentId:'root',linked:true,position:target.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:role==='fuelTank'?'#ffb52e':'#667788'};scene.elements.push(anchor);}anchor.vehicleDamageAnchor=role;anchor.position=target.position.slice();return anchor;};
+        const syncAnchors=()=>{
+          [['vehicle_fuel_tank','Fuel Tank Damage Dummy','fuelTank',definition.damage.fuelTank],['vehicle_engine_smoke','Engine Smoke Dummy','engineSmoke',definition.damage.engineSmoke],['vehicle_exhaust','Exhaust / Muffler Dummy','exhaust',definition.damage.exhaust]].forEach(spec=>{const anchor=ensureAnchor(spec[0],spec[1],spec[2],spec[3]);let runtimeNode=null;object.traverse(node=>{if(!runtimeNode&&node.userData&&node.userData.logicElementSceneId===anchor.id)runtimeNode=node;});if(runtimeNode&&runtimeNode.position&&runtimeNode.position.set)runtimeNode.position.set(anchor.position[0],anchor.position[1],anchor.position[2]);});
+        };
+        syncAnchors();
+        if(deps.playerSetupInspector.buildVehicleDamage)deps.playerSetupInspector.buildVehicleDamage(box,{
+          pawnType:vehicleType,damage:definition.damage,
+          setDamageConfig(values){
+            definition.damage=damageApi&&damageApi.normalizeConfig?damageApi.normalizeConfig(values,vehicleType):JSON.parse(JSON.stringify(values));
+            this.damage=definition.damage;syncAnchors();const pawn=livePawn();if(pawn&&pawn.setDamageConfig)pawn.setDamageConfig(definition.damage);saveElementGraph(object,graph);return definition.damage;
+          },
+          get damageRuntime(){const pawn=livePawn();return pawn&&pawn.damageRuntime||null;},
+        },{type:vehicleType,onChange:()=>saveElementGraph(object,graph)});
+        if(graph.sketchbookPawn){
+          definition.engineAudio=Object.assign({enabled:true,volume:.28,pitch:1,setId:null},definition.engineAudio||{});
+        if(deps.playerSetupInspector.buildEngineSound)deps.playerSetupInspector.buildEngineSound(box,{
+            engineAudio:definition.engineAudio,
+            engineAudioStatus(){const pawn=livePawn();return pawn&&pawn.engineAudioStatus?pawn.engineAudioStatus():null;},
+            setEngineSound(setId){
+              definition.engineAudio.setId=setId||null;
+              const pawn=livePawn();if(pawn&&pawn.setEngineAudio)pawn.setEngineAudio({setId:definition.engineAudio.setId});
+              saveElementGraph(object,graph);
+            },
+          });
+        }
+      }
       return;
     }
 
@@ -6006,6 +6267,23 @@ function create(deps){
         });
         return target;
       };
+      const vehicleDamageRuntime=window.LK_RUNTIME_VEHICLE_DAMAGE;
+      graph.vehiclePawn.damage=vehicleDamageRuntime
+        ?vehicleDamageRuntime.normalizeConfig(graph.vehiclePawn.damage,'car')
+        :mergePawnConfig({enabled:true,maxEnergy:850,fuelTank:{position:[-.72,.48,-1.18],radius:.42,damageMultiplier:2.5,dummyVisible:true},engineSmoke:{position:[0,.72,.82],dummyVisible:true},exhaust:{position:[0,.42,-1.72],dummyVisible:true},smokeThreshold:.62,fireThreshold:.28,explosion:{delay:.75,radius:7,force:120,detachWheels:true,blacken:true}},graph.vehiclePawn.damage||{});
+      const damageScene=graph.logicScene||(graph.logicScene={root:{id:'root',name:'Vehicle Root',type:'empty',linked:true},elements:[],components:[]});
+      damageScene.elements=Array.isArray(damageScene.elements)?damageScene.elements:[];
+      const ensureDamageAnchor=(id,name,role,position)=>{
+        let element=damageScene.elements.find(item=>item&&item.id===id);
+        if(!element){element={id,name,type:'empty',parentId:'root',linked:true,position:(position||[0,0,0]).slice(),rotation:[0,0,0],scale:[1,1,1],color:role==='fuelTank'?'#ffb52e':'#667788',vehicleDamageAnchor:role};damageScene.elements.push(element);}
+        element.vehicleDamageAnchor=role;element.position=Array.isArray(element.position)?element.position:(position||[0,0,0]).slice();return element;
+      };
+      const damageAnchors={
+        fuelTank:ensureDamageAnchor('vehicle_fuel_tank','Fuel Tank Damage Dummy','fuelTank',graph.vehiclePawn.damage.fuelTank.position),
+        engineSmoke:ensureDamageAnchor('vehicle_engine_smoke','Engine Smoke Dummy','engineSmoke',graph.vehiclePawn.damage.engineSmoke.position),
+        exhaust:ensureDamageAnchor('vehicle_exhaust','Exhaust / Muffler Dummy','exhaust',graph.vehiclePawn.damage.exhaust.position),
+      };
+      graph.vehiclePawn.damage.fuelTank.position=damageAnchors.fuelTank.position.slice();graph.vehiclePawn.damage.engineSmoke.position=damageAnchors.engineSmoke.position.slice();graph.vehiclePawn.damage.exhaust.position=damageAnchors.exhaust.position.slice();
       const liveVehiclePawn = () => GAME.pawns && GAME.pawns.list
         ? GAME.pawns.list().find(item => item && item.kind === 'logic-element' && item.owner === object) || null
         : null;
@@ -6038,6 +6316,10 @@ function create(deps){
         row.appendChild(caption); row.appendChild(input);
         return row;
       };
+      const syncVehicleDamage=()=>{const live=liveVehiclePawn();if(live&&live.setDamageConfig)live.setDamageConfig(graph.vehiclePawn.damage);saveElementGraph(object,graph);};
+      const damageToggle=(label,target,key)=>{const row=el('<div class="lk-row"></div>'),caption=document.createElement('label'),input=el('<input type="checkbox">');caption.textContent=label;input.checked=target[key]===true;input.addEventListener('change',()=>{target[key]=input.checked;syncVehicleDamage();});row.append(caption,input);return row;};
+      const damageNumber=(label,target,key,min,max,step)=>{const row=pawnNumber(label,target,key,min,max,step),input=row.querySelector('input');input.addEventListener('change',()=>{const live=liveVehiclePawn();if(live&&live.setDamageConfig)live.setDamageConfig(graph.vehiclePawn.damage);});return row;};
+      const damageVector=(label,target,anchor)=>{const row=el('<div class="lk-vec"></div>'),caption=document.createElement('label');caption.textContent=label;row.appendChild(caption);const values=Array.isArray(target.position)?target.position:[0,0,0],safe=(value,fallback)=>Number.isFinite(Number(value))?Number(value):Number(fallback)||0;['X','Y','Z'].forEach((axis,index)=>{const input=el('<input type="number" step=".05" title="'+axis+'">');input.value=safe(values[index],0);input.addEventListener('change',()=>{values[index]=safe(input.value,values[index]);target.position=values.slice();anchor.position=values.slice();let runtimeNode=null;object.traverse(node=>{if(!runtimeNode&&node.userData&&node.userData.logicElementSceneId===anchor.id)runtimeNode=node;});if(runtimeNode&&runtimeNode.position&&runtimeNode.position.set)runtimeNode.position.set(values[0],values[1],values[2]);syncVehicleDamage();});row.appendChild(input);});return row;};
       pawn.body.appendChild(el('<div class="lk-hint">' + tr(
         'Runtime Vehicle Pawn active: independent Cannon RaycastVehicle, four-wheel suspension, lifecycle/state, reset, local Player possession and Vehicle Pawn nodes.',
         'Runtime Vehicle Pawn attivo: Cannon RaycastVehicle indipendente, sospensioni a quattro ruote, lifecycle/stato, reset, possesso Player locale e nodi Vehicle Pawn.'
@@ -6079,6 +6361,26 @@ function create(deps){
       driving.body.appendChild(pawnNumber(tr('Grip', 'Aderenza'), graph.vehiclePawn.tuning, 'grip', .1, 1, .01));
       driving.body.appendChild(pawnNumber(tr('Drag', 'Resistenza'), graph.vehiclePawn.tuning, 'drag', 0, 10, .05));
       pawn.body.appendChild(driving.root);
+      const damage=section(tr('VEHICLE ENERGY / DAMAGE DUMMIES','ENERGIA VEICOLO / DUMMY DANNI'),false),damageCfg=graph.vehiclePawn.damage;
+      damage.body.appendChild(el('<div class="lk-hint">'+tr('Fuel Tank is a real shootable hit zone. A GLB anchor named fuel_tank / serbatoio overrides this fallback; Engine Smoke and Exhaust work the same way. The dummies remain independently movable in the vehicle rig.','Il serbatoio è una vera hit-zone sparabile. Un anchor GLB chiamato fuel_tank / serbatoio sostituisce questo fallback; Engine Smoke e Scarico funzionano allo stesso modo. I dummy restano spostabili indipendentemente nel rig del veicolo.')+'</div>'));
+      damage.body.appendChild(damageToggle(tr('Damage enabled','Danni abilitati'),damageCfg,'enabled'));
+      damage.body.appendChild(damageNumber(tr('Maximum energy','Energia massima'),damageCfg,'maxEnergy',1,100000,10));
+      damage.body.appendChild(damageVector(tr('Fuel Tank dummy','Dummy serbatoio'),damageCfg.fuelTank,damageAnchors.fuelTank));
+      damage.body.appendChild(damageNumber(tr('Fuel Tank radius','Raggio serbatoio'),damageCfg.fuelTank,'radius',.08,5,.01));
+      damage.body.appendChild(damageNumber(tr('Fuel Tank damage multiplier','Moltiplicatore danno serbatoio'),damageCfg.fuelTank,'damageMultiplier',1,20,.1));
+      damage.body.appendChild(damageToggle(tr('Show Fuel Tank dummy','Mostra dummy serbatoio'),damageCfg.fuelTank,'dummyVisible'));
+      damage.body.appendChild(damageVector(tr('Engine smoke dummy','Dummy fumo motore'),damageCfg.engineSmoke,damageAnchors.engineSmoke));
+      damage.body.appendChild(damageToggle(tr('Show engine dummy','Mostra dummy motore'),damageCfg.engineSmoke,'dummyVisible'));
+      damage.body.appendChild(damageVector(tr('Exhaust / muffler dummy','Dummy scarico / marmitta'),damageCfg.exhaust,damageAnchors.exhaust));
+      damage.body.appendChild(damageToggle(tr('Show exhaust dummy','Mostra dummy scarico'),damageCfg.exhaust,'dummyVisible'));
+      damage.body.appendChild(damageNumber(tr('Smoke energy threshold','Soglia energia fumo'),damageCfg,'smokeThreshold',0,1,.01));
+      damage.body.appendChild(damageNumber(tr('Fire energy threshold','Soglia energia fuoco'),damageCfg,'fireThreshold',0,1,.01));
+      damage.body.appendChild(damageNumber(tr('Explosion delay (s)','Ritardo esplosione (s)'),damageCfg.explosion,'delay',0,10,.05));
+      damage.body.appendChild(damageNumber(tr('Explosion radius','Raggio esplosione'),damageCfg.explosion,'radius',.5,40,.1));
+      damage.body.appendChild(damageNumber(tr('Explosion force','Forza esplosione'),damageCfg.explosion,'force',0,2000,5));
+      damage.body.appendChild(damageToggle(tr('Detach wheels','Stacca ruote'),damageCfg.explosion,'detachWheels'));
+      damage.body.appendChild(damageToggle(tr('Blacken destroyed body','Annerisci carrozzeria distrutta'),damageCfg.explosion,'blacken'));
+      pawn.body.appendChild(damage.root);
       if(deps.playerColliderInspector && deps.playerColliderInspector.build){
         deps.playerColliderInspector.build(pawn.body, {
           collision:graph.vehiclePawn.collision,
@@ -6483,7 +6785,11 @@ function create(deps){
           modelAssets(){ return assetLibraryLoad().filter(asset => asset && asset.kind === 'glb'); },
           replaceModelWithAsset:replaceLogicVehicleModel,
           openModelPicker:openLogicVehicleModelPicker,
-          setEngineSound(setId){ graph.vehiclePawn.engineAudio.setId = setId || null; this.engineAudio.setId = setId || null; saveElementGraph(object, graph); },
+          setEngineSound(setId){
+            graph.vehiclePawn.engineAudio.setId = setId || null; this.engineAudio.setId = setId || null;
+            const livePawn=liveVehiclePawn();if(livePawn&&livePawn.setEngineAudio)livePawn.setEngineAudio({setId:this.engineAudio.setId});
+            saveElementGraph(object, graph);
+          },
         };
         box.appendChild(el('<div class="lk-hint">' + tr('Shared Pawn/Driving/Model/Engine Sound inspector targeting this Vehicle Pawn.', 'Inspector Pawn/Guida/Modello/Engine Sound condiviso con target questo Vehicle Pawn.') + '</div>'));
         deps.playerSetupInspector.build(box, setupTarget);

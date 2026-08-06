@@ -165,7 +165,23 @@ async function loadFbxSource(asset,context){
   const manager=new THREE.LoadingManager();
   if(THREE.TGALoader)manager.addHandler(/\.tga$/i,new THREE.TGALoader(manager));
   manager.setURLModifier(url=>resolveDependencyUrl(index,url)||url);
-  return new THREE.FBXLoader(manager).loadAsync(sourceUrl);
+  const loaded=await new THREE.FBXLoader(manager).loadAsync(sourceUrl);
+  // Repair a doubled bone chain before anything can bind to it. The bundled
+  // mannequins - and their original sources - carry every bone twice, nested, with
+  // the two skinned meshes bound to DIFFERENT copies; a mixer drives the outer one,
+  // so one mesh animates and the other stays in its T-pose. Done here because this
+  // is the single funnel every FBX passes through, so a user import from the same
+  // pipeline is fixed too.
+  const repair=window.LK_SKINNED_RIG_REPAIR;
+  if(repair&&loaded){
+    const outcome=repair.collapseDuplicateBones(loaded);
+    if(outcome.collapsed&&window.console&&console.info){
+      console.info('[LOT KING] repaired doubled bone chain in '+(asset.name||asset.source||'FBX')+
+        ': '+outcome.collapsed+' duplicate bones removed, '+outcome.remappedBones+
+        ' skeleton slots repointed across '+outcome.meshes+' meshes');
+    }
+  }
+  return loaded;
 }
 
 async function rebuildFbx(asset,context){

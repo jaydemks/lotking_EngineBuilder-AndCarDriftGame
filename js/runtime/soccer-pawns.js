@@ -9,11 +9,29 @@ const SCHEMA_VERSION=1;
 const ROLES=['striker','winger','midfielder','defender','goalkeeper'];
 const ROLE_ANIMATION_DEFAULTS={common:{idle:'Idle',walk:'Walking',run:'Running',strafeLeft:'Left Strafe',strafeRight:'Right Strafe',jump:'Jump',celebrate:'Victory',defeat:'Defeated'},striker:{shoot:'Soccer Strike',pass:'Soccer Pass',cross:'Soccer Pass'},winger:{shoot:'Soccer Strike',pass:'Soccer Pass',cross:'Soccer Pass'},midfielder:{shoot:'Soccer Strike',pass:'Soccer Pass',cross:'Soccer Pass'},defender:{shoot:'Soccer Strike',pass:'Soccer Pass',tackle:'Soccer Tackle'},goalkeeper:{save:'Goalkeeper Catch',diveLeft:'Goalkeeper Dive Left',diveRight:'Goalkeeper Dive Right',shoot:'Soccer Strike',pass:'Soccer Pass'}};
 const ROLE_ACTIONS={striker:['shoot','pass','cross','celebrate','defeat'],winger:['shoot','pass','cross','celebrate','defeat'],midfielder:['shoot','pass','cross','celebrate','defeat'],defender:['shoot','pass','tackle','celebrate','defeat'],goalkeeper:['save','diveLeft','diveRight','pass','celebrate','defeat']};
+// How each role reads its stick and decides where it points. Outfield players
+// run where the camera looks and turn into the run, which is the control every
+// football game has used since the analogue stick; only the goalkeeper keeps a
+// fixed frame, so it stays square to the pitch while it shuffles along its line.
+// `facingMode:'heading'` means nothing but an explicit heading write can rotate
+// the Pawn, so it must never be the default for a player-controlled outfielder.
+const ROLE_CONTROL_FRAME=Object.freeze({
+  striker:{inputMode:'camera',facingMode:'movement'},
+  winger:{inputMode:'camera',facingMode:'movement'},
+  midfielder:{inputMode:'camera',facingMode:'movement'},
+  defender:{inputMode:'camera',facingMode:'movement'},
+  goalkeeper:{inputMode:'heading',facingMode:'heading'},
+});
+function roleControlFrame(role){
+  const frame=ROLE_CONTROL_FRAME[role];
+  if(!frame)throw new Error('Soccer Pawn: no control frame is declared for role "'+role+'"');
+  return frame;
+}
 function normalizeRole(value){const role=String(value||'').trim().toLowerCase();return ROLES.includes(role)?role:'striker';}
 function roleAnimationDefaults(role){return Object.assign({},ROLE_ANIMATION_DEFAULTS.common,ROLE_ANIMATION_DEFAULTS[normalizeRole(role)]||{});}
 function normalizeConfig(source){
   const base=window.LK_RUNTIME_CHARACTER_PAWN_BASE,src=source&&typeof source==='object'?base.clone(source):{},role=normalizeRole(src.role),keeper=src.keeper||{},ball=src.ball||{},fieldAI=src.fieldAI||{};
-  const cfg=base.normalizeCommonConfig(src,{schemaVersion:SCHEMA_VERSION,role,playerId:1,movement:{walkSpeed:1.9,runSpeed:6,sprintMultiplier:1.35,acceleration:14,turnRate:10,jumpHeight:1.1,gravity:22,airControl:.35,inputMode:'heading',facingMode:'heading'},animations:roleAnimationDefaults(role),appearance:{shirtColor:'#e11d48',shortsColor:'#f8fafc',socksColor:'#e11d48',hairColor:'#2b2118',skinColor:'#d8a184',hairStyle:'short',number:9},camera:{mode:'free',view:'third',distance:7.5,height:2.6,lag:6.5,fov:60}});
+  const cfg=base.normalizeCommonConfig(src,{schemaVersion:SCHEMA_VERSION,role,playerId:1,movement:Object.assign({walkSpeed:1.9,runSpeed:6,sprintMultiplier:1.35,acceleration:14,turnRate:10,jumpHeight:1.1,gravity:22,airControl:.35},roleControlFrame(role)),animations:roleAnimationDefaults(role),appearance:{shirtColor:'#e11d48',shortsColor:'#f8fafc',socksColor:'#e11d48',hairColor:'#2b2118',skinColor:'#d8a184',hairStyle:'short',number:9},camera:{mode:'free',view:'third',distance:7.5,height:2.6,lag:6.5,fov:60}});
   const hasAi=Object.prototype.hasOwnProperty.call(keeper,'aiEnabled');
   cfg.role=role;cfg.keeper={diveDistance:base.clamp(base.finite(keeper.diveDistance,2.6),.5,5),diveDuration:base.clamp(base.finite(keeper.diveDuration,.55),.2,1.5),reach:base.clamp(base.finite(keeper.reach,1.1),.4,2.5),aiEnabled:hasAi?keeper.aiEnabled!==false:role==='goalkeeper',aiReaction:base.clamp(base.finite(keeper.aiReaction,.14),.02,.8),aiPrediction:base.clamp(base.finite(keeper.aiPrediction,1.15),.2,2.5),aiReturnSpeed:base.clamp(base.finite(keeper.aiReturnSpeed,3.8),.5,10)};
   cfg.fieldAI={enabled:fieldAI.enabled===true,reaction:base.clamp(base.finite(fieldAI.reaction,.32),.05,2),shootDistance:base.clamp(base.finite(fieldAI.shootDistance,1.05),.5,2)};
@@ -24,6 +42,10 @@ function normalizeConfig(source){
     shootPower:base.clamp(base.finite(ball.shootPower,26),8,40),
     shotMinPower:base.clamp(base.finite(ball.shotMinPower,10),4,25),
     shotChargeTime:base.clamp(base.finite(ball.shotChargeTime,1.15),.3,3),
+    // Aiming drops the world into slow motion so the player has time to pick
+    // a corner, a height and an amount of curve, from the spot or at a sprint.
+    aimSlowMotion:ball.aimSlowMotion!==false,
+    aimTimeScale:base.clamp(base.finite(ball.aimTimeScale,.18),.02,.9),
     shotCurve:base.clamp(base.finite(ball.shotCurve,.65),0,1),
     aimReticle:ball.aimReticle!==false,
     passPower:base.clamp(base.finite(ball.passPower,10),2,30),
@@ -41,6 +63,22 @@ function createLogic(GAME,owner,source,services){
   pawn.setBall=function(patch){this.config.ball=normalizeConfig({role:this.config.role,ball:Object.assign({},this.config.ball,patch||{})}).ball;return this.config.ball;};
   pawn.availableActions=function(){return (ROLE_ACTIONS[this.config.role]||ROLE_ACTIONS.striker).slice();};
   const baseAction=pawn.playAction.bind(pawn);
+  const baseClearPlayerControlState=typeof pawn.clearPlayerControlState==='function'?pawn.clearPlayerControlState.bind(pawn):null;
+  pawn.clearPlayerControlState=function(reason){
+    if(baseClearPlayerControlState)baseClearPlayerControlState(reason);
+    else this.control=null;
+    // A held kick belongs to the Player that began it. Cancelling the charge on
+    // release prevents the now-AI/unpossessed footballer from firing it on the
+    // next neutral frame (the old Soccer keeper/player state bleed).
+    if(this.state.chargeActionVisual&&this.locomotion&&typeof this.locomotion.stopAction==='function')this.locomotion.stopAction();
+    this.state.shotCharge=null;
+    this.state.setupAim=null;
+    this.state.setupAimKey=null;
+    this.state.chargeActionVisual=false;
+    this.state.shotChargeReadsDevice=false;
+    this.state.actionButtonDown=false;
+    return true;
+  };
   pawn.playAction=function(name,options){
     const action=String(name||'').trim(),opts=options||{};
     // Compatibility for v1 Soccer graphs that still invoke Shoot from an
@@ -60,7 +98,7 @@ function createLogic(GAME,owner,source,services){
   pawn.beginChargedShot=function(move){
     if(this.config.role==='goalkeeper'||this.state.pendingBallContact||this.state.shotCharge)return false;
     const setup=this.state.setupAim;
-    this.state.shotCharge={elapsed:0,normalized:0,aimX:base.clamp(base.finite(setup&&setup.aimX,base.finite(move&&move.x,0)),-1,1),aimY:base.clamp(base.finite(setup&&setup.aimY,base.finite(move&&move.z,0)),-1,1),curve:false,pointerAim:!!(setup&&setup.pointerAim)};
+    this.state.shotCharge={elapsed:0,normalized:0,aimX:base.clamp(base.finite(setup&&setup.aimX,base.finite(move&&move.x,0)),-1,1),aimY:base.clamp(base.finite(setup&&setup.aimY,base.finite(move&&move.z,0)),-1,1),curve:0,pointerAim:!!(setup&&setup.pointerAim)};
     // Start the actual authored kick immediately, then freeze it just before
     // foot contact while the player holds the button. Release resumes this
     // very same clip so there is no invisible charge or animation restart.
@@ -85,6 +123,19 @@ function createLogic(GAME,owner,source,services){
     return true;
   };
   pawn.penaltyState=function(){return GAME&&GAME.systems&&GAME.systems.penaltyFlow&&GAME.systems.penaltyFlow.state?GAME.systems.penaltyFlow.state():null;};
+  // A penalty keeper must be able to commit BEFORE the ball is readable: the
+  // shootout director (js/runtime/penalty-flow.js) owns that decision — guess,
+  // early commit bought by a feint, or a late read — and this only executes it.
+  // Ball-flight prediction below stays the authority for every other situation.
+  pawn.commitPenaltyDive=function(){
+    const flow=GAME&&GAME.systems&&GAME.systems.penaltyFlow;
+    if(this.config.role!=='goalkeeper'||this.possessed||!flow||!flow.keeperCommitment)return false;
+    const call=flow.keeperCommitment();if(!call)return false;
+    const keeper=this.config.keeper,lateral=base.clamp(base.finite(call.lateral,0),-1,1);
+    if(Math.abs(lateral)<.22){this.playAction('save',{duration:.55,speed:base.finite(call.height,0)>.4?1.12:1});return true;}
+    this.playAction(lateral<0?'diveLeft':'diveRight',{duration:keeper.diveDuration,speed:1.1});
+    return true;
+  };
   pawn.wantsShotAimInput=function(){
     const penalty=this.penaltyState();
     return this.config.role!=='goalkeeper'&&!this.state.pendingBallContact&&!!(this.state.shotCharge||penalty&&(penalty.phase==='ready'||penalty.phase==='aim'));
@@ -126,8 +177,12 @@ function createLogic(GAME,owner,source,services){
       y:goal.y+.18+(aimY+1)*.5*(goal.height*.82),
       z:goal.z-Math.sin(goal.heading)*aimX*(goal.width*.43)
     }:{x:owner.position.x+fx*30,y:.5+(aimY+1),z:owner.position.z+fz*30};
-    const curve=(charge.curve?this.config.ball.shotCurve:this.config.ball.shotCurve*.22)*aimX;
-    return {charge:amount,aimX,aimY,power,curve,target,lift:.08+amount*.16};
+    // A signed curve axis bends the flight independently of where the shot is
+    // aimed; with no curve input the strike keeps a slight natural bend from
+    // the side of the foot that struck it.
+    const bend=base.clamp(base.finite(charge.curve,0),-1,1);
+    const curve=this.config.ball.shotCurve*(bend!==0?bend:aimX*.22);
+    return {charge:amount,aimX,aimY,power,curve,bend,target,lift:.08+amount*.16};
   };
   pawn.releaseChargedShot=function(){
     const charge=this.state.shotCharge;if(!charge)return false;
@@ -147,6 +202,7 @@ function createLogic(GAME,owner,source,services){
   pawn.updateKeeperAI=function(h){
     const keeper=this.config.keeper,system=GAME&&GAME.systems&&GAME.systems.soccerBall,ai=this.state.keeperAI||(this.state.keeperAI={ballId:null,reaction:0,committed:false});
     if(this.config.role!=='goalkeeper'||keeper.aiEnabled===false||this.possessed||!system||!system.list||!system.state||!this.owner)return false;
+    if(!this.state.diving&&this.commitPenaltyDive()){ai.committed=true;return true;}
     const goals=system.goals?system.goals():[],owner=this.owner;
     let goal=null,goalDistance=Infinity;
     goals.forEach(candidate=>{const dx=candidate.x-owner.position.x,dz=candidate.z-owner.position.z,d2=dx*dx+dz*dz;if(d2<goalDistance){goalDistance=d2;goal=candidate;}});
@@ -249,7 +305,12 @@ function createLogic(GAME,owner,source,services){
         charge.aimX=base.clamp(base.finite(shotMove&&shotMove.x,charge.aimX),-1,1);
         charge.aimY=base.clamp(base.finite(shotMove&&shotMove.z,charge.aimY),-1,1);
       }
-      charge.curve=shotMove&&shotMove.sprint===true;
+      // Curve is its own signed axis on the lean controls, ramped while held.
+      // Sprint stays a legacy shortcut for "bend it as hard as this foot can".
+      const leanCurve=(shotMove&&shotMove.leanRight===true?1:0)-(shotMove&&shotMove.leanLeft===true?1:0);
+      if(leanCurve!==0)charge.curve=base.clamp(base.finite(charge.curve,0)+leanCurve*h*1.6,-1,1);
+      else if(shotMove&&shotMove.sprint===true)charge.curve=base.clamp(base.finite(charge.curve,0)+Math.sign(charge.aimX||1)*h*1.6,-1,1);
+      else charge.curve=base.finite(charge.curve,0)*Math.max(0,1-h*2.2);
       if(this.state.chargeActionVisual&&this.locomotion&&this.locomotion.actionProgress&&this.locomotion.holdActionAtProgress){
         if(this.locomotion.actionProgress()>=.3||charge.elapsed>=.28)this.locomotion.holdActionAtProgress(.3);
       }

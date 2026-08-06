@@ -34,6 +34,12 @@ function createApi(manager, env, plugin){
     assetPreviewLoader(type, config){
       return add('assetPreviewLoader', Object.assign({type}, config || {}));
     },
+    // Contributes browseable assets without merging them into the engine or
+    // project catalogues. The Asset panel renders enabled providers under the
+    // owning plugin name and removes them automatically when it is disabled.
+    assetProvider(id, config){
+      return add('assetProvider', Object.assign({id}, config || {}));
+    },
     pawnStudioType(id, config){
       return add('pawnStudioType', Object.assign({id}, config || {}));
     },

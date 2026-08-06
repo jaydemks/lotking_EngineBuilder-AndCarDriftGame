@@ -8,6 +8,14 @@ It is **additive**. A Character Pawn without a `firstPerson` block behaves exact
 on the untouched third-person path. See [Character Movement](CHARACTER_MOVEMENT.md) for the
 shared locomotion contract this builds on.
 
+A Character that can switch from third to first person uses one full-body Pawn in both views.
+The switch changes only the shared camera from shoulder to eye height; it does not instantiate
+`first-person-view-pawn`, duplicate the AnimationMixer or load a second arms mesh. For a monolithic
+SkinnedMesh, the eye camera moves horizontally just beyond the face and uses a safe near plane;
+it never scales or hides the Head bone. The separate-arms presentation remains available only as an explicit
+choice for a dedicated first-person-only project. Vehicle interior view follows the equivalent
+camera-only rule on the existing Vehicle Pawn.
+
 ---
 
 ## Modules
@@ -16,7 +24,7 @@ shared locomotion contract this builds on.
 | --- | --- |
 | `js/runtime/first-person-controller.js` | View angles, eye transform, ADS, recoil, view bob, weapon state, hitscan, the damageable contract |
 | `js/runtime/fps-hud.js` | Crosshair, hit marker, ammo, weapon, loadout, health/armour/stamina, radar, prompts, toasts, damage vignette |
-| `js/runtime/fps-view-model.js` | The visible weapon **and the arms holding it**: procedural model, ADS, sway, recoil, reload pose, muzzle flash |
+| `js/runtime/fps-view-model.js` | The real weapon held by the Character, plus the optional classic **separate arms** presentation: ADS, sway, recoil, reload pose, muzzle flash |
 | `js/runtime/character-abilities.js` | Traversal: crouch, slow walk, slide, vault, mantle, ladder and wall climb |
 | `js/runtime/character-vitals.js` | Health, armour, stamina, regeneration, death and respawn |
 | `js/runtime/item-system.js` | World pickups (`userData.item`) and the per-Pawn weapon inventory |
@@ -90,15 +98,16 @@ rather than replacing them, so a game mode that already installed its own hooks 
 Ordering matters and is deliberate:
 
 - **`beforeMovementStep`** applies stick look, ADS blending, reload timers and the fire
-  cadence, then writes `owner.rotation.y = yaw + recoilYaw`. Running *before* the shared
-  movement controller means the body is already facing the view when locomotion resolves, so
-  strafing stays exactly perpendicular to the crosshair.
+  cadence. In first person, ADS, or while firing it aligns the body with the aim; during normal
+  third-person locomotion the hips follow the actual travel direction. Running *before* the
+  shared movement controller keeps aim and movement in the same frame without forcing a running
+  Character to point permanently at the crosshair.
 - **`afterMovementStep`** decays recoil, advances view bob and blends FOV using the movement
   snapshot, so those effects match the distance actually travelled that frame.
 
-The template sets `movement.inputMode` and `movement.facingMode` to `heading`: the rig already
-aligns the body with the view every frame, so a camera-relative frame or a turn-toward-velocity
-facing would fight it.
+The template uses the shared Character movement contract. The first-person rig temporarily owns
+aim-facing only where the presentation requires it; the normal locomotion controller remains the
+source of travel-facing in third person.
 
 ---
 
@@ -118,13 +127,23 @@ pointer-lock bookkeeping `updateCamera` does.
 Consequences, all intentional:
 
 - Pointer lock is requested regardless of the vehicle camera mode.
-- `C` (cycle camera mode) reports `FIRST PERSON CAMERA` instead of cycling a mode the Pawn
+- The mapped Character Camera Mode action (default `B` / `R3`) reports the destination view instead of cycling a vehicle mode the Pawn
   does not use.
 - Mouse deltas go to `rig.applyLookDelta()` and never touch `camYaw`/`camPitch`, so switching
   back to a vehicle keeps its framing.
-- The own body mesh is hidden for the owning player. The traversal is guarded by the last
-  applied value, so it runs on state changes rather than every frame, and `dispose()` restores
-  visibility.
+- With the default same-body presentation, the animated Character, Head bone, hands, held weapon,
+  skeleton and mixer remain the same objects and transforms used in third person. Camera-only face
+  clearance plus a `0.14 m` near plane prevents clipping/overdraw. Separately-authored rigid hair
+  or helmet pieces may be hidden at eye height; cached visibility is restored on the TPS transition.
+
+`autoEyeHeight` is enabled by default. The rig resolves the actual Head bone once and converts its
+position to Pawn-local metres; `eyeBoneOffset` (default `0.08`) moves that pivot to eye level. The
+result is stable rather than following every animated head bounce. `eyeHeight` remains the safe
+minimum and becomes the exact manual value when automatic height is disabled.
+
+The asset loader remains authoritative over procedural fallbacks. Once the real Main Mesh is
+ready, its hidden placeholder parts are stamped as asset-suppressed and camera transitions cannot
+restore them from an older visibility cache.
 
 ---
 
@@ -302,20 +321,19 @@ work.
 
 ### The weapon view model
 
-`js/runtime/fps-view-model.js` builds the visible weapon procedurally from primitives and
-holds it in front of the camera, with aim-down-sights, sway, walking bob, recoil kick and a
-muzzle flash. Its shape follows the weapon preset — the marksman profile gets a longer barrel
-and a scope, the shotgun a wider bore and no magazine — and an unrecognised custom loadout is
-matched by behaviour (pellet count, range) rather than name.
+The default is **not** a second arms Pawn. `js/runtime/fps-view-model.js` updates the real held
+weapon attached to the full Character's hand while the camera moves between the rig's shoulder
+and eye transforms. Switching view therefore does not create a second weapon, skeleton, mixer,
+input owner, or Pawn.
 
-It is deliberately **not** parented to the camera: `lot-king.js` rewrites that camera every
-frame, so a child would inherit shake and every other camera effect. The model is an ordinary
-scene object positioned from the rig's own eye transform. It carries `userData.editorOnly`, so
-it is never picked, exported, or hit by the hitscan.
+An author can explicitly select `first-person-arms` for a traditional FPS-only project. Only in
+that optional mode does the module build a separate procedural arms-and-weapon presentation in
+front of the camera, with aim-down-sights, sway, walking bob, recoil, reload pose and muzzle
+flash. The optional model is an ordinary scene object positioned from the rig's eye transform;
+it carries `userData.editorOnly`, so it is never picked, exported, or hit by hitscan.
 
-Its materials use `depthTest:false` so the barrel cannot poke through a wall. That is the cheap
-stand-in for a dedicated view-model render pass; a second camera pass would be the proper fix
-if it ever needs to receive real depth.
+The optional arms model uses `depthTest:false` so its barrel cannot poke through a wall. This
+special-case rendering is absent from the default same-body path.
 
 ### Lighting and collision budget
 
@@ -554,7 +572,8 @@ which is what makes third person feel the same as first person.
 
 ## First person, third person, and your own legs
 
-`C` toggles the view (`firstPerson.allowViewToggle`), and **the rig owns the camera in both**.
+The mapped Character Camera Mode action (default `B` / `R3`) toggles the view
+(`firstPerson.allowViewToggle`), and **the same rig owns the camera in both**.
 
 Third person is *not* the generic vehicle follow camera with the rig switched off. It is the
 rig's own over-the-shoulder camera: same yaw and pitch, same recoil, same crosshair, same weapon,
@@ -579,13 +598,11 @@ firstPerson.thirdPerson = {
 Set `firstPerson.view = 'third'` to start behind the shoulder. Everything else is identical, so a
 project can ship a third-person shooter from the same template without touching a node.
 
-The weapon is drawn twice, never at once: the procedural view model in front of the camera in
-first person, and an ordinary-depth copy carried by the character in third person.
-
-That copy takes its **position** from the right hand bone and its **orientation** from the view
-angles. Parenting it outright to the bone is a trap — the grip axis of a hand bone is whatever the
-rig author decided, so a fixed local rotation points the barrel backwards for every rig but one,
-and the bone's scale is inherited. The socket is authorable when auto-detection is wrong:
+By default the weapon is drawn once: it is the same world weapon carried by the same full Character
+in both views. It takes its **position** from the right hand bone and its **orientation** from the
+view angles. Parenting it outright to the bone is a trap — the grip axis of a hand bone is whatever
+the rig author decided, so a fixed local rotation points the barrel backwards for every rig but
+one, and the bone's scale is inherited. The socket is authorable when auto-detection is wrong:
 
 ```js
 firstPerson.weaponSocket = {
@@ -597,7 +614,7 @@ firstPerson.weaponSocket = {
 };
 ```
 
-Body visibility has three modes:
+First-person presentation has two authorable modes:
 
 The procedural body has real **elbows**: each arm is shoulder → upper arm → elbow → forearm → hand.
 With a two-handed weapon the support arm is **solved**, not posed: the view model reports where the
@@ -609,10 +626,15 @@ rifle from reading as a T-pose — real arms bend. A project saved before elbows
 node with those ids, and an absent part is skipped, so those arms stay straight and everything else
 bends.
 
-- `hideOwnBody:true` (default) — the whole character is culled. Cheapest.
-- `showLegs:true` — only head-and-shoulder geometry is culled, so looking down shows a real body.
-  Costs the skinned draw the hidden path does not pay.
-- `hideOwnBody:false` — nothing is culled.
+- `viewPawn.kind:'none'` (default) — no separate Pawn is created. The eye camera, animated body
+  and held world weapon all belong to the same Character used in third person; camera clearance
+  keeps the lens beyond the face without modifying any skeleton bone.
+- `viewPawn.kind:'first-person-arms'` (optional) — enables the classic separate arms visual for a
+  dedicated FPS presentation. `showLegs:false` hides the world body; `showLegs:true` retains it
+  below the head-and-shoulder cull.
+
+Legacy engine FPS levels that still contain the old default arms configuration are migrated once
+to `kind:'none'`. A later explicit author selection of `first-person-arms` is preserved.
 
 ---
 

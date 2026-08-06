@@ -24,6 +24,9 @@ function createState(){
     cinemaFloatPreviewMinimized: false,
     cinemaFloatPreviewW: 640,
     cinemaFloatPreviewAspect: '16:9',
+    // Editor-wide aspect override for every camera preview. 'auto' = off, each
+    // camera uses its own. Never saved into a level; never affects Play.
+    masterPreviewAspect: 'auto',
     cinemaFloatPreviewPos: null,
     cinemaPreviewMode: 'final',
     assetsH: 220,

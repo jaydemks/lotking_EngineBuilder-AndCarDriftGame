@@ -85,14 +85,22 @@ function create(deps){
     );
     ground.rotation.x = -Math.PI/2;
     ground.receiveShadow = true;
+    ground.userData.driveSurface = true;
     scene.add(ground);
-    tagEntity(ground, spec.groundName || 'Ground (parking lot)', 'mesh');
+    const groundCollider = {x:0, y:-.025, z:0, hx:LOT, hy:.025, hz:LOT, physics:false, enabled:true, owner:ground};
+    groundCollider._boxList = colliders.box;
+    colliders.box.push(groundCollider);
+    tagEntity(ground, spec.groundName || 'Ground (parking lot)', 'mesh', {collider:{kind:'box', ref:groundCollider}});
     meshes.ground = ground;
 
     const apron = new THREE.Mesh(new THREE.PlaneGeometry(600,600), new THREE.MeshStandardMaterial({color:0x181b20, roughness:1}));
     apron.rotation.x = -Math.PI/2; apron.position.y = -0.02;
+    apron.userData.driveSurface = true;
     scene.add(apron);
-    tagEntity(apron, 'Outer Apron', 'mesh');
+    const apronCollider = {x:0, y:-.045, z:0, hx:300, hy:.025, hz:300, physics:false, enabled:true, owner:apron};
+    apronCollider._boxList = colliders.box;
+    colliders.box.push(apronCollider);
+    tagEntity(apron, 'Outer Apron', 'mesh', {collider:{kind:'box', ref:apronCollider}});
     meshes.apron = apron;
 
     const wallMat = new THREE.MeshStandardMaterial({color:0x3a3f4a, roughness:.9});

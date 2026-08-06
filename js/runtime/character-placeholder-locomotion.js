@@ -30,6 +30,8 @@ function vectorLength(value){
 const PART_IDS = {
   torso:'torso_shirt', hips:'hips_shorts',
   legLeft:'leg_sock_left', legRight:'leg_sock_right',
+  kneeLeft:'knee_sock_left', kneeRight:'knee_sock_right',
+  footLeft:'foot_shoe_left', footRight:'foot_shoe_right',
   armLeft:'arm_skin_left', armRight:'arm_skin_right',
   handLeft:'hand_skin_left', handRight:'hand_skin_right',
   // Elbows are newer than the rest of the rig. A project saved before they
@@ -46,9 +48,15 @@ const T_POSE = Object.freeze([
   {id:'torso_shirt',name:'Torso Shirt',type:'mesh',primitive:'cube',parentId:'root',position:[0,1.27,0],rotation:[0,0,0],scale:[.52,.62,.31],colorKey:'shirtColor'},
   {id:'hips_shorts',name:'Hips Shorts',type:'mesh',primitive:'cube',parentId:'root',position:[0,.88,0],rotation:[0,0,0],scale:[.47,.30,.29],colorKey:'shortsColor'},
   {id:'leg_sock_left',name:'Left Hip Joint',type:'empty',parentId:'root',position:[-.13,.79,0],rotation:[0,0,0],scale:[1,1,1]},
-  {id:'leg_sock_mesh_left',name:'Leg Sock Left',type:'mesh',primitive:'cylinder',parentId:'leg_sock_left',position:[0,-.37,0],rotation:[0,0,0],scale:[.15,.82,.15],colorKey:'socksColor'},
+  {id:'leg_sock_mesh_left',name:'Left Thigh',type:'mesh',primitive:'cylinder',parentId:'leg_sock_left',position:[0,-.195,0],rotation:[0,0,0],scale:[.15,.43,.15],colorKey:'socksColor'},
+  {id:'knee_sock_left',name:'Left Knee Joint',type:'empty',parentId:'leg_sock_left',position:[0,-.39,0],rotation:[0,0,0],scale:[1,1,1]},
+  {id:'shin_sock_left',name:'Left Shin',type:'mesh',primitive:'cylinder',parentId:'knee_sock_left',position:[0,-.185,0],rotation:[0,0,0],scale:[.135,.41,.135],colorKey:'socksColor'},
+  {id:'foot_shoe_left',name:'Left Foot',type:'mesh',primitive:'cube',parentId:'knee_sock_left',position:[0,-.35,.075],rotation:[0,0,0],scale:[.16,.09,.30],colorKey:'shoeColor'},
   {id:'leg_sock_right',name:'Right Hip Joint',type:'empty',parentId:'root',position:[.13,.79,0],rotation:[0,0,0],scale:[1,1,1]},
-  {id:'leg_sock_mesh_right',name:'Leg Sock Right',type:'mesh',primitive:'cylinder',parentId:'leg_sock_right',position:[0,-.37,0],rotation:[0,0,0],scale:[.15,.82,.15],colorKey:'socksColor'},
+  {id:'leg_sock_mesh_right',name:'Right Thigh',type:'mesh',primitive:'cylinder',parentId:'leg_sock_right',position:[0,-.195,0],rotation:[0,0,0],scale:[.15,.43,.15],colorKey:'socksColor'},
+  {id:'knee_sock_right',name:'Right Knee Joint',type:'empty',parentId:'leg_sock_right',position:[0,-.39,0],rotation:[0,0,0],scale:[1,1,1]},
+  {id:'shin_sock_right',name:'Right Shin',type:'mesh',primitive:'cylinder',parentId:'knee_sock_right',position:[0,-.185,0],rotation:[0,0,0],scale:[.135,.41,.135],colorKey:'socksColor'},
+  {id:'foot_shoe_right',name:'Right Foot',type:'mesh',primitive:'cube',parentId:'knee_sock_right',position:[0,-.35,.075],rotation:[0,0,0],scale:[.16,.09,.30],colorKey:'shoeColor'},
   // Each arm is shoulder -> upper arm -> ELBOW -> forearm -> hand. Without the
   // elbow the arm is one rigid bar, and no amount of shoulder posing stops a
   // character holding a rifle from reading as a T-pose: real arms bend.
@@ -65,7 +73,7 @@ const T_POSE = Object.freeze([
   {id:'head_skin',name:'Head Skin',type:'mesh',primitive:'sphere',parentId:'root',position:[0,1.69,0],rotation:[0,0,0],scale:[.31,.34,.31],colorKey:'skinColor'},
   {id:'hair_top',name:'Hair Top',type:'mesh',primitive:'sphere',parentId:'root',position:[0,1.79,-.015],rotation:[0,0,0],scale:[.32,.19,.32],colorKey:'hairColor'},
 ]);
-function paletteColor(palette,key){const defaults={shirtColor:'#4f8fbf',shortsColor:'#263445',socksColor:'#263445',hairColor:'#2b2118',skinColor:'#d8a184'};return palette&&palette[key]||defaults[key]||'#64748b';}
+function paletteColor(palette,key){const defaults={shirtColor:'#4f8fbf',shortsColor:'#263445',socksColor:'#263445',shoeColor:'#171b22',hairColor:'#2b2118',skinColor:'#d8a184'};return palette&&palette[key]||defaults[key]||'#64748b';}
 function sceneElements(palette){return T_POSE.map(part=>({id:part.id,name:part.name,type:part.type,primitive:part.primitive||'sphere',parentId:part.parentId,linked:true,dummyVisible:false,position:part.position.slice(),rotation:part.rotation.slice(),scale:part.scale.slice(),color:paletteColor(palette,part.colorKey)}));}
 function createVisual(THREERef,palette){
   if(!THREERef)return null;const root=new THREERef.Group();root.name='Character Placeholder · T-Pose';root.userData.characterPlaceholderRig=true;const nodes=new Map([['root',root]]);
@@ -79,6 +87,11 @@ function createVisual(THREERef,palette){
 // "Shoot", "Goalkeeper Dive Left"... all resolve to a sensible built-in pose.
 const GESTURE_HINTS = [
   ['jump', ['jump']],
+  ['land', ['land', 'landing']],
+  // Keep firearm fire distinct from Soccer's `Shoot`, which is a kick. The
+  // authoritative action slot below resolves `fire` even when the imported
+  // take is generically named `mixamo.com`; these hints cover readable names.
+  ['fire', ['fire', 'firing', 'recoil']],
   ['kick', ['shoot', 'kick', 'strike', 'pass', 'cross']],
   ['dive', ['dive', 'save']],
   ['celebrate', ['celebrate', 'victory']],
@@ -103,9 +116,12 @@ function createController(options){
     runSpeed:Math.max(.2, finite(opts.runSpeed, 6)),
     responsiveness:Math.max(.5, finite(opts.responsiveness, 9)),
     predictionTime:Math.max(0, finite(opts.predictionTime, .12)),
+    stepPoseStrength:clamp(finite(opts.stepPoseStrength, 1), 0, 2),
+    stair:{amount:0, side:1, rise:0},
     velocity:{x:0, z:0}, predicted:{x:0, z:0},
     phase:0, idlePhase:0,
-    gesture:null, // {name, elapsed, duration, direction, onDone}
+    gesture:null, // {name, slot, elapsed, duration, direction, onDone}
+    gestureBlend:null,
   };
 
   function findPart(id){
@@ -141,6 +157,27 @@ function createController(options){
     node.rotation.set(rest.rotation.x, rest.rotation.y, rest.rotation.z);
   }
   function resetAllParts(){ Object.keys(state.parts).forEach(resetPart); }
+  function capturePose(){
+    const pose={};
+    Object.keys(state.parts).forEach(key=>{const node=state.parts[key];if(node)pose[key]={position:{x:node.position.x,y:node.position.y,z:node.position.z},rotation:{x:node.rotation.x,y:node.rotation.y,z:node.rotation.z}};});
+    return pose;
+  }
+  function blendPose(base, actionWeight){
+    const weight=clamp(finite(actionWeight,1),0,1);
+    Object.keys(base||{}).forEach(key=>{
+      const node=state.parts[key],rest=base[key];if(!node||!rest)return;
+      node.position.set(
+        rest.position.x+(node.position.x-rest.position.x)*weight,
+        rest.position.y+(node.position.y-rest.position.y)*weight,
+        rest.position.z+(node.position.z-rest.position.z)*weight
+      );
+      node.rotation.set(
+        rest.rotation.x+(node.rotation.x-rest.rotation.x)*weight,
+        rest.rotation.y+(node.rotation.y-rest.rotation.y)*weight,
+        rest.rotation.z+(node.rotation.z-rest.rotation.z)*weight
+      );
+    });
+  }
   function relaxArms(amount){
     const t=clamp(finite(amount,1),0,1),left=state.parts.armLeft,right=state.parts.armRight,restLeft=state.rest.armLeft,restRight=state.rest.armRight;
     if(left&&restLeft)left.rotation.z=restLeft.rotation.z+Math.PI*.46*t;
@@ -202,6 +239,29 @@ function createController(options){
     if(hips && restHips) hips.rotation.z = restHips.rotation.z + s * .05 * speedRatio;
     const head = state.parts.head, restHead = state.rest.head;
     if(head && restHead) head.rotation.x = restHead.rotation.x - speedRatio * (sprinting ? .1 : .04);
+  }
+
+  function applyStairPose(want, dt){
+    const grounded=want.groundContact!==false&&want.grounded!==false;
+    const rise=Math.max(0,finite(want.stepRise,0));
+    const maxRise=Math.max(.02,finite(want.stepHeight,.55));
+    if(grounded&&rise>.001){
+      const speed=Math.max(finite(want.speed,0),Math.hypot(finite(want.x,0),finite(want.z,0)));
+      const speedScale=.45+.55*clamp(speed/Math.max(.1,state.walkSpeed),0,1);
+      state.stair.amount=Math.max(state.stair.amount,clamp(rise/maxRise,0,1)*speedScale*state.stepPoseStrength);
+      state.stair.side=finite(want.stepSide,state.stair.side)>=0?1:-1;
+      state.stair.rise=rise;
+    } else state.stair.amount*=Math.exp(-8*Math.max(.0001,dt));
+    const amount=clamp(state.stair.amount,0,1.5);
+    if(amount<.002)return;
+    const leadLeft=state.stair.side<0;
+    const leadLeg=leadLeft?'legLeft':'legRight',trailLeg=leadLeft?'legRight':'legLeft';
+    const leadKnee=leadLeft?'kneeLeft':'kneeRight',trailKnee=leadLeft?'kneeRight':'kneeLeft';
+    const leadFoot=leadLeft?'footLeft':'footRight',trailFoot=leadLeft?'footRight':'footLeft';
+    const add=(key,angle)=>{const node=state.parts[key];if(node)node.rotation.x+=angle*amount;};
+    add(leadLeg,-.48);add(leadKnee,.82);add(leadFoot,-.34);
+    add(trailLeg,.12);add(trailKnee,.22);add(trailFoot,-.08);
+    const hips=state.parts.hips;if(hips)hips.position.y+=Math.min(.08,state.stair.rise*.22)*amount;
   }
 
   // Carrying a weapon is an UPPER BODY pose laid on top of whatever the legs are
@@ -379,17 +439,18 @@ function createController(options){
     });
   }
 
-  function applyWeaponPose(weapon){
+  function applyWeaponPose(weapon,layerWeight){
     if(!weapon) return;
-    const carry = clamp(finite(weapon.carry, 0), 0, 1);
+    const carry = clamp(finite(weapon.carry, 0), 0, 1)*clamp(finite(layerWeight,1),0,1);
     if(carry <= .002) return;
     const aim = clamp(finite(weapon.aim, 0), 0, 1);
     const pitch = clamp(finite(weapon.pitch, 0), -1.2, 1.2);
     const side = finite(weapon.side, 1) >= 0 ? 1 : -1;
+    const kind = String(weapon.kind || 'firearm');
     const oneHanded = weapon.twoHanded === false;
     // Firing punches the arms back for an instant, so a burst reads from outside
     // even before a real fire clip is bound. Reloading drops the support hand.
-    const punch = weapon.firing ? .14 : 0;
+    const punch = .14*clamp(finite(weapon.fireAmount,weapon.firing?1:0),0,1);
     const reload = weapon.reloading ? 1 : 0;
 
     // Aiming LOCKS the pose; hip carry deliberately leaves most of the run swing
@@ -403,6 +464,23 @@ function createController(options){
 
     const trigger = armOnSide(side);
     const support = armOnSide(-side);
+
+    // Unarmed is a guard plus a real punch, not an invisible rifle pose. The
+    // striking arm opens only during the attack while the other fist protects
+    // the torso. This fallback is used whenever no authored punch clip exists.
+    if(kind === 'unarmed'){
+      poseArm(trigger,Math.PI*.34,weapon.firing?1.42:.72,weapon.firing?.35:1.28,blendZ,blendX,.24);
+      poseArm(support,Math.PI*.38,.66,1.34,blendZ,blendX,.2);
+      return;
+    }
+
+    // A throwable is cocked beside the head until released. It must not borrow
+    // the pistol's straight-arm pose just because both are one-handed.
+    if(kind === 'thrown'){
+      poseArm(trigger,Math.PI*.28,weapon.firing?.95:-.22,weapon.firing?.55:1.58,blendZ,blendX,.38);
+      poseArm(support,Math.PI*.45,.18,1.08,blendZ*.7,blendX*.7,.12);
+      return;
+    }
 
     // Trigger arm: hangs near vertical, swings forward onto the grip, and folds
     // its elbow forward with the elbow held a little off the ribs.
@@ -446,11 +524,18 @@ function createController(options){
   function applyGesture(dt){
     const g = state.gesture;
     if(!g.held)g.elapsed += dt;
+    if(g.loop&&g.elapsed>=g.duration)g.elapsed%=Math.max(.001,g.duration);
     const t = clamp(g.elapsed / g.duration, 0, 1);
     const swing = Math.sin(t * Math.PI); // 0 -> 1 -> 0 across the gesture
     resetAllParts();
     relaxArms(1);
-    if(g.name === 'jump'){
+    if(g.name === 'fire'){
+      // Arms are solved onto the live weapon by applyWeaponPose() immediately
+      // after this layer. Only add a small whole-body recoil here; borrowing
+      // the generic Interact wave made an unrigged shooter raise one hand.
+      const torso=state.parts.torso,restTorso=state.rest.torso;
+      if(torso&&restTorso)torso.rotation.x=restTorso.rotation.x-swing*.08;
+    } else if(g.name === 'jump'){
       const legL = state.parts.legLeft, restLL = state.rest.legLeft;
       const legR = state.parts.legRight, restLR = state.rest.legRight;
       if(legL && restLL) legL.rotation.x = restLL.rotation.x + swing * .55;
@@ -459,6 +544,13 @@ function createController(options){
       const armR = state.parts.armRight, restAR = state.rest.armRight;
       if(armL && restAL) armL.rotation.x = restAL.rotation.x - swing * .35;
       if(armR && restAR) armR.rotation.x = restAR.rotation.x - swing * .35;
+    } else if(g.name === 'land'){
+      const compression=Math.sin(Math.min(1,t/.7)*Math.PI),hips=state.parts.hips,restHips=state.rest.hips;
+      const torso=state.parts.torso,restTorso=state.rest.torso;
+      if(hips&&restHips)hips.position.y=restHips.position.y-compression*.09;
+      if(torso&&restTorso)torso.rotation.x=restTorso.rotation.x+compression*.24;
+      ['legLeft','legRight'].forEach(key=>{const node=state.parts[key],rest=state.rest[key];if(node&&rest)node.rotation.x=rest.rotation.x+compression*.22;});
+      ['kneeLeft','kneeRight'].forEach(key=>{const node=state.parts[key],rest=state.rest[key];if(node&&rest)node.rotation.x=rest.rotation.x-compression*.48;});
     } else if(g.name === 'kick'){
       const legR = state.parts.legRight, restLR = state.rest.legRight;
       if(legR && restLR) legR.rotation.x = restLR.rotation.x - swing * 1.1;
@@ -486,6 +578,11 @@ function createController(options){
       const armR = state.parts.armRight, restAR = state.rest.armRight;
       if(armR && restAR) armR.rotation.x = restAR.rotation.x - swing * 1.4;
     }
+    if(t >= 1 && g.holdLastFrame){
+      g.elapsed=g.duration;
+      g.held=true;
+      return;
+    }
     if(t >= 1){
       const done = g.onDone;
       state.gesture = null;
@@ -505,25 +602,48 @@ function createController(options){
     state.velocity.z += (finite(want.z, 0) - state.velocity.z) * k;
     state.predicted.x = state.velocity.x + (finite(want.x, 0) - state.velocity.x) * state.predictionTime * state.responsiveness;
     state.predicted.z = state.velocity.z + (finite(want.z, 0) - state.velocity.z) * state.predictionTime * state.responsiveness;
-    if(state.gesture){ applyGesture(h); applyWeaponPose(want.weapon); applyLean(want.lean); return; }
+    const blendRuntime=window.LK_RUNTIME_CHARACTER_ANIMATION_BLEND;
+    if(state.gesture&&blendRuntime&&blendRuntime.shouldInterrupt&&blendRuntime.shouldInterrupt(state.gesture.slot||state.gesture.name,want))stopAction();
     const speed = Math.sqrt(state.predicted.x * state.predicted.x + state.predicted.z * state.predicted.z);
-    if(speed < .08){ applyIdle(h); applyWeaponPose(want.weapon); applyLean(want.lean); return; }
-    const sprinting = speed > state.walkSpeed * 1.05;
-    const speedRatio = clamp(speed / Math.max(.1, state.runSpeed), 0, 1);
-    applyLocomotion(speedRatio, sprinting, h);
-    applyWeaponPose(want.weapon);
+    if(speed < .08)applyIdle(h);
+    else {
+      const sprinting = speed > state.walkSpeed * 1.05;
+      const speedRatio = clamp(speed / Math.max(.1, state.runSpeed), 0, 1);
+      applyLocomotion(speedRatio, sprinting, h);
+    }
+    if(state.gesture){
+      const basePose=capturePose(),gesture=state.gesture;
+      applyGesture(h);
+      const progress=clamp(gesture.elapsed/Math.max(.001,gesture.duration),0,1);
+      const blend=blendRuntime&&blendRuntime.profile?blendRuntime.profile({slot:gesture.slot||gesture.name,progress,desired:want,loop:gesture.loop,held:gesture.held,releaseStart:gesture.releaseStart,releaseEnd:gesture.releaseEnd,locomotionFloor:gesture.locomotionFloor}):{actionWeight:1,locomotionWeight:0,progress,category:'generic'};
+      blendPose(basePose,blend.actionWeight);
+      state.gestureBlend=state.gesture?blend:null;
+    } else state.gestureBlend=null;
+    applyStairPose(want,h);
+    const weaponLayer=state.gestureBlend&&state.gestureBlend.category!=='upper-body'&&state.gestureBlend.category!=='generic'
+      ?state.gestureBlend.locomotionWeight:1;
+    applyWeaponPose(want.weapon,weaponLayer);
     applyLean(want.lean);
   }
 
   function playAction(clipName, actionOptions){
     if(!state.bound) return false;
     const o = actionOptions || {};
-    const name = resolveGesture(clipName);
+    const slot=normalizeName(o.slot||clipName);
+    const name = slot.indexOf('fire')===0 ? 'fire' : (slot.indexOf('land')>=0?'land':resolveGesture(clipName));
+    const baseDuration=clamp(finite(o.duration, name === 'jump' ? .45 : .7), .15, 2.5),rate=Math.max(.05,Math.abs(finite(o.speedScale,1)));
+    const fitted=o.fitDuration==null?baseDuration/rate:Math.min(baseDuration/rate,Math.max(.15,finite(o.fitDuration,baseDuration)));
     state.gesture = {
-      name, elapsed:0,
-      duration:clamp(finite(o.duration, name === 'jump' ? .45 : .7), .15, 2.5),
+      name, slot:slot||name, elapsed:0,
+      duration:clamp(fitted,.15,2.5),
       direction:/left/i.test(String(clipName || '')) ? -1 : 1,
       onDone:o.onDone,
+      releaseStart:o.releaseStart,
+      releaseEnd:o.releaseEnd,
+      locomotionFloor:o.locomotionFloor,
+      loop:o.loop===true,
+      holdLastFrame:o.holdLastFrame===true,
+      held:false,
     };
     return true;
   }
@@ -531,6 +651,7 @@ function createController(options){
     if(!state.gesture) return;
     const done = state.gesture.onDone;
     state.gesture = null;
+    state.gestureBlend = null;
     resetAllParts();
     if(typeof done === 'function') done();
   }
@@ -554,11 +675,14 @@ function createController(options){
     if(p.runSpeed != null) state.runSpeed = Math.max(.2, finite(p.runSpeed, state.runSpeed));
     if(p.responsiveness != null) state.responsiveness = Math.max(.5, finite(p.responsiveness, state.responsiveness));
     if(p.predictionTime != null) state.predictionTime = Math.max(0, finite(p.predictionTime, state.predictionTime));
+    if(p.stepPoseStrength != null) state.stepPoseStrength = clamp(finite(p.stepPoseStrength,state.stepPoseStrength),0,2);
   }
   function dispose(){
     if(state.bound) resetAllParts();
     state.owner = null; state.parts = {}; state.rest = {}; state.bound = false;
     state.gesture = null; state.phase = 0; state.idlePhase = 0;
+    state.gestureBlend = null;
+    state.stair = {amount:0,side:1,rise:0};
     state.velocity = {x:0, z:0}; state.predicted = {x:0, z:0};
   }
 
@@ -566,7 +690,7 @@ function createController(options){
     bind, update, playAction, stopAction, isActionPlaying, holdActionAtProgress, resumeAction, actionProgress, configure, dispose,
     isBound:() => state.bound,
     availableClips:() => Object.keys(PART_IDS).filter(key => state.parts[key]),
-    debugState:() => ({velocity:Object.assign({}, state.velocity), gesture:state.gesture ? state.gesture.name : null}),
+    debugState:() => ({velocity:Object.assign({}, state.velocity), gesture:state.gesture ? state.gesture.name : null,gestureBlend:state.gestureBlend?Object.assign({},state.gestureBlend):null,stair:Object.assign({},state.stair)}),
   });
 }
 

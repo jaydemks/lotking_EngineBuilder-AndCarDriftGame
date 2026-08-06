@@ -6,6 +6,11 @@
 (function(){
 'use strict';
 
+// Upper bound for the hidden-resource warm pass. Sized so a heavy open world
+// still spends most of its warm budget on textures and shaders instead of
+// re-rendering geometry the player may never look at.
+const HIDDEN_WARM_BUDGET_MS = 6000;
+
 function shouldUseLowProfile(fps, threshold){
   const measured = Number(fps);
   const limit = Number.isFinite(Number(threshold)) ? Number(threshold) : 25;
@@ -162,6 +167,13 @@ function create(options){
       if(!node || item.visible !== false || !(node.isMesh || node.isLine || node.isPoints || node.isSprite)) return;
       const data = node.userData || {};
       if(data.editorOnly || data.nonExportable || data.helperOnly) return;
+      // Collision/navigation descriptors are authored geometry that the engine
+      // deliberately keeps hidden — they never reach a play frame, so warming
+      // them is wasted work. Worse, un-hiding one walks its ancestors visible,
+      // which on the Sketchbook world (427 physics nodes) re-reveals most of a
+      // 26 MB scene for every batch and stalls the whole Play warmup.
+      const tag = String(data.data || data.kind || '').toLowerCase();
+      if(data.lkSketchbookMetadataHidden || tag === 'physics' || tag === 'collision' || tag === 'navmesh') return;
       let addsResource = false;
       if(node.geometry && !geometries.has(node.geometry)){
         geometries.add(node.geometry);
@@ -181,6 +193,10 @@ function create(options){
   async function warmHiddenResources(state){
     const selected = hiddenResourceRepresentatives(state);
     const batchSize = 24;
+    // Warming is an optimisation, never a precondition for Play. A large world
+    // must degrade to "warmed what we could" instead of holding the loading
+    // screen open, so this stage is bounded like the other benchmark passes.
+    const started = performance.now();
     let warmed = 0;
     for(let start = 0; start < selected.length; start += batchSize){
       const batch = selected.slice(start, start + batchSize);
@@ -198,6 +214,7 @@ function create(options){
       warmed += batch.length;
       await nextFrame();
       restoreSceneState(state);
+      if(performance.now() - started > HIDDEN_WARM_BUDGET_MS) break;
     }
     return warmed;
   }
@@ -282,7 +299,8 @@ function create(options){
     const stops = strategicMapStops(state, maximumStops);
     const THREE = window.THREE;
     const previousTarget = renderer.getRenderTarget ? renderer.getRenderTarget() : null;
-    const target = THREE && THREE.WebGLRenderTarget ? new THREE.WebGLRenderTarget(320, 180, {depthBuffer:true}) : null;
+    const Target=renderer&&renderer.isWebGPURenderer?THREE&&THREE.RenderTarget:THREE&&THREE.WebGLRenderTarget;
+    const target = Target ? new Target(320, 180, {depthBuffer:true}) : null;
     const shadowAutoUpdate = renderer.shadowMap ? renderer.shadowMap.autoUpdate : null;
     const started = performance.now();
     let rendered = 0;
@@ -331,7 +349,8 @@ function create(options){
     ].slice(0, Math.max(0, Math.min(5, Number(maximumViews) || 5)));
     const THREE = window.THREE;
     const previousTarget = renderer && renderer.getRenderTarget ? renderer.getRenderTarget() : null;
-    const target = renderer && THREE && THREE.WebGLRenderTarget ? new THREE.WebGLRenderTarget(320, 180, {depthBuffer:true}) : null;
+    const Target=renderer&&renderer.isWebGPURenderer?THREE&&THREE.RenderTarget:THREE&&THREE.WebGLRenderTarget;
+    const target = renderer && Target ? new Target(320, 180, {depthBuffer:true}) : null;
     const shadowAutoUpdate = renderer && renderer.shadowMap ? renderer.shadowMap.autoUpdate : null;
     const started = performance.now();
     let rendered = 0;

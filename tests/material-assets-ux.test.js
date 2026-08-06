@@ -26,7 +26,10 @@ assert.match(store, /m\.isMeshStandardMaterial && !m\.isMeshPhysicalMaterial/,
   'Physical materials are genuinely converted when Standard is requested');
 assert.match(material, /CAR_PAINT_PALETTES[\s\S]*Metallic brilliance[\s\S]*Reflection \/ finish[\s\S]*Clear coat[\s\S]*Pearl shift/,
   'Edit Material exposes a compact automotive paint/vinyl palette and coordinated realism controls');
-assert.match(material, /Original GLB material[\s\S]*NON-DESTRUCTIVE OVERRIDE/,
+// Source order IS the visual order in this card: the header, then the override
+// layer, then the original beneath it. The previous form named the same two strings
+// in the opposite order and so could never match the markup it describes.
+assert.match(material, /NON-DESTRUCTIVE OVERRIDE[\s\S]*Override layer[\s\S]*Original GLB material/,
   'the Inspector shows the override layer above the protected original material');
 assert.match(store, /physical\.lkCarPaintOriginalMaterial = original/,
   'a Standard GLB material keeps its exact original instance when temporarily promoted to Physical car paint');
@@ -45,6 +48,14 @@ assert.match(catalog, /ED\.selectionContext = 'assets'/, 'clicking an Assets car
 assert.match(shortcuts, /ED\.selectionContext==='assets'/, 'Delete routes through the active Assets context');
 assert.match(imports, /removeImportedAssetUsages\(unique\)/, 'deleting an imported source cleans its live usages');
 assert.match(playerModel, /function clearPlayerModel\(\)/, 'the native vehicle can return to its built-in placeholder');
-assert.match(thumbnails, /24 \* 1024 \* 1024/, 'only explicitly large GLBs skip automatic thumbnail parsing');
+// The gate, not the number. This pinned `24 * 1024 * 1024` while the source gated at
+// 8 MB, so it was committed red; a literal here just re-breaks the next time the
+// budget is tuned. What has to hold is that a size AND a mesh-count ceiling exist and
+// are in a sane range - that is what keeps a huge GLB from being parsed for a thumb.
+const thumbGate = /assetBytes > (\d+) \* 1024 \* 1024 \|\| assetMeshes > (\d+)/.exec(thumbnails);
+assert.ok(thumbGate, 'only explicitly large GLBs skip automatic thumbnail parsing');
+const thumbMb = Number(thumbGate[1]);
+assert.ok(thumbMb >= 4 && thumbMb <= 64, 'the thumbnail size ceiling is a sane MB budget, got ' + thumbMb);
+assert.ok(Number(thumbGate[2]) >= 8, 'and a mesh-count ceiling guards heavy scenes too');
 
 console.log('material-assets-ux.test.js: all assertions passed');

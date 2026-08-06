@@ -4,7 +4,7 @@
 (function(){
 'use strict';
 const SCHEMA_VERSION=1;
-const PRESETS=Object.freeze({normal:{walkSpeed:1.8,runSpeed:5.4,sprintMultiplier:1.3,acceleration:13,turnRate:10,jumpHeight:1.05,gravity:22,airControl:.32},civil:{walkSpeed:1.45,runSpeed:4.4,sprintMultiplier:1.2,acceleration:10,turnRate:9,jumpHeight:.8,gravity:22,airControl:.25},police:{walkSpeed:2,runSpeed:6.2,sprintMultiplier:1.4,acceleration:16,turnRate:11,jumpHeight:1.2,gravity:23,airControl:.38}});
+const PRESETS=Object.freeze({normal:{walkSpeed:1.8,runSpeed:4.8,sprintMultiplier:1,acceleration:13,turnRate:10,jumpHeight:1.05,gravity:22,airControl:.32},civil:{walkSpeed:1.45,runSpeed:4,sprintMultiplier:1,acceleration:10,turnRate:9,jumpHeight:.8,gravity:22,airControl:.25},police:{walkSpeed:2,runSpeed:5.2,sprintMultiplier:1.08,acceleration:16,turnRate:11,jumpHeight:1.2,gravity:23,airControl:.38}});
 const ANIMATION_DEFAULTS=Object.freeze({idle:'Idle',walk:'Walking',run:'Running',strafeLeft:'Left Strafe',strafeRight:'Right Strafe',jump:'Jump',fall:'Falling Idle',land:'Landing',interact:'Interact'});
 function normalizePreset(value){const preset=String(value||'').trim().toLowerCase();return PRESETS[preset]?preset:'normal';}
 function normalizeConfig(source){

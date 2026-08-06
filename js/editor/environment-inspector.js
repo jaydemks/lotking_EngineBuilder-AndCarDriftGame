@@ -64,15 +64,46 @@ function create(deps){
     const swc = section('WORLD SURFACE COLLISION');
     const physics = GAME.systems && GAME.systems.physics;
     if(physics && physics.getSurfaceWorldCollision && physics.setSurfaceWorldCollision){
-      swc.body.appendChild(checkRow('Surface world collision', physics.getSurfaceWorldCollision(), v => {
+      swc.body.appendChild(checkRow(tr('Legacy infinite ground plane', 'Piano terreno infinito legacy'), physics.getSurfaceWorldCollision(), v => {
         physics.setSurfaceWorldCollision(v);
         markDirty();
       }).root);
-      swc.body.appendChild(el('<div class="lk-hint">Invisible fallback physics plane at world Y=0. Disable it for underground tracks, floating levels, or when your road meshes provide their own Complex collision.</div>'));
+      swc.body.appendChild(el('<div class="lk-hint">'+tr('Compatibility fallback at world Y=0 for old levels without authored or procedural ground. A procedural heightfield automatically replaces it; drive surfaces and Complex colliders remain active independently.','Fallback di compatibilità a Y=0 per vecchi livelli senza terreno authored o procedurale. L\'heightfield procedurale lo sostituisce automaticamente; drive surface e collider Complex restano attivi indipendentemente.')+'</div>'));
     } else {
       swc.body.appendChild(el('<div class="lk-empty">Physics world unavailable.</div>'));
     }
     box.appendChild(swc.root);
+
+    const spw = section(tr('PROCEDURAL WORLD / TERRAIN / WATER', 'MONDO PROCEDURALE / TERRENO / ACQUA'));
+    const worldscape = GAME.systems && GAME.systems.proceduralWorld;
+    if(worldscape){
+      const cfg=worldscape.get(),commit=(sectionName,patch,rebuildPanel)=>{const next=worldscape.get();if(sectionName)Object.assign(next[sectionName],patch);else Object.assign(next,patch);worldscape.set(next,{rebuild:false});worldscape.requestRebuild(90);markDirty();if(rebuildPanel)buildInspector();},stats=worldscape.stats(),qualityOptions=['auto','low','medium','high','ultra'].map(value=>({value,label:value}));
+      spw.body.appendChild(checkRow(tr('Enabled for this level', 'Attivo per questo livello'),cfg.enabled,v=>commit(null,{enabled:v},true)).root);
+      spw.body.appendChild(selectRow(tr('World preset', 'Preset mondo'),cfg.preset,[{value:'cinematic-island',label:tr('Cinematic island','Isola cinematica')},{value:'subtle-coast',label:tr('Subtle coast','Costa delicata')},{value:'ocean-only',label:tr('Ocean only','Solo oceano')},{value:'off',label:tr('Disabled','Disattivato')}],v=>{worldscape.applyPreset(v,{rebuild:false});worldscape.requestRebuild(20);markDirty();buildInspector();}).root);
+      if(cfg.enabled){
+        spw.body.appendChild(sliderRow(tr('Seed', 'Seed'),cfg.seed,0,9999,1,v=>commit(null,{seed:Math.round(v)}),v=>String(Math.round(v))).root);
+        spw.body.appendChild(sliderRow(tr('Protected level margin', 'Margine protetto del livello'),cfg.bounds.padding,0,400,5,v=>commit('bounds',{padding:v}),v=>Math.round(v)+' m').root);
+        spw.body.appendChild(selectRow(tr('Terrain quality', 'Qualità terreno'),cfg.terrain.quality,qualityOptions,v=>commit('terrain',{quality:v})).root);
+        spw.body.appendChild(sliderRow(tr('Terrain collision level under authored map', 'Quota collisione terreno sotto la mappa'),cfg.datum.islandTopY,-40,5,.5,v=>commit('datum',{islandTopY:v}),v=>(+v).toFixed(1)+' m').root);
+        spw.body.appendChild(sliderRow(tr('Surrounding relief', 'Rilievo circostante'),cfg.terrain.relief,0,80,1,v=>commit('terrain',{relief:v}),v=>Math.round(v)+' m').root);
+        spw.body.appendChild(sliderRow(tr('Coast width', 'Larghezza costa'),cfg.terrain.shoreWidth,20,300,5,v=>commit('terrain',{shoreWidth:v}),v=>Math.round(v)+' m').root);
+        spw.body.appendChild(sliderRow(tr('Sea level', 'Livello del mare'),cfg.ocean.seaLevel,-40,10,.5,v=>commit('ocean',{seaLevel:v}),v=>(+v).toFixed(1)+' m').root);
+        spw.body.appendChild(sliderRow(tr('Seabed level', 'Livello fondale'),cfg.datum.seabedY,-80,-1,.5,v=>commit('datum',{seabedY:v}),v=>(+v).toFixed(1)+' m').root);
+        spw.body.appendChild(selectRow(tr('Water quality', 'Qualità acqua'),cfg.ocean.quality,qualityOptions,v=>commit('ocean',{quality:v})).root);
+        spw.body.appendChild(sliderRow(tr('Wave amplitude', 'Ampiezza onde'),cfg.ocean.waveAmplitude,0,3,.05,v=>commit('ocean',{waveAmplitude:v}),v=>(+v).toFixed(2)+' m').root);
+        spw.body.appendChild(sliderRow(tr('Wave length', 'Lunghezza onde'),cfg.ocean.waveLength,4,140,1,v=>commit('ocean',{waveLength:v}),v=>Math.round(v)+' m').root);
+        spw.body.appendChild(sliderRow(tr('Wave speed', 'Velocità onde'),cfg.ocean.waveSpeed,0,4,.05,v=>commit('ocean',{waveSpeed:v}),v=>(+v).toFixed(2)+'×').root);
+        spw.body.appendChild(sliderRow(tr('Crest / shore foam', 'Schiuma creste / riva'),cfg.ocean.foam,0,1,.01,v=>commit('ocean',{foam:v}),v=>Math.round(v*100)+'%').root);
+        spw.body.appendChild(checkRow(tr('Distant islands', 'Isole distanti'),cfg.archipelago.enabled,v=>commit('archipelago',{enabled:v},true)).root);
+        if(cfg.archipelago.enabled)spw.body.appendChild(sliderRow(tr('Distant island count', 'Numero isole distanti'),cfg.archipelago.count,0,48,1,v=>commit('archipelago',{count:Math.round(v)}),v=>String(Math.round(v))).root);
+        const addLake=()=>{const next=worldscape.get(),p=GAME.core&&GAME.core.camera&&GAME.core.camera.position||{x:0,z:0};next.waterBodies.push({id:'lake-'+Date.now().toString(36),name:'Procedural Lake',type:'lake',enabled:true,center:[Number(p.x)||0,Number(p.z)||0],radius:22,aspect:1,rotation:0,level:next.datum.islandTopY+.12,waveAmplitude:.12,color:'#2585a3'});worldscape.set(next,{rebuild:false});worldscape.requestRebuild(20);markDirty();buildInspector();};
+        const addRiver=()=>{const next=worldscape.get(),p=GAME.core&&GAME.core.camera&&GAME.core.camera.position||{x:0,z:0},x=Number(p.x)||0,z=Number(p.z)||0;next.waterBodies.push({id:'river-'+Date.now().toString(36),name:'Procedural River',type:'river',enabled:true,points:[[x-30,z],[x,z+18],[x+35,z+4]],width:8,level:next.datum.islandTopY+.1,waveAmplitude:.06,flowSpeed:.8,color:'#2d8faa'});worldscape.set(next,{rebuild:false});worldscape.requestRebuild(20);markDirty();buildInspector();};
+        const buttons=[{label:tr('+ Lake at camera', '+ Lago alla camera'),action:addLake},{label:tr('+ River at camera', '+ Fiume alla camera'),action:addRiver}];if(cfg.waterBodies.length)buttons.push({label:tr('− Remove last water body', '− Rimuovi ultima acqua'),action:()=>{const next=worldscape.get();next.waterBodies.pop();worldscape.set(next,{rebuild:false});worldscape.requestRebuild(20);markDirty();buildInspector();}});spw.body.appendChild(btnRow(buttons));
+        spw.body.appendChild(btnRow([{label:tr('New random seed', 'Nuovo seed casuale'),action:()=>commit(null,{seed:Math.floor(Math.random()*10000)},true)},{label:'↺ Default',action:()=>{worldscape.set(worldscape.defaults(),{rebuild:false});worldscape.requestRebuild(20);markDirty();buildInspector();}}]));
+        spw.body.appendChild(el('<div class="lk-hint">'+tr('The authored level stays at Y=0 and is supported by its drive surfaces and colliders. The procedural heightfield remains visible and collidable across the surrounding world, but its protected centre is lower (−6 m by default), then descends to sea and seabed. Nothing shifts saved objects, Pawn spawns or Cinema keyframes.','Il livello authored resta a Y=0 ed è sostenuto dalle sue drive surface e collisioni. L\'heightfield procedurale resta visibile e collidibile in tutto il mondo circostante, ma il centro protetto è più basso (−6 m di default), poi scende verso mare e fondale. Oggetti, spawn dei Pawn e keyframe Cinema non vengono spostati.')+'<br><b>'+tr('Budget','Budget')+':</b> '+stats.terrainDrawCalls+' terrain · '+stats.waterDrawCalls+' water · '+stats.islandDrawCalls+' archipelago draw calls · '+stats.terrainVertices+' terrain vertices · '+stats.animatedWaterVertices+' animated water vertices.</div>'));
+      }
+    } else spw.body.appendChild(el('<div class="lk-empty">'+tr('Procedural World module not loaded.','Modulo Procedural World non caricato.')+'</div>'));
+    box.appendChild(spw.root);
 
     const spe = section('PROCEDURAL ENVIRONMENT');
     if(sky.proceduralEnv){
@@ -142,6 +173,14 @@ function create(deps){
     if(sky.volClouds && (!sky.volClouds.available || sky.volClouds.available()) && sky.volClouds.get()){
       const vc = sky.volClouds.get();
       const vset = patch => { sky.volClouds.set(patch); markDirty(); };
+      if(sky.volClouds.applyPreset){
+        svc.body.appendChild(btnRow([
+          {label:tr('Clear', 'Sereno'), action:() => { sky.volClouds.applyPreset('clear'); markDirty(); buildInspector(); }},
+          {label:'Cumulus', action:() => { sky.volClouds.applyPreset('cumulus'); markDirty(); buildInspector(); }},
+          {label:tr('Overcast', 'Coperto'), action:() => { sky.volClouds.applyPreset('overcast'); markDirty(); buildInspector(); }},
+          {label:tr('Storm', 'Tempesta'), action:() => { sky.volClouds.applyPreset('storm'); markDirty(); buildInspector(); }},
+        ]));
+      }
       svc.body.appendChild(checkRow(tr('Enabled (replaces sprite clouds)', 'Attive (sostituiscono le sprite clouds)'), vc.enabled, v => { vset({enabled:v}); buildInspector(); }).root);
       svc.body.appendChild(sliderRow(tr('Coverage', 'Copertura'), vc.coverage, 0, 1, .01, v => vset({coverage:v}), v => Math.round(v*100) + '%').root);
       svc.body.appendChild(sliderRow(tr('Density', 'Densita'), vc.density, 0, 3, .05, v => vset({density:v}), v => (+v).toFixed(2)).root);
@@ -151,15 +190,65 @@ function create(deps){
       svc.body.appendChild(sliderRow(tr('Wind direction', 'Direzione vento'), vc.windAngle, 0, 360, 1, v => vset({windAngle:v}), v => Math.round(v) + '°').root);
       svc.body.appendChild(sliderRow(tr('Layer altitude', 'Quota strato'), vc.altitude, 40, 400, 5, v => vset({altitude:v}), v => Math.round(v) + 'm').root);
       svc.body.appendChild(sliderRow(tr('Layer thickness', 'Spessore strato'), vc.thickness, 10, 260, 5, v => vset({thickness:v}), v => Math.round(v) + 'm').root);
+      svc.body.appendChild(sliderRow(tr('Anvil / tower shape', 'Forma a incudine'), vc.anvil == null ? .3 : vc.anvil, 0, 1, .01, v => vset({anvil:v}), v => Math.round(v*100) + '%').root);
+      svc.body.appendChild(sliderRow(tr('Detail scale', 'Scala dettaglio'), vc.detailScale == null ? 2.8 : vc.detailScale, .5, 8, .1, v => vset({detailScale:v}), v => (+v).toFixed(1)).root);
+      svc.body.appendChild(sliderRow(tr('Detail drift (parallax)', 'Deriva dettaglio (parallasse)'), vc.detailSpeed == null ? 1.8 : vc.detailSpeed, 0, 4, .05, v => vset({detailSpeed:v}), v => (+v).toFixed(2)).root);
+      svc.body.appendChild(sliderRow(tr('Forward scattering', 'Scattering in avanti'), vc.anisotropy == null ? .62 : vc.anisotropy, 0, .95, .01, v => vset({anisotropy:v}), v => (+v).toFixed(2)).root);
+      svc.body.appendChild(sliderRow(tr('Back scattering', 'Scattering all\'indietro'), vc.backScatter == null ? .26 : vc.backScatter, 0, .9, .01, v => vset({backScatter:v}), v => (+v).toFixed(2)).root);
+      svc.body.appendChild(sliderRow(tr('Silver lining', 'Bordo controluce'), vc.silverLining == null ? .9 : vc.silverLining, 0, 3, .05, v => vset({silverLining:v}), v => (+v).toFixed(2)).root);
+      svc.body.appendChild(sliderRow(tr('Powder / dark edges', 'Powder / bordi scuri'), vc.powder == null ? .55 : vc.powder, 0, 1, .01, v => vset({powder:v}), v => Math.round(v*100) + '%').root);
+      svc.body.appendChild(sliderRow(tr('Scattering octaves', 'Ottave di scattering'), vc.multiScatter == null ? 3 : vc.multiScatter, 1, 4, 1, v => vset({multiScatter:Math.round(v)}), v => String(Math.round(v))).root);
+      svc.body.appendChild(sliderRow(tr('Sky ambient', 'Ambiente cielo'), vc.ambient == null ? .85 : vc.ambient, 0, 2, .01, v => vset({ambient:v}), v => (+v).toFixed(2)).root);
+      svc.body.appendChild(sliderRow(tr('Sky tint', 'Tinta del cielo'), vc.skyTint == null ? .7 : vc.skyTint, 0, 1, .01, v => vset({skyTint:v}), v => Math.round(v*100) + '%').root);
       svc.body.appendChild(sliderRow(tr('Quality (steps)', 'Qualita (passi)'), vc.quality, 6, 40, 1, v => vset({quality:Math.round(v)}), v => String(Math.round(v))).root);
+      svc.body.appendChild(sliderRow(tr('Sun shadow taps', 'Tap ombra solare'), vc.lightSteps == null ? 5 : vc.lightSteps, 1, 8, 1, v => vset({lightSteps:Math.round(v)}), v => String(Math.round(v))).root);
+      svc.body.appendChild(sliderRow(tr('Render scale (GPU load)', 'Scala di resa (carico GPU)'), vc.resolutionScale == null ? .8 : vc.resolutionScale, .35, 1, .05, v => vset({resolutionScale:v}), v => Math.round(v*100) + '%').root);
       svc.body.appendChild(sliderRow(tr('Absorption', 'Assorbimento'), vc.absorption, .2, 3, .05, v => vset({absorption:v}), v => (+v).toFixed(2)).root);
       svc.body.appendChild(sliderRow(tr('Opacity', 'Opacita'), vc.opacity, 0, 1, .01, v => vset({opacity:v}), v => Math.round(v*100) + '%').root);
       svc.body.appendChild(btnRow([{label:'↺ Default', action:() => { sky.volClouds.set(sky.volClouds.defaults()); markDirty(); buildInspector(); }}]));
-      svc.body.appendChild(el('<div class="lk-hint">' + tr('Raymarched clouds lit by the sun and synced to the day/night cycle. Quality is the main GPU cost: 14-20 is a good compromise; raise it only if the frame rate holds.', 'Nuvole raymarched illuminate dal sole e sincronizzate col ciclo giorno/notte. La qualita e il costo GPU principale: 14-20 e un buon compromesso, alza solo se il frame rate regge.') + '</div>'));
+      svc.body.appendChild(el('<div class="lk-hint">' + tr('Raymarched Perlin-Worley clouds lit by the sun and synced to the day/night cycle: Beer-Lambert extinction, dual-lobe Henyey-Greenstein scattering and multi-octave approximate multiple scattering. Quality (steps), Sun shadow taps and Render scale are the GPU cost: Render scale trims march length, shadow taps and edge erosion per pixel — lower it first if the frame rate drops.', 'Nuvole raymarched Perlin-Worley illuminate dal sole e sincronizzate col ciclo giorno/notte: estinzione Beer-Lambert, scattering Henyey-Greenstein a doppio lobo e multiple scattering approssimato a ottave. Qualita (passi), Tap ombra solare e Scala di resa sono il costo GPU: la Scala di resa riduce lunghezza del march, tap d\'ombra ed erosione dei bordi per pixel, abbassala per prima se il frame rate cala.') + '</div>'));
     } else {
       svc.body.appendChild(el('<div class="lk-empty">' + tr('Cloud module not loaded:<br>reload the page with Ctrl+F5<br>(browser cache).', 'Modulo nuvole non caricato:<br>ricarica la pagina con Ctrl+F5<br>(cache del browser).') + '</div>'));
     }
     box.appendChild(svc.root);
+
+    // Weather sits above Rain because an enabled preset drives rain, clouds,
+    // fog and grip together; the panels below stay available for manual tuning.
+    const swx = section(tr('WEATHER', 'METEO'), false);
+    const weatherApi = window.LK_RUNTIME_WEATHER;
+    const weather = GAME.systems.weather || (weatherApi && weatherApi.install ? weatherApi.install(GAME) : null);
+    if(weather){
+      const wp = weather.get();
+      const wset = patch => { weather.set(patch); markDirty(); };
+      swx.body.appendChild(checkRow(tr('Weather director enabled', 'Direttore meteo attivo'), wp.enabled, v => { wset({enabled:v}); buildInspector(); }).root);
+      if(wp.enabled){
+        swx.body.appendChild(selectRow(tr('Preset', 'Preset'), wp.preset,
+          weather.presetIds().map(id => ({value:id, label:tr(weatherApi.PRESETS[id].label, weatherApi.PRESETS[id].labelIt)})),
+          v => { wset({preset:v}); buildInspector(); }).root);
+        swx.body.appendChild(sliderRow(tr('Intensity', 'Intensita'), wp.intensity, 0, 1, .01, v => wset({intensity:v}), v => Math.round(v*100) + '%').root);
+        swx.body.appendChild(sliderRow(tr('Wind direction', 'Direzione vento'), wp.windDirection, 0, 360, 1, v => wset({windDirection:v}), v => Math.round(v) + '°').root);
+        swx.body.appendChild(sliderRow(tr('Transition time', 'Tempo di transizione'), wp.transitionTime, 0, 120, .5, v => wset({transitionTime:v}), v => (+v).toFixed(1) + 's').root);
+        swx.body.appendChild(selectRow(tr('Ground surface', 'Superficie del terreno'), wp.surface,
+          weatherApi.SURFACE_IDS.map(id => ({value:id, label:id})), v => { wset({surface:v}); buildInspector(); }).root);
+        swx.body.appendChild(checkRow(tr('Drive visuals (sky, cloud, rain)', 'Guida la resa (cielo, nuvole, pioggia)'), wp.driveVisuals, v => { wset({driveVisuals:v}); buildInspector(); }).root);
+        swx.body.appendChild(checkRow(tr('Drive physics (surface grip)', 'Guida la fisica (aderenza)'), wp.drivePhysics, v => { wset({drivePhysics:v}); buildInspector(); }).root);
+        swx.body.appendChild(checkRow(tr('Cycle through presets', 'Cicla tra i preset'), wp.cycle.enabled, v => { wset({cycle:Object.assign({}, wp.cycle, {enabled:v})}); buildInspector(); }).root);
+        if(wp.cycle.enabled){
+          swx.body.appendChild(sliderRow(tr('Hold each preset', 'Durata di ogni preset'), wp.cycle.holdSeconds, 5, 900, 5,
+            v => wset({cycle:Object.assign({}, wp.cycle, {holdSeconds:v})}), v => Math.round(v) + 's').root);
+        }
+        const live = weather.surface();
+        swx.body.appendChild(el('<div class="lk-hint">'
+          + tr('Live: grip ', 'Live: aderenza ') + '<b>' + (+live.gripMultiplier).toFixed(2) + '×</b>'
+          + tr(', wetness ', ', bagnato ') + Math.round(live.wetness * 100) + '%'
+          + tr(', snow ', ', neve ') + Math.round(live.snow * 100) + '%'
+          + ', ' + Math.round(live.temperature) + '°C</div>'));
+      }
+      swx.body.appendChild(el('<div class="lk-hint">' + tr('One preset drives cloud coverage, rain, fog and wind together, and scales tyre grip for the selected ground surface. Below-zero standing water becomes ice. Disable the director to keep hand-tuned cloud and rain values.', 'Un preset guida insieme copertura nuvolosa, pioggia, nebbia e vento, e scala l\'aderenza degli pneumatici per la superficie scelta. Sotto zero l\'acqua diventa ghiaccio. Disattiva il direttore per mantenere i valori di nuvole e pioggia regolati a mano.') + '</div>'));
+    } else {
+      swx.body.appendChild(el('<div class="lk-empty">' + tr('Weather module not loaded.', 'Modulo meteo non caricato.') + '</div>'));
+    }
+    box.appendChild(swx.root);
 
     const srn = section(tr('RAIN', 'PIOGGIA'), false);
     const rain = GAME.systems.rain;

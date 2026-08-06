@@ -93,30 +93,9 @@ function create(deps){
     box.appendChild(sp.root);
 
     const binding = section(tr('RADIO OWNERSHIP', 'PROPRIETÀ RADIO'), true);
-    binding.body.appendChild(selectRow(tr('Runtime binding', 'Collegamento runtime'), hud.bindingMode || 'vehicle', [
-      {value:'vehicle', label:tr('Possessed vehicle (recommended)', 'Veicolo posseduto (consigliato)')},
-      {value:'actor', label:tr('Specific actor', 'Actor specifico')},
-      {value:'global', label:tr('Global gameplay', 'Gameplay globale')},
-    ], value => upd({bindingMode:value})).root);
-    const actorOptions = [{value:'', label:tr('Select an actor...', 'Seleziona un actor...')}];
-    if(GAME.world && GAME.world.registry && GAME.world.registry.forEach){
-      GAME.world.registry.forEach(object => {
-        if(!object) return;
-        const data = object.userData || {};
-        const id = String(data.editorId || data.logicInstanceId || data.entityId || data.id || '');
-        if(!id) return;
-        actorOptions.push({value:id, label:String(data.editorName || data.name || object.name || id)});
-      });
-    }
-    binding.body.appendChild(selectRow(
-      tr('Bound actor', 'Actor collegato'),
-      hud.bindingActorId || '',
-      actorOptions,
-      value => upd({bindingActorId:value})
-    ).root);
     binding.body.appendChild(el('<div class="lk-hint">' + tr(
-      'By default the radio and its TAB interface exist only while Player 1 possesses an enabled native or Logic Element vehicle. Actor and Global are explicit overrides for custom projects.',
-      'Per impostazione predefinita la radio e la sua interfaccia TAB esistono solo mentre il Giocatore 1 possiede un veicolo nativo o Logic Element attivo. Actor e Globale sono override espliciti per progetti personalizzati.'
+      'The radio and its TAB interface exist only while the active player possesses an enabled, visible native or Logic Element vehicle. It never acts as level music; menu-role music remains a separate system.',
+      'La radio e la sua interfaccia TAB esistono solo mentre il giocatore attivo possiede un veicolo nativo o Logic Element abilitato e visibile. Non funziona mai come musica del livello; la musica dei menu resta un sistema separato.'
     ) + '</div>'));
     box.appendChild(binding.root);
 

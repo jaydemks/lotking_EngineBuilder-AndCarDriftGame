@@ -126,7 +126,9 @@ function registerFirstPersonNodes(registry){
       const object = api.getInput('object') || (api.services.objects && api.services.objects.owner());
       if(object && object.userData){
         const health = Math.max(1, number(api.getInput('health')) || 100);
-        object.userData.damageable = {health, maxHealth:health, team:String(api.getInput('team') || 'enemy')};
+        const contract = window.LK_RUNTIME_DAMAGE_CONTRACT;
+        if(contract && contract.reset) contract.reset(object, {health, maxHealth:health, team:String(api.getInput('team') || 'enemy')});
+        else object.userData.damageable = {health, maxHealth:health, team:String(api.getInput('team') || 'enemy')};
       }
       return {exec:'completed'};
     },
@@ -152,8 +154,11 @@ function registerFirstPersonNodes(registry){
     inputs:[execIn, dataIn('object', 'object3d', null), dataIn('damage', 'number', 25)],
     outputs:[completedOut, dataOut('health', 'number'), dataOut('killed', 'boolean')],
     run(api){
+      const contract = window.LK_RUNTIME_DAMAGE_CONTRACT;
       const runtime = window.LK_RUNTIME_FIRST_PERSON;
-      const result = runtime ? runtime.applyDamage(api.getInput('object'), number(api.getInput('damage'))) : null;
+      const result = contract && contract.apply
+        ? contract.apply(api.getInput('object'), number(api.getInput('damage')), {source:'logic'})
+        : (runtime ? runtime.applyDamage(api.getInput('object'), number(api.getInput('damage')), {source:'logic'}) : null);
       api.node.data.__damage = result || null;
       return {exec:'completed'};
     },
@@ -284,9 +289,11 @@ function registerFirstPersonNodes(registry){
     outputs:[completedOut, dataOut('health', 'number'), dataOut('died', 'boolean')],
     run(api){
       const target = pawn(api);
-      api.node.data.__hurt = target && target.vitals
-        ? target.vitals.applyDamage(number(api.getInput('amount')), {source:String(api.getInput('source') || 'script')})
-        : null;
+      const info = {source:String(api.getInput('source') || 'script')};
+      const contract = window.LK_RUNTIME_DAMAGE_CONTRACT;
+      api.node.data.__hurt = target && contract && contract.apply && target.owner
+        ? contract.apply(target.owner, number(api.getInput('amount')), info)
+        : (target && target.vitals ? target.vitals.applyDamage(number(api.getInput('amount')), info) : null);
       return {exec:'completed'};
     },
     evaluate(api, pin){
@@ -318,19 +325,42 @@ function registerFirstPersonNodes(registry){
   registry.register({
     type:'world.makeItem', title:'Make Object a Pickup', category:'World Items',
     description:'Turns any object into a pickup: a weapon, a medkit, armour, ammo, or a custom item that only fires On Item Picked Up.',
-    inputs:[execIn, dataIn('object', 'object3d', null), dataIn('kind', 'string', 'health'), dataIn('amount', 'number', 35), dataIn('preset', 'string', ''), dataIn('respawn', 'number', 0)],
+    inputs:[execIn, dataIn('object', 'object3d', null), dataIn('kind', 'string', 'health'),
+      dataIn('name', 'string', ''), dataIn('amount', 'number', 35), dataIn('preset', 'string', ''),
+      dataIn('ammo', 'number', -1), dataIn('reserve', 'number', -1),
+      dataIn('respawn', 'number', 0), dataIn('radius', 'number', 1.5), dataIn('mass', 'number', 2.5),
+      dataIn('carryable', 'boolean', true), dataIn('generatedVisual', 'boolean', false),
+      dataIn('fireAction', 'string', 'fire'), dataIn('reloadAction', 'string', 'reload'), dataIn('throwAction', 'string', 'throw')],
     outputs:[completedOut],
     run(api){
       const object = api.getInput('object') || (api.services.objects && api.services.objects.owner());
       const runtime = window.LK_RUNTIME_ITEMS;
       if(object && object.userData && runtime){
         const preset = String(api.getInput('preset') || '');
+        const ammo = number(api.getInput('ammo')), reserve = number(api.getInput('reserve'));
+        const weapon = preset ? {
+          preset,
+          name:String(api.getInput('name') || object.name || ''),
+          characterActions:{
+            fire:String(api.getInput('fireAction') || ''),
+            reload:String(api.getInput('reloadAction') || ''),
+            throw:String(api.getInput('throwAction') || ''),
+          },
+        } : null;
         object.userData.item = runtime.normalizeItem({
           kind:String(api.getInput('kind') || 'health'),
-          name:object.name || undefined,
+          name:String(api.getInput('name') || object.name || ''),
           amount:number(api.getInput('amount')),
           respawn:number(api.getInput('respawn')),
-          weapon:preset ? {preset} : null,
+          radius:number(api.getInput('radius')) || 1.5,
+          mass:number(api.getInput('mass')) || 2.5,
+          carryable:api.getInput('carryable') !== false,
+          visual:api.getInput('generatedVisual') === true ? 'auto' : '',
+          weapon,
+          ammoState:ammo >= 0 || reserve >= 0 ? {
+            ammo:ammo >= 0 ? ammo : undefined,
+            reserve:reserve >= 0 ? reserve : undefined,
+          } : null,
         });
         object.userData.item.__normalized = true;
       }

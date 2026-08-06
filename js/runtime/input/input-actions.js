@@ -19,7 +19,7 @@
 (function(){
 'use strict';
 
-const CONFIG_VERSION = 13;
+const CONFIG_VERSION = 15;
 const DEVICE_TYPES = ['keyboard', 'gamepad', 'touch'];
 const SINGLE_INSTANCE = {touch: true};   // types that cannot be split
 
@@ -27,18 +27,27 @@ const SINGLE_INSTANCE = {touch: true};   // types that cannot be split
 // Pawns read them, and every non-character scheme leaves them unbound so
 // vehicle input resolves exactly as before.
 const COMBAT_ACTIONS = ['fire', 'aim', 'reload'];
+// Football verbs. A Soccer Pawn is not a shooter and must not borrow vehicle
+// actions: shooting used to read the vehicle's `highBeams`, which the character
+// context deliberately leaves unbound, so the shot key simply never fired.
+const SOCCER_ACTIONS = ['shoot', 'pass', 'tackle', 'diveLeft', 'diveRight'];
+// Species abilities live in the same persisted on-foot context, then the
+// possessed-Pawn profile makes them mutually exclusive with human/football
+// verbs that intentionally share the convenient F/Q/E defaults.
+const ANIMAL_ACTIONS = ['primaryAbility', 'secondaryAbility', 'voice'];
+
 // On-foot traversal and world verbs. Same rule as combat: shared schema, left
 // unbound for every non-character context, so vehicle input is untouched.
-const ONFOOT_ACTIONS = ['crouch', 'slowWalk', 'interact', 'pickup', 'dropItem', 'nextWeapon', 'useItem', 'dodge', 'swapShoulder', 'leanLeft', 'leanRight',
-  'slot1', 'slot2', 'slot3', 'slot4', 'slot5', 'slot6', 'slot7', 'inventory'];
+const ONFOOT_ACTIONS = ['jump', 'crouch', 'slowWalk', 'interact', 'pickup', 'dropItem', 'nextWeapon', 'useItem', 'dodge', 'swapShoulder', 'leanLeft', 'leanRight',
+  'slot1', 'slot2', 'slot3', 'slot4', 'slot5', 'slot6', 'slot7', 'inventory'].concat(SOCCER_ACTIONS).concat(ANIMAL_ACTIONS);
 const KEYBOARD_ACTIONS = [
-  'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'sprint', 'reset',
-  'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
+  'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'wheelBrake', 'sprint', 'reset',
+  'pauseMenu', 'highBeams', 'towToggle', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
   'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
 ].concat(COMBAT_ACTIONS).concat(ONFOOT_ACTIONS);
 const GAMEPAD_ACTIONS = [
-  'steer', 'throttle', 'brake', 'handbrake', 'sprint', 'reset',
-  'pauseMenu', 'highBeams', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
+  'steer', 'throttle', 'brake', 'handbrake', 'wheelBrake', 'sprint', 'reset',
+  'pauseMenu', 'highBeams', 'towToggle', 'radioToggle', 'radioPlay', 'radioNext', 'radioPrev',
   'cameraMode', 'lookBack', 'tuningMenu', 'mute', 'legend',
   'cameraLookX', 'cameraLookY',
 ].concat(COMBAT_ACTIONS).concat(ONFOOT_ACTIONS);
@@ -56,10 +65,14 @@ function defaultKeyboardScheme(){
     steerLeft:  ['KeyA', 'ArrowLeft'],
     steerRight: ['KeyD', 'ArrowRight'],
     handbrake:  ['Space'],
+    // Aircraft landing-gear brakes are independent from Handbrake and from
+    // global radio/camera commands. K is deliberately free in Vehicle defaults.
+    wheelBrake: ['KeyK'],
     sprint:     ['ShiftLeft', 'ShiftRight'],
     reset:      ['KeyR'],
     pauseMenu:  ['Escape'],
-    highBeams:  ['KeyF'],
+    highBeams:  ['KeyL'],
+    towToggle:  ['KeyT'],
     radioToggle:['Tab'],
     radioPlay:  ['KeyP'],
     radioNext:  ['KeyN'],
@@ -72,9 +85,18 @@ function defaultKeyboardScheme(){
     fire:       [],
     aim:        [],
     reload:     [],
+    shoot:      [],
+    pass:       [],
+    tackle:     [],
+    diveLeft:   [],
+    diveRight:  [],
+    primaryAbility: [],
+    secondaryAbility: [],
+    voice:      [],
+    jump:       [],
     crouch:     [],
     slowWalk:   [],
-    interact:   [],
+    interact:   ['KeyF'],
     pickup:     [],
     dropItem:   [],
     nextWeapon: [],
@@ -93,10 +115,16 @@ function defaultGamepadScheme(){
     throttle:  {type: 'button', index: 7},
     brake:     {type: 'button', index: 6},
     handbrake: {type: 'button', index: 0},
+    // No standard pad button is free without colliding with an existing
+    // Vehicle command. Authors/players can bind this explicitly when needed.
+    wheelBrake:null,
     sprint:    {type: 'button', index: 5},
     reset:     {type: 'button', index: 10},
     pauseMenu: {type: 'button', index: 9},
-    highBeams: {type: 'button', index: 2},
+    highBeams: {type: 'button', index: 14},
+    // Deliberately unbound: standard pads have no unused button. It remains
+    // independently rebindable in the Vehicle context.
+    towToggle: null,
     radioToggle:{type: 'button', index: 8},
     radioPlay: {type: 'button', index: 3},
     radioNext: {type: 'button', index: 15},
@@ -105,15 +133,24 @@ function defaultGamepadScheme(){
     lookBack:  {type: 'button', index: 1},
     tuningMenu:{type: 'button', index: 12},
     mute:      {type: 'button', index: 4},
-    legend:    {type: 'button', index: 14},
+    legend:    null,
     cameraLookX:{type: 'axis', index: 2, scale: -1, deadzone: 0.16},
     cameraLookY:{type: 'axis', index: 3, scale: 1, deadzone: 0.16},
     fire:      null,
     aim:       null,
     reload:    null,
+    shoot:     null,
+    pass:      null,
+    tackle:    null,
+    diveLeft:  null,
+    diveRight: null,
+    primaryAbility:null,
+    secondaryAbility:null,
+    voice:      null,
+    jump:      null,
     crouch:    null,
     slowWalk:  null,
-    interact:  null,
+    interact:  {type: 'button', index: 2},
     pickup:    null,
     dropItem:  null,
     nextWeapon:null,
@@ -129,10 +166,16 @@ function defaultGamepadScheme(){
 function defaultCharacterKeyboardScheme(){
   const scheme = defaultKeyboardScheme();
   scheme.handbrake = [];
-  scheme.reset = ['Space'];
+  scheme.wheelBrake = [];
+  // Reset belongs exclusively to vehicle Pawns. Jump is an independent action,
+  // so R can reload a weapon without a global vehicle handler teleporting the
+  // possessed Character back to spawn.
+  scheme.reset = [];
+  scheme.jump = ['Space'];
   // E / F / G are the world verbs on foot, so the vehicle's headlight flash
   // gives its keys up rather than fighting them.
   scheme.highBeams = [];
+  scheme.towToggle = [];
   scheme.radioToggle = [];
   scheme.radioPlay = [];
   scheme.radioNext = [];
@@ -160,6 +203,18 @@ function defaultCharacterKeyboardScheme(){
   // a crate — and a HOLD picks an item up. Two verbs on one key, told apart by
   // how long it is held, so the player never has to remember which is which.
   scheme.interact = ['KeyF'];
+  // Football. Hold to charge, release to strike. Deliberately NOT on Mouse0:
+  // that is Fire, and a shared binding is a real conflict in the mapping UI.
+  // The Soccer Pawn accepts Fire as an alias at the Pawn level instead, so
+  // left-click still shoots without either action losing its own key.
+  scheme.shoot = ['KeyF'];
+  scheme.pass = ['KeyG'];
+  scheme.tackle = ['KeyC'];
+  scheme.diveLeft = ['KeyJ'];
+  scheme.diveRight = ['KeyL'];
+  scheme.primaryAbility = ['KeyF'];
+  scheme.secondaryAbility = ['KeyE'];
+  scheme.voice = ['KeyQ'];
   // Unbound on purpose: picking up is the hold on Interact. The action still
   // exists so a project that wants a separate instant-pickup key can bind one.
   scheme.pickup = [];
@@ -196,10 +251,16 @@ function defaultCharacterGamepadScheme(){
   scheme.steer = {type:'axis', index:0, scale:-1, deadzone:.18};
   scheme.throttle = {type:'axis', index:1, scale:-1, deadzone:.18};
   scheme.brake = {type:'axis', index:1, scale:1, deadzone:.18};
-  scheme.handbrake = {type:'button', index:1};
+  // Vehicle-only verbs stay physically unbound in an on-foot context. Leaving
+  // them on inherited buttons makes the Mapping UI report false conflicts
+  // (B/Circle was both Handbrake and Crouch, X/Square both High Beams and Use).
+  scheme.handbrake = null;
+  scheme.wheelBrake = null;
   scheme.sprint = {type:'button', index:10};
-  scheme.reset = {type:'button', index:0};
-  scheme.highBeams = {type:'button', index:2};
+  scheme.reset = null;
+  scheme.jump = {type:'button', index:0};
+  scheme.highBeams = null;
+  scheme.towToggle = null;
   scheme.radioToggle = null;
   scheme.radioPlay = null;
   scheme.radioNext = null;
@@ -211,15 +272,33 @@ function defaultCharacterGamepadScheme(){
   scheme.crouch = {type:'button', index:1};  // B/Circle
   scheme.slowWalk = null;                    // analog stick already walks
   scheme.interact = {type:'button', index:2};// X/Square
-  scheme.pickup = {type:'button', index:2};  // shares X: context decides
+  scheme.shoot = {type:'button', index:2};   // X/Square: hold to charge a shot
+  scheme.pass = {type:'button', index:0};    // A/Cross
+  scheme.tackle = {type:'button', index:1};  // B/Circle
+  scheme.diveLeft = {type:'button', index:14};  // D-pad Left
+  scheme.diveRight = {type:'button', index:15}; // D-pad Right
+  scheme.primaryAbility = {type:'button', index:2};   // X/Square
+  scheme.secondaryAbility = {type:'button', index:5}; // RB
+  scheme.voice = {type:'button', index:4};            // LB
+  // Pick Up is the Interact hold gesture. Keeping a second X binding makes a
+  // single press execute both the tap and the dedicated action before the hold
+  // resolver has had a chance to decide which one the player meant.
+  scheme.pickup = null;
   scheme.dropItem = {type:'button', index:14};
   scheme.nextWeapon = {type:'button', index:15};
   scheme.useItem = {type:'button', index:13};
-  scheme.dodge = {type:'button', index:5};   // RB, double-tapped
+  // RB belongs to Lean Right. There is no remaining standard face/shoulder
+  // button that does not already own a simultaneous Character action, so Dodge
+  // is intentionally available for rebinding instead of double-firing.
+  scheme.dodge = null;
   scheme.lookBack = null;
-  scheme.swapShoulder = {type:'button', index:11};
+  scheme.swapShoulder = {type:'button', index:12}; // D-pad Up; R3 stays Camera
   scheme.leanLeft = {type:'button', index:4};    // LB
   scheme.leanRight = {type:'button', index:5};   // RB
+  // These inherited UI shortcuts collided with Lean Left and Drop Item. They
+  // remain keyboard actions and can be explicitly rebound on a custom pad.
+  scheme.mute = null;
+  scheme.legend = null;
   scheme.inventory = {type:'button', index:8};   // View / Back
   return scheme;
 }
@@ -373,8 +452,12 @@ function normalizeConfig(raw){
   }
   migrateV2GamepadDefaults(cfg, rawVersion);
   migrateV4OnFoot(cfg, rawVersion);
+  migrateV13Soccer(cfg, rawVersion);
+  migrateV14Jump(cfg, rawVersion, raw);
   migrateV5Modifiers(cfg, rawVersion);
   migrateV10Controls(cfg, rawVersion);
+  hardenVehicleExitBindings(cfg);
+  hardenCharacterGamepadBindings(cfg);
   return cfg;
 }
 
@@ -428,8 +511,95 @@ function migrateV4OnFoot(cfg, rawVersion){
   });
 }
 
+// v13 had no football verbs: a Soccer Pawn read the vehicle's `highBeams`,
+// which the character context unbinds, so the shot key did nothing. A config
+// saved before v14 gains the new bindings rather than inheriting empty ones.
+function migrateV13Soccer(cfg, rawVersion){
+  if(rawVersion >= 14) return;
+  const schemes = cfg.contexts && cfg.contexts.character && cfg.contexts.character.schemes;
+  if(!schemes) return;
+  const keyboardDefaults = defaultCharacterKeyboardScheme();
+  const gamepadDefaults = defaultCharacterGamepadScheme();
+  SOCCER_ACTIONS.forEach(action => {
+    if(schemes.keyboard && (!Array.isArray(schemes.keyboard[action]) || !schemes.keyboard[action].length)){
+      schemes.keyboard[action] = keyboardDefaults[action].slice();
+    }
+    if(schemes.gamepad && !schemes.gamepad[action]) schemes.gamepad[action] = gamepadDefaults[action];
+  });
+}
+
+// v14 represented Character Jump through the vehicle-only `reset` action.
+// Move the actual authored binding, rather than restoring a default, so a
+// project that moved Jump to another key/button keeps that decision. Per-device
+// overrides need the same migration or a split keyboard/gamepad would silently
+// retain the old overlap after the project-level scheme had been repaired.
+function migrateV14Jump(cfg, rawVersion, raw){
+  if(rawVersion >= 15) return;
+  const schemes = cfg.contexts && cfg.contexts.character && cfg.contexts.character.schemes;
+  const rawSchemes = raw && raw.contexts && raw.contexts.character && raw.contexts.character.schemes;
+  if(schemes && schemes.keyboard){
+    // A partial v14 config may omit the Character context or this binding and
+    // rely on its schema default. In that case normalizeScheme has already
+    // supplied the v15 Jump default; only overwrite it when v14 really stored
+    // an authored Reset-as-Jump value.
+    if(rawSchemes && rawSchemes.keyboard && Object.prototype.hasOwnProperty.call(rawSchemes.keyboard, 'reset')){
+      schemes.keyboard.jump = clone(schemes.keyboard.reset);
+    }
+    schemes.keyboard.reset = [];
+  }
+  if(schemes && schemes.gamepad){
+    if(rawSchemes && rawSchemes.gamepad && Object.prototype.hasOwnProperty.call(rawSchemes.gamepad, 'reset')){
+      schemes.gamepad.jump = clone(schemes.gamepad.reset);
+    }
+    schemes.gamepad.reset = null;
+  }
+  Object.keys(cfg.overrides || {}).forEach(deviceId => {
+    const byContext = cfg.overrides[deviceId];
+    const override = byContext && byContext.character;
+    if(!override || !Object.prototype.hasOwnProperty.call(override, 'reset')) return;
+    const device = (cfg.devices || []).find(item => item && item.id === deviceId);
+    override.jump = clone(override.reset);
+    override.reset = device && device.type === 'gamepad' ? null : [];
+  });
+}
+
 function sameButtonBinding(bind, index){
   return !!(bind && bind.type === 'button' && bind.index === index);
+}
+
+// Targeted repair for the former Vehicle defaults: F/X flashed high beams and
+// Vehicle Interact was empty, making a Character able to enter but unable to
+// leave. Only exact old defaults move; every authored remap stays authored.
+function hardenVehicleExitBindings(cfg){
+  const schemes=cfg&&cfg.contexts&&cfg.contexts.vehicle&&cfg.contexts.vehicle.schemes;
+  if(!schemes)return;
+  const keyboard=schemes.keyboard;
+  if(keyboard&&Array.isArray(keyboard.interact)&&!keyboard.interact.length&&Array.isArray(keyboard.highBeams)&&keyboard.highBeams.join(',')==='KeyF'){
+    keyboard.interact=['KeyF'];keyboard.highBeams=['KeyL'];
+  }
+  const gamepad=schemes.gamepad;
+  if(gamepad&&sameButtonBinding(gamepad.highBeams,2)&&(!gamepad.interact||sameButtonBinding(gamepad.interact,2))&&sameButtonBinding(gamepad.legend,14)){
+    gamepad.interact={type:'button',index:2};gamepad.highBeams={type:'button',index:14};
+    if(sameButtonBinding(gamepad.legend,14))gamepad.legend=null;
+  }
+}
+
+// Schema v15 stays v15: this is a targeted repair for the short-lived v15
+// defaults that assigned two simultaneous Character verbs to one button. The
+// football overlaps are deliberately untouched because the possessed-Pawn
+// semantic filter makes Soccer and non-Soccer outputs mutually exclusive.
+function hardenCharacterGamepadBindings(cfg){
+  const scheme=cfg&&cfg.contexts&&cfg.contexts.character&&cfg.contexts.character.schemes
+    &&cfg.contexts.character.schemes.gamepad;
+  if(!scheme)return;
+  if(sameButtonBinding(scheme.pickup,2)&&sameButtonBinding(scheme.interact,2))scheme.pickup=null;
+  if(sameButtonBinding(scheme.dodge,5)&&sameButtonBinding(scheme.leanRight,5))scheme.dodge=null;
+  if(sameButtonBinding(scheme.mute,4)&&sameButtonBinding(scheme.leanLeft,4))scheme.mute=null;
+  if(sameButtonBinding(scheme.legend,14)&&sameButtonBinding(scheme.dropItem,14))scheme.legend=null;
+  if(sameButtonBinding(scheme.swapShoulder,11)&&sameButtonBinding(scheme.cameraMode,11)){
+    const dpadUpUsed=Object.keys(scheme).some(action=>action!=='swapShoulder'&&sameButtonBinding(scheme[action],12));
+    scheme.swapShoulder=dpadUpUsed?null:{type:'button',index:12};
+  }
 }
 
 function migrateV2GamepadScheme(scheme){
@@ -464,17 +634,41 @@ function seedDefaultDevices(cfg){
 function mergeConfig(base, override){
   const cfg = normalizeConfig(base);
   if(!override || typeof override !== 'object') return cfg;
-  if(['auto', 'on', 'off'].indexOf(override.touchMode) >= 0) cfg.touchMode = override.touchMode;
-  if(typeof override.autoAssign === 'boolean') cfg.autoAssign = override.autoAssign;
-  if(typeof override.activeContext === 'string' && cfg.contexts[override.activeContext]) cfg.activeContext = override.activeContext;
-  if(Array.isArray(override.devices)){
-    override.devices.forEach(d => {
+  const layer = clone(override);
+  // Overrides saved before v15 did not carry a version. In every such file the
+  // Character `reset` slot meant Jump, so treating an absent version as v14 is
+  // both lossless and deterministic.
+  if(Number(layer.version || 14) < 15){
+    const schemes = layer.contexts && layer.contexts.character && layer.contexts.character.schemes;
+    if(schemes && schemes.keyboard && Object.prototype.hasOwnProperty.call(schemes.keyboard, 'reset')){
+      schemes.keyboard.jump = clone(schemes.keyboard.reset);
+      schemes.keyboard.reset = [];
+    }
+    if(schemes && schemes.gamepad && Object.prototype.hasOwnProperty.call(schemes.gamepad, 'reset')){
+      schemes.gamepad.jump = clone(schemes.gamepad.reset);
+      schemes.gamepad.reset = null;
+    }
+    Object.keys(layer.overrides || {}).forEach(deviceId => {
+      const byContext = layer.overrides[deviceId];
+      const item = byContext && byContext.character;
+      if(!item || !Object.prototype.hasOwnProperty.call(item, 'reset')) return;
+      const device = (layer.devices || cfg.devices || []).find(entry => entry && entry.id === deviceId);
+      item.jump = clone(item.reset);
+      item.reset = device && device.type === 'gamepad' ? null : [];
+    });
+    layer.version = CONFIG_VERSION;
+  }
+  if(['auto', 'on', 'off'].indexOf(layer.touchMode) >= 0) cfg.touchMode = layer.touchMode;
+  if(typeof layer.autoAssign === 'boolean') cfg.autoAssign = layer.autoAssign;
+  if(typeof layer.activeContext === 'string' && cfg.contexts[layer.activeContext]) cfg.activeContext = layer.activeContext;
+  if(Array.isArray(layer.devices)){
+    layer.devices.forEach(d => {
       if(d && d.id && DEVICE_TYPES.indexOf(d.type) >= 0 && !cfg.devices.some(x => x.id === d.id)) cfg.devices.push({id: d.id, type: d.type, slot: d.slot || 1});
     });
   }
-  if(override.contexts){
-    for(const ctxId in override.contexts){
-      const oc = override.contexts[ctxId];
+  if(layer.contexts){
+    for(const ctxId in layer.contexts){
+      const oc = layer.contexts[ctxId];
       if(!oc || !oc.schemes || !cfg.contexts[ctxId]) continue;
       ['keyboard', 'gamepad'].forEach(type => {
         const os = oc.schemes[type];
@@ -483,17 +677,19 @@ function mergeConfig(base, override){
       });
     }
   }
-  if(override.overrides){
-    for(const devId in override.overrides){
+  if(layer.overrides){
+    for(const devId in layer.overrides){
       cfg.overrides[devId] = cfg.overrides[devId] || {};
-      for(const ctxId in override.overrides[devId]){
-        cfg.overrides[devId][ctxId] = Object.assign(cfg.overrides[devId][ctxId] || {}, clone(override.overrides[devId][ctxId]));
+      for(const ctxId in layer.overrides[devId]){
+        cfg.overrides[devId][ctxId] = Object.assign(cfg.overrides[devId][ctxId] || {}, clone(layer.overrides[devId][ctxId]));
       }
     }
   }
-  if(Array.isArray(override.players) && override.players.length){
-    cfg.players = override.players.map((p, i) => ({id: (p && p.id) || ('player-' + (i + 1)), device: (p && p.device) || 'keyboard-1'}));
+  if(Array.isArray(layer.players) && layer.players.length){
+    cfg.players = layer.players.map((p, i) => ({id: (p && p.id) || ('player-' + (i + 1)), device: (p && p.device) || 'keyboard-1'}));
   }
+  hardenCharacterGamepadBindings(cfg);
+  hardenVehicleExitBindings(cfg);
   return cfg;
 }
 
@@ -554,13 +750,37 @@ function setBinding(config, contextId, deviceId, action, binding){
   }
 }
 
+// Soccer and the other on-foot Pawn kinds intentionally share one persisted
+// Character scheme. A/Cross can therefore mean Pass to Soccer and Jump to a
+// Character, for example, without ever producing both commands for one Pawn.
+// Keep that domain rule here beside conflict detection so the Mapping UI does
+// not warn about safe, possession-exclusive aliases. Fire/Shoot is the sole
+// cross-domain alias: the Soccer filter converts Fire into Shoot and clears the
+// firearm output. Fire combined with Pass/Tackle remains a real conflict.
+const NON_SOCCER_ACTIONS = new Set(COMBAT_ACTIONS.filter(action=>action!=='fire').concat(
+  ONFOOT_ACTIONS.filter(action=>SOCCER_ACTIONS.indexOf(action)<0&&ANIMAL_ACTIONS.indexOf(action)<0&&action!=='leanLeft'&&action!=='leanRight')
+));
+const NON_ANIMAL_ACTIONS = new Set(COMBAT_ACTIONS.concat(ONFOOT_ACTIONS.filter(action=>ANIMAL_ACTIONS.indexOf(action)<0)));
+function actionsAreMutuallyExclusive(first,second){
+  if((first==='fire'&&second==='shoot')||(second==='fire'&&first==='shoot'))return true;
+  const firstSoccer=SOCCER_ACTIONS.indexOf(first)>=0,secondSoccer=SOCCER_ACTIONS.indexOf(second)>=0;
+  if((firstSoccer&&NON_SOCCER_ACTIONS.has(second))||(secondSoccer&&NON_SOCCER_ACTIONS.has(first)))return true;
+  const firstAnimal=ANIMAL_ACTIONS.indexOf(first)>=0,secondAnimal=ANIMAL_ACTIONS.indexOf(second)>=0;
+  return (firstAnimal&&NON_ANIMAL_ACTIONS.has(second))||(secondAnimal&&NON_ANIMAL_ACTIONS.has(first));
+}
+
 // duplicate-binding detection within a scheme (for conflict warnings)
 function schemeConflicts(scheme, type){
   const used = {};
   const conflicts = {};
   const add = (key, action) => {
-    if(used[key]){ conflicts[action] = true; conflicts[used[key]] = true; }
-    else used[key] = action;
+    const previous=used[key]||(used[key]=[]);
+    previous.forEach(other=>{
+      if(actionsAreMutuallyExclusive(action,other))return;
+      conflicts[action]=true;
+      conflicts[other]=true;
+    });
+    previous.push(action);
   };
   if(type === 'keyboard'){
     for(const a in scheme) (scheme[a] || []).forEach(code => add('k:' + code, a));
@@ -578,12 +798,13 @@ function applyDeadzone(v, dz){
 }
 function neutralDrive(){
   return {
-    steer: 0, throttle: 0, brake: 0, handbrake: false, sprint: false, reset: false,
-    pauseMenu: false, highBeams: false, radioToggle: false, radioPlay: false,
+    steer: 0, throttle: 0, brake: 0, handbrake: false, wheelBrake:false, sprint: false, sprintAmount:0, reset: false, jump: false,
+    pauseMenu: false, highBeams: false, towToggle:false, radioToggle: false, radioPlay: false,
     radioNext: false, radioPrev: false, cameraMode: false, lookBack: false,
     tuningMenu: false, mute: false, legend: false, cameraLookX: 0, cameraLookY: 0,
-    fire: false, aim: false, reload: false,
-    crouch: false, slowWalk: false, interact: false, pickup: false,
+    fire: false, aim: false, reload: false, shoot:false, pass:false, tackle:false, diveLeft:false, diveRight:false,
+    primaryAbility:false, secondaryAbility:false, voice:false,
+    crouch: false, crouchAmount:0, slowWalk: false, interact: false, pickup: false,
     dropItem: false, nextWeapon: false, useItem: false, dodge: false, swapShoulder: false, leanLeft: false, leanRight: false,
     slot1:false, slot2:false, slot3:false, slot4:false, slot5:false, slot6:false, slot7:false,
     inventory:false,
@@ -598,10 +819,14 @@ function mergeDrive(a, b){
     throttle: Math.max(a.throttle, b.throttle),
     brake: Math.max(a.brake, b.brake),
     handbrake: a.handbrake || b.handbrake,
+    wheelBrake: a.wheelBrake || b.wheelBrake,
     sprint: a.sprint || b.sprint,
+    sprintAmount: Math.max(Number(a.sprintAmount)||0, Number(b.sprintAmount)||0),
     reset: a.reset || b.reset,
+    jump: a.jump || b.jump,
     pauseMenu: a.pauseMenu || b.pauseMenu,
     highBeams: a.highBeams || b.highBeams,
+    towToggle: a.towToggle || b.towToggle,
     radioToggle: a.radioToggle || b.radioToggle,
     radioPlay: a.radioPlay || b.radioPlay,
     radioNext: a.radioNext || b.radioNext,
@@ -616,7 +841,16 @@ function mergeDrive(a, b){
     fire: a.fire || b.fire,
     aim: a.aim || b.aim,
     reload: a.reload || b.reload,
+    shoot: a.shoot || b.shoot,
+    pass: a.pass || b.pass,
+    tackle: a.tackle || b.tackle,
+    diveLeft:a.diveLeft||b.diveLeft,
+    diveRight:a.diveRight||b.diveRight,
+    primaryAbility:a.primaryAbility||b.primaryAbility,
+    secondaryAbility:a.secondaryAbility||b.secondaryAbility,
+    voice:a.voice||b.voice,
     crouch: a.crouch || b.crouch,
+    crouchAmount: Math.max(Number(a.crouchAmount)||0, Number(b.crouchAmount)||0),
     slowWalk: a.slowWalk || b.slowWalk,
     interact: a.interact || b.interact,
     pickup: a.pickup || b.pickup,
@@ -641,10 +875,14 @@ function resolveKeyboard(scheme, kb){
     throttle: anyDown(scheme.throttle) ? 1 : 0,
     brake: anyDown(scheme.brake) ? 1 : 0,
     handbrake: anyDown(scheme.handbrake),
+    wheelBrake: anyDown(scheme.wheelBrake),
     sprint: anyDown(scheme.sprint),
+    sprintAmount: anyDown(scheme.sprint) ? 1 : 0,
     reset: anyDown(scheme.reset),
+    jump: anyDown(scheme.jump),
     pauseMenu: anyDown(scheme.pauseMenu),
     highBeams: anyDown(scheme.highBeams),
+    towToggle: anyDown(scheme.towToggle),
     radioToggle: anyDown(scheme.radioToggle),
     radioPlay: anyDown(scheme.radioPlay),
     radioNext: anyDown(scheme.radioNext),
@@ -659,7 +897,16 @@ function resolveKeyboard(scheme, kb){
     fire: anyDown(scheme.fire),
     aim: anyDown(scheme.aim),
     reload: anyDown(scheme.reload),
+    shoot: anyDown(scheme.shoot),
+    pass: anyDown(scheme.pass),
+    tackle: anyDown(scheme.tackle),
+    diveLeft:anyDown(scheme.diveLeft),
+    diveRight:anyDown(scheme.diveRight),
+    primaryAbility:anyDown(scheme.primaryAbility),
+    secondaryAbility:anyDown(scheme.secondaryAbility),
+    voice:anyDown(scheme.voice),
     crouch: anyDown(scheme.crouch),
+    crouchAmount: anyDown(scheme.crouch) ? 1 : 0,
     slowWalk: anyDown(scheme.slowWalk),
     interact: anyDown(scheme.interact),
     pickup: anyDown(scheme.pickup),
@@ -693,10 +940,14 @@ function resolveGamepad(scheme, gp){
     throttle: clamp01(readGamepadValue(scheme.throttle, gp)),
     brake: clamp01(readGamepadValue(scheme.brake, gp)),
     handbrake: readGamepadPressed(scheme.handbrake, gp),
+    wheelBrake: readGamepadPressed(scheme.wheelBrake, gp),
     sprint: readGamepadPressed(scheme.sprint, gp),
+    sprintAmount: clamp01(Math.abs(readGamepadValue(scheme.sprint, gp))),
     reset: readGamepadPressed(scheme.reset, gp),
+    jump: readGamepadPressed(scheme.jump, gp),
     pauseMenu: readGamepadPressed(scheme.pauseMenu, gp),
     highBeams: readGamepadPressed(scheme.highBeams, gp),
+    towToggle: readGamepadPressed(scheme.towToggle, gp),
     radioToggle: readGamepadPressed(scheme.radioToggle, gp),
     radioPlay: readGamepadPressed(scheme.radioPlay, gp),
     radioNext: readGamepadPressed(scheme.radioNext, gp),
@@ -711,7 +962,16 @@ function resolveGamepad(scheme, gp){
     fire: readGamepadPressed(scheme.fire, gp),
     aim: readGamepadPressed(scheme.aim, gp),
     reload: readGamepadPressed(scheme.reload, gp),
+    shoot: readGamepadPressed(scheme.shoot, gp),
+    pass: readGamepadPressed(scheme.pass, gp),
+    tackle: readGamepadPressed(scheme.tackle, gp),
+    diveLeft:readGamepadPressed(scheme.diveLeft,gp),
+    diveRight:readGamepadPressed(scheme.diveRight,gp),
+    primaryAbility:readGamepadPressed(scheme.primaryAbility,gp),
+    secondaryAbility:readGamepadPressed(scheme.secondaryAbility,gp),
+    voice:readGamepadPressed(scheme.voice,gp),
     crouch: readGamepadPressed(scheme.crouch, gp),
+    crouchAmount: clamp01(Math.abs(readGamepadValue(scheme.crouch, gp))),
     slowWalk: readGamepadPressed(scheme.slowWalk, gp),
     interact: readGamepadPressed(scheme.interact, gp),
     pickup: readGamepadPressed(scheme.pickup, gp),
@@ -737,12 +997,16 @@ function resolveTouch(touch){
     throttle: clamp01(a.throttle || 0),
     brake: clamp01(a.brake || 0),
     handbrake: !!a.handbrake,
+    wheelBrake: !!a.wheelBrake,
     // No dedicated touch button yet: the handbrake tap doubles as Sprint for
     // on-foot Pawns, which never read handbrake themselves.
     sprint: !!a.sprint || !!a.handbrake,
+    sprintAmount: clamp01(Number(a.sprint != null ? a.sprint : a.handbrake) || 0),
     reset: !!a.reset,
+    jump: !!a.jump,
     pauseMenu: !!a.pauseMenu,
     highBeams: !!a.highBeams,
+    towToggle: !!a.towToggle,
     radioToggle: !!a.radioToggle,
     radioPlay: !!a.radioPlay,
     radioNext: !!a.radioNext,
@@ -757,7 +1021,16 @@ function resolveTouch(touch){
     fire: !!a.fire,
     aim: !!a.aim,
     reload: !!a.reload,
+    shoot: !!a.shoot,
+    pass: !!a.pass,
+    tackle: !!a.tackle,
+    diveLeft:!!a.diveLeft,
+    diveRight:!!a.diveRight,
+    primaryAbility:!!a.primaryAbility,
+    secondaryAbility:!!a.secondaryAbility,
+    voice:!!a.voice,
     crouch: !!a.crouch,
+    crouchAmount: clamp01(Number(a.crouch) || 0),
     slowWalk: !!a.slowWalk,
     interact: !!a.interact,
     pickup: !!a.pickup,
@@ -804,10 +1077,13 @@ const ACTION_LABELS = {
   steerRight: {en: 'Steer right', it: 'Sterza destra'},
   steer: {en: 'Steering', it: 'Sterzo'},
   handbrake: {en: 'Handbrake (drift)', it: 'Freno a mano (drift)'},
+  wheelBrake: {en: 'Aircraft wheel brake', it: 'Freno ruote aeromobile'},
   sprint: {en: 'Sprint / Run', it: 'Scatto / Corsa'},
   reset: {en: 'Reset car', it: 'Reset auto'},
+  jump: {en: 'Jump', it: 'Salta'},
   pauseMenu: {en: 'Pause menu', it: 'Menu pausa'},
   highBeams: {en: 'Flash headlights', it: 'Lampeggia fari'},
+  towToggle: {en: 'Attach / detach tow', it: 'Aggancia / sgancia traino'},
   radioToggle: {en: 'Radio open/close', it: 'Apri/chiudi radio'},
   radioPlay: {en: 'Radio play/pause', it: 'Radio play/pausa'},
   radioNext: {en: 'Radio next', it: 'Radio avanti'},
@@ -822,6 +1098,14 @@ const ACTION_LABELS = {
   fire: {en: 'Fire weapon', it: 'Spara'},
   aim: {en: 'Aim down sights', it: 'Mira'},
   reload: {en: 'Reload', it: 'Ricarica'},
+  shoot: {en: 'Shoot ball', it: 'Tira'},
+  pass: {en: 'Pass ball', it: 'Passa'},
+  tackle: {en: 'Tackle', it: 'Contrasto'},
+  diveLeft: {en: 'Goalkeeper dive left', it: 'Tuffo portiere a sinistra'},
+  diveRight: {en: 'Goalkeeper dive right', it: 'Tuffo portiere a destra'},
+  primaryAbility: {en: 'Animal primary ability', it: 'Abilita animale primaria'},
+  secondaryAbility: {en: 'Animal secondary ability', it: 'Abilita animale secondaria'},
+  voice: {en: 'Animal voice', it: 'Verso animale'},
   crouch: {en: 'Crouch / slide', it: 'Abbassati / scivolata'},
   slowWalk: {en: 'Walk slowly', it: 'Cammina piano'},
   interact: {en: 'Interact (doors, ladders, objects)', it: 'Interagisci (porte, scale, oggetti)'},

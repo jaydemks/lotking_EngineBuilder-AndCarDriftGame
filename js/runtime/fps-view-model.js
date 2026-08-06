@@ -51,6 +51,41 @@ function profileFor(weapon){
 }
 
 function damp(rate, dt){ return 1 - Math.exp(-Math.max(0, rate) * Math.max(0, dt)); }
+function clamp01(value){ return Math.max(0, Math.min(1, Number(value) || 0)); }
+function blendAngle(from, to, amount){
+  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+  return from + delta * clamp01(amount);
+}
+
+// Keeps a world-space weapon on an animated trigger hand without parenting it
+// below the skeleton. Parenting would inherit arbitrary import scale; copying
+// the world pose does not. The first valid frame calibrates the hand's authored
+// bone axes against the already-correct aim orientation, then later frames keep
+// that offset while following every arm/hand animation (including recoil).
+function createTriggerHandFollower(THREE){
+  if(!THREE)return {reset(){},apply(){return false;}};
+  const handPosition=new THREE.Vector3(),handQuaternion=new THREE.Quaternion(),alignment=new THREE.Quaternion();
+  let bone=null,ready=false;
+  return {
+    reset(){bone=null;ready=false;alignment.identity();},
+    apply(weapon,hand,desiredQuaternion,followRotation){
+      if(!weapon||!hand||!hand.parent||typeof hand.getWorldPosition!=='function')return false;
+      hand.getWorldPosition(handPosition);weapon.position.copy(handPosition);
+      if(followRotation!==false&&typeof hand.getWorldQuaternion==='function'){
+        hand.getWorldQuaternion(handQuaternion);
+        if(!ready||bone!==hand){
+          alignment.copy(handQuaternion).invert().multiply(desiredQuaternion).normalize();
+          bone=hand;ready=true;
+        }
+        weapon.quaternion.copy(handQuaternion).multiply(alignment).normalize();
+      }else{
+        weapon.quaternion.copy(desiredQuaternion);
+        bone=hand;ready=false;
+      }
+      return true;
+    },
+  };
+}
 
 // Never saved, exported, picked or shot at — but, unlike an editor helper, it
 // must render during gameplay. `runtimeVisual` is what separates the two; the
@@ -219,6 +254,9 @@ function create(GAME){
   let heldHost = null;
   let heldBone = null;
   let heldSocketBone = null;
+  const heldHandFollower = createTriggerHandFollower(THREE);
+  let visualComponent = null;
+  const visualOwner = {};
   const state = {swayX:0, swayY:0, kick:0, ads:0, bob:0, reload:0, lower:0};
 
   const offset = THREE ? new THREE.Vector3() : null;
@@ -227,6 +265,7 @@ function create(GAME){
   const heldRight = THREE ? new THREE.Vector3() : null;
   const heldForward = THREE ? new THREE.Vector3() : null;
   const heldEuler = THREE ? new THREE.Euler(0, 0, 0, 'YXZ') : null;
+  const heldDesiredQuaternion = THREE ? new THREE.Quaternion() : null;
   const gripPoint = THREE ? new THREE.Vector3() : null;
 
   function scene(){ return GAME && GAME.core && GAME.core.scene || null; }
@@ -243,7 +282,7 @@ function create(GAME){
     const profile = profileFor(weapon);
     const key = (weapon && weapon.name || '') + ':' + (weapon && weapon.preset || '') + ':' + profile.barrel;
     if(model && profileKey === key) return model;
-    dispose();
+    disposeModel();
     model = build(THREE, profile);
     profileKey = key;
     const target = scene();
@@ -251,14 +290,43 @@ function create(GAME){
     return model;
   }
 
-  function dispose(){
-    disposeHeld();
+  // Tears down the MODEL only. `ensure()` calls this on every weapon change, so
+  // it must not touch anything that belongs to the view model as a whole.
+  function disposeModel(){
     if(!model) return;
     if(model.parent) model.parent.remove(model);
     model.traverse(node => { if(node.geometry) node.geometry.dispose(); });
     (model.userData.materials || []).forEach(material => material.dispose());
     model = null;
     profileKey = '';
+  }
+  // The public teardown: the whole view model goes away, listener included. The
+  // listener used to outlive it, so a reloaded level left the previous view model
+  // still reacting to every shot in the game.
+  function dispose(){
+    if(window.removeEventListener) window.removeEventListener('lk-pawn-event', onPawnEvent);
+    releaseVisualComponent();
+    disposeModel();
+    disposeHeld();
+    return true;
+  }
+
+  function releaseVisualComponent(){
+    const component = visualComponent;
+    visualComponent = null;
+    if(component && typeof component.releaseVisual === 'function') component.releaseVisual(visualOwner);
+  }
+  function claimVisualComponent(component){
+    if(component === visualComponent) return true;
+    releaseVisualComponent();
+    visualComponent = component || null;
+    if(!component || typeof component.claimVisual !== 'function') return false;
+    const claimed = component.claimVisual(visualOwner, () => {
+      visualComponent = null;
+      disposeModel();
+    });
+    if(!claimed) visualComponent = null;
+    return claimed;
   }
 
   // --- third person: the weapon in the character's hands -------------------
@@ -293,7 +361,7 @@ function create(GAME){
     socketHelper.quaternion.copy(weapon.quaternion);
   }
 
-  function findNamedBone(owner, name){
+  function findNamedBone(owner, name, side){
     let found = null;
     const wanted = String(name || '').toLowerCase();
     if(owner && owner.traverse){
@@ -302,7 +370,7 @@ function create(GAME){
         if(String(node.name).toLowerCase() === wanted) found = node;
       });
     }
-    return found || findHand(owner);
+    return found || findHand(owner, side);
   }
 
   // Picking the hand by NAME alone is wrong, and the placeholder body proves it:
@@ -342,8 +410,17 @@ function create(GAME){
       (a, b) => (Math.abs(b.localX) > Math.abs(a.localX) ? b : a));
     return best ? best.node : null;
   }
+  function belongsToOwner(node,owner){
+    let current=node;
+    while(current){if(current===owner)return true;current=current.parent;}
+    return false;
+  }
 
   function disposeHeld(){
+    heldHandFollower.reset();
+    heldBone = null;
+    heldSocketBone = null;
+    heldHost = null;
     if(!held) return;
     if(held.parent) held.parent.remove(held);
     held.traverse(node => { if(node.geometry) node.geometry.dispose(); });
@@ -377,12 +454,12 @@ function create(GAME){
   // backwards or sideways for every other one — and the bone's own scale is
   // inherited, so a character imported at 0.01 carries a toy or a skyscraper.
   //
-  // Instead the bone supplies only the POSITION, so the weapon still follows
-  // the animation, and the orientation comes from the same view angles the
-  // camera uses. That is what makes it read as aimed rather than merely held,
-  // and it is correct for every rig by construction.
+  // Instead we copy the hand's world pose and retain one calibrated rotation
+  // offset. This follows the real trigger hand during Fire/Reload clips without
+  // inheriting skeleton scale, while the calibration absorbs Mixamo/Blender GLB
+  // differences in bone axes.
   function updateHeld(rig, pawn, dt){
-    if(!rig.armed()){
+    if(!rig.armed()||(rig.state&&rig.state.weaponHolstered===true)){
       if(held) held.visible = false;
       if(rig.state) rig.state.supportGrip = null;
       return false;
@@ -396,20 +473,43 @@ function create(GAME){
     const socket = rig.config().weaponSocket || {bone:'', offset:[0, 0, 0], rotation:[0, 0, 0], scale:1, showHelper:false};
     const side = rig.weaponSide ? rig.weaponSide() : 1;
     const key = socket.bone + '#' + side;
-    if(heldHost !== owner || heldSocketBone !== key){
+    // Main Mesh can finish loading after Play already started, or be replaced by
+    // Pawn Studio without changing the Pawn owner. Re-resolve a missing/stale
+    // hand instead of keeping the body fallback forever.
+    if(heldHost !== owner || heldSocketBone !== key || !heldBone || !belongsToOwner(heldBone,owner)){
       heldHost = owner;
       heldSocketBone = key;
-      heldBone = socket.bone ? findNamedBone(owner, socket.bone) : findHand(owner, side);
+      heldHandFollower.reset();
+      heldBone = socket.bone ? findNamedBone(owner, socket.bone, side) : findHand(owner, side);
     }
-    // Aim angles, not view angles: they carry the live recoil, so the weapon in
-    // the character's hands kicks with the shot and still points where the
-    // bullet went.
+    // Carry follows the Character. Only a shot fully commits the weapon to the
+    // crosshair; ADS contributes a smaller preview so ordinary walking — notably
+    // walking toward the camera — cannot leave the weapon and arms facing away
+    // from the body's travel direction.
     const angles = rig.aimAngles ? rig.aimAngles() : rig.viewAngles();
-    // Hip carry keeps the barrel closer to level than the head is looking;
-    // aiming commits the whole weapon to the view direction.
-    const aim = rig.state && rig.state.ads != null ? Math.max(0, Math.min(1, rig.state.ads)) : 0;
-    heldEuler.set(angles.pitch * (.35 + .65 * aim), angles.yaw + Math.PI, 0, 'YXZ');
+    const aim = rig.state && rig.state.ads != null ? clamp01(rig.state.ads) : 0;
+    const sinceShot = Number(rig.state && rig.state.sinceShot);
+    const fireAmount = clamp01(1 - (Number.isFinite(sinceShot) ? sinceShot : 9) / .14);
+    const crosshairBlend = Math.max(fireAmount, aim * .35);
+    const bodyYaw = Number(owner.rotation && owner.rotation.y);
+    const carryYaw = Number.isFinite(bodyYaw) ? bodyYaw : angles.yaw;
+    // Pawn Studio composes the held model as:
+    //   body/aim frame × authored trigger wrist × weapon forward half-turn.
+    // Play previously skipped the middle term, so rotating a hand in the Studio
+    // rotated the preview weapon but was calibrated away from the real one.
+    // The negative pitch plus final half-turn is algebraically identical to the
+    // old no-authoring orientation, keeping existing unauthored weapons stable.
+    heldEuler.set(-angles.pitch * crosshairBlend, blendAngle(carryYaw, angles.yaw, crosshairBlend), 0, 'YXZ');
     weapon.quaternion.setFromEuler(heldEuler);
+    const gripRotation=rig.state&&Array.isArray(rig.state.weaponGripRotation)?rig.state.weaponGripRotation:null;
+    if(gripRotation){
+      weapon.rotateX(Number(gripRotation[0])||0);
+      weapon.rotateY(Number(gripRotation[1])||0);
+      weapon.rotateZ(Number(gripRotation[2])||0);
+    }
+    weapon.rotateY(Math.PI);
+    heldDesiredQuaternion.copy(weapon.quaternion);
+    const followsTriggerHand = heldHandFollower.apply(weapon, heldBone, heldDesiredQuaternion, socket.followHandRotation !== false);
     if(socket.rotation[0] || socket.rotation[1] || socket.rotation[2]){
       weapon.rotateX(socket.rotation[0]);
       weapon.rotateY(socket.rotation[1]);
@@ -417,9 +517,28 @@ function create(GAME){
     }
     weapon.scale.setScalar(socket.scale);
 
-    if(heldBone && heldBone.parent){
-      heldBone.getWorldPosition(handPoint);
-      weapon.position.copy(handPoint);
+    const fullBodyEye = rig.firstPersonView && rig.firstPersonView()
+      && !(rig.armsPresentation && rig.armsPresentation());
+    if(followsTriggerHand){
+      // Position and orientation already come from the animated trigger hand.
+      // This is also the full-body first-person path: it keeps one Character and
+      // one weapon instead of creating an eye-anchored duplicate.
+    } else if(fullBodyEye && rig.eyeTransform){
+      // Unified body view: keep the TPS character and its one world weapon,
+      // but drive that weapon from the eye sight-line. Following the animated
+      // hand here left a third-person hip pose under the camera, which made the
+      // advertised full-body first person indistinguishable from a broken TPS
+      // close-up. The body locomotion receives the resulting grip target below
+      // and extends its real arms onto this same weapon.
+      const eyeView = rig.eyeTransform();
+      if(eyeView){
+        heldForward.set(0, 0, -1).applyQuaternion(weapon.quaternion);
+        heldRight.set(1, 0, 0).applyQuaternion(weapon.quaternion);
+        weapon.position.copy(eyeView.position)
+          .addScaledVector(heldForward, .48 - .05 * aim)
+          .addScaledVector(heldRight, (.18 - .09 * aim) * side);
+        weapon.position.y -= .2 - .04 * aim;
+      }
     } else {
       // No rig to follow: carry it at the right hand's resting height. `right`
       // and `forward` come from the same quaternion, so the offsets mean the
@@ -465,19 +584,47 @@ function create(GAME){
     const editing = GAME && GAME.state && GAME.state.editorActive && !GAME.state.editorPreview;
     // No weapon in hand: there is nothing to hold. The rig itself is still
     // live, so the HUD and the camera are unaffected.
-    if(!THREE || !rig || editing || rig.armed() === false){
+    if(!THREE || !rig || editing || rig.armed() === false || (rig.state&&rig.state.weaponHolstered===true)){
+      if(rig && (!rig.firstPersonView || !rig.firstPersonView() || rig.armed() === false)){
+        releaseVisualComponent();
+        disposeModel();
+      }
       if(model) model.visible = false;
       if(held) held.visible = false;
       return false;
     }
-    // Third person draws the weapon on the character instead of in front of the
-    // camera. Both paths exist at once so a view switch is instant.
+    // Third person draws the real weapon on the Character. The optional arms
+    // visual is released rather than retained off-screen.
     if(!rig.firstPersonView()){
-      if(model) model.visible = false;
+      releaseVisualComponent();
+      disposeModel();
       const h = Math.max(.0001, Math.min(.1, Number(dt) || .016));
       if(flashTimer > 0) flashTimer -= h;
       return updateHeld(rig, activePawn(), h);
     }
+    // The eye view can be presented two ways, and only one of them wants this
+    // model. With `presentation: 'body'` the player sees their own character from
+    // its eyes: building a second arms rig and a second weapon mesh in front of
+    // the camera is pure cost - a duplicated weapon and a large frame-rate drop -
+    // so the held weapon on the body stays and this model is left off.
+    const pawn = activePawn();
+    const component = pawn && pawn.firstPersonViewPawn;
+    const arms = rig.armsPresentation
+      ? rig.armsPresentation()
+      : !!((rig.config() || {}).viewPawn
+        ? (rig.config().viewPawn.enabled && rig.config().viewPawn.kind === 'first-person-arms')
+        : (rig.config() || {}).presentation === 'arms');
+    if(!arms){
+      // Body mode has exactly one character rig. Releasing the autonomous view
+      // Pawn tears down GPU resources immediately instead of merely hiding a
+      // second rig that can still cost memory and reappear after a level load.
+      releaseVisualComponent();
+      disposeModel();
+      const step = Math.max(.0001, Math.min(.1, Number(dt) || .016));
+      if(flashTimer > 0) flashTimer -= step;
+      return updateHeld(rig, pawn, step);
+    }
+    claimVisualComponent(component);
     if(held) held.visible = false;
     const transform = rig.cameraTransform();
     if(!transform){ if(model) model.visible = false; return false; }
@@ -574,10 +721,25 @@ function create(GAME){
     return true;
   }
 
-  window.addEventListener('lk-pawn-event', event => {
+  // The muzzle flash belongs to the weapon THIS view is drawing, so the event has
+  // to be filtered by the Pawn that owns the eye. Unfiltered, every AI shot in the
+  // level flashed the player's own barrel and kicked the view model: with a
+  // garrison firing, the player's weapon appeared to be shooting by itself, in
+  // time with everyone else's shots.
+  function ownsEvent(detail){
+    const pawn = activePawn();
+    if(!pawn) return false;
+    // A shot with no pawn attribution can only be the local player's: nothing
+    // else in the engine fires anonymously.
+    if(detail.pawnId == null || detail.pawnId === '') return true;
+    return String(detail.pawnId) === String(pawn.id);
+  }
+  function onPawnEvent(event){
     const detail = event && event.detail || {};
-    if(detail.type === 'OnWeaponFired') flashTimer = FLASH_SECONDS;
-  });
+    if(detail.type === 'OnWeaponFired' && detail.kind !== 'unarmed' && detail.kind !== 'melee' &&
+      detail.kind !== 'thrown' && ownsEvent(detail)) flashTimer = FLASH_SECONDS;
+  }
+  window.addEventListener('lk-pawn-event', onPawnEvent);
 
   // The update path hides the model itself, but it only runs while the eye owns
   // the camera. Switching to third person stops calling it, so the frame loop
@@ -632,5 +794,5 @@ function warmup(THREE, scene){
   };
 }
 
-window.LK_RUNTIME_FPS_VIEW_MODEL = Object.freeze({PROFILES, profileFor, build, buildWorldModel, warmup, create});
+window.LK_RUNTIME_FPS_VIEW_MODEL = Object.freeze({PROFILES, profileFor, build, buildWorldModel, createTriggerHandFollower, warmup, create});
 })();

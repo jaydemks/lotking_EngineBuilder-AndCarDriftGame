@@ -31,12 +31,13 @@ function create(deps){
   }
 
   function selectableObject(o){
+    if(o&&o.userData&&o.userData.pawnCameraDummy===true)return o;
     if(o && o.userData && o.userData.logicElementInternal) return logicElementOwnerOf(o) || o;
     return o;
   }
 
   function isBlueprintPart(o){
-    return !o || !o.userData || o.userData.logicElementInternal || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
+    return !o || !o.userData || (o.userData.logicElementInternal&&o.userData.pawnCameraDummy!==true) || o.userData.editorType === 'player' || o.userData.editorType === 'playerLight' ||
       o.userData.editorType === 'playerEffect' || o.userData.editorType === 'playerSkid' ||
       o.userData.editorType === 'playerDataWidget' || o.userData.editorType === 'playerCamera';
   }
@@ -685,7 +686,7 @@ function create(deps){
       entry.physicsMass = sourceCollider.mass != null ? sourceCollider.mass : o.userData.physicsMass;
       entry.physicsImpact = sourceCollider.impact != null ? sourceCollider.impact : o.userData.physicsImpact;
     }
-    if(o.userData.assetKey) entry.asset = {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource};
+    if(o.userData.assetKey) entry.asset = Object.assign({}, entry.asset || {}, {key:o.userData.assetKey, name:o.userData.assetName, source:o.userData.assetSource});
     const place = created => {
       created.position.copy(o.position);
       if(offset) created.position.add(offset);
@@ -767,6 +768,11 @@ function create(deps){
   function onGizmoChange(){
     const o = ED.selected;
     if(!o) return;
+    if(o.userData && o.userData.cinemaPathHandle && typeof ED.cinemaPathHandleChange === 'function'){
+      ED.cinemaPathHandleChange(o);
+      deps.syncTransformFields();
+      return;
+    }
     if(ED.playerColliderEdit && colliderProxy && GAME.player && GAME.player.car === o && GAME.player.collision){
       const base = colliderProxy.userData.colliderBase || {};
       const yaw = o.rotation ? (o.rotation.y || 0) : 0;
@@ -858,6 +864,9 @@ function create(deps){
     deps.applyZUpProxyToSelected();
     if(o.userData.editorType === 'playerCamera' && GAME.player && GAME.player.syncCameraDummy){
       GAME.player.syncCameraDummy(o);
+    }
+    if(o.userData.pawnCameraDummy===true&&window.LK_LOGIC_GRAPH&&window.LK_LOGIC_GRAPH.syncPawnCameraNode){
+      window.LK_LOGIC_GRAPH.syncPawnCameraNode(o);
     }
     if(o.userData.editorType === 'player'){
       if(GAME.player.syncSpawnFromVisibleTransform) GAME.player.syncSpawnFromVisibleTransform();

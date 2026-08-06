@@ -22,7 +22,9 @@ function unexpectedFailures(failures){
   // project bridge; the editor treats that endpoint's 404 as a browser-cache fallback.
   return failures.filter(message =>
     !/models\/(?:car1|car2|cone)(?:\.glb|\/scene\.gltf)/.test(message) &&
-    !/__lotking\/project-state/.test(message)
+    !/__lotking\/project-state/.test(message) &&
+    !/WebGPURenderer: WebGPU is not available, running under WebGL2 backend/.test(message) &&
+    !/WebGPU request continued through the WebGL 2 fallback/.test(message)
   );
 }
 
@@ -55,7 +57,7 @@ test('editor boots on the pinned Three.js r185 bundle', async ({page}, testInfo)
       outputColorSpace:LOT_KING.core.renderer.outputColorSpace,
       expectedColorSpace:THREE.SRGBColorSpace,
       webgl2:typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext,
-      addons:['GLTFLoader','FBXLoader','TGALoader','GLTFExporter','SkeletonUtils','OrbitControls','TransformControls','EffectComposer','OutputPass','SSRPass','BokehPass','OutlineEffect','FontLoader','TextGeometry','RectAreaLightUniformsLib'].every(key => !!THREE[key]),
+      addons:['WebGPURenderer','RenderPipeline','TSL','GLTFLoader','FBXLoader','TGALoader','GLTFExporter','SkeletonUtils','OrbitControls','TransformControls','EffectComposer','OutputPass','SSRPass','BokehPass','OutlineEffect','FontLoader','TextGeometry','RectAreaLightUniformsLib'].every(key => !!THREE[key]),
       fbxPlugin:(() => {
         const plugins = LOT_KING.editor && LOT_KING.editor.plugins;
         const descriptor = plugins && plugins.list().find(plugin => plugin.id === 'fbx-glb-importer');
@@ -72,7 +74,7 @@ test('editor boots on the pinned Three.js r185 bundle', async ({page}, testInfo)
   });
   expect(state).toEqual({
     revision:'185',
-    bundle:{version:'0.185.1', revision:'185', format:'iife-compat-v1'},
+    bundle:{version:'0.185.1', revision:'185', format:'iife-compat-v2', webgpu:true, tsl:true},
     outputColorSpace:state.expectedColorSpace,
     expectedColorSpace:state.expectedColorSpace,
     webgl2:true,
@@ -187,5 +189,159 @@ test('standalone editor harness uses the same pinned renderer', async ({page}) =
     expectedColorSpace:THREE.SRGBColorSpace,
   }));
   expect(state).toEqual({revision:'185', version:'0.185.1', outputColorSpace:state.expectedColorSpace, expectedColorSpace:state.expectedColorSpace});
+  expect(unexpectedFailures(failures)).toEqual([]);
+});
+
+test('Auto keeps WebGPU behind the engine and mobile parity gate', async ({page}, testInfo) => {
+  const failures = captureRuntimeFailures(page);
+  await seedWorkspace(page);
+  await page.goto('/gameplay.html?webgpu-readiness-gate=1', {waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => window.LK_RUNTIME_RENDERING_BACKEND && window.LOT_KING && LOT_KING.core && LOT_KING.core.renderer);
+  const state = await page.evaluate(async () => {
+    const backend = LK_RUNTIME_RENDERING_BACKEND;
+    const probe = await backend.probe();
+    const report = backend.describe(LOT_KING.core.renderer);
+    return {
+      webgpuApi:probe.webgpuApi,
+      adapterAvailable:probe.adapterAvailable,
+      probeError:probe.error,
+      requested:report.requested,
+      effective:report.effective,
+      runtimeIncluded:report.readiness.runtimeIncluded,
+      platformAvailable:report.readiness.platformAvailable,
+      defaultSafe:report.readiness.defaultSafe,
+      mobileQualified:report.readiness.mobileQualified,
+      mobile:report.readiness.mobile,
+      blockers:report.readiness.blockers.map(item => item.id),
+    };
+  });
+  expect(state.requested).toBe('auto');
+  expect(typeof state.webgpuApi).toBe('boolean');
+  expect(typeof state.adapterAvailable).toBe('boolean');
+  expect(typeof state.probeError).toBe('string');
+  expect(state.effective).toBe('webgl');
+  expect(state.runtimeIncluded).toBe(true);
+  expect(state.defaultSafe).toBe(false);
+  expect(state.mobileQualified).toBe(false);
+  expect(state.mobile).toBe(/mobile/i.test(testInfo.project.name));
+  expect(state.blockers).toEqual(expect.arrayContaining(['legacy-shaders','material-patches','legacy-post','webgl-render-targets','mobile-qualification']));
+  expect(state.blockers).not.toContain('runtime-bundle');
+  await page.locator('#settingsBtn').click();
+  await page.locator('[data-settings-tab="video"]').click();
+  await expect(page.locator('#videoGpuBackend')).toBeVisible();
+  const videoMenu = await page.evaluate(() => {
+    const gpu=document.getElementById('videoGpuBackend');
+    const webgpu=gpu&&gpu.querySelector('option[value="webgpu"]');
+    const pipeline=document.getElementById('videoRenderer');
+    return {
+      gpuValues:Array.from(gpu&&gpu.options||[]).map(option=>option.value),
+      webgpuDisabled:!!(webgpu&&webgpu.disabled),
+      webgpuLabel:webgpu&&webgpu.textContent,
+      status:document.getElementById('videoGpuBackendStatus')&&document.getElementById('videoGpuBackendStatus').textContent,
+      pipelineValues:Array.from(pipeline&&pipeline.options||[]).map(option=>option.value),
+    };
+  });
+  expect(videoMenu.gpuValues).toEqual(['auto','webgpu','webgl']);
+  expect(videoMenu.webgpuDisabled).toBe(!state.platformAvailable);
+  expect(videoMenu.webgpuLabel).toContain('WebGPU');
+  expect(videoMenu.status).toContain('WebGL 2');
+  expect(videoMenu.pipelineValues).toEqual(['webgl','raytracing','pathtracing']);
+  expect(unexpectedFailures(failures)).toEqual([]);
+});
+
+test('explicit WebGPU preference boots the complete runtime or its safe fallback', async ({page}) => {
+  const failures=captureRuntimeFailures(page);
+  await seedWorkspace(page);
+  await page.addInitScript(()=>localStorage.setItem('lotking.renderBackend.v1','webgpu'));
+  await page.goto('/gameplay.html?webgpu-full-runtime=1',{waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.core&&LOT_KING.core.rendererReady);
+  await page.waitForFunction(()=>LOT_KING.core.renderer.userData&&LOT_KING.core.renderer.userData.lkBackendReady===true);
+  await page.waitForFunction(()=>Number(LOT_KING.core.renderer.info&&LOT_KING.core.renderer.info.render&&LOT_KING.core.renderer.info.render.calls)>0,null,{timeout:30000});
+  const state=await page.evaluate(async()=>{
+    const report=await LOT_KING.core.rendererReady;
+    const config=LOT_KING.settings.getVideoProject();
+    Object.assign(config.defaults,{visualStyle:'illustrated-sketch',sketchMedium:'paper-pencil',sketchStrength:.9,sketchDetail:.82,sketchPaper:.55});
+    await LOT_KING.settings.setVideoProject(config);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const renderer=LOT_KING.core.renderer;
+    const post=LOT_KING.systems&&LOT_KING.systems.post;
+    const pathTracing=LOT_KING.systems&&LOT_KING.systems.pathTracing;
+    return {
+      requested:report.requested,
+      effective:report.effective,
+      candidate:report.capabilities.webgpuCandidate,
+      commonRenderer:renderer.isWebGPURenderer===true,
+      actualWebGPU:LK_RUNTIME_RENDERING_BACKEND.isActualWebGPU(renderer),
+      ready:renderer.userData.lkBackendReady===true,
+      postWebGPU:post&&post.webgpu===true,
+      pathTracingSupported:!!(pathTracing&&pathTracing.supported),
+      renderCalls:Number(renderer.info&&renderer.info.render&&renderer.info.render.calls)||0,
+      bundleWebGPU:THREE.__LOT_KING_BUNDLE__&&THREE.__LOT_KING_BUNDLE__.webgpu===true,
+      sketchMedium:LOT_KING.settings.video.sketchMedium,
+    };
+  });
+  expect(state.requested).toBe('webgpu');
+  expect(state.ready).toBe(true);
+  expect(state.bundleWebGPU).toBe(true);
+  expect(state.sketchMedium).toBe('paper-pencil');
+  expect(state.pathTracingSupported).toBe(false);
+  expect(state.renderCalls).toBeGreaterThan(0);
+  if(process.env.LK_WEBGPU_E2E==='1')expect(state.effective).toBe('webgpu');
+  if(state.candidate){
+    expect(state.commonRenderer).toBe(true);
+    expect(state.postWebGPU).toBe(true);
+    expect(state.actualWebGPU).toBe(state.effective==='webgpu');
+  }else{
+    expect(state.commonRenderer).toBe(false);
+    expect(state.effective).toBe('webgl');
+  }
+  expect(unexpectedFailures(failures)).toEqual([]);
+});
+
+test('explicit backend survives Editor viewport and Play preview lifecycle',async({page})=>{
+  const failures=captureRuntimeFailures(page);
+  await seedWorkspace(page);
+  await page.addInitScript(()=>localStorage.setItem('lotking.renderBackend.v1','webgpu'));
+  await page.goto('/engine_editor.html?webgpu-editor-play=1',{waitUntil:'domcontentloaded'});
+  await page.waitForFunction(()=>window.LOT_KING&&LOT_KING.core&&LOT_KING.core.rendererReady);
+  await page.evaluate(()=>LOT_KING.core.rendererReady);
+  await page.waitForFunction(()=>LOT_KING.state&&LOT_KING.state.sceneReady===true,null,{timeout:30000});
+  await page.evaluate(()=>{document.querySelector('#lkWorkspaceClose')?.click();document.querySelector('#lkProjectsClose')?.click();});
+  const active=await page.waitForFunction(()=>!!(document.querySelector('#lkEditor.active')||LOT_KING.editor&&LOT_KING.editor.state&&LOT_KING.editor.state.active),null,{timeout:12000}).then(()=>true).catch(()=>false);
+  if(!active){await page.locator('#editorBtn').waitFor({state:'visible',timeout:15000});await page.locator('#editorBtn').click({force:true});}
+  await page.waitForFunction(()=>!!(document.querySelector('#lkEditor.active')||LOT_KING.editor&&LOT_KING.editor.state&&LOT_KING.editor.state.active));
+  await page.evaluate(async()=>{
+    const config=LOT_KING.settings.getVideoProject();
+    Object.assign(config.defaults,{visualStyle:'illustrated-sketch',sketchMedium:'paper-pencil',sketchStrength:.9,sketchDetail:.82,sketchPaper:.55});
+    await LOT_KING.settings.setVideoProject(config);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  });
+  await page.evaluate(()=>{
+    const renderer=LOT_KING.core.renderer,raw=renderer.setViewport.bind(renderer);
+    renderer.userData.lkE2eViewportCalls=[];
+    renderer.setViewport=function(x,y,w,h){
+      if(typeof x==='number')renderer.userData.lkE2eViewportCalls.push({x,y,w,h});
+      return raw.apply(renderer,arguments);
+    };
+  });
+  await page.locator('#lkPlay').waitFor({state:'visible'});
+  await page.evaluate(()=>document.querySelector('#lkPlay').click());
+  await page.waitForFunction(()=>LOT_KING.state.editorPreview===true,null,{timeout:60000});
+  await page.waitForFunction(()=>Number(LOT_KING.core.renderer.info&&LOT_KING.core.renderer.info.render&&LOT_KING.core.renderer.info.render.calls)>0);
+  await page.evaluate(()=>document.querySelector('#lkPlay').click());
+  await page.waitForFunction(()=>LOT_KING.state.editorPreview===false);
+  const state=await page.evaluate(()=>{
+    const renderer=LOT_KING.core.renderer,report=LK_RUNTIME_RENDERING_BACKEND.describe(renderer);
+    const rect=LOT_KING.editor.viewportRect(),bottomY=innerHeight-rect.y-rect.h;
+    const expectedY=LK_RUNTIME_RENDERING_BACKEND.viewportOriginY(renderer,bottomY,rect.h,innerHeight);
+    const viewportMatched=(renderer.userData.lkE2eViewportCalls||[]).some(call=>Math.abs(call.x-rect.x)<2&&Math.abs(call.y-expectedY)<2&&Math.abs(call.w-rect.w)<2&&Math.abs(call.h-rect.h)<2);
+    return {requested:report.requested,effective:report.effective,ready:renderer.userData.lkBackendReady===true,editorActive:LOT_KING.state.editorActive===true,preview:LOT_KING.state.editorPreview,commonRenderer:renderer.isWebGPURenderer===true,candidate:report.capabilities.webgpuCandidate,viewportMatched};
+  });
+  expect(state.requested).toBe('webgpu');
+  expect(state.ready).toBe(true);
+  expect(state.editorActive).toBe(true);
+  expect(state.preview).toBe(false);
+  expect(state.viewportMatched).toBe(true);
+  if(state.candidate)expect(state.commonRenderer).toBe(true);
   expect(unexpectedFailures(failures)).toEqual([]);
 });

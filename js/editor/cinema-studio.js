@@ -5,15 +5,35 @@
 (function(){
 'use strict';
 
+const CINEMA_MAX_DURATION = 86400;
+const motionPresetsApi = typeof module !== 'undefined' && module.exports
+  ? require('./cinema-motion-presets.js')
+  : window.LK_EDITOR_CINEMA_MOTION_PRESETS;
+const MOTION_PRESETS = motionPresetsApi.presets;
+const buildMotionPreset = motionPresetsApi.build;
+const motionPresetById = motionPresetsApi.presetById;
+const sequenceApi = typeof module !== 'undefined' && module.exports
+  ? require('../runtime/cinema-sequence.js')
+  : window.LK_RUNTIME_CINEMA_SEQUENCE;
+if(!sequenceApi) throw new Error('Cinema Studio: shared sequence evaluator is not loaded');
+const {advancePlayback,automaticTangent,cubicBezierArray,resolveCompletion,spatialPosition,vec3}=sequenceApi;
+
 function create(deps){
   deps = deps || {};
+  const THREE = deps.THREE || window.THREE;
   const GAME = deps.GAME;
   const ED = deps.ED;
   const root = deps.root;
+  const helperGroup = deps.helperGroup || null;
   const cinemaTimeline = root.querySelector('#lkCinemaTimeline');
   const cinemaPlayBtn = root.querySelector('#lkCinemaTlPlay');
   const cinemaStopBtn = root.querySelector('#lkCinemaTlStop');
   const cinemaExportBtn = root.querySelector('#lkCinemaTlExport');
+  const cinemaExportWebBtn = root.querySelector('#lkCinemaTlExportWeb');
+  const cinemaSaveSequenceBtn = root.querySelector('#lkCinemaTlSaveSequence');
+  const cinemaLoadSequenceBtn = root.querySelector('#lkCinemaTlLoadSequence');
+  const cinemaSequenceInput = root.querySelector('#lkCinemaSequenceInput');
+  const cinemaDurationInput = root.querySelector('#lkCinemaTlDuration');
   const cinemaLockBtn = root.querySelector('#lkCinemaTlLock');
   const cinemaDockBtn = root.querySelector('#lkCinemaTlDock');
   const cinemaFloatPreviewBtn = root.querySelector('#lkCinemaTlFloatPreview');
@@ -38,6 +58,12 @@ function create(deps){
   const cinemaAddObjectBtn = root.querySelector('#lkCinemaTlAddObject');
   const cinemaKeyObjectBtn = root.querySelector('#lkCinemaTlKeyObject');
   const cinemaKeyLensBtn = root.querySelector('#lkCinemaTlKeyLens');
+  const cinemaMotionKind = root.querySelector('#lkCinemaMotionKind');
+  const cinemaMotionPreset = root.querySelector('#lkCinemaTlMotionPreset');
+  const cinemaMotionDuration = root.querySelector('#lkCinemaTlMotionDuration');
+  const cinemaMotionDistance = root.querySelector('#lkCinemaTlMotionDistance');
+  const cinemaApplyMotionBtn = root.querySelector('#lkCinemaTlApplyMotion');
+  const cinemaEditPathBtn = root.querySelector('#lkCinemaTlEditPath');
   const cinemaRuler = root.querySelector('#lkCinemaTlRuler');
   const cinemaPlayhead = root.querySelector('#lkCinemaTlPlayhead');
   const cinemaClipPanel = root.querySelector('#lkCinemaClipPanel');
@@ -49,6 +75,9 @@ function create(deps){
   let markerDrag = null;
   let playheadDrag = null;
   let timelineNotice = null;
+  let pathRoot = null;
+  let pathSignature = '';
+  let pathGizmoBefore = null;
 
   if(cinemaTimeline) cinemaTimeline.addEventListener('pointerdown', () => {
     ED.cinemaTimelineFocused = true;
@@ -67,6 +96,20 @@ function create(deps){
   if(cinemaExportBtn) cinemaExportBtn.addEventListener('click', () => {
     const studio = activeStudio();
     if(studio && deps.openVideoExport) deps.openVideoExport(studio);
+  });
+  if(cinemaExportWebBtn) cinemaExportWebBtn.addEventListener('click', () => exportInteractiveLevel());
+  if(cinemaSaveSequenceBtn) cinemaSaveSequenceBtn.addEventListener('click', () => exportSequenceAsset());
+  if(cinemaLoadSequenceBtn) cinemaLoadSequenceBtn.addEventListener('click', () => {
+    if(cinemaSequenceInput) cinemaSequenceInput.click();
+  });
+  if(cinemaSequenceInput) cinemaSequenceInput.addEventListener('change', () => {
+    const file = cinemaSequenceInput.files && cinemaSequenceInput.files[0];
+    cinemaSequenceInput.value = '';
+    if(file) importSequenceAsset(file);
+  });
+  if(cinemaDurationInput) cinemaDurationInput.addEventListener('change', () => {
+    const studio = activeStudio();
+    if(studio) setSequenceDuration(studio, cinemaDurationInput.value);
   });
   if(cinemaLockBtn) cinemaLockBtn.addEventListener('click', () => {
     const studio = activeStudio();
@@ -140,6 +183,8 @@ function create(deps){
   if(cinemaAddObjectBtn) cinemaAddObjectBtn.addEventListener('click', () => addObjectTrack());
   if(cinemaKeyObjectBtn) cinemaKeyObjectBtn.addEventListener('click', () => keyObjectTrack());
   if(cinemaKeyLensBtn) cinemaKeyLensBtn.addEventListener('click', () => keyLensTrack());
+  if(cinemaApplyMotionBtn) cinemaApplyMotionBtn.addEventListener('click', () => applySelectedMotionPreset());
+  if(cinemaEditPathBtn) cinemaEditPathBtn.addEventListener('click', () => editSelectedMotionPath());
   if(cinemaRuler) cinemaRuler.addEventListener('pointerdown', e => scrubRuler(e));
   if(cinemaPlayhead) cinemaPlayhead.addEventListener('pointerdown', e => beginPlayheadDrag(e));
   const cinemaBody = root.querySelector('#lkCinemaTlBody');
@@ -214,8 +259,8 @@ function create(deps){
   }
   function propsFor(studio){
     const props = studio.userData.cinemaProps || {};
-    props.version = Math.max(2, Number(props.version) || 1);
-    props.duration = Math.max(.1, Number(props.duration) || 6);
+    props.version = Math.max(4, Number(props.version) || 1);
+    props.duration = Math.max(.1, Math.min(CINEMA_MAX_DURATION, Number(props.duration) || 6));
     props.fps = Math.max(1, Number(props.fps) || 24);
     props.playback = props.playback || 'one-shot';
     props.trigger = props.trigger || 'manual';
@@ -229,6 +274,7 @@ function create(deps){
     if(!Array.isArray(props.eventTracks)) props.eventTracks = [];
     if(!Array.isArray(props.keyframes)) props.keyframes = [];
     if(!Array.isArray(props.markers)) props.markers = [];
+    props.completion = resolveCompletion(props, null, null);
     props.movieTrack.forEach((shot, index) => {
       shot.id = shot.id || ('shot_' + index + '_' + Date.now().toString(36));
       shot.type = 'shot';
@@ -238,10 +284,16 @@ function create(deps){
     props.objectTracks.forEach(track => {
       track.id = track.id || ('objtrack_' + Date.now().toString(36));
       track.type = 'object';
+      track.pathMode = ['linear','smooth','bezier'].includes(track.pathMode) ? track.pathMode : 'linear';
+      track.pathVisible = track.pathVisible !== false;
       if(!Array.isArray(track.keyframes)) track.keyframes = [];
       track.keyframes.forEach((key, index) => {
         key.id = key.id || ('key_' + index + '_' + Date.now().toString(36));
+        key.time = Math.max(0, Math.min(props.duration, Number(key.time) || 0));
         key.curve = key.curve || 'linear';
+        key.spatialMode = ['auto','aligned','broken'].includes(key.spatialMode) ? key.spatialMode : 'auto';
+        if(key.tangentIn != null) key.tangentIn = vec3(key.tangentIn);
+        if(key.tangentOut != null) key.tangentOut = vec3(key.tangentOut);
       });
     });
     props.lensTracks.forEach(track => {
@@ -312,6 +364,351 @@ function create(deps){
       },
     });
   }
+  function setSequenceDuration(studio, value){
+    if(!studio) return;
+    const before = historySnapshot(studio);
+    const props = propsFor(studio);
+    const duration = Math.max(.1, Math.min(CINEMA_MAX_DURATION, Number(value) || props.duration || 6));
+    const step = Math.min(duration, frameStep(props));
+    props.duration = duration;
+    props.movieTrack.forEach(shot => {
+      shot.time = Math.max(0, Math.min(Math.max(0, duration - step), Number(shot.time) || 0));
+      shot.duration = Math.max(step, Math.min(Number(shot.duration) || step, duration - shot.time));
+    });
+    props.objectTracks.forEach(track => (track.keyframes || []).forEach(key => { key.time = Math.max(0, Math.min(duration, Number(key.time) || 0)); }));
+    props.lensTracks.forEach(track => (track.keyframes || []).forEach(key => { key.time = Math.max(0, Math.min(duration, Number(key.time) || 0)); }));
+    props.markers.forEach(marker => { marker.time = Math.max(0, Math.min(duration, Number(marker.time) || 0)); });
+    props.eventTracks.forEach(event => { event.time = Math.max(0, Math.min(duration, Number(event.time) || 0)); });
+    if(ED.cinemaPreview && ED.cinemaPreview.id === studio.userData.editorId) ED.cinemaPreview.time = Math.min(duration, Number(ED.cinemaPreview.time) || 0);
+    studio.userData.cinemaProps = props;
+    if(studio.userData.addedEntry) studio.userData.addedEntry.props = cloneData(props);
+    markDirty();
+    buildInspector();
+    syncTimeline(currentViewportRect());
+    pushCinemaHistory(studio, before, historySnapshot(studio), 'Change sequence duration');
+    showTimelineNotice('Sequence duration: ' + duration.toFixed(2) + ' s');
+  }
+  function safeAssetName(value){
+    const name = String(value || 'Cinema Sequence').trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 96);
+    return (name || 'Cinema Sequence') + '.lkcinema.json';
+  }
+  function bindingDescriptor(id, kind){
+    const obj = sceneObjectById(id);
+    return {
+      sourceId:id || '',
+      kind:kind || 'object',
+      name:obj && (obj.userData.editorName || obj.name) || '',
+      editorType:obj && obj.userData.editorType || '',
+    };
+  }
+  function sequenceBindings(props){
+    const values = new Map();
+    const add = (id, kind) => {
+      if(!id) return;
+      const key = kind + ':' + id;
+      if(!values.has(key)) values.set(key, bindingDescriptor(id, kind));
+    };
+    add(props.previewCamera, 'camera');
+    props.movieTrack.forEach(shot => add(shot.cameraId, 'camera'));
+    props.lensTracks.forEach(track => add(track.targetId, 'camera'));
+    props.objectTracks.forEach(track => add(track.targetId, 'object'));
+    return Array.from(values.values());
+  }
+  function downloadJson(name, value){
+    const blob = new Blob([JSON.stringify(value, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+  function exportSequenceAsset(){
+    const studio = activeStudio();
+    if(!studio) return;
+    const props = propsFor(studio);
+    const asset = {
+      kind:'lotking-cinema-sequence',
+      version:1,
+      engineVersion:'0.7.8',
+      name:studio.userData.editorName || 'Cinema Sequence',
+      savedAt:new Date().toISOString(),
+      bindings:sequenceBindings(props),
+      sequence:cloneData(props),
+    };
+    downloadJson(safeAssetName(asset.name), asset);
+    showTimelineNotice('Reusable sequence saved');
+  }
+  function resolveImportedBinding(binding){
+    if(!binding || !binding.sourceId) return '';
+    const sourceId = String(binding.sourceId);
+    const exact = binding.kind === 'camera' ? sceneCameraById(sourceId) : timelineObjectById(sourceId);
+    if(exact) return sourceId;
+    const name = String(binding.name || '').trim().toLowerCase();
+    if(!name) return '';
+    const pool = binding.kind === 'camera' ? sceneCameras() : timelineObjects();
+    const candidates = pool.filter(obj => {
+      const objName = String(obj.userData.editorName || obj.name || '').trim().toLowerCase();
+      const typeMatches = !binding.editorType || binding.kind === 'camera' || obj.userData.editorType === binding.editorType;
+      return typeMatches && objName === name;
+    });
+    return candidates.length === 1 ? candidates[0].userData.editorId : '';
+  }
+  function remapImportedBindings(sequence, bindings){
+    const map = new Map();
+    let unresolved = 0;
+    (bindings || []).forEach(binding => {
+      const resolved = resolveImportedBinding(binding);
+      if(resolved) map.set(String(binding.sourceId), resolved);
+      else unresolved++;
+    });
+    const remap = id => map.get(String(id || '')) || id || '';
+    sequence.previewCamera = remap(sequence.previewCamera);
+    (sequence.cameraCuts || sequence.movieTrack || []).forEach(shot => { shot.cameraId = remap(shot.cameraId); });
+    (sequence.lensTracks || []).forEach(track => { track.targetId = remap(track.targetId); });
+    (sequence.objectTracks || []).forEach(track => { track.targetId = remap(track.targetId); });
+    return unresolved;
+  }
+  async function importSequenceAsset(file){
+    const studio = activeStudio();
+    if(!studio || !file) return;
+    if(file.size > 10 * 1024 * 1024){
+      showTimelineNotice('Sequence file is too large');
+      return;
+    }
+    try {
+      const asset = JSON.parse(await file.text());
+      if(!asset || asset.kind !== 'lotking-cinema-sequence' || !asset.sequence || typeof asset.sequence !== 'object') throw new Error('Unsupported Cinema sequence file');
+      const before = historySnapshot(studio);
+      const sequence = cloneData(asset.sequence);
+      const unresolved = remapImportedBindings(sequence, Array.isArray(asset.bindings) ? asset.bindings : []);
+      studio.userData.cinemaProps = sequence;
+      propsFor(studio);
+      ED.cinemaSelectedItem = null;
+      ED.cinemaPreview = {id:studio.userData.editorId, time:0, playing:false};
+      markDirty();
+      buildInspector();
+      syncTimeline(currentViewportRect());
+      pushCinemaHistory(studio, before, historySnapshot(studio), 'Import Cinema sequence');
+      showTimelineNotice(unresolved ? 'Sequence loaded · ' + unresolved + ' binding(s) need reassignment' : 'Sequence loaded · bindings remapped');
+    } catch(err){
+      showTimelineNotice(err && err.message || 'Could not load sequence');
+    }
+  }
+  function exportInteractiveLevel(){
+    const studio = activeStudio();
+    if(!studio || !deps.exportInteractive) return;
+    const props = propsFor(studio);
+    if(props.trigger === 'manual') showTimelineNotice('Web export ready · use On Preview/Simulate for autoplay');
+    else showTimelineNotice('Building interactive Three.js player…');
+    deps.exportInteractive(studio);
+  }
+  function pathTrackFor(studio){
+    const item = ED.cinemaSelectedItem || {};
+    if(!studio || (item.type !== 'objectTrack' && item.type !== 'objectKey')) return null;
+    return propsFor(studio).objectTracks.find(track => track.id === item.id) || null;
+  }
+  function pathParentFor(track){
+    const target = track && sceneObjectById(track.targetId);
+    return target && target.parent || null;
+  }
+  function pathWorldPoint(track, value){
+    const point = new THREE.Vector3().fromArray(vec3(value));
+    const parent = pathParentFor(track);
+    if(parent && parent.localToWorld){
+      parent.updateMatrixWorld(true);
+      parent.localToWorld(point);
+    }
+    return point;
+  }
+  function pathLocalPoint(track, value){
+    const point = value.clone();
+    const parent = pathParentFor(track);
+    if(parent && parent.worldToLocal){
+      parent.updateMatrixWorld(true);
+      parent.worldToLocal(point);
+    }
+    return point;
+  }
+  function pathSamples(track){
+    const keys = (track && track.keyframes || []).slice().sort((a,b) => (a.time || 0) - (b.time || 0));
+    const points = [];
+    if(!keys.length) return points;
+    if(keys.length === 1) return [pathWorldPoint(track, keys[0].position)];
+    for(let segment = 0; segment < keys.length - 1; segment++){
+      const subdivisions = track.pathMode === 'linear' ? 1 : 24;
+      for(let i = segment ? 1 : 0; i <= subdivisions; i++) points.push(pathWorldPoint(track, spatialPosition(track, keys, segment, i / subdivisions)));
+    }
+    return points;
+  }
+  function clearCinemaPathHelpers(){
+    if(!pathRoot) return;
+    pathRoot.traverse(node => {
+      if(node.geometry && node.geometry.dispose) node.geometry.dispose();
+      if(node.material && node.material.dispose) node.material.dispose();
+    });
+    if(pathRoot.parent) pathRoot.parent.remove(pathRoot);
+    pathRoot = null;
+    pathSignature = '';
+  }
+  function pathHandleData(studio, track, key, kind){
+    return {
+      cinemaPathHandle:true,
+      cinemaStudioId:studio.userData.editorId,
+      cinemaTrackId:track.id,
+      cinemaKeyId:key.id,
+      cinemaHandleKind:kind,
+      editorId:'__cinema_path_' + track.id + '_' + key.id + '_' + kind,
+      editorType:'cinemaPathHandle',
+      editorName:kind === 'key' ? 'Motion key' : 'Bezier ' + kind + ' tangent',
+      editorOnly:true,
+      nonExportable:true,
+    };
+  }
+  function tangentForKey(track, keys, index, kind){
+    const key = keys[index];
+    if(track.pathMode === 'bezier' && key.spatialMode !== 'auto'){
+      const stored = kind === 'in' ? key.tangentIn : key.tangentOut;
+      if(Array.isArray(stored)) return vec3(stored);
+    }
+    return automaticTangent(keys, index, kind);
+  }
+  function createPathHandle(studio, track, key, kind, position, color, size){
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(size || .16, 14, 10),
+      new THREE.MeshBasicMaterial({color, depthTest:false, depthWrite:false, transparent:true, opacity:.96})
+    );
+    mesh.position.copy(position);
+    mesh.renderOrder = 10020;
+    Object.assign(mesh.userData, pathHandleData(studio, track, key, kind));
+    pathRoot.add(mesh);
+    return mesh;
+  }
+  function rebuildCinemaPathHelpers(studio, preserveHandle){
+    const track = pathTrackFor(studio);
+    if(!THREE || !helperGroup || !track || track.pathVisible === false){
+      clearCinemaPathHelpers();
+      return;
+    }
+    const previous = preserveHandle && ED.selected && ED.selected.userData && ED.selected.userData.cinemaPathHandle ? cloneData(ED.selected.userData) : null;
+    clearCinemaPathHelpers();
+    pathRoot = new THREE.Group();
+    pathRoot.name = 'Cinema motion path helpers';
+    pathRoot.userData.editorOnly = true;
+    pathRoot.userData.nonExportable = true;
+    helperGroup.add(pathRoot);
+    const samples = pathSamples(track);
+    if(samples.length > 1){
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(samples),
+        new THREE.LineBasicMaterial({color:track.pathMode === 'linear' ? 0x52b7ff : 0xffd166, depthTest:false, depthWrite:false, transparent:true, opacity:.94})
+      );
+      line.renderOrder = 10010;
+      line.userData.cinemaPathLine = true;
+      pathRoot.add(line);
+    }
+    const keys = (track.keyframes || []).slice().sort((a,b) => (a.time || 0) - (b.time || 0));
+    keys.forEach(key => createPathHandle(studio, track, key, 'key', pathWorldPoint(track, key.position), 0x52b7ff, .18));
+    const selected = selectedObjectKey(studio);
+    if(track.pathMode === 'bezier' && selected && selected.track.id === track.id){
+      const index = keys.indexOf(selected.key);
+      if(index >= 0){
+        const base = vec3(selected.key.position);
+        const inPoint = base.map((value, i) => value + tangentForKey(track, keys, index, 'in')[i]);
+        const outPoint = base.map((value, i) => value + tangentForKey(track, keys, index, 'out')[i]);
+        const baseWorld = pathWorldPoint(track, base);
+        const inWorld = pathWorldPoint(track, inPoint);
+        const outWorld = pathWorldPoint(track, outPoint);
+        const control = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints([inWorld, baseWorld, baseWorld, outWorld]),
+          new THREE.LineBasicMaterial({color:0xff6bd6, depthTest:false, depthWrite:false, transparent:true, opacity:.8})
+        );
+        control.renderOrder = 10011;
+        pathRoot.add(control);
+        createPathHandle(studio, track, selected.key, 'in', inWorld, 0xff6bd6, .13);
+        createPathHandle(studio, track, selected.key, 'out', outWorld, 0xff6bd6, .13);
+      }
+    }
+    if(previous){
+      const replacement = pathRoot.children.find(node => node.userData && node.userData.editorId === previous.editorId);
+      if(replacement) requestAnimationFrame(() => selectObject(replacement));
+    }
+  }
+  function cinemaPathSignature(studio, track){
+    return JSON.stringify({
+      studio:studio.userData.editorId,
+      selected:ED.cinemaSelectedItem || null,
+      track:track && [track.id, track.targetId, track.pathMode, track.pathVisible, (track.keyframes || []).map(key => [key.id, key.time, key.position, key.spatialMode, key.tangentIn, key.tangentOut])],
+    });
+  }
+  function syncCinemaPathHelpers(studio){
+    const track = pathTrackFor(studio);
+    if(!studio || !track || track.pathVisible === false){
+      clearCinemaPathHelpers();
+      return;
+    }
+    const signature = cinemaPathSignature(studio, track);
+    const gizmo = deps.getGizmo && deps.getGizmo();
+    if(signature !== pathSignature && !(gizmo && gizmo.dragging)){
+      rebuildCinemaPathHelpers(studio, false);
+      pathSignature = signature;
+    }
+  }
+  function updatePathLineGeometry(track){
+    if(!pathRoot) return;
+    const line = pathRoot.children.find(node => node.userData && node.userData.cinemaPathLine);
+    if(line && line.geometry){
+      line.geometry.dispose();
+      line.geometry = new THREE.BufferGeometry().setFromPoints(pathSamples(track));
+    }
+  }
+  function onCinemaPathHandleChange(handle){
+    const data = handle && handle.userData || {};
+    if(!data.cinemaPathHandle) return false;
+    const studio = GAME.world.registry.find(o => o && o.userData && o.userData.editorId === data.cinemaStudioId && o.userData.editorType === 'cinemaStudio');
+    if(!studio) return true;
+    const track = propsFor(studio).objectTracks.find(item => item.id === data.cinemaTrackId);
+    const key = track && (track.keyframes || []).find(item => item.id === data.cinemaKeyId);
+    if(!track || !key) return true;
+    const local = pathLocalPoint(track, handle.position).toArray();
+    if(data.cinemaHandleKind === 'key') key.position = local;
+    else {
+      const offset = local.map((value, i) => value - vec3(key.position)[i]);
+      key.spatialMode = key.spatialMode === 'aligned' ? 'aligned' : 'broken';
+      if(data.cinemaHandleKind === 'in') key.tangentIn = offset;
+      else key.tangentOut = offset;
+      if(key.spatialMode === 'aligned'){
+        const oppositeName = data.cinemaHandleKind === 'in' ? 'tangentOut' : 'tangentIn';
+        const length = Math.max(.0001, Math.hypot(...vec3(key[oppositeName], offset)));
+        const movedLength = Math.max(.0001, Math.hypot(...offset));
+        key[oppositeName] = offset.map(value => -value / movedLength * length);
+      }
+    }
+    studio.userData.cinemaProps = propsFor(studio);
+    markDirty();
+    if(ED.cinemaPreview && ED.cinemaPreview.id === studio.userData.editorId) applyAtTime(studio, ED.cinemaPreview.time, {forceEditableTarget:true});
+    updatePathLineGeometry(track);
+    pathSignature = cinemaPathSignature(studio, track);
+    return true;
+  }
+  ED.cinemaPathHandleChange = onCinemaPathHandleChange;
+  ED.cinemaPathGizmoStart = () => {
+    const studio = activeStudio();
+    pathGizmoBefore = studio ? {studioId:studio.userData.editorId, snapshot:historySnapshot(studio)} : null;
+  };
+  ED.cinemaPathGizmoEnd = () => {
+    const state = pathGizmoBefore;
+    pathGizmoBefore = null;
+    if(!state) return;
+    const studio = GAME.world.registry.find(o => o && o.userData && o.userData.editorId === state.studioId && o.userData.editorType === 'cinemaStudio');
+    if(!studio) return;
+    pushCinemaHistory(studio, state.snapshot, historySnapshot(studio), 'Edit 3D motion path');
+    const track = pathTrackFor(studio);
+    rebuildCinemaPathHelpers(studio, true);
+    pathSignature = track ? cinemaPathSignature(studio, track) : '';
+  };
   function cameraLabel(id){
     const cam = GAME.world.registry.find(item => item && item.userData && item.userData.editorId === id);
     return cam && (cam.userData.editorName || cam.userData.editorId) || id || 'Camera';
@@ -816,6 +1213,12 @@ function create(deps){
       }
       if(cinemaCurveMode) cinemaCurveMode.value = key.curve;
     }
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'spatialMode')){
+      key.spatialMode = ['auto','aligned','broken'].includes(patch.spatialMode) ? patch.spatialMode : 'auto';
+      if(key.spatialMode !== 'auto') ensureEditableTangents(track, key);
+    }
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'tangentIn')) key.tangentIn = vec3(patch.tangentIn);
+    if(patch && Object.prototype.hasOwnProperty.call(patch, 'tangentOut')) key.tangentOut = vec3(patch.tangentOut);
     track.keyframes = (track.keyframes || []).slice().sort((a,b) => (a.time || 0) - (b.time || 0));
     studio.userData.cinemaProps = props;
     if(opts.preview){
@@ -825,6 +1228,34 @@ function create(deps){
     markDirty();
     syncTimeline(currentViewportRect());
     if(before) pushCinemaHistory(studio, before, historySnapshot(studio), opts.label || 'Edit object key');
+  }
+  function ensureEditableTangents(track, key){
+    const keys = (track && track.keyframes || []).slice().sort((a,b) => (a.time || 0) - (b.time || 0));
+    const index = keys.indexOf(key);
+    if(index < 0) return;
+    if(!Array.isArray(key.tangentIn)) key.tangentIn = automaticTangent(keys, index, 'in');
+    if(!Array.isArray(key.tangentOut)) key.tangentOut = automaticTangent(keys, index, 'out');
+  }
+  function applyObjectTrackPatch(studio, track, patch, label){
+    if(!studio || !track) return;
+    const before = historySnapshot(studio);
+    if(Object.prototype.hasOwnProperty.call(patch, 'targetId')) track.targetId = patch.targetId || '';
+    if(Object.prototype.hasOwnProperty.call(patch, 'pathMode')) track.pathMode = ['linear','smooth','bezier'].includes(patch.pathMode) ? patch.pathMode : 'linear';
+    if(Object.prototype.hasOwnProperty.call(patch, 'pathVisible')) track.pathVisible = patch.pathVisible !== false;
+    studio.userData.cinemaProps = propsFor(studio);
+    ED.cinemaTimelineTargetId = track.targetId || ED.cinemaTimelineTargetId;
+    markDirty();
+    syncTimeline(currentViewportRect());
+    pushCinemaHistory(studio, before, historySnapshot(studio), label || 'Edit object track');
+  }
+  function applyLensTrackPatch(studio, track, patch){
+    if(!studio || !track) return;
+    const before = historySnapshot(studio);
+    if(Object.prototype.hasOwnProperty.call(patch, 'targetId')) track.targetId = patch.targetId || '';
+    studio.userData.cinemaProps = propsFor(studio);
+    markDirty();
+    syncTimeline(currentViewportRect());
+    pushCinemaHistory(studio, before, historySnapshot(studio), 'Reassign lens track camera');
   }
   function applyLensKeyPatch(studio, track, key, patch, opts){
     if(!studio || !track || !key) return;
@@ -912,15 +1343,25 @@ function create(deps){
     if(objectKey){
       title.textContent = 'OBJECT KEY';
       cinemaClipPanel.appendChild(title);
-      cinemaClipPanel.appendChild(createDetailStatic('Target', objectLabel(objectKey.track.targetId)));
+      cinemaClipPanel.appendChild(createDetailSelect('Target binding', objectKey.track.targetId || '', [{value:'', label:'Missing target'}].concat(timelineObjects().map(obj => ({value:obj.userData.editorId, label:obj.userData.editorName || obj.userData.editorId}))), value => applyObjectTrackPatch(studio, objectKey.track, {targetId:value}, 'Reassign object track target')));
       cinemaClipPanel.appendChild(createDetailInput('Time', objectKey.key.time || 0, step, value => applyObjectKeyPatch(studio, objectKey.track, objectKey.key, {time:value}, {preview:true})));
-      cinemaClipPanel.appendChild(createDetailSelect('Curve', objectKey.key.curve || 'linear', [
+      cinemaClipPanel.appendChild(createDetailSelect('Time curve', objectKey.key.curve || 'linear', [
         {value:'linear', label:'Linear'},
         {value:'ease-in', label:'Ease in'},
         {value:'ease-out', label:'Ease out'},
         {value:'ease-in-out', label:'Ease in/out'},
         {value:'manual', label:'Manual'},
       ], value => applyObjectKeyPatch(studio, objectKey.track, objectKey.key, {curve:value})));
+      cinemaClipPanel.appendChild(createDetailSelect('Spatial path', objectKey.track.pathMode || 'linear', [
+        {value:'linear', label:'Linear segments'},
+        {value:'smooth', label:'Smooth auto spline'},
+        {value:'bezier', label:'Editable Bezier'},
+      ], value => applyObjectTrackPatch(studio, objectKey.track, {pathMode:value}, 'Change spatial path')));
+      if(objectKey.track.pathMode === 'bezier') cinemaClipPanel.appendChild(createDetailSelect('Tangent mode', objectKey.key.spatialMode || 'auto', [
+        {value:'auto', label:'Automatic'},
+        {value:'aligned', label:'Aligned handles'},
+        {value:'broken', label:'Broken handles'},
+      ], value => applyObjectKeyPatch(studio, objectKey.track, objectKey.key, {spatialMode:value}, {label:'Change spatial tangent mode'})));
       const keyWarnings = validationMessagesFor(validation, 'objectKey', objectKey.track.id, objectKey.key.id).filter((text, index, all) => all.indexOf(text) === index);
       if(keyWarnings.length) cinemaClipPanel.appendChild(createDetailStatic('Warnings', keyWarnings.join(' | ')));
       return;
@@ -928,10 +1369,10 @@ function create(deps){
     if(lensKey){
       title.textContent = 'LENS KEY';
       cinemaClipPanel.appendChild(title);
-      cinemaClipPanel.appendChild(createDetailStatic('Camera', cameraLabel(lensKey.track.targetId)));
+      cinemaClipPanel.appendChild(createDetailSelect('Camera binding', lensKey.track.targetId || '', [{value:'', label:'Missing camera'}].concat(sceneCameras().map(cam => ({value:cam.userData.editorId, label:cam.userData.editorName || cam.userData.editorId}))), value => applyLensTrackPatch(studio, lensKey.track, {targetId:value})));
       cinemaClipPanel.appendChild(createDetailInput('Time', lensKey.key.time || 0, step, value => applyLensKeyPatch(studio, lensKey.track, lensKey.key, {time:value}, {preview:true})));
       cinemaClipPanel.appendChild(createDetailInput('FOV', lensKey.key.fov || 50, 1, value => applyLensKeyPatch(studio, lensKey.track, lensKey.key, {fov:value}, {preview:true})));
-      cinemaClipPanel.appendChild(createDetailSelect('Curve', lensKey.key.curve || 'linear', [
+      cinemaClipPanel.appendChild(createDetailSelect('Time curve', lensKey.key.curve || 'linear', [
         {value:'linear', label:'Linear'},
         {value:'ease-in', label:'Ease in'},
         {value:'ease-out', label:'Ease out'},
@@ -945,7 +1386,16 @@ function create(deps){
     if(objectTrack){
       title.textContent = 'OBJECT TRACK';
       cinemaClipPanel.appendChild(title);
-      cinemaClipPanel.appendChild(createDetailStatic('Target', objectLabel(objectTrack.targetId)));
+      cinemaClipPanel.appendChild(createDetailSelect('Target binding', objectTrack.targetId || '', [{value:'', label:'Missing target'}].concat(timelineObjects().map(obj => ({value:obj.userData.editorId, label:obj.userData.editorName || obj.userData.editorId}))), value => applyObjectTrackPatch(studio, objectTrack, {targetId:value}, 'Reassign object track target')));
+      cinemaClipPanel.appendChild(createDetailSelect('Spatial path', objectTrack.pathMode || 'linear', [
+        {value:'linear', label:'Linear segments'},
+        {value:'smooth', label:'Smooth auto spline'},
+        {value:'bezier', label:'Editable Bezier'},
+      ], value => applyObjectTrackPatch(studio, objectTrack, {pathMode:value}, 'Change spatial path')));
+      cinemaClipPanel.appendChild(createDetailSelect('Path in viewport', objectTrack.pathVisible === false ? 'off' : 'on', [
+        {value:'on', label:'Visible'},
+        {value:'off', label:'Hidden'},
+      ], value => applyObjectTrackPatch(studio, objectTrack, {pathVisible:value === 'on'}, 'Toggle spatial path')));
       cinemaClipPanel.appendChild(createDetailStatic('Keys', String((objectTrack.keyframes || []).length)));
       const trackWarnings = validationMessagesFor(validation, 'objectTrack', objectTrack.id);
       if(trackWarnings.length) cinemaClipPanel.appendChild(createDetailStatic('Warnings', trackWarnings.join(' | ')));
@@ -954,7 +1404,7 @@ function create(deps){
     if(lensTrack){
       title.textContent = 'LENS TRACK';
       cinemaClipPanel.appendChild(title);
-      cinemaClipPanel.appendChild(createDetailStatic('Camera', cameraLabel(lensTrack.targetId)));
+      cinemaClipPanel.appendChild(createDetailSelect('Camera binding', lensTrack.targetId || '', [{value:'', label:'Missing camera'}].concat(sceneCameras().map(cam => ({value:cam.userData.editorId, label:cam.userData.editorName || cam.userData.editorId}))), value => applyLensTrackPatch(studio, lensTrack, {targetId:value})));
       cinemaClipPanel.appendChild(createDetailStatic('Keys', String((lensTrack.keyframes || []).length)));
       const trackWarnings = validationMessagesFor(validation, 'objectTrack', lensTrack.id);
       if(trackWarnings.length) cinemaClipPanel.appendChild(createDetailStatic('Warnings', trackWarnings.join(' | ')));
@@ -999,7 +1449,107 @@ function create(deps){
       rotation:[obj.rotation.x, obj.rotation.y, obj.rotation.z],
       scale:[obj.scale.x, obj.scale.y, obj.scale.z],
       curve:'linear',
+      spatialMode:'auto',
     };
+  }
+  function motionBasisFor(obj, kind){
+    const quaternion = obj && obj.quaternion;
+    const axis = (x, y, z) => {
+      const value = new THREE.Vector3(x, y, z);
+      if(quaternion && value.applyQuaternion) value.applyQuaternion(quaternion);
+      return value.toArray();
+    };
+    return {
+      right:axis(1, 0, 0),
+      up:axis(0, 1, 0),
+      forward:kind === 'camera' ? axis(0, 0, -1) : axis(0, 0, 1),
+    };
+  }
+  function motionTargetKind(obj){
+    return obj && obj.userData && obj.userData.editorType === 'camera' ? 'camera' : 'object';
+  }
+  function applySelectedMotionPreset(){
+    const studio = activeStudio();
+    if(!studio) return;
+    const targetId = cinemaObjectSelect && cinemaObjectSelect.value || preferredTimelineObjectId();
+    const obj = timelineObjectById(targetId);
+    const preset = motionPresetById(cinemaMotionPreset && cinemaMotionPreset.value);
+    if(!obj){
+      showTimelineNotice('Choose a camera or object target first');
+      return;
+    }
+    const kind = motionTargetKind(obj);
+    if(!preset || preset.kind !== kind){
+      showTimelineNotice('Choose a compatible ' + kind + ' movement');
+      return;
+    }
+    const before = historySnapshot(studio);
+    const props = propsFor(studio);
+    const start = Math.max(0, Math.min(CINEMA_MAX_DURATION - .1, selectedTime(studio)));
+    const duration = Math.max(.1, Math.min(CINEMA_MAX_DURATION - start, Number(cinemaMotionDuration && cinemaMotionDuration.value) || 6));
+    const end = start + duration;
+    const pose = {
+      position:[obj.position.x, obj.position.y, obj.position.z],
+      rotation:[obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      scale:[obj.scale.x, obj.scale.y, obj.scale.z],
+    };
+    const distance = Math.max(.1, Math.min(100000, Number(cinemaMotionDistance && cinemaMotionDistance.value) || 8));
+    const generated = buildMotionPreset(preset.id, pose, start, duration, motionBasisFor(obj, kind), distance)
+      .map(key => Object.assign({id:uniqueTimelineId('key')}, key));
+    let track = props.objectTracks.find(item => item.targetId === targetId);
+    if(!track){
+      track = {id:uniqueTimelineId('objtrack'), type:'object', targetId, pathMode:'bezier', pathVisible:true, keyframes:[]};
+      props.objectTracks.push(track);
+    }
+    const epsilon = .0001;
+    track.keyframes = (track.keyframes || [])
+      .filter(key => (Number(key.time) || 0) < start - epsilon || (Number(key.time) || 0) > end + epsilon)
+      .concat(generated)
+      .sort((a,b) => (a.time || 0) - (b.time || 0));
+    track.pathMode = 'bezier';
+    track.pathVisible = true;
+    props.duration = Math.max(props.duration, end);
+    if(kind === 'camera'){
+      props.previewCamera = targetId;
+      if(!props.movieTrack.length){
+        props.movieTrack.push({id:uniqueTimelineId('shot'), type:'shot', name:preset.label, time:start, duration, cameraId:targetId});
+        props.cameraCuts = props.movieTrack;
+      }
+    }
+    studio.userData.cinemaProps = props;
+    ED.cinemaTimelineTargetId = targetId;
+    const first = generated[0];
+    selectItem({type:'objectKey', id:track.id, keyId:first.id, curve:first.curve});
+    ED.cinemaPreview = {id:studio.userData.editorId, time:start, playing:false};
+    applyAtTime(studio, start, {forceEditableTarget:true});
+    revealTimelineTime(props, start);
+    markDirty();
+    buildInspector();
+    syncTimeline(currentViewportRect());
+    revealTimelineLane('#lkCinemaTlObjectTrack');
+    pushCinemaHistory(studio, before, historySnapshot(studio), 'Apply ' + preset.label + ' motion preset');
+    showTimelineNotice(preset.label + ' · editable Bezier · ' + duration.toFixed(1) + ' s');
+  }
+  function editSelectedMotionPath(){
+    const studio = activeStudio();
+    if(!studio) return;
+    const targetId = cinemaObjectSelect && cinemaObjectSelect.value || preferredTimelineObjectId();
+    const track = propsFor(studio).objectTracks.find(item => item.targetId === targetId);
+    if(!track || !(track.keyframes || []).length){
+      showTimelineNotice('Add two transform keys or apply a movement preset first');
+      return;
+    }
+    const before = historySnapshot(studio);
+    track.pathMode = 'bezier';
+    track.pathVisible = true;
+    const playhead = selectedTime(studio);
+    const key = track.keyframes.slice().sort((a,b) => Math.abs((a.time || 0) - playhead) - Math.abs((b.time || 0) - playhead))[0];
+    selectItem({type:'objectKey', id:track.id, keyId:key.id, curve:key.curve || 'linear'});
+    studio.userData.cinemaProps = propsFor(studio);
+    markDirty();
+    syncTimeline(currentViewportRect());
+    pushCinemaHistory(studio, before, historySnapshot(studio), 'Open editable 3D motion path');
+    showTimelineNotice('Drag blue keys and magenta Bezier handles in the viewport');
   }
   function selectedSceneCameraId(){
     const selectedId = ED.selected && ED.selected.userData && ED.selected.userData.editorType === 'camera' ? ED.selected.userData.editorId : '';
@@ -1062,11 +1612,20 @@ function create(deps){
     }
     ED.cinemaPreview = {
       id:studio.userData.editorId,
+      playerId:Number.isInteger(Number(opts.playerId))&&Number(opts.playerId)>=1&&Number(opts.playerId)<=4
+        ?Number(opts.playerId)
+        :(Number.isInteger(Number(props.outputPlayerIndex))?Number(props.outputPlayerIndex)+1:1),
       time:Math.max(0, Math.min(props.duration, Number(time) || 0)),
       playing:opts.playing !== false,
       runtime:!!opts.runtime,
       source:opts.source || 'manual',
       lastEventTime:Math.max(0, Math.min(props.duration, Number(time) || 0)),
+      playbackOverride:opts.playbackOverride==='once'?'once':null,
+      onComplete:typeof opts.onComplete==='function'?opts.onComplete:null,
+      completionDispatched:false,
+      completionOverride:opts.completionOverride||null,
+      blending:false,
+      endBlend:null,
     };
     updatePreview(0);
     syncTimeline(currentViewportRect());
@@ -1221,7 +1780,7 @@ function create(deps){
     ED.cinemaTimelineTargetId = targetId;
     let track = props.objectTracks.find(item => item.targetId === targetId);
     if(!track){
-      track = {id:'objtrack_' + Date.now().toString(36), type:'object', targetId, keyframes:[]};
+      track = {id:'objtrack_' + Date.now().toString(36), type:'object', targetId, pathMode:'smooth', pathVisible:true, keyframes:[]};
       props.objectTracks.push(track);
     }
     const key = transformKeyForObject(obj, selectedTime(studio));
@@ -1528,6 +2087,18 @@ function create(deps){
     });
     select.value = options.some(opt => opt.value === current) ? current : (options[0] && options[0].value || '');
   }
+  function syncMotionPresetControls(targetId){
+    const target = timelineObjectById(targetId);
+    const kind = target ? motionTargetKind(target) : '';
+    const options = MOTION_PRESETS
+      .filter(preset => preset.kind === kind)
+      .map(preset => ({value:preset.id, label:preset.label}));
+    syncSelect(cinemaMotionPreset, options.length ? options : [{value:'', label:'Choose a target first'}], cinemaMotionPreset && cinemaMotionPreset.value);
+    if(cinemaMotionKind) cinemaMotionKind.textContent = kind === 'camera' ? 'CAMERA MOTION' : (kind === 'object' ? 'OBJECT MOTION' : 'MOTION PRESETS');
+    if(cinemaMotionPreset) cinemaMotionPreset.disabled = !target;
+    if(cinemaApplyMotionBtn) cinemaApplyMotionBtn.disabled = !target;
+    if(cinemaEditPathBtn) cinemaEditPathBtn.disabled = !target;
+  }
   function setTimelineLaneRows(lane, rows){
     if(!lane) return;
     const h = Math.max(26, Math.max(1, rows || 1) * 30 - 4);
@@ -1572,11 +2143,13 @@ function create(deps){
     ED.cinemaTimelineOpen = on;
     cinemaTimeline.classList.toggle('on', on);
     if(!on){
+      clearCinemaPathHelpers();
       if(cinemaViewportHud) cinemaViewportHud.classList.remove('on');
       ED.cinemaTimelineFocused = false;
       return;
     }
     const props = propsFor(studio);
+    syncCinemaPathHelpers(studio);
     const validation = validateTimeline(studio, props);
     const state = ED.cinemaPreview && ED.cinemaPreview.id === studio.userData.editorId ? ED.cinemaPreview : null;
     const time = Math.max(0, Math.min(props.duration, state ? state.time || 0 : 0));
@@ -1601,9 +2174,12 @@ function create(deps){
     const eventTrack = cinemaTimeline.querySelector('#lkCinemaTlEventTrack');
     const playhead = cinemaTimeline.querySelector('#lkCinemaTlPlayhead');
     syncSelect(cinemaCameraSelect, [{value:'', label:'Choose camera'}].concat(sceneCameras().map(cam => ({value:cam.userData.editorId, label:cam.userData.editorName || cam.userData.editorId}))), selectedSceneCameraId() || ED.cinemaTimelineCameraId || props.previewCamera);
-    syncSelect(cinemaObjectSelect, [{value:'', label:'Choose target'}].concat(timelineObjects().map(obj => ({value:obj.userData.editorId, label:obj.userData.editorName || obj.userData.editorId}))), selectedTargetId(studio) || selectedTimelineObjectId() || ED.cinemaTimelineTargetId);
+    const motionTargetId = selectedTargetId(studio) || selectedTimelineObjectId() || ED.cinemaTimelineTargetId;
+    syncSelect(cinemaObjectSelect, [{value:'', label:'Choose target'}].concat(timelineObjects().map(obj => ({value:obj.userData.editorId, label:obj.userData.editorName || obj.userData.editorId}))), motionTargetId);
+    syncMotionPresetControls(motionTargetId);
     if(name) name.textContent = studio.userData.editorName || 'Cinema Studio';
     if(clock) clock.textContent = notice || (time.toFixed(2) + ' / ' + props.duration.toFixed(2) + ' s');
+    if(cinemaDurationInput && document.activeElement !== cinemaDurationInput) cinemaDurationInput.value = String(Number(props.duration.toFixed(3)));
     if(cinemaPlayBtn) cinemaPlayBtn.textContent = state && state.playing ? 'Pause' : 'Play';
     if(cinemaLockBtn) cinemaLockBtn.classList.toggle('on', !!ED.cinemaTimelineLocked);
     if(cinemaDockBtn) cinemaDockBtn.classList.toggle('on', !!ED.cinemaTimelineDocked);
@@ -2126,8 +2702,9 @@ function create(deps){
       return;
     }
     const alpha = curveAlpha((time - (prev.time || 0)) / ((next.time || 0) - (prev.time || 0)), prev.curve || 'linear');
+    const segmentIndex = Math.max(0, Math.min(keys.length - 2, keys.indexOf(prev)));
     applyTransformKey(obj, {
-      position:lerpArray(prev.position || [obj.position.x, obj.position.y, obj.position.z], next.position || [obj.position.x, obj.position.y, obj.position.z], alpha),
+      position:spatialPosition(track, keys, segmentIndex, alpha),
       rotation:lerpArray(prev.rotation || [obj.rotation.x, obj.rotation.y, obj.rotation.z], next.rotation || [obj.rotation.x, obj.rotation.y, obj.rotation.z], alpha),
       scale:lerpArray(prev.scale || [obj.scale.x, obj.scale.y, obj.scale.z], next.scale || [obj.scale.x, obj.scale.y, obj.scale.z], alpha),
     });
@@ -2196,6 +2773,40 @@ function create(deps){
         if(afterStart && t <= to + eps) dispatchTimelineEvent(studio, event, state);
       });
   }
+  function completePreviewCinema(studio,state,duration){
+    if(!state||state.completionDispatched)return false;
+    state.completionDispatched=true;
+    if(state.runtime&&GAME.state)GAME.state.cinemaInputLocked=false;
+    const detail={studioId:studio&&studio.userData&&studio.userData.editorId||state.id,playerId:1,time:duration,source:state.source||'timeline',reason:'completed'};
+    const onComplete=state.onComplete;
+    state.onComplete=null;
+    if(typeof onComplete==='function'){
+      try{onComplete(detail);}catch(err){console.error('Lot King Cinema Studio completion callback failed:',err);}
+    }
+    return true;
+  }
+  function completionPawn(config){
+    if(!config||!GAME.pawns)return null;
+    if(config.pawnRef)return config.pawnRef.possess?config.pawnRef:null;
+    if(config.pawnId&&GAME.pawns.get){
+      return GAME.pawns.get(config.pawnId)||null;
+    }
+    return config.playerId&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(config.playerId):null;
+  }
+  function beginPreviewCompletion(studio,state,props,cut,duration){
+    const config=resolveCompletion(props,state.completionOverride,state.playerId||1);
+    const pawn=config.pawnRef||config.pawnId?completionPawn(config):null;
+    if(pawn&&pawn.possess){
+      pawn.possess(config.playerId||state.playerId||1,true);
+      if(pawn.possessCamera)pawn.possessCamera(true);
+    }
+    if(state.runtime&&config.mode==='blend'&&config.duration>0&&cut){
+      state.blending=true;
+      state.endBlend={elapsed:0,duration:config.duration,curve:config.curve,cut};
+      return false;
+    }
+    return completePreviewCinema(studio,state,duration);
+  }
   function updatePreview(dt){
     const state = ED.cinemaPreview;
     if(!state) return;
@@ -2204,19 +2815,28 @@ function create(deps){
     const props = propsFor(studio);
     const beforeTime = Math.max(0, Math.min(props.duration, Number(state.time) || 0));
     const wasPlaying = !!state.playing;
-    if(state.playing){
-      state.time += Math.max(0, dt || 0);
-      const duration = Math.max(.1, props.duration || 6);
-      if(state.time > duration){
-        if(props.playback === 'loop') state.time %= duration;
-        else { state.time = duration; state.playing = false; }
+    let advance=null;
+    if(state.blending&&state.endBlend){
+      state.endBlend.elapsed=Math.min(state.endBlend.duration,state.endBlend.elapsed+Math.max(0,Number(dt)||0));
+      const alpha=sequenceApi.curveAlpha(state.endBlend.elapsed/Math.max(.0001,state.endBlend.duration),state.endBlend.curve);
+      const blendCut=Object.assign({},state.endBlend.cut,{__completionBlendAlpha:alpha});
+      if(state.endBlend.elapsed>=state.endBlend.duration){
+        state.blending=false;
+        completePreviewCinema(studio,state,props.duration);
       }
+      return blendCut;
+    }
+    if(state.playing){
+      const duration = Math.max(.1, props.duration || 6);
+      advance=advancePlayback(state.time,dt,duration,props.playback,state.playbackOverride);
+      state.time=advance.time;
+      if(advance.completed)state.playing=false;
     }
     const forceEditableTarget = !!ED.cinemaForceEditableTargetFrame;
     ED.cinemaForceEditableTargetFrame = false;
-    const cut = applyAtTime(studio, state.time, {skipEditableTarget:!state.playing, forceEditableTarget});
+    const cut = applyAtTime(studio, state.time, {skipEditableTarget:!wasPlaying&&!state.playing, forceEditableTarget});
     if(wasPlaying && (dt || 0) > 0){
-      if(props.playback === 'loop' && state.time < beforeTime){
+      if(advance&&advance.looped){
         dispatchTimelineEventsBetween(studio, props, beforeTime, props.duration, state, false);
         dispatchTimelineEventsBetween(studio, props, 0, state.time, state, true);
       } else {
@@ -2224,6 +2844,7 @@ function create(deps){
       }
       state.lastEventTime = state.time;
     }
+    if(advance&&advance.completed)beginPreviewCompletion(studio,state,props,cut,advance.duration);
     return cut;
   }
   function hideTimeline(){
@@ -2244,5 +2865,10 @@ function create(deps){
   });
 }
 
-window.LK_EDITOR_CINEMA_STUDIO = Object.freeze({create});
+const cinemaStudioApi = Object.freeze({
+  create,
+  _internals:Object.freeze({CINEMA_MAX_DURATION, MOTION_PRESETS, automaticTangent, buildMotionPreset, cubicBezierArray, motionPresetById, spatialPosition, vec3}),
+});
+if(typeof module !== 'undefined' && module.exports) module.exports = cinemaStudioApi;
+if(typeof window !== 'undefined') window.LK_EDITOR_CINEMA_STUDIO = cinemaStudioApi;
 })();

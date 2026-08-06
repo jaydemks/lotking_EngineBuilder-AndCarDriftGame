@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Lot King cowork harness</title></head>
+<body>
+  <div id="lkTopbar"><div class="lk-preview-tools"><button type="button">Preview</button></div></div>
+  <main><canvas></canvas><aside id="lkInspector"><input id="objectName"></aside><section id="lkCinemaTimeline"></section></main>
+  <script src="../../js/runtime/p2p-protocol.js?v=0.7.8-session-monitor-1"></script>
+  <script src="../../js/runtime/p2p-session.js?v=0.7.8-session-monitor-1"></script>
+  <script src="../../js/plugins/p2p-cowork-locks.js?v=0.7.8-cowork-locks-1"></script>
+  <script src="../../js/plugins/p2p-collaboration-plugin.js?v=0.7.8-session-monitor-1"></script>
+  <script>
+  (()=>{
+    const clone=value=>JSON.parse(JSON.stringify(value));
+    const object={
+      name:'Cowork Crate',visible:true,
+      position:{x:0,y:0,z:0},rotation:{x:0,y:0,z:0},scale:{x:1,y:1,z:1},
+      userData:{editorId:'cowork-crate',editorName:'Cowork Crate',addedEntry:{id:'cowork-crate',kind:'mesh',name:'Cowork Crate',t:{p:[0,0,0],r:[0,0,0],s:[1,1,1]},props:{color:'#4488cc'}}},
+    };
+    const ED={selected:null,dirty:false,cinemaTimelineOpen:false};
+    const GAME={world:{registry:[object]}};
+    const STORE={
+      tOf:item=>({p:[item.position.x,item.position.y,item.position.z],r:[item.rotation.x,item.rotation.y,item.rotation.z],s:[item.scale.x,item.scale.y,item.scale.z]}),
+      applyT(item,t){const p=t.p||[0,0,0],r=t.r||[0,0,0],s=t.s||[1,1,1];Object.assign(item.position,{x:p[0],y:p[1],z:p[2]});Object.assign(item.rotation,{x:r[0],y:r[1],z:r[2]});Object.assign(item.scale,{x:s[0],y:s[1],z:s[2]});},
+      snapshotAddedEntry(item,base){const entry=clone(base);entry.name=item.userData.editorName||item.name;entry.t=this.tOf(item);return entry;},
+      syncCollider(){},applyMatProps(item,props){item.userData.matProps=clone(props);},
+    };
+    window.__saveCount=0;window.__status='';
+    function saveScene(options){window.__saveCount++;ED.dirty=false;dispatchEvent(new CustomEvent('lotking:project-saved',{detail:{source:options&&options.coworkRemote?'cowork':'local'}}));return true;}
+    window.LK_EDITOR_PROJECT_IO_INSTANCE={saveScene,createPortableCollaborationSnapshot:async()=>({meta:{projectName:'Cowork harness'},scene:{added:[STORE.snapshotAddedEntry(object,object.userData.addedEntry)]}}),applyPortableCollaborationSnapshot:async()=>true};
+    const commands=new Map(),pluginApi={
+      env:null,capability(){},runtimeHook(){},menu(){},command(id,definition){commands.set(id,definition.run);},runCommand(id){return commands.get(id)?.();},
+    };
+    const env={GAME,STORE,ED,status:value=>{window.__status=String(value||'');},buildInspector(){},markDirty(){ED.dirty=true;},saveScene,getGizmo:()=>null,refreshOutliner(){},refreshAssetsPanel(){}};
+    LK_P2P_COLLABORATION_PLUGIN.register(pluginApi,env);
+    window.LOT_KING=GAME;GAME.editor={state:ED,plugins:pluginApi};window.__coworkObject=object;
+  })();
+  </script>
+</body>
+</html>

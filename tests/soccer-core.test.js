@@ -56,6 +56,10 @@ test('soccer templates are registered and validate cleanly', () => {
   assert.ok(ids.includes('logic-template-soccer-goal'));
   assert.ok(ids.includes('logic-template-penalty-shootout'));
   assert.equal(global.LK_LOGIC_TEMPLATES.get('logic-template-player-soccer').graph.logicScene.elements.some(element=>element.id==='camera_anchor'),false,'Soccer Pawn camera config must not enlarge its spatial dummy');
+  const playerGraph=global.LK_LOGIC_TEMPLATES.get('logic-template-player-soccer').graph;
+  assert.equal(playerGraph.nodes.some(node=>node.type==='event.onKeyDown'),false,'shipped Soccer gameplay must not listen to raw keys');
+  assert.equal(playerGraph.nodes.some(node=>node.type==='soccer.jump'),false,'Soccer template must not install a duplicate player Jump');
+  ['diveLeft','diveRight'].forEach(action=>assert.ok(playerGraph.nodes.some(node=>node.type==='event.onInputActionDown'&&node.data.action===action),'missing semantic '+action));
   ['logic-template-player-soccer', 'logic-template-soccer-ball', 'logic-template-soccer-goal', 'logic-template-penalty-shootout'].forEach(id => {
     const template = global.LK_LOGIC_TEMPLATES.get(id);
     const graph = global.LK_LOGIC_GRAPH.normalizeGraph(template.graph, template.name, 'element');
@@ -171,6 +175,26 @@ test('soccer pawn registers in the shared registry, moves and disposes', () => {
   assert.equal(pawn.applyBinding('appearance.shirtColor', '#00ff00'), true);
   pawn.dispose();
   assert.equal(pawns.getByPlayerId(1), null);
+});
+
+test('Soccer possession release cannot leak a held shot into keeper or AI control', () => {
+  const GAME={systems:{},core:{scene:new global.THREE.Scene()}};
+  global.LK_RUNTIME_VEHICLE_PAWNS.install(GAME);
+  const owner=new global.THREE.Group();owner.userData={};
+  const pawn=global.LK_RUNTIME_SOCCER_PAWNS.createLogic(GAME,owner,{role:'striker',playerId:1},{});
+  pawn.start();
+  assert.equal(pawn.beginChargedShot({x:.5,z:.25}),true);
+  pawn.state.shotChargeReadsDevice=true;
+  pawn.state.actionButtonDown=true;
+  assert.ok(pawn.state.shotCharge);
+  assert.equal(pawn.unpossess(),true);
+  assert.equal(pawn.playerId,null);
+  assert.equal(pawn.possessed,false);
+  assert.equal(pawn.control,null);
+  assert.equal(pawn.state.shotCharge,null);
+  assert.equal(pawn.state.shotChargeReadsDevice,false);
+  assert.equal(pawn.state.actionButtonDown,false);
+  pawn.dispose();
 });
 
 test('unpossessed goalkeeper AI predicts a penalty and commits to a directional dive', () => {
@@ -485,7 +509,14 @@ test('penalty shootout stadium level template places a ready-to-play penalty set
   assert.equal(goalSensor.graph.variables.find(v => v.name === 'GoalId').value, 'penalty-goal');
 
   assert.equal(scene.template.id, 'penalty-shootout-stadium');
-  assert.equal(scene.template.version, 4);
+  assert.equal(scene.template.version, 5);
+  // The shipped penalty.configure node predates the v2 shootout dials, so the
+  // extra direction travels as exposed variables plus a runtime descriptor.
+  assert.ok(manager.graph.penaltyShootout, 'shootout direction descriptor missing');
+  const managerBindings = manager.graph.variables.map(v => v.binding);
+  ['penaltyShootout.keeperSkill', 'penaltyShootout.runUpSeconds', 'penaltyShootout.pressureEnabled',
+   'penaltyShootout.presentationCameras', 'penaltyShootout.autoAdvanceDelay']
+    .forEach(binding => assert.ok(managerBindings.includes(binding), 'missing ' + binding));
   assert.equal(scene.env.skyTime, .25, 'penalty preset must start at noon');
   assert.equal(scene.env.dayNightCycleEnabled, false, 'authored noon must stay stable while editing');
   assert.ok(scene.env.lighting.daySun >= 1.4 && scene.env.lighting.dayAmbient >= .9, 'stadium daylight must remain readable');

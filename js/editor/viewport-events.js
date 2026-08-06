@@ -99,7 +99,10 @@ function create(deps){
         return;
       }
       const hit = deps.pickAt(e.clientX, e.clientY);
-      if(hit && hit.collider){
+      if(hit && hit.cinemaPath){
+        if(deps.setTool) deps.setTool('translate');
+        deps.selectObject(hit.entity, {reveal:false});
+      } else if(hit && hit.collider){
         if(hit.logicElementCollider || hit.logicVehicleCollider) deps.selectObject(hit.entity);
         else if(hit.playerCollider && deps.selectPlayerCollider) deps.selectPlayerCollider();
         else if(Number.isInteger(hit.colliderPartIndex) && deps.selectColliderPart) deps.selectColliderPart(hit.entity, hit.colliderPartIndex);

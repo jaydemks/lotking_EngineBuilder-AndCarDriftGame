@@ -89,7 +89,7 @@ Select the Character or Soccer Logic Element in the scene.
 
 ### Root motion rule
 
-Use **in-place animations with root motion disabled**. The Character Movement controller owns world translation, collision and jump height. A locomotion clip that also translates its root will visually drift away from the Pawn/collider and can snap when blending.
+Use **in-place animations with root motion disabled**. The Character Movement controller owns world translation, collision and jump height. Imported position and scale tracks are removed so an animation cannot lift the Pawn mesh or move it away from its collider. Correct a clip visually with its isolated Pawn Studio slot offset or Root timeline keys; those authoring layers move the visible Main Mesh while the gameplay pivot remains fixed.
 
 Recommended exports:
 
@@ -98,6 +98,25 @@ Recommended exports:
 - do not bake jump height into root translation;
 - keep a consistent orientation/rest pose and recognizable humanoid bone mapping; Pawn Studio compensates compatible rig-unit differences but cannot infer an unrelated hierarchy;
 - trim looping clips so their first and last poses blend cleanly.
+
+### Surface-adaptive traversal
+
+Vault, mantle, ledge hang and climb use the same arcade collider world as normal
+movement. A broad ledge lookup selects one collider, then one exact surface probe
+measures its near face, far face/depth, top and outward normal. That result produces
+three independent animation stages:
+
+1. a named root target used by the traversal motion-warp path;
+2. named left/right hand and foot effectors plus elbow/knee pole targets;
+3. hand and foot contact windows that blend the IK correction over the authored
+   full-body clip (hands establish the ledge first, feet follow).
+
+The `Traversal / Contact Adaptation` Inspector category exposes root-warp and IK
+weights, contact spacing/offset and phase limits. `Show Probe + IK Dummies (Editor)`
+draws the hit, normal, root, effectors and joint chains in Editor and Play-in-Editor.
+Those objects are helper-only and are never created in standalone or exported
+gameplay. The debug lines reuse one retained GPU buffer so visual diagnostics do not
+create per-frame WebGPU resources.
 
 ## Animation slots
 

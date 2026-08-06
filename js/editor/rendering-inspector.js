@@ -38,28 +38,36 @@ function create(deps){
     box.appendChild(defaultsPanel);
     box.appendChild(exposedPanel);
 
-    const updateDefault = (key, value, message) => {
+    const updateDefault = (key, value, message, heavy) => {
       const next = config();
       next.defaults[key] = value;
-      commit(next, message);
+      commit(next, message, heavy);
     };
     const pipeline = deps.section(tr('OUTPUT & PIPELINE', 'OUTPUT E PIPELINE'), true);
     if(backend){
-      pipeline.body.appendChild(deps.selectRow(tr('GPU backend preference','Preferenza backend GPU'),backend.preference(),[
-        {value:'auto',label:tr('Auto · recommended','Auto · consigliato')},{value:'webgpu',label:'WebGPU · experimental'},{value:'webgl',label:'WebGL 2 · stable'},
-      ],value=>{backend.setPreference(value);if(deps.status)deps.status(tr('Backend preference saved. Reopen the editor to rebuild the GPU device.','Preferenza backend salvata. Riapri l’editor per ricostruire il dispositivo GPU.'));}).root);
+      const readiness=backendReport&&backendReport.readiness||(backend.migrationReadiness?backend.migrationReadiness():null);
+      const displayedBackend=backend.gpuQuarantined&&backend.gpuQuarantined()?'webgl':backend.preference();
+      pipeline.body.appendChild(deps.selectRow(tr('GPU backend preference','Preferenza backend GPU'),displayedBackend,[
+        {value:'auto',label:tr('Auto · guarded WebGL 2','Auto · WebGL 2 protetto')},{value:'webgpu',label:tr('WebGPU · experimental full engine','WebGPU · sperimentale intero motore')},{value:'webgl',label:'WebGL 2 · stable'},
+      ],value=>{backend.setPreference(value);if(deps.status)deps.status(tr('Rebuilding the editor on the selected GPU backend…','Ricostruzione editor sul backend GPU selezionato…'));setTimeout(()=>location.reload(),60);}).root);
       const caps=backendReport&&backendReport.capabilities||backend.syncCapabilities();
       const info=deps.el('<div class="lk-ps-summary lk-render-backend-summary"></div>');
-      [[tr('Active','Attivo'),backendReport&&backendReport.effective||'webgl'],['WebGPU API',caps.webgpuApi?'ready':'unavailable'],['Three r185',caps.revision||'unknown'],[tr('GPU','GPU'),backendReport&&backendReport.gpu||tr('probing…','rilevamento…')]].forEach(item=>{const card=deps.el('<div><small></small><b></b></div>');card.querySelector('small').textContent=item[0];card.querySelector('b').textContent=item[1];info.appendChild(card);});
+      [[tr('Active','Attivo'),backendReport&&backendReport.effective||'webgl'],['WebGPU API',caps.webgpuApi?'ready':'unavailable'],[tr('WebGPU default','Default WebGPU'),readiness&&readiness.defaultSafe?'qualified':'blocked'],[tr('Mobile parity','Parità mobile'),readiness&&readiness.mobileQualified?'qualified':'not qualified'],['Three r185',caps.revision||'unknown'],[tr('GPU','GPU'),backendReport&&backendReport.gpu||tr('probing…','rilevamento…')]].forEach(item=>{const card=deps.el('<div><small></small><b></b></div>');card.querySelector('small').textContent=item[0];card.querySelector('b').textContent=item[1];info.appendChild(card);});
       pipeline.body.appendChild(info);
       const support=backend.featureSupport?backend.featureSupport(GAME&&GAME.core&&GAME.core.renderer):{};
       const limits=deps.el('<div class="lk-ps-summary lk-render-capability-summary"></div>');
       [[tr('Vendor','Produttore'),backendReport&&backendReport.vendor||'—'],[tr('Max texture','Texture massima'),backendReport&&backendReport.maxTextureSize?backendReport.maxTextureSize+' px':'—'],['MSAA',backendReport&&backendReport.maxSamples?backendReport.maxSamples+'×':'—'],['GTAO',support.gtao?'ready':'unavailable'],['Compute',support.compute?'ready':'unavailable'],['LightProbeGrid',support.lightProbeGrid?'ready':'unavailable']].forEach(item=>{const card=deps.el('<div><small></small><b></b></div>');card.querySelector('small').textContent=item[0];card.querySelector('b').textContent=item[1];limits.appendChild(card);});
       pipeline.body.appendChild(limits);
+      if(readiness&&!readiness.defaultSafe){
+        const gate=deps.el('<div class="lk-hint lk-render-backend-warning"><b></b><ul></ul></div>');
+        gate.querySelector('b').textContent=tr('WebGPU is explicitly testable; automatic promotion still awaits full parity','WebGPU è provabile esplicitamente; la promozione automatica attende ancora la parità completa');
+        (readiness.blockers||[]).forEach(blocker=>{const item=document.createElement('li');item.textContent=blocker.label||blocker.id;gate.querySelector('ul').appendChild(item);});
+        pipeline.body.appendChild(gate);
+      }
       if(backendReport&&backendReport.fallbackReason)pipeline.body.appendChild(deps.el('<div class="lk-hint lk-render-backend-warning">'+backendReport.fallbackReason+'</div>'));
     }
     pipeline.body.appendChild(deps.selectRow(tr('Renderer', 'Renderer'), cfg.defaults.rendererMode, [
-      {value:'webgl', label:tr('Normal (WebGL)', 'Normale (WebGL)')},
+      {value:'webgl', label:tr('Real-time raster (active GPU backend)', 'Raster real-time (backend GPU attivo)')},
       {value:'raytracing', label:tr('Ray lighting', 'Ray lighting')},
       {value:'pathtracing', label:tr(
         'Progressive path tracing (Experimental - Not stable)',
@@ -85,8 +93,63 @@ function create(deps){
       {value:'ssaa2x',label:'Supersampling 2×'}, {value:'ssaa4x',label:'Supersampling 4×'},
     ], value => updateDefault('antialiasing', value, tr('Rebuilding the render surface…', 'Ricostruzione superficie di rendering…'))).root);
     pipeline.body.appendChild(deps.sliderRow(tr('Exposure', 'Esposizione'), cfg.defaults.exposure, .7, 1.6, .01, value => updateDefault('exposure', value, tr('Updating scene exposure…', 'Aggiornamento esposizione scena…')), value => (+value).toFixed(2) + '×').root);
-    pipeline.body.appendChild(deps.el('<div class="lk-hint">' + tr('Backend selects the GPU API and requires a renderer restart. Rendering mode controls the visual pipeline inside that backend. Auto always keeps a validated WebGL fallback.', 'Backend seleziona l’API GPU e richiede il riavvio del renderer. La modalità rendering controlla la pipeline visiva nel backend. Auto mantiene sempre un fallback WebGL verificato.') + '</div>'));
+    pipeline.body.appendChild(deps.el('<div class="lk-hint">' + tr('Backend selects the GPU API and requires a renderer restart. Auto remains on validated WebGL 2 until WebGPU passes engine-feature and real-device mobile parity.', 'Backend seleziona l’API GPU e richiede il riavvio del renderer. Auto resta su WebGL 2 verificato finché WebGPU non supera la parità delle funzioni del motore e i test su dispositivi mobili reali.') + '</div>'));
     defaultsPanel.appendChild(pipeline.root);
+
+    const illustration = deps.section(tr('ILLUSTRATED SKETCH', 'SKETCH ILLUSTRATO'), true);
+    illustration.body.appendChild(deps.selectRow(tr('Automatic scene style', 'Stile automatico scena'), cfg.defaults.visualStyle, [
+      {value:'natural', label:tr('Natural rendering', 'Rendering naturale')},
+      {value:'illustrated-sketch', label:tr('Detailed illustrated sketch', 'Sketch illustrato dettagliato')},
+    ], value => updateDefault('visualStyle', value, tr('Applying the illustrated scene pipeline…', 'Applicazione pipeline scena illustrata…'))).root);
+    illustration.body.appendChild(deps.selectRow(tr('Sketch medium', 'Supporto sketch'), cfg.defaults.sketchMedium, [
+      {value:'painted-storybook', label:tr('Painted Storybook · full colour', 'Racconto dipinto · colore completo')},
+      {value:'paper-pencil', label:tr('Paper pencil · organic', 'Matita su carta · organica')},
+      {value:'illustrated-ink', label:tr('Illustrated ink · graphic', 'Inchiostro illustrato · grafico')},
+    ], value => updateDefault('sketchMedium', value, tr('Changing the sketch medium…', 'Cambio supporto sketch…'), false)).root);
+    illustration.body.appendChild(deps.sliderRow(tr('Ink strength', 'Forza inchiostro'), cfg.defaults.sketchStrength, 0, 1, .01,
+      value => updateDefault('sketchStrength', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Line / hatch detail', 'Dettaglio linee / tratteggio'), cfg.defaults.sketchDetail, 0, 1, .01,
+      value => updateDefault('sketchDetail', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Hatching / grid', 'Tratteggio / griglia'), cfg.defaults.sketchHatching, 0, 1, .01,
+      value => updateDefault('sketchHatching', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Drawn-line noise', 'Noise linea disegnata'), cfg.defaults.sketchLineNoise, 0, 1, .01,
+      value => updateDefault('sketchLineNoise', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Pigment & palette', 'Pigmento e palette'), cfg.defaults.sketchPigment, 0, 1, .01,
+      value => updateDefault('sketchPigment', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Pigment colour noise', 'Noise colore pigmento'), cfg.defaults.sketchColorNoise, 0, 1, .01,
+      value => updateDefault('sketchColorNoise', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Sketch colour', 'Colore sketch'), cfg.defaults.sketchSaturation, 0, 2, .01,
+      value => updateDefault('sketchSaturation', value, null, false), value => (+value).toFixed(2) + '×').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Sketch light gain', 'Gain luce sketch'), cfg.defaults.sketchLightGain, .25, 3, .01,
+      value => updateDefault('sketchLightGain', value, null, false), value => (+value).toFixed(2) + '×').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Atmosphere & transparent FX', 'Atmosfera ed effetti trasparenti'), cfg.defaults.sketchAtmosphere, 0, 1, .01,
+      value => updateDefault('sketchAtmosphere', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.sliderRow(tr('Paper grain', 'Grana carta'), cfg.defaults.sketchPaper, 0, 1, .01,
+      value => updateDefault('sketchPaper', value, null, false), value => Math.round(value * 100) + '%').root);
+    illustration.body.appendChild(deps.checkRow(tr('Global black & white filter', 'Filtro globale bianco e nero'), cfg.defaults.monochrome === true,
+      value => updateDefault('monochrome', value, tr('Updating the global monochrome filter…', 'Aggiornamento filtro monocromatico globale…'), false)).root);
+    illustration.body.appendChild(deps.el('<div class="lk-hint">' + tr(
+      'Painted Storybook filters surface colour, shadow bands, highlights and every composited atmospheric pixel. Paper Pencil is high-key and graphite-led; Illustrated Ink is the stronger graphic treatment. Black & white remains independent and each material can still define its own pigment response.',
+      'Racconto dipinto filtra colore delle superfici, fasce d’ombra, luci e ogni pixel atmosferico compositato. Matita su carta è chiara e guidata dalla grafite; Inchiostro illustrato è il trattamento più grafico. Il bianco e nero resta indipendente e ogni materiale può ancora definire la propria risposta del pigmento.'
+    ) + '</div>'));
+    defaultsPanel.appendChild(illustration.root);
+
+    const authorOutput=deps.section(tr('AUTHOR OUTPUT OVERRIDE', 'OVERRIDE OUTPUT AUTORE'), true);
+    authorOutput.body.appendChild(deps.checkRow(
+      tr('Force authored sketch appearance', 'Forza aspetto sketch dell’autore'),
+      cfg.authority.visualStyle==='author',
+      value=>{const next=config();next.authority.visualStyle=value?'author':'player';commit(next,tr('Updating author sketch authority…','Aggiornamento autorità sketch autore…'),false);}
+    ).root);
+    authorOutput.body.appendChild(deps.checkRow(
+      tr('Force authored black & white', 'Forza bianco e nero dell’autore'),
+      cfg.authority.monochrome==='author',
+      value=>{const next=config();next.authority.monochrome=value?'author':'player';commit(next,tr('Updating author monochrome authority…','Aggiornamento autorità monocromatica autore…'),false);}
+    ).root);
+    authorOutput.body.appendChild(deps.el('<div class="lk-hint">'+tr(
+      'The two locks are independent. The first forces style, medium, ink, detail, pigment, atmosphere and paper values; the second forces the authored black & white value (on or off). Enable either one or both. Players can still change every unlocked setting.',
+      'I due blocchi sono indipendenti. Il primo forza stile, supporto, inchiostro, dettaglio, pigmento, atmosfera e carta; il secondo forza il valore bianco e nero scelto dall’autore (attivo o disattivo). Puoi abilitarne uno o entrambi. Il giocatore può ancora cambiare tutte le impostazioni non bloccate.'
+    )+'</div>'));
+    defaultsPanel.appendChild(authorOutput.root);
 
     const features = deps.section(tr('LIGHTING FEATURES', 'FUNZIONI ILLUMINAZIONE'), true);
     [
@@ -149,6 +212,19 @@ function create(deps){
       ['rendererMode', tr('Rendering pipeline', 'Pipeline rendering')],
       ['antialiasing', tr('Antialiasing', 'Antialiasing')],
       ['exposure', tr('Exposure / brightness', 'Esposizione / luminosita')],
+      ['visualStyle', tr('Illustrated scene style', 'Stile scena illustrato')],
+      ['sketchMedium', tr('Sketch medium', 'Supporto sketch')],
+      ['sketchStrength', tr('Sketch ink strength', 'Forza inchiostro sketch')],
+      ['sketchDetail', tr('Sketch line detail', 'Dettaglio linee sketch')],
+      ['sketchHatching', tr('Sketch hatching / grid', 'Tratteggio / griglia sketch')],
+      ['sketchLineNoise', tr('Drawn-line noise', 'Noise linea disegnata')],
+      ['sketchPigment', tr('Sketch pigment & palette', 'Pigmento e palette sketch')],
+      ['sketchColorNoise', tr('Sketch pigment noise', 'Noise pigmento sketch')],
+      ['sketchSaturation', tr('Sketch colour amount', 'Quantità colore sketch')],
+      ['sketchLightGain', tr('Sketch light gain', 'Gain luce sketch')],
+      ['sketchAtmosphere', tr('Sketch atmosphere & FX', 'Atmosfera ed effetti sketch')],
+      ['sketchPaper', tr('Sketch paper grain', 'Grana carta sketch')],
+      ['monochrome', tr('Global black & white', 'Bianco e nero globale')],
       ['shadows', tr('Dynamic shadows', 'Ombre dinamiche')],
       ['shadowQuality', tr('Shadow quality', 'Qualita ombre')],
       ['ambientOcclusion',tr('Ambient occlusion','Occlusione ambientale')],

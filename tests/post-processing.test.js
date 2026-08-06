@@ -14,6 +14,8 @@ const editorRuntimeSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'ed
 const volumetricCloudSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'volumetric-clouds.js'), 'utf8');
 const playerLightRigSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'player-light-rig.js'), 'utf8');
 const lotKingSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'lot-king.js'), 'utf8');
+const renderingBackendSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'rendering-backend.js'), 'utf8');
+const consolePolicySource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'console-policy.js'), 'utf8');
 const modelAssetsSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'model-assets.js'), 'utf8');
 const sceneStoreSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'engine', 'scene-store.js'), 'utf8');
 const materialEditorSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'editor', 'material-editor.js'), 'utf8');
@@ -45,6 +47,15 @@ assert(!source.includes('vec3 reflected=max(base-bounce'), 'indirect ray lightin
 assert(source.includes('low:{contrast:1, saturation:1, brightness:0'), 'quality presets keep color and illumination neutral');
 assert(source.includes('videoOnly'), 'editor cameras can render the shared video pipeline without player-camera grading');
 assert(source.includes('renderPass.camera = activeCamera'), 'the shared post pipeline accepts editor and gameplay cameras');
+assert(source.includes('function needsPost()') && source.includes("video&&video.visualStyle==='illustrated-sketch'"), 'WebGPU enters its TSL post graph only for effects that graph implements');
+assert(source.includes("submission&&typeof submission.then==='function'") && source.includes('submission.catch(failToDirect)'), 'an asynchronous WebGPU pipeline failure retires post and restores direct scene rendering');
+const webgpuEligibility=source.slice(source.indexOf('function needsPost()'),source.indexOf('function render(cameraOverride,options)'));
+assert(!webgpuEligibility.includes('volumetricLighting'), 'legacy volumetric selection cannot replace a valid Natural WebGPU frame with an empty target');
+assert(editorRuntimeSource.includes('post.webgpu && post.needsPost'), 'the Editor asks the active WebGPU post graph whether it is required');
+assert(lotKingSource.includes('POST&&POST.webgpu&&POST.needsPost'), 'Play and standalone game use the same WebGPU post eligibility contract');
+assert(lotKingSource.includes('GAME.systems.post.dispose') && lotKingSource.includes('GAME.systems.pathTracing.dispose'), 'iframe renderer handoff releases post and path-tracing GPU allocations explicitly');
+assert(renderingBackendSource.includes("device.addEventListener('uncapturederror'") && renderingBackendSource.includes('GPU_QUARANTINE_KEY'), 'native WebGPU validation storms are grouped and session-quarantined before exhausting the GPU process');
+assert(consolePolicySource.includes("lotking:webgpu-console-error") && consolePolicySource.includes('gpuConsoleSignature'), 'Three.js WebGPU console failures are deduplicated and forwarded to structured diagnostics');
 assert(source.includes('node.isSprite||data.lkSkipAoGBuffer===true||data.lkFlareIgnore===true||noDepthMaterial'), 'GTAO excludes camera-facing flare sprites and non-depth optical effects from its geometry buffers');
 assert(source.includes('new THREE.ShaderPass(THREE.FXAAShader)'), 'FXAA uses the Three.js post-process shader');
 assert(source.includes('new THREE.OutputPass()'), 'modern Three.js output color conversion is explicit in the composer');
@@ -85,6 +96,7 @@ assert(editorCoreSource.includes('helperGroup.userData.lkFlareIgnore = true'), '
 assert(editorRuntimeSource.includes('Number(GAME.player.cameraCfg.helperRange) || 5'), 'the editor camera cone uses a compact authored range instead of the gameplay far plane');
 assert(cameraSource.includes('freePitch: .32') && cameraSource.includes('helperSize: .7'), 'camera placement and helper sizing have persistent defaults');
 assert(cameraSource.includes('interiorLateral: -.42') && lotKingSource.includes("mode === 'interior'"), 'native and Logic vehicles share a left-hand-drive steering-aligned interior camera');
+assert(cameraSource.includes('interiorNear: .1') && cameraSource.includes('interiorFocusDistance: 9') && lotKingSource.includes("mode==='interior' ? CAM_CFG.interiorNear : CAM_CFG.near"), 'external and interior vehicle camera optics are authored independently and consumed by Play');
 assert(cameraSource.includes('interiorGForceMotion: 0') && cameraSource.includes('interiorAccelerationMotion: 0') && cameraSource.includes('interiorRoadShake: 0'), 'all cockpit translation and vibration are disabled by default');
 assert(lotKingSource.includes('interiorTargetOffset.clampLength(0, motionLimit)'), 'optional cockpit motion is constrained to the authored cabin safety range');
 assert(lotKingSource.includes('camPos.copy(want)') && lotKingSource.includes("if(mode === 'interior') camLook.copy(look)"), 'interior camera position and aim remain rigidly attached instead of lagging in world space');
@@ -94,7 +106,7 @@ assert(lotKingSource.includes('Math.sin(interiorShakePhase') && !lotKingSource.i
 assert(lotKingSource.includes("'player_camera_external'") && lotKingSource.includes("'player_camera_interior'"), 'the native vehicle exposes persistent external and interior camera dummies');
 assert(lotKingSource.includes('syncPlayerCameraConfigFromDummy') && editorRuntimeSource.includes('GAME.player.cameraDummies'), 'camera dummy gizmos drive the authored camera config and remain editor-only');
 assert(lotKingSource.includes('interiorDummy.getWorldPosition(want)') && lotKingSource.includes('interiorDummy.getWorldQuaternion(interiorCameraWorldQuaternion)'), 'the runtime cockpit camera copies one complete world transform from its authored dummy');
-assert(lotKingSource.includes('lookBack ? -12 : 12') && lotKingSource.includes('if(lookBack) camera.rotateY(Math.PI)'), 'mapped Look Back reverses only the cockpit viewing direction while preserving its authored position');
+assert(lotKingSource.includes('lookBack ? -12 : 12') && (lotKingSource.match(/if\(lookBack\) camera\.rotateY\(Math\.PI\)/g)||[]).length >= 2, 'mapped Look Back survives both cockpit and authored external-camera rotation while preserving camera position');
 assert(editorRuntimeSource.includes('interiorDummy.getWorldPosition(gameCam.position)') && editorRuntimeSource.includes('interiorDummy.getWorldQuaternion(gameCam.quaternion)'), 'the editor cockpit preview uses the exact same dummy transform as gameplay');
 assert(editorRuntimeSource.includes('syncPlayerDummyPreviewCamera(selectedPlayerCamera)') && editorRuntimeSource.includes("data.editorType === 'playerCamera'"), 'selecting a player camera renders that exact dummy in the floating preview independently of the active gameplay mode');
 assert(skySource.includes('nightEnvironment:1') && skySource.includes('LIGHTING.moonIndirect=clampf(Number(LIGHTING.moonIndirect)||0,0,4)') && skySource.includes('LIGHTING.nightEnvironment=clampf(Number(LIGHTING.nightEnvironment)||0,0,5)'), 'night indirect and environment response have useful extended authoring ranges');
@@ -122,7 +134,7 @@ assert(driveTuningSource.includes('frontDriveBias:0') && lotKingSource.includes(
 assert(vehiclePawnSource.includes('frontDriveBias') && vehiclePawnSource.includes('engineForces[index] = engineForce * (1 - frontDriveBias)'), 'Logic Vehicle Pawns share the authored axle drive distribution instead of implicitly powering every wheel');
 assert(engineControllerSource.includes('boostTarget') && engineControllerSource.includes('state.boost01') && engineControllerSource.includes('Math.exp(-boostRate'), 'turbo torque uses persistent progressive spool pressure rather than an RPM threshold step');
 assert(driveTuningSource.includes('frontSuspension') && driveTuningSource.includes('rearDamping') && physicsWorldSource.includes("axleValue(front, 'stiffness')"), 'front and rear suspension stiffness/damping controls reach the native raycast wheels');
-assert(sceneStoreSource.includes('retainDynamicRadioSurface(controller)') && radioHudSource.includes('materialSurfaceAvailable || !!resolveAvailability(cfg)'), 'an authored Radio HUD material makes its shared radio actions available');
+assert(sceneStoreSource.includes('retainDynamicRadioSurface(controller)') && radioHudSource.includes('runtimeAvailability({') && radioHudSource.includes('if(!available && !editorPreview) return false;'), 'an authored Radio HUD material mirrors the vehicle radio but cannot create ambient level playback');
 assert(radioHudSource.includes('playFromSurface') && radioHudSource.includes('RADIO PLAYBACK FAILED'), 'material radio controls initialize audio from the user gesture and report playback failures');
 assert(lotKingSource.includes('cockpitInteractionSlowMotionRequested') && lotKingSource.includes('requested && !runtimeSinglePlayer()') && lotKingSource.includes('state.peerCount > 0'), 'cockpit cursor slow-motion is guarded against local and P2P multiplayer');
 assert(sceneStoreSource.includes('uses.get(material)') && sceneStoreSource.includes('lkMaterialSlotInstance'), 'per-mesh dynamic surfaces split shared glTF material references before editing');

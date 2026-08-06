@@ -21,9 +21,17 @@ const SHADOW_PRESETS = Object.freeze({
   high:   Object.freeze({label:'High',   mapSize:2048, radius:1.75}),
   ultra:  Object.freeze({label:'Ultra',  mapSize:4096, radius:2.25}),
 });
-const VIDEO_SETTING_KEYS = Object.freeze(['quality','renderResolution','textureSize','antialiasing','rendererMode','exposure','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting','cinematicLensFlares']);
+const SKETCH_STYLE_SETTING_KEYS = Object.freeze([
+  'visualStyle','sketchMedium','sketchStrength','sketchDetail','sketchHatching',
+  'sketchLineNoise','sketchPigment','sketchColorNoise','sketchSaturation',
+  'sketchLightGain','sketchAtmosphere','sketchPaper',
+]);
+const VIDEO_SETTING_KEYS = Object.freeze(['quality','renderResolution','textureSize','antialiasing','rendererMode','exposure',...SKETCH_STYLE_SETTING_KEYS,'monochrome','shadows','shadowQuality','ambientOcclusion','aoQuality','reflections','reflectionQuality','reflectionDistance','volumetricLighting','cinematicLensFlares']);
 const VIDEO_DEFAULTS = Object.freeze({
   quality:'high', renderResolution:1, textureSize:1024, antialiasing:'ssaa2x', rendererMode:'webgl', exposure:1.12,
+  visualStyle:'natural', sketchMedium:'painted-storybook', sketchStrength:.78, sketchDetail:.72,
+  sketchHatching:1, sketchLineNoise:.35, sketchPigment:.82, sketchColorNoise:1,
+  sketchSaturation:1, sketchLightGain:1, sketchAtmosphere:.68, sketchPaper:.38, monochrome:false,
   shadows:true, shadowQuality:'auto', shadowDistance:55, shadowBias:-0.00035, shadowNormalBias:0.035, shadowSoftness:1,
   ambientOcclusion:true, aoQuality:'medium',
   reflections:true, reflectionQuality:'high', reflectionDistance:35, volumetricLighting:true, cinematicLensFlares:false,
@@ -171,6 +179,19 @@ function normalizeVideoValues(input){
     antialiasing: ['off','fxaa','ssaa2x','ssaa4x'].includes(antialiasing) ? antialiasing : VIDEO_DEFAULTS.antialiasing,
     rendererMode: ['raytracing','pathtracing'].includes(src.rendererMode) ? src.rendererMode : 'webgl',
     exposure: clampNumber(src.exposure, VIDEO_DEFAULTS.exposure, .7, 1.6),
+    visualStyle: src.visualStyle === 'illustrated-sketch' ? 'illustrated-sketch' : 'natural',
+    sketchMedium: ['paper-pencil','illustrated-ink','painted-storybook'].includes(src.sketchMedium) ? src.sketchMedium : 'painted-storybook',
+    sketchStrength: clampNumber(src.sketchStrength, VIDEO_DEFAULTS.sketchStrength, 0, 1),
+    sketchDetail: clampNumber(src.sketchDetail, VIDEO_DEFAULTS.sketchDetail, 0, 1),
+    sketchHatching: clampNumber(src.sketchHatching, VIDEO_DEFAULTS.sketchHatching, 0, 1),
+    sketchLineNoise: clampNumber(src.sketchLineNoise, VIDEO_DEFAULTS.sketchLineNoise, 0, 1),
+    sketchPigment: clampNumber(src.sketchPigment, VIDEO_DEFAULTS.sketchPigment, 0, 1),
+    sketchColorNoise: clampNumber(src.sketchColorNoise, VIDEO_DEFAULTS.sketchColorNoise, 0, 1),
+    sketchSaturation: clampNumber(src.sketchSaturation, VIDEO_DEFAULTS.sketchSaturation, 0, 2),
+    sketchLightGain: clampNumber(src.sketchLightGain, VIDEO_DEFAULTS.sketchLightGain, .25, 3),
+    sketchAtmosphere: clampNumber(src.sketchAtmosphere, VIDEO_DEFAULTS.sketchAtmosphere, 0, 1),
+    sketchPaper: clampNumber(src.sketchPaper, VIDEO_DEFAULTS.sketchPaper, 0, 1),
+    monochrome: src.monochrome === true,
     shadows: src.shadows !== false,
     shadowQuality: ['auto','low','medium','high','ultra'].includes(src.shadowQuality) ? src.shadowQuality : VIDEO_DEFAULTS.shadowQuality,
     shadowDistance: clampNumber(src.shadowDistance, VIDEO_DEFAULTS.shadowDistance, 15, 180),
@@ -191,7 +212,22 @@ function normalizeVideoProject(input){
   const src = input || {};
   const exposed = {};
   VIDEO_SETTING_KEYS.forEach(key => { exposed[key] = !src.exposed || src.exposed[key] !== false; });
-  return {version:5, defaults:normalizeVideoValues(src.defaults || src), exposed};
+  const sourceAuthority=src.authority||{};
+  const authority={
+    visualStyle:sourceAuthority.visualStyle==='author'?'author':'player',
+    monochrome:sourceAuthority.monochrome==='author'?'author':'player',
+  };
+  return {version:8, defaults:normalizeVideoValues(src.defaults || src), exposed, authority};
+}
+
+function authorEffectiveValues(input, project){
+  const values=normalizeVideoValues(input);
+  const config=normalizeVideoProject(project);
+  if(config.authority.visualStyle==='author'){
+    SKETCH_STYLE_SETTING_KEYS.forEach(key=>{values[key]=config.defaults[key];});
+  }
+  if(config.authority.monochrome==='author')values.monochrome=config.defaults.monochrome;
+  return values;
 }
 
 function createVideo(options){
@@ -240,7 +276,15 @@ function createVideo(options){
 
   function applyCore(){
     if(!renderer) return;
-    const activeValues = presentationReasons.size ? menuRenderValues(values) : values;
+    // Keep the shared VIDEO object authoritative too: post-processing, editor
+    // viewport routing and gameplay all retain this object by reference.
+    // Copying forced values here prevents a hidden/programmatic player change
+    // from bypassing the project author's two independent output locks.
+    if(project.authority.visualStyle==='author'){
+      SKETCH_STYLE_SETTING_KEYS.forEach(key=>{values[key]=project.defaults[key];});
+    }
+    if(project.authority.monochrome==='author')values.monochrome=project.defaults.monochrome;
+    const activeValues = authorEffectiveValues(presentationReasons.size ? menuRenderValues(values) : values, project);
     const preset = VIDEO_PRESETS[activeValues.quality] || VIDEO_PRESETS.high;
     const aaRatio = activeValues.antialiasing === 'off' ? .8 : (activeValues.antialiasing === 'ssaa2x' ? Math.SQRT2 : (activeValues.antialiasing === 'ssaa4x' ? 2 : 1));
     const rayRatio = 1;
@@ -327,6 +371,8 @@ function createVideo(options){
     if(compat)document.body.dataset.lkGpuCompatibility=compat.conservativePost?'conservative':'full';
     document.body.classList.toggle('lk-renderer-raytracing', activeValues.rendererMode === 'raytracing');
     document.body.classList.toggle('lk-renderer-pathtracing', activeValues.rendererMode === 'pathtracing');
+    document.body.classList.toggle('lk-visual-sketch', activeValues.visualStyle === 'illustrated-sketch');
+    document.body.classList.toggle('lk-visual-monochrome', activeValues.monochrome === true);
     document.body.classList.toggle('lk-volumetric-lighting', !!activeValues.volumetricLighting);
     document.body.classList.toggle('lk-cinematic-lens-flares', activeValues.cinematicLensFlares !== false);
     document.body.dataset.lkVideoQuality = activeValues.quality;
@@ -432,7 +478,7 @@ function createVideo(options){
     setWarmProfile,
     setPresentationReason,
     isMenuPresentation:() => presentationReasons.size > 0,
-    effectiveValues:() => Object.assign({}, presentationReasons.size ? menuRenderValues(values) : values),
+    effectiveValues:() => authorEffectiveValues(presentationReasons.size ? menuRenderValues(values) : values, project),
     applyAdaptiveLow,
     benchmarkPreference:() => Object.assign({}, benchmarkPreference),
   };
@@ -442,7 +488,7 @@ function syncVideoControls(project, values){
   const config = normalizeVideoProject(project);
   const selectors = {
     quality:'#videoQuality', renderResolution:'#videoResolution', textureSize:'#videoTextureSize', antialiasing:'#videoAA', rendererMode:'#videoRenderer',
-    exposure:'#videoExposure', shadows:'#videoShadows', shadowQuality:'#videoShadowQuality',
+    exposure:'#videoExposure', visualStyle:'#videoVisualStyle', sketchMedium:'#videoSketchMedium', sketchStrength:'#videoSketchStrength', sketchDetail:'#videoSketchDetail', sketchHatching:'#videoSketchHatching', sketchLineNoise:'#videoSketchLineNoise', sketchPigment:'#videoSketchPigment', sketchColorNoise:'#videoSketchColorNoise', sketchSaturation:'#videoSketchSaturation', sketchLightGain:'#videoSketchLightGain', sketchAtmosphere:'#videoSketchAtmosphere', sketchPaper:'#videoSketchPaper', monochrome:'#videoMonochrome', shadows:'#videoShadows', shadowQuality:'#videoShadowQuality',
     ambientOcclusion:'#videoAmbientOcclusion',aoQuality:'#videoAoQuality',
     reflections:'#videoReflections', reflectionQuality:'#videoReflectionQuality', reflectionDistance:'#videoReflectionDistance',
     volumetricLighting:'#videoVolumetricLighting',
@@ -453,15 +499,29 @@ function syncVideoControls(project, values){
     if(input){
       if(input.type === 'checkbox') input.checked = !!values[key];
       else input.value = values[key];
+      const authorGroup=key==='monochrome'?'monochrome':(SKETCH_STYLE_SETTING_KEYS.includes(key)?'visualStyle':'');
+      const authorLocked=authorGroup&&config.authority[authorGroup]==='author';
+      const editorOverlay=input.closest&&input.closest('#settingsOverlay');
+      const editorMode=!!(editorOverlay&&editorOverlay.classList.contains('editor'));
+      input.disabled=!!(authorLocked&&!editorMode);
+      input.dataset.authorLocked=authorLocked?'true':'false';
       if(input.type === 'range'){
         const out = document.querySelector('output[for="' + input.id + '"]');
-        if(out) out.value = key === 'reflectionDistance' ? Math.round(values[key]) + ' m' : Number(values[key]).toFixed(2) + '×';
+        if(out) out.value = key === 'reflectionDistance'
+          ? Math.round(values[key]) + ' m'
+          : (key === 'sketchSaturation' || key === 'sketchLightGain')
+            ? Number(values[key]).toFixed(2) + '×'
+          : SKETCH_STYLE_SETTING_KEYS.includes(key)
+            ? Math.round(Number(values[key]) * 100) + '%'
+            : Number(values[key]).toFixed(2) + '×';
       }
     }
     document.querySelectorAll('[data-video-setting="' + key + '"]').forEach(row => {
       row.dataset.videoExposed = config.exposed[key] === false ? 'false' : 'true';
       const editorMode = !!(row.closest('#settingsOverlay') && row.closest('#settingsOverlay').classList.contains('editor'));
       row.classList.toggle('hidden', !editorMode && config.exposed[key] === false);
+      const authorGroup=key==='monochrome'?'monochrome':(SKETCH_STYLE_SETTING_KEYS.includes(key)?'visualStyle':'');
+      row.dataset.authorLocked=authorGroup&&config.authority[authorGroup]==='author'?'true':'false';
     });
   });
 }
@@ -517,8 +577,23 @@ function createMenu(options){
     const resolution = document.getElementById('videoResolution');
     const textureSize = document.getElementById('videoTextureSize');
     const aa = document.getElementById('videoAA');
+    const gpuBackend = document.getElementById('videoGpuBackend');
+    const gpuBackendStatus = document.getElementById('videoGpuBackendStatus');
     const rendererMode = document.getElementById('videoRenderer');
     const exposure = document.getElementById('videoExposure');
+    const visualStyle = document.getElementById('videoVisualStyle');
+    const sketchMedium = document.getElementById('videoSketchMedium');
+    const sketchStrength = document.getElementById('videoSketchStrength');
+    const sketchDetail = document.getElementById('videoSketchDetail');
+    const sketchHatching = document.getElementById('videoSketchHatching');
+    const sketchLineNoise = document.getElementById('videoSketchLineNoise');
+    const sketchPigment = document.getElementById('videoSketchPigment');
+    const sketchColorNoise = document.getElementById('videoSketchColorNoise');
+    const sketchSaturation = document.getElementById('videoSketchSaturation');
+    const sketchLightGain = document.getElementById('videoSketchLightGain');
+    const sketchAtmosphere = document.getElementById('videoSketchAtmosphere');
+    const sketchPaper = document.getElementById('videoSketchPaper');
+    const monochrome = document.getElementById('videoMonochrome');
     const shadows = document.getElementById('videoShadows');
     const shadowQuality = document.getElementById('videoShadowQuality');
     const ambientOcclusion = document.getElementById('videoAmbientOcclusion');
@@ -778,6 +853,54 @@ function createMenu(options){
       if(video) video.antialiasing = aa.value;
       applyVideo({heavy:true, message:tr('Rebuilding the render surface…', 'Ricostruzione superficie di rendering…')});
     });
+    if(gpuBackend){
+      const backend=window.LK_RUNTIME_RENDERING_BACKEND;
+      const syncGpuBackend=capabilities=>{
+        if(!backend){gpuBackend.disabled=true;if(gpuBackendStatus)gpuBackendStatus.textContent=tr('GPU backend manager unavailable.','Gestore backend GPU non disponibile.');return;}
+        const renderer=window.LOT_KING&&LOT_KING.core&&LOT_KING.core.renderer;
+        const report=backend.describe?backend.describe(renderer):null;
+        const readiness=backend.migrationReadiness?backend.migrationReadiness(capabilities||report&&report.capabilities):null;
+        const webgpuOption=gpuBackend.querySelector('option[value="webgpu"]');
+        const autoOption=gpuBackend.querySelector('option[value="auto"]');
+        const webglOption=gpuBackend.querySelector('option[value="webgl"]');
+        if(autoOption)autoOption.textContent=tr('Auto · guarded WebGL 2','Auto · WebGL 2 protetto');
+        if(webglOption)webglOption.textContent='WebGL 2 · stable';
+        if(webgpuOption){
+          const selectable=!!(readiness&&readiness.runtimeIncluded&&readiness.platformAvailable);
+          webgpuOption.disabled=!selectable;
+          webgpuOption.textContent=readiness&&readiness.defaultSafe
+            ? tr('WebGPU · qualified','WebGPU · qualificato')
+            : (selectable?tr('WebGPU · experimental','WebGPU · sperimentale'):tr('WebGPU · unavailable on this device','WebGPU · non disponibile su questo dispositivo'));
+        }
+        gpuBackend.value=backend.gpuQuarantined&&backend.gpuQuarantined()
+          ? 'webgl'
+          : (backend.preference?backend.preference():'auto');
+        if(gpuBackendStatus){
+          const apiReady=!!(capabilities&&capabilities.webgpuApi||report&&report.capabilities&&report.capabilities.webgpuApi);
+          const adapterReady=capabilities&&Object.prototype.hasOwnProperty.call(capabilities,'adapterAvailable')?capabilities.adapterAvailable:null;
+          const active=report&&report.effective==='webgpu'?'WebGPU':'WebGL 2';
+          const experimental=readiness&&readiness.runtimeIncluded&&readiness.platformAvailable&&!readiness.defaultSafe;
+          gpuBackendStatus.textContent=readiness&&readiness.defaultSafe
+            ? tr('WebGPU passed the engine and mobile gates. Active: ','WebGPU ha superato le verifiche motore e mobile. Attivo: ')+active
+            : (experimental
+              ? tr('Experimental full-engine backend; changing it reloads Editor/Play. Automatic WebGL 2 fallback remains active. Current: ','Backend sperimentale per tutto il motore; il cambio ricarica Editor/Play. Il fallback WebGL 2 resta attivo. Corrente: ')+active
+              : tr('WebGPU cannot start on this browser/device. API: ','WebGPU non può avviarsi su questo browser/dispositivo. API: ')+(apiReady?'ready':'unavailable')+(adapterReady==null?'':(' · adapter: '+(adapterReady?'ready':'unavailable')))+' · '+tr('current: ','corrente: ')+active);
+        }
+      };
+      gpuBackend.addEventListener('change',()=>{
+        if(!backend)return;
+        const selected=gpuBackend.value;
+        const readiness=backend.migrationReadiness?backend.migrationReadiness():null;
+        if(selected==='webgpu'&&!(readiness&&readiness.runtimeIncluded&&readiness.platformAvailable)){gpuBackend.value=backend.preference();syncGpuBackend();return;}
+        backend.setPreference(selected);
+        syncGpuBackend();
+        // A canvas cannot change GPU context after construction. Reloading is
+        // the deterministic switch for Editor, Play and gameplay alike.
+        setTimeout(()=>location.reload(),60);
+      });
+      syncGpuBackend();
+      if(backend&&backend.probe)backend.probe().then(syncGpuBackend).catch(()=>syncGpuBackend());
+    }
     if(rendererMode){
       rendererMode.value = video && video.rendererMode || 'webgl';
       rendererMode.addEventListener('change', () => {
@@ -818,6 +941,49 @@ function createMenu(options){
         if(video) video.exposure = clampNumber(exposure.value, VIDEO_DEFAULTS.exposure, .7, 1.6);
         syncExposureOutput();
         applyVideo();
+      });
+    }
+    if(visualStyle){
+      visualStyle.value = video && video.visualStyle || VIDEO_DEFAULTS.visualStyle;
+      visualStyle.addEventListener('change', () => {
+        if(video) video.visualStyle = visualStyle.value === 'illustrated-sketch' ? 'illustrated-sketch' : 'natural';
+        applyVideo({heavy:true, message:tr('Applying illustrated visual style…', 'Applicazione stile visivo illustrato…')});
+      });
+    }
+    if(sketchMedium){
+      sketchMedium.value = video && video.sketchMedium || VIDEO_DEFAULTS.sketchMedium;
+      sketchMedium.addEventListener('change', () => {
+        if(video) video.sketchMedium = ['paper-pencil','illustrated-ink','painted-storybook'].includes(sketchMedium.value) ? sketchMedium.value : 'painted-storybook';
+        applyVideo({message:tr('Changing sketch medium…', 'Cambio supporto sketch…')});
+      });
+    }
+    const bindSketchRange = (input, key, message, min=0, max=1, format=value=>Math.round(value * 100) + '%') => {
+      if(!input) return;
+      input.value = video && video[key] != null ? video[key] : VIDEO_DEFAULTS[key];
+      const output = document.querySelector('output[for="' + input.id + '"]');
+      const update = () => {
+        if(video) video[key] = clampNumber(input.value, VIDEO_DEFAULTS[key], min, max);
+        if(output) output.value = format(Number(input.value));
+        applyVideo({message});
+      };
+      input.addEventListener('input', update);
+      if(output) output.value = format(Number(input.value));
+    };
+    bindSketchRange(sketchStrength, 'sketchStrength', tr('Updating ink strength…', 'Aggiornamento intensità inchiostro…'));
+    bindSketchRange(sketchDetail, 'sketchDetail', tr('Updating sketch detail…', 'Aggiornamento dettaglio sketch…'));
+    bindSketchRange(sketchHatching, 'sketchHatching', tr('Updating cross-hatching…', 'Aggiornamento tratteggio…'));
+    bindSketchRange(sketchLineNoise, 'sketchLineNoise', tr('Updating drawn-line variation…', 'Aggiornamento irregolarità linee…'));
+    bindSketchRange(sketchPigment, 'sketchPigment', tr('Updating illustrated pigment…', 'Aggiornamento pigmento illustrato…'));
+    bindSketchRange(sketchColorNoise, 'sketchColorNoise', tr('Updating pigment noise…', 'Aggiornamento noise pigmento…'));
+    bindSketchRange(sketchSaturation, 'sketchSaturation', tr('Updating sketch colour…', 'Aggiornamento colore sketch…'), 0, 2, value=>value.toFixed(2)+'×');
+    bindSketchRange(sketchLightGain, 'sketchLightGain', tr('Updating sketch light gain…', 'Aggiornamento gain luce sketch…'), .25, 3, value=>value.toFixed(2)+'×');
+    bindSketchRange(sketchAtmosphere, 'sketchAtmosphere', tr('Updating atmospheric stylisation…', 'Aggiornamento stilizzazione atmosferica…'));
+    bindSketchRange(sketchPaper, 'sketchPaper', tr('Updating paper grain…', 'Aggiornamento grana carta…'));
+    if(monochrome){
+      monochrome.checked = !!(video && video.monochrome);
+      monochrome.addEventListener('change', () => {
+        if(video) video.monochrome = !!monochrome.checked;
+        applyVideo({message:tr('Updating monochrome filter…', 'Aggiornamento filtro bianco e nero…')});
       });
     }
     if(reflections){
@@ -901,7 +1067,7 @@ function createMenu(options){
 
 window.LK_RUNTIME_SETTINGS_MENU = Object.freeze({
   createVideo, createMenu, presets:VIDEO_PRESETS, shadowPresets:SHADOW_PRESETS, defaults:VIDEO_DEFAULTS,
-  normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, adaptiveLowValues, menuRenderValues, syncControls:syncVideoControls,
+  normalizeValues:normalizeVideoValues, normalizeProject:normalizeVideoProject, authorEffectiveValues, adaptiveLowValues, menuRenderValues, syncControls:syncVideoControls,
   resolvePixelRatio, formatRenderResolution, textureSizes:TEXTURE_SIZES,
   renderBudget:Object.freeze({ratioCeiling:RENDER_RATIO_CEILING, longEdge:RENDER_BUFFER_LONG_EDGE, pixels:RENDER_BUFFER_PIXELS}),
   menuRenderProfile:MENU_RENDER_PROFILE,

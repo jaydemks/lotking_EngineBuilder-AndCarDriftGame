@@ -78,6 +78,7 @@ function create(options){
     call('resetGameplayCamera');
     call('disposePhysicsWorld');
     call('disposeRenderLists');
+    delete gameState.runtimeLevelRole;
   }
 
   function prepareEditorLevel(){
@@ -114,6 +115,7 @@ function create(options){
     call('resetGameplayCamera');
     const levelRole = call('currentLevelRole') || 'gameplay';
     const menuSession = levelRole === 'editor-menu' || levelRole === 'game-menu';
+    gameState.runtimeLevelRole = levelRole;
     call('setMenuPresentation', 'menu-overlay', false);
     call('setMenuPresentation', 'menu-session', menuSession);
     call('initGameplayPhysics', {levelRole, menuSession});
@@ -126,6 +128,9 @@ function create(options){
     } else {
       call('pauseMenuMusic');
       call('beginRadio');
+      // Logic runtime construction mounts Player-specific HUD controllers.
+      // Reassert the container after that synchronous lifecycle boundary.
+      setHudVisible(true);
     }
   }
 
@@ -150,6 +155,7 @@ function create(options){
     call('resetGameplayCamera');
     call('disposePhysicsWorld');
     call('disposeRenderLists');
+    delete gameState.runtimeLevelRole;
     if(gameState.editorActive){
       call('setMenuPresentation', 'menu-session', false);
       if(overlay){

@@ -97,16 +97,40 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 - `js/runtime/world-generation.js`
   Default parking-lot track factory: ground, walls, props, parked cars, cones, light poles, and track-owned lights.
 
+- `js/runtime/world/procedural-world-schema.js`, `procedural-terrain.js`, `procedural-water.js`, `procedural-archipelago.js`, `procedural-world-system.js`
+  Versioned per-level world envelope. These modules keep the authored Y=0 work plane unchanged while generating a deterministic plateau/coast/seabed field, renderer-neutral PBR ocean/lakes/rivers, an instanced horizon archipelago, shared terrain/physics samples and deferred WebGPU-safe lifecycle. See `docs/PROCEDURAL_WORLD.md`.
+
 - `js/runtime/physics-world.js`
-  Cannon world adapter: player body creation, static collider rebuild, height-aware vertical cylinders for circular props such as light poles, body sync, physics stepping, and teardown.
+  Cannon world adapter: player body creation, static collider rebuild, procedural Heightfield replacement of the legacy infinite Y=0 plane, height-aware vertical cylinders for circular props such as light poles, body sync, physics stepping, and teardown.
 
 ## Logic Element Runtime
 
 - `js/runtime/pawn-core.js`
-  Generic Pawn foundation: stable identity, authoring/runtime flags, lifecycle, possession callbacks, snapshots and a component-factory registry. Vehicle Pawn consumes this layer; future Human and Animal Pawns can reuse it without inheriting wheel, engine or RaycastVehicle assumptions.
+  Generic Pawn foundation: stable identity, authoring/runtime flags, lifecycle, possession callbacks, snapshots and a component-factory registry. Vehicle, Character, Sketchbook and Animal Pawns consume this layer without inheriting one another's wheel, engine or locomotion assumptions.
 
 - `js/runtime/vehicle-pawns.js`
   Versioned `VehiclePawn` v2 contract and registry exposed as `LOT_KING.pawns`. It separates authoring configuration, runtime state and visual ownership; provides lifecycle, reset/sleep/dispose, nullable Player 1–4 possession, an adapter for the untouched native Player Car, Cannon/fallback locomotion, independent synth audio, metric widgets, vehicle effects and Pawn-scoped runtime events.
+
+- `js/runtime/sketchbook-pawns.js`
+  Separate `sketchbookPawn` runtime adapted from swift502/Sketchbook: compound-capsule advanced character locomotion, driver/passenger seats and linked-door animation, source-tuned RaycastVehicle car handling, arcade airplane and helicopter flight, world physics/path/scenario/spawn metadata binding and shared Cannon stepping. Aircraft wheel braking is a normal remappable Vehicle action rather than a direct keyboard/gamepad read. It registers in the existing Pawn registry but does not replace or retune the native or editable racing/drift Player Car paths.
+
+- `js/runtime/sketchbook-open-world-level-template.js`
+  Default Open World level builder. It places the original placeholder world plus editable advanced-character, car, airplane and helicopter Logic Elements with deterministic IDs and retained source/license/metadata provenance. It disables the native Player Car only inside this template; Empty and every other template keep their ordinary authoring behavior.
+
+- `js/runtime/animal-pawns.js` / `js/runtime/animal-placeholder-locomotion.js`
+  Independent quadruped Pawn runtime and animated fallback for cat, dog, horse and generic author-defined species. Rigged GLB/FBX Main Meshes and Motion Sets remain authoritative when supplied; species abilities, rideable horse seats, possession and lifecycle stay Pawn-scoped.
+
+- `js/runtime/ai/actor-cover-planner.js`
+  Focused local-cover service used by Actor Behavior. It searches ordinary colliders with a bounded fair candidate budget and a per-search spatial blocker index, rejects Pawn-owned and vertically irrelevant geometry, scores and reserves a quantized protected face/slot, drives approach/retry/stall state and permits cover attachment only at the authored reach distance. Reservations are lifecycle-owned and immediately reusable after release. It is deliberately not a navmesh or global pathfinder.
+
+- `js/runtime/ai/actor-behavior.js`
+  Reusable unpossessed-actor decision layer for Character and Animal Pawns. AI is enabled only by an explicit `behavior` descriptor (with read compatibility for legacy `enemyAi`), never merely by a null Player ID. It normalizes six profiles, factions, hostile lists, squad/pack memory, box/cylinder-aware perception, patrol, guard range, fear and reactions to damage, weapon fire, explosions and death. Movement uses the Pawn's ordinary steering and the separate local cover planner; attacks use Actor Combat or Damage-Contract-backed species verbs. Behavior-owned Animal chase, target, cover and record state is released synchronously on possession, death, descriptor removal, Pawn disposal and Stop Preview.
+
+- `js/runtime/objective-system.js` / `js/runtime/objective-hud.js`
+  Shared, editor-authored mission state and HUD used by the game-mode templates. Objectives, rewards, success/failure and runtime events persist through the same Logic Element graph contract used by Play Preview and playable export.
+
+- `js/runtime/{snowboarding,cat-neighborhood,jungle-car-escape,fps-enemy-outpost}-level-template.js`
+  Self-registering editable templates for the four additional game modes. Each creates ordinary scene entries and Logic Elements rather than a hidden bespoke runtime, so authors can replace assets, tune objectives and remove or add systems from the editor.
 
 ## Soccer Game Mode
 
@@ -131,6 +155,11 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 - `js/runtime/character-audio.js`
   Character Sound Sets: on-foot audio for footsteps, weapons, explosive FX and body foley, procedural by default. Each slot is a modular synthesis recipe (filtered noise burst, pitched/sub sweep, high-Q material ring, optional grains) plus an optional sample that wins when it loads, so an empty or broken path degrades to sound rather than to silence. Footsteps are spaced by distance walked with separate walk/run strides and pick their recipe from the surface in the movement snapshot; weapon and explosion audio is driven by the Pawn event channel. The shipped explosion layers a debris transient, resonant body and 808-style sub drop. The decision layer (`defaultSet`, `normalizeSet`, `weaponClassFor`, `createGait`) is DOM-free and node-testable; only the Web Audio graph needs a browser.
 
+- `js/runtime/character-animation-blend.js`
+  Shared semantic skeletal-crossfade policy for imported animation mixers and
+  procedural Character bodies. It keeps transition weights normalized, releases
+  moving landings into locomotion before the clip ends, and prevents stale
+  landing actions from surviving a repeated jump.
 - `js/runtime/soccer-locomotion.js`
   Legacy filename for the shared Character locomotion module. It exports the generic `LK_RUNTIME_CHARACTER_LOCOMOTION` contract (and the older Soccer alias): velocity damping, metadata-driven Motion Set selection, weighted direction/speed blends, stride matching, one-shot actions and per-bone Edit Rig pose-layer blending. It canonicalizes Mixamo/Blender track names and uses r185 `SkeletonUtils.retargetClip()` for real source/target skeletons, including armature-span compensation for hip translation.
 
@@ -162,7 +191,16 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Generic Character Pawn control/state nodes and `Template - Player Character (Normal)`, including preset selection and explicit in-place/no-root-motion guidance for every animation slot.
 
 - `js/runtime/first-person-controller.js`
-  Character view/weapon rig attached to a Pawn that carries a `firstPerson` config block. Owns view angles with pitch clamping and **both** camera transforms handed to `lot-king.js` — the eye, and an over-the-shoulder third-person camera with wall clearance that shares the same look angles, crosshair and hitscan, so the two views are equally playable and `C` switches between them without changing anything else. Also owns aim-down-sights blending, view bob, recoil applied to the view angles themselves, and a hitscan weapon (fire mode, cadence, spread, magazine, reload, reserve, multi-pellet). Also defines the `userData.damageable` health contract and its head hit zone, and is the only code that mutates it. `attach()` composes onto the Pawn's existing `beforeMovementStep` / `afterMovementStep` / `reset` / `dispose` hooks rather than replacing them, so the third-person path is untouched. DOM-free and unit-testable in node.
+  Character view/weapon rig attached to a Pawn that carries a `firstPerson` config block. Owns view angles with pitch clamping and **both** camera transforms handed to `lot-king.js` — the eye, and an over-the-shoulder third-person camera with wall clearance that shares the same look angles, crosshair and hitscan, so the two views are equally playable and the mapped Camera Mode action (default `B` / `R3` on foot) switches between them without changing anything else. Also owns aim-down-sights blending, view bob, recoil applied to the view angles themselves, and a hitscan weapon (fire mode, cadence, spread, magazine, reload, reserve, multi-pellet). Hits resolve through the shared Damage Contract, including the head hit zone and impact metadata. `attach()` composes onto the Pawn's existing lifecycle hooks rather than replacing them, so the third-person path is untouched. DOM-free and unit-testable in node.
+
+- `js/runtime/combat/actor-combat.js`
+  Per-Pawn combat facade used by player, AI and Logic callers. It owns no global Player weapon state: it resolves or lazily attaches that actor's weapon controller and idempotently hydrates its own inventory/loadout, exposes aim/fire/reload/equip/ammo commands, performs bounded usable-weapon fallback with sidearm priority and presents an unpossessed actor's carried weapon at a discovered right-hand bone or deterministic body socket. Registry release is identity-safe and removes the visual immediately on Pawn disposal or Stop Preview. The facade is deliberately separate from behavior decisions.
+
+- `js/runtime/combat/damage-contract.js`
+  Shared synchronous mutation boundary for `userData.damageable`. The scene record remains plain serializable numeric data, while a WeakMap delegates runtime writes to Character/Animal vitals without serializing functions. Hitscan, explosions, Logic damage and props receive the same actual damage, armour, killed/dead and instigator/impact metadata result.
+
+- `js/runtime/physics/pawn-death-physics.js`
+  Renderer- and Cannon-independent death component selected by `vitals.deathPhysics`. It snapshots the live pose, discovers semantic humanoid/quadruped joints in rigged GLBs or procedural placeholders and simulates a bounded Verlet/constraint fall against the shared ground and box colliders. Insufficient or mesh-only rigs use a whole-owner rigid fallback; `animation` and `none` remain explicit modes. The standing Logic Element collider is suspended for the active death body; revive, reset and disposal restore its pose, collider state and runtime resources.
 
 - `js/runtime/fps-hud.js`
   Optional shooter overlay for a possessed character Pawn: crosshair whose gap tracks live spread and recoil, hit and kill markers, weapon name, ammo/reserve/reload, the carried loadout, health/armour/stamina bars, a collider-driven radar, the Use and Pick Up prompts, pickup toasts and a damage vignette. It mounts **inside `#hud`**, which `lot-king.js` already positions onto the rendered camera rectangle, so the crosshair sits on the optical centre in split screen and inside the editor viewport rather than on the centre of the window. It renders only during a running session or Play Preview, never in edit mode. Removing the script removes the HUD and nothing else.
@@ -171,7 +209,7 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   GASP-style traversal state machine shared by first and third person: crouch (with a headroom check that refuses to stand up under an obstacle), slow walk, slide, vault, mantle, ladder and climbable-wall climbing. Crouch and walk are speed scales layered onto the ordinary movement controller; vault, mantle and climb take over the frame and drive `owner.position` as a tween. Obstacle classification reads the same arcade box colliders the movement controller resolves against, so an obstacle is vaultable exactly when it is solid. `attach()` composes onto the Pawn hooks and adds a `movementScale` factor. DOM-free apart from event dispatch.
 
 - `js/runtime/character-vitals.js`
-  Health, armour, stamina, delayed regeneration, death and respawn for a character Pawn. Mirrors its health onto `owner.userData.damageable`, the same contract the first-person hitscan resolver writes, so the player is damaged by exactly the code that damages any other target and armour is applied in one place. Emits `OnCharacterDamaged` / `OnCharacterHealed` / `OnCharacterDied` / `OnCharacterRevived`.
+  Health, armour, stamina, delayed regeneration, death and respawn for a Character or Animal Pawn. Mirrors serializable values onto `owner.userData.damageable` and registers the authoritative mutation delegate with Damage Contract, so armour and lethal transitions happen once. While dead it gates movement, actions and weapons but continues death physics and the optional respawn timer. Emits `OnCharacterDamaged` / `OnCharacterHealed` / `OnCharacterDied` / `OnCharacterRevived` with source and impact metadata.
 
 - `js/runtime/item-system.js`
   World pickups and the per-Pawn weapon inventory. Exposes `warmup()` for the pre-benchmark, which builds one visual of every pickup kind so their shaders compile before the first medkit appears in play. An object in the scene **is** an item when it carries `userData.item = {kind, ...}`: `weapon`, `health`, `armor`, `ammo` or `custom`. The visual is whatever the object already is, so any primitive, GLB or FBX becomes a pickup with no second code path. The inventory parks each weapon's magazine and reserve while another is equipped, swaps rather than refusing a pickup at capacity, and hands the definition back on drop so a world pickup can be spawned for it. Dropped weapons reuse the view-model geometry and fall on a short ballistic arc.
@@ -204,13 +242,16 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
   Capability boundary used by node implementations to access scene objects, Three.js transforms/materials, Cannon bodies, input, audio, camera, animation, and debug output. Material/audio services also resolve supported asset-ref objects, including blob-backed `dbKey` values through `LK_ASSET_BLOBS`.
 
 - `js/logic/logic-nodes-mvp.js`
-  Catalog with 108 registered node definitions for events, flow, variables/data, math/vector, scene/transform, physics/collision, material, raycast, camera, audio, animation, and debug, plus the Part 2 `Call Subgraph`, Function Input/Return, dynamic pins and multi-output return foundations.
+  Catalog of registered node definitions for events (including semantic Pawn/Player input actions), flow, variables/data, math/vector, scene/transform, physics/collision, material, raycast, camera, audio, animation and debug, plus the Part 2 `Call Subgraph`, Function Input/Return, dynamic pins and multi-output return foundations.
 
 - `js/logic/logic-templates.js`
   Built-in Logic Element starter templates used by the Assets panel, including gameplay, interaction, debug and physics starters. Templates are placed as local editable Logic Element copies, not as hidden linked definitions.
 
+- `js/logic/logic-templates-sketchbook.js`
+  Additive Logic Element pack for the Sketchbook advanced character, car, airplane and helicopter. Each template exposes its movement/vehicle/flight, camera, spawn, possession and interaction settings and references the portable placeholder GLBs under `models/sketchbook/`, so the same systems can be composed from an Empty project.
+
 - `js/runtime/logic-elements-runner.js`
-  Runtime lifecycle bridge for Level Logic and scene Logic Elements. Builds validated runtimes, creates/starts/steps/disposes owned Vehicle Pawns, routes start/update/fixed-update/input/gamepad/resize/collision/custom/destroy events, starts internal animations, aggregates profiling stats across active graph runtimes, and manages breakpoint execution.
+  Runtime lifecycle bridge for Level Logic and scene Logic Elements. Builds validated runtimes, creates/starts/steps/disposes owned Pawns, polls possession-safe semantic action edges for a graph's own Pawn or explicit Player 1–4 nodes, routes lifecycle/gamepad/pointer/resize/collision/custom events, starts internal animations, aggregates profiling stats and manages breakpoint execution. Raw DOM key events are delivered only to legacy non-Pawn graphs; old Pawn `On Key` nodes receive the remap-aware semantic adapter.
 
 `js/engine/scene-store.js` resolves reusable Logic Element definitions before runtime creation. Linked instances share their definition and apply only exposed-variable overrides; saved entries embed the definition and resolved fallback so runtime/playable imports do not depend on another browser's local asset library.
 
@@ -277,13 +318,16 @@ Lighting, shadow and flare authoring is documented in `docs/RENDERING_LIGHTING_A
 ## Input System
 
 - `js/runtime/input/input-actions.js`
-  Pure input schema and resolver. Owns config versioning, migration, normalization, independent Vehicle/Character keyboard and gamepad schemes, input contexts, device instances, player mappings, effective schemes, conflict logic, and normalized drive-command resolution.
+  Pure input schema and resolver. Schema v15 owns migration, normalization, independent Vehicle/Character keyboard and gamepad schemes, input contexts, device instances, player mappings, effective schemes, semantic-profile-aware conflict logic and normalized action-command resolution. Character `jump` is distinct from Vehicle `reset`; Aircraft `wheelBrake`, Animal abilities and Soccer dives are explicit remappable actions; v14 project bindings and local overrides are migrated without discarding custom mappings.
 
 - `js/runtime/input/input-devices.js`
   Physical input sources for keyboard, gamepad, and touch. Tracks key/button/axis state and presents a small source API to the input manager.
 
 - `js/runtime/input/input-manager.js`
-  Runtime input coordinator exposed as `GAME.input`. Merges project `meta.input` with local user overrides, detects connected gamepads (including the connection-event window before `getGamepads()` catches up), reserves configured multiplayer devices before Player 1 auto-assign, persists remaps, computes touch visibility, and returns per-player commands in the context requested by each possessed Pawn.
+  Runtime input coordinator exposed as `GAME.input`. Merges project `meta.input` with local user overrides, detects connected gamepads (including the connection-event window before `getGamepads()` catches up), reserves configured multiplayer devices before Player 1 auto-assign, persists remaps, computes touch visibility, and returns per-player commands in the requested context. Context reads are side-effect free; possession changes the remembered Player context through an explicit setter.
+
+- `js/runtime/input/player-action-router.js`
+  Possession boundary above input resolution for Players 1–4. It derives or reads each active Pawn's `inputContextId` and semantic profile, filters mutually exclusive Character/Animal/Soccer verbs, synchronizes that Player's context and edge-dispatches only actions advertised by `inputCapabilities`. Vehicle Reset therefore reaches only a possessed Vehicle Pawn; Character lifecycle `reset()` is never treated as an input verb. Its held-edge latch also prevents an action crossing a possession transfer.
 
 - `js/runtime/input/touch-controls.js`
   On-screen mobile/portrait touch UI for steering, throttle, brake, and handbrake.

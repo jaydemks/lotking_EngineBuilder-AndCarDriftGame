@@ -836,7 +836,7 @@ test('Vehicle Pawn Cannon, Active Camera and playable ZIP sign-off', async ({pag
   expect(zip.file('vendor/THIRD_PARTY_LICENSES.md')).toBeTruthy();
   expect(zip.file('vendor/GLTFLoader.js')).toBeNull();
   const runtimeHtml = await zip.file('gameplay.html').async('string');
-  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk6');
+  expect(runtimeHtml).toContain('vendor/three-r185-compat.min.js?v=0.185.1-lk8-webgpu');
   expect(runtimeHtml).not.toMatch(/three@0\.128\.0|three\.js\/r128|examples\/js\//);
 });
 

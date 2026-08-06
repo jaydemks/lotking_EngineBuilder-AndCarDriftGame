@@ -4,20 +4,32 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
+import re
 import shutil
 import socket
 import tempfile
+import threading
+import webbrowser
+from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 STATE_URL = "/__lotking/project-state"
+SERVER_INFO_URL = "/__lotking/server-info"
 STATE_DIR = ".lotking-local"
 STATE_FILE = "active-project.lkep.json"
 STATE_BACKUP_FILE = "active-project.previous.lkep.json"
+PROJECT_HISTORY_URL = "/__lotking/project-history"
+PROJECT_HISTORY_RESTORE_URL = "/__lotking/project-history/restore"
+PROJECT_HISTORY_DIR = "project-history"
 MAX_STATE_BYTES = 512 * 1024 * 1024
+PROJECT_SHRINK_GUARD_MIN_BYTES = 1024 * 1024
+PROJECT_SHRINK_GUARD_RATIO = 0.25
 PERFORMANCE_URL = "/__lotking/developer-performance"
 PERFORMANCE_FILE = "developer-performance-latest.md"
 MAX_PERFORMANCE_BYTES = 2 * 1024 * 1024
@@ -29,6 +41,12 @@ DEMO_SPLIT_FOLDER = "demo-project"
 DEMO_SPLIT_BACKUP_FOLDER = "demo-project.previous"
 DEMO_SPLIT_THRESHOLD_BYTES = 90 * 1000 * 1000
 DEMO_CHUNK_CHAR_LIMIT = 8_000_000
+
+
+def root_fingerprint(root: Path) -> str:
+    """Identify one checkout without exposing its local filesystem path."""
+    normalized = os.path.normcase(str(Path(root).resolve()))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _utf16_length(value: str) -> int:
@@ -218,6 +236,7 @@ def performance_markdown(payload: dict) -> str:
 
 class LocalEditorHandler(SimpleHTTPRequestHandler):
     root: Path
+    project_write_lock = threading.RLock()
 
     def __init__(self, *args, directory=None, **kwargs):
         super().__init__(*args, directory=directory, **kwargs)
@@ -229,6 +248,10 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
     @property
     def performance_path(self) -> Path:
         return self.root / STATE_DIR / PERFORMANCE_FILE
+
+    @property
+    def project_history_path(self) -> Path:
+        return self.root / STATE_DIR / PROJECT_HISTORY_DIR
 
     @property
     def demo_path(self) -> Path:
@@ -253,12 +276,214 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
         self.send_error(403, "Lot King disk bridge is available only to the host computer")
         return False
 
+    @staticmethod
+    def _project_file_metadata(path: Path, source: str, identifier: str) -> dict[str, object]:
+        stat = path.stat()
+        # Project identity and save time are at the beginning of every LKEP.
+        # Reading a bounded prefix keeps the Projects panel cheap even when a
+        # portable version contains hundreds of megabytes of embedded assets.
+        with path.open("rb") as handle:
+            prefix = handle.read(1024 * 1024).decode("utf-8", errors="ignore")
+        def first(field: str) -> str | None:
+            match = re.search(r'"' + re.escape(field) + r'"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', prefix)
+            if not match:
+                return None
+            try:
+                return json.loads('"' + match.group(1) + '"')
+            except json.JSONDecodeError:
+                return match.group(1)
+        project_name = first("projectName") or first("trackName") or first("name") or path.stem
+        return {
+            "id": identifier,
+            "file": path.name,
+            "name": project_name,
+            "savedAt": first("savedAt"),
+            "bytes": stat.st_size,
+            "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            "source": source,
+        }
+
+    def _history_candidates(self) -> list[tuple[Path, str, str]]:
+        candidates: list[tuple[Path, str, str]] = []
+        history = self.project_history_path
+        if history.is_dir():
+            for path in history.glob("*.lkep.json"):
+                candidates.append((path, "version", "history/" + path.name))
+        state_dir = self.root / STATE_DIR
+        if state_dir.is_dir():
+            for path in state_dir.glob("*.json"):
+                if path.name == STATE_FILE or path.parent == history:
+                    continue
+                try:
+                    with path.open("rb") as handle:
+                        prefix = handle.read(4096)
+                    if b'"format"' not in prefix or b'"LKEP"' not in prefix:
+                        continue
+                except OSError:
+                    continue
+                source = "quarantined" if "accidental-minimal" in path.name else ("recovery" if "recovery" in path.name else "legacy-backup")
+                candidates.append((path, source, "legacy/" + path.name))
+        return candidates
+
+    def _history_records(self) -> list[dict[str, object]]:
+        records = []
+        for path, source, identifier in self._history_candidates():
+            try:
+                records.append(self._project_file_metadata(path, source, identifier))
+            except OSError:
+                continue
+        records.sort(key=lambda item: str(item.get("savedAt") or item.get("modifiedAt") or ""), reverse=True)
+        return records
+
+    def _resolve_history_file(self, identifier: str) -> Path | None:
+        if not isinstance(identifier, str) or "/" not in identifier:
+            return None
+        prefix, name = identifier.split("/", 1)
+        if not name or Path(name).name != name or not name.endswith(".json"):
+            return None
+        base = self.project_history_path if prefix == "history" else (self.root / STATE_DIR if prefix == "legacy" else None)
+        if base is None:
+            return None
+        path = base / name
+        allowed = {candidate.resolve() for candidate, _, _ in self._history_candidates()}
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return None
+        return path if resolved in allowed and path.is_file() else None
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def _archive_active_project(self, reason: str) -> dict[str, object] | None:
+        active = self.state_path
+        if not active.is_file():
+            return None
+        history = self.project_history_path
+        history.mkdir(parents=True, exist_ok=True)
+        digest = self._file_sha256(active)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        safe_reason = re.sub(r"[^a-z0-9]+", "-", str(reason or "save").lower()).strip("-") or "save"
+        stem = f"{stamp}-{safe_reason}-{digest[:12]}"
+        destination = history / f"{stem}.lkep.json"
+        sequence = 1
+        while destination.exists():
+            destination = history / f"{stem}-{sequence}.lkep.json"
+            sequence += 1
+        with tempfile.NamedTemporaryFile("wb", delete=False, dir=history, prefix="version-", suffix=".tmp") as handle:
+            temporary = Path(handle.name)
+        try:
+            shutil.copy2(active, temporary)
+            if self._file_sha256(temporary) != digest:
+                raise OSError("project-history checksum mismatch")
+            os.replace(temporary, destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return self._project_file_metadata(destination, "version", "history/" + destination.name)
+
+    def _archive_project_payload(self, payload: bytes, reason: str) -> dict[str, object]:
+        history = self.project_history_path
+        history.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(payload).hexdigest()
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        safe_reason = re.sub(r"[^a-z0-9]+", "-", str(reason or "snapshot").lower()).strip("-") or "snapshot"
+        stem = f"{stamp}-{safe_reason}-{digest[:12]}"
+        destination = history / f"{stem}.lkep.json"
+        sequence = 1
+        while destination.exists():
+            destination = history / f"{stem}-{sequence}.lkep.json"
+            sequence += 1
+        _atomic_write(destination, payload)
+        if self._file_sha256(destination) != digest:
+            destination.unlink(missing_ok=True)
+            raise OSError("project-history payload checksum mismatch")
+        return self._project_file_metadata(destination, "version", "history/" + destination.name)
+
+    def _published_demo_payload(self) -> bytes | None:
+        path = self.demo_path
+        if not path.is_file():
+            return None
+        payload = path.read_bytes()
+        try:
+            descriptor = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return payload
+        if not isinstance(descriptor, dict) or descriptor.get("format") != "LKEP_SPLIT_POINTER":
+            return payload
+        manifest_name = descriptor.get("manifest")
+        if not isinstance(manifest_name, str):
+            raise OSError("invalid split DEMO pointer")
+        manifest_path = (path.parent / manifest_name).resolve()
+        if path.parent.resolve() not in manifest_path.parents:
+            raise OSError("split DEMO manifest escapes demo folder")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("format") != "LKEP_SPLIT_MANIFEST":
+            raise OSError("invalid split DEMO manifest")
+        parts = []
+        total = 0
+        for spec in manifest.get("chunks") or []:
+            chunk = (manifest_path.parent / str(spec.get("file") or "")).resolve()
+            if manifest_path.parent not in chunk.parents or not chunk.is_file():
+                raise OSError("invalid split DEMO chunk")
+            data = chunk.read_bytes()
+            if len(data) != int(spec.get("bytes") or -1) or hashlib.sha256(data).hexdigest() != spec.get("sha256"):
+                raise OSError("split DEMO chunk integrity failure")
+            parts.append(data)
+            total += len(data)
+        if total != int(manifest.get("totalBytes") or -1):
+            raise OSError("split DEMO total size mismatch")
+        return b"".join(parts)
+
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def do_GET(self) -> None:
         request_path = self.path.split("?", 1)[0]
+        if request_path == SERVER_INFO_URL:
+            if not self.require_loopback_bridge():
+                return
+            payload = json.dumps({
+                "schema": "lotking.local-server.v1",
+                "rootFingerprint": root_fingerprint(self.root),
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if request_path == PROJECT_HISTORY_URL:
+            if not self.require_loopback_bridge():
+                return
+            requested = parse_qs(urlparse(self.path).query).get("file", [""])[0]
+            if requested:
+                path = self._resolve_history_file(requested)
+                if path is None:
+                    self.send_error(404, "Project version not found")
+                    return
+                length = path.stat().st_size
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
+                self.send_header("Content-Length", str(length))
+                self.end_headers()
+                with path.open("rb") as handle:
+                    shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+                return
+            payload = json.dumps({"ok": True, "versions": self._history_records()}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if request_path == DEMO_PUBLISH_URL:
             if not self.require_loopback_bridge():
                 return
@@ -324,12 +549,84 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
         with path.open("rb") as handle:
             shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
 
+    def do_POST(self) -> None:
+        request_path = self.path.split("?", 1)[0]
+        if request_path != PROJECT_HISTORY_RESTORE_URL:
+            self.send_error(404)
+            return
+        if not self.require_loopback_bridge():
+            return
+        if self.headers.get("X-LotKing-Project-Authority", "") != "local-disk":
+            self.send_error(409, "Explicit local project authority required")
+            return
+        if self.headers.get("X-LotKing-Confirm-Restore", "") != "1":
+            self.send_error(409, "Explicit project-version restore confirmation required")
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 64 * 1024:
+            self.send_error(413, "Invalid restore request")
+            return
+        try:
+            request = json.loads(self.rfile.read(length).decode("utf-8"))
+            identifier = request.get("id") if isinstance(request, dict) else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            identifier = None
+        source = self._resolve_history_file(identifier)
+        if source is None:
+            self.send_error(404, "Project version not found")
+            return
+        if source.stat().st_size <= 0 or source.stat().st_size > MAX_STATE_BYTES:
+            self.send_error(413, "Invalid project version size")
+            return
+        try:
+            with source.open("r", encoding="utf-8") as handle:
+                project = json.load(handle)
+            if not isinstance(project, dict) or project.get("format") != "LKEP" or "scene" not in project:
+                raise ValueError("not an LKEP project")
+            with self.project_write_lock:
+                archived = self._archive_active_project("before-restore")
+                path = self.state_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix="restore-", suffix=".tmp") as handle:
+                    temporary = Path(handle.name)
+                try:
+                    shutil.copy2(source, temporary)
+                    if self._file_sha256(source) != self._file_sha256(temporary):
+                        raise OSError("restored project checksum mismatch")
+                    os.replace(temporary, path)
+                    restored_metadata = self._project_file_metadata(path, "active", "active")
+                    restored_etag = self.file_etag(path)
+                finally:
+                    if temporary.exists():
+                        temporary.unlink()
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            self.send_error(500, f"Project version restore failed: {exc}")
+            return
+        response = json.dumps({
+            "ok": True,
+            "restored": restored_metadata,
+            "archivedCurrent": archived,
+        }).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.send_header("ETag", restored_etag)
+        self.end_headers()
+        self.wfile.write(response)
+
     def do_PUT(self) -> None:
         request_path = self.path.split("?", 1)[0]
         if request_path == DEMO_PUBLISH_URL:
             if not self.require_loopback_bridge():
                 return
-            self._publish_demo_project()
+            if self.headers.get("X-LotKing-Confirm-Demo-Publish", "") != "1":
+                self.send_error(409, "Explicit DEMO replacement confirmation required")
+                return
+            with self.project_write_lock:
+                self._publish_demo_project()
             return
         if request_path == PERFORMANCE_URL:
             if not self.require_loopback_bridge():
@@ -340,6 +637,9 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             self.send_error(404)
             return
         if not self.require_loopback_bridge():
+            return
+        if self.headers.get("X-LotKing-Project-Authority", "") != "local-disk":
+            self.send_error(409, "Explicit local project authority required")
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -358,17 +658,37 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             return
         path = self.state_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix="project-", suffix=".tmp") as handle:
-            handle.write(payload)
-            temp_path = Path(handle.name)
-        if path.is_file():
-            shutil.copy2(path, path.with_name(STATE_BACKUP_FILE))
-        os.replace(temp_path, path)
-        response = json.dumps({"ok": True, "file": f"{STATE_DIR}/{STATE_FILE}"}).encode("utf-8")
+        allow_shrink = self.headers.get("X-LotKing-Allow-Project-Shrink", "") == "1"
+        with self.project_write_lock:
+            if path.is_file() and self.headers.get("X-LotKing-Confirm-Overwrite", "") != "1":
+                self.send_error(409, "Explicit confirmation required before replacing the active project")
+                return
+            if path.is_file():
+                previous_size = path.stat().st_size
+                suspicious_shrink = (
+                    previous_size >= PROJECT_SHRINK_GUARD_MIN_BYTES
+                    and length < previous_size * PROJECT_SHRINK_GUARD_RATIO
+                )
+                if suspicious_shrink and not allow_shrink:
+                    self.send_error(409, "Refusing suspicious project shrink; use an explicit project import/replacement")
+                    return
+            archived = None
+            if path.is_file():
+                try:
+                    archived = self._archive_active_project("before-save")
+                except OSError as exc:
+                    self.send_error(500, f"Cannot preserve the current project version: {exc}")
+                    return
+            with tempfile.NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix="project-", suffix=".tmp") as handle:
+                handle.write(payload)
+                temp_path = Path(handle.name)
+            os.replace(temp_path, path)
+            saved_etag = self.file_etag(path)
+        response = json.dumps({"ok": True, "file": f"{STATE_DIR}/{STATE_FILE}", "archived": archived}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))
-        self.send_header("ETag", self.file_etag(path))
+        self.send_header("ETag", saved_etag)
         self.end_headers()
         self.wfile.write(response)
 
@@ -394,6 +714,14 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             return
         path = self.demo_path
         path.parent.mkdir(parents=True, exist_ok=True)
+        archived = None
+        try:
+            previous_payload = self._published_demo_payload()
+            if previous_payload:
+                archived = self._archive_project_payload(previous_payload, "before-demo-publish")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            self.send_error(500, f"Cannot preserve the current DEMO version: {exc}")
+            return
         publish_report: dict[str, object] = {"split": False, "chunks": 1, "largestChunkBytes": len(payload)}
         existing_split = False
         if path.is_file():
@@ -418,6 +746,7 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
             "savedAt": project.get("savedAt"),
             "trackId": meta.get("trackId"),
             "trackName": meta.get("trackName") or meta.get("levelName"),
+            "archived": archived,
             **publish_report,
         }).encode("utf-8")
         self.send_response(200)
@@ -456,29 +785,73 @@ class LocalEditorHandler(SimpleHTTPRequestHandler):
         self.wfile.write(response)
 
 
+def existing_lotking_server(port: int, root: Path) -> bool:
+    """Reuse a server only when it belongs to this exact checkout."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1.5)
+    try:
+        connection.request("GET", SERVER_INFO_URL)
+        response = connection.getresponse()
+        payload = json.loads(response.read(64 * 1024).decode("utf-8"))
+        return (
+            response.status == 200
+            and payload.get("schema") == "lotking.local-server.v1"
+            and payload.get("rootFingerprint") == root_fingerprint(root)
+        )
+    except (OSError, http.client.HTTPException, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    finally:
+        connection.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Serve LOT KING locally with a disk-backed project cache.")
     parser.add_argument("port", nargs="?", type=int, default=5700)
     parser.add_argument("--bind", "-b", default="127.0.0.1")
     parser.add_argument("--directory", "-d", default=os.getcwd())
+    parser.add_argument("--page", default="index.html")
+    parser.add_argument("--open-browser", action="store_true")
     args = parser.parse_args()
+    try:
+        bind_address = ipaddress.ip_address(socket.gethostbyname(args.bind))
+    except (ValueError, OSError):
+        parser.error("--bind must resolve to a loopback address")
+    if not bind_address.is_loopback:
+        parser.error("serve_local.py is loopback-only; use serve_lan.py for network access")
     root = Path(args.directory).resolve()
+    page = str(args.page or "index.html").lstrip("/")
     handler = lambda *a, **kw: LocalEditorHandler(*a, directory=str(root), **kw)
     LocalEditorHandler.root = root
-    server = ThreadingHTTPServer((args.bind, args.port), handler)
-    print(f"LOT KING local editor: http://localhost:{args.port}/engine_editor.html")
-    if args.bind not in {"127.0.0.1", "localhost", "::1"}:
-        print("LAN browser instances:")
-        for address in local_ips():
-            print(f"  http://{address}:{args.port}/")
-            print(f"  http://{address}:{args.port}/engine_editor.html")
-        print("Each device keeps an independent browser database; only localhost uses the disk bridge.")
+    server = None
+    selected_port = args.port
+    for candidate in range(args.port, min(65536, args.port + 20)):
+        url = f"http://localhost:{candidate}/{page}"
+        if existing_lotking_server(candidate, root):
+            print(f"LOT KING local editor already running: {url}")
+            if args.open_browser:
+                webbrowser.open(url)
+            return
+        try:
+            server = ThreadingHTTPServer((str(bind_address), candidate), handler)
+            selected_port = candidate
+            break
+        except OSError as exc:
+            if exc.errno not in {getattr(socket, "EADDRINUSE", 98), 10048}:
+                raise
+    if server is None:
+        raise SystemExit(f"No free local editor port found from {args.port} through {min(65535, args.port + 19)}.")
+    url = f"http://localhost:{selected_port}/{page}"
+    print(f"LOT KING local editor: http://localhost:{selected_port}/engine_editor.html")
+    print("Security boundary: loopback only (not exposed to LAN).")
     print(f"Project backup: {root / STATE_DIR / STATE_FILE}")
     print(f"Performance snapshot: {root / STATE_DIR / PERFORMANCE_FILE}")
+    if args.open_browser:
+        webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nStopped.")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

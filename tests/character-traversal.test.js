@@ -5,8 +5,10 @@
 // All four are DOM-free apart from event dispatch, so they run headless.
 
 const assert = require('node:assert/strict');
+const THREE = require('three');
 
 global.window = global;
+global.THREE = THREE;
 global.CustomEvent = class CustomEvent {
   constructor(type, init){ this.type = type; this.detail = (init || {}).detail || {}; }
 };
@@ -32,6 +34,7 @@ require('../js/runtime/item-system.js');
 require('../js/runtime/interaction-system.js');
 require('../js/runtime/character-audio.js');
 require('../js/runtime/input/input-actions.js');
+require('../js/logic/logic-graph.js');
 
 const ABILITIES = global.LK_RUNTIME_CHARACTER_ABILITIES;
 const VITALS = global.LK_RUNTIME_CHARACTER_VITALS;
@@ -39,6 +42,7 @@ const ITEMS = global.LK_RUNTIME_ITEMS;
 const INTERACT = global.LK_RUNTIME_INTERACTIONS;
 const FP = global.LK_RUNTIME_FIRST_PERSON;
 const AUDIO = global.LK_RUNTIME_CHARACTER_AUDIO;
+const GRAPH = global.LK_LOGIC_GRAPH;
 
 function test(name, run){
   events.length = 0;
@@ -89,6 +93,159 @@ test('ability config clamps every move and can be turned off wholesale', () => {
   assert.equal(config.crouch.speedScale, 1, 'crouch speed cannot exceed standing');
   assert.equal(config.vault.maxHeight, .2, 'vault height clamps to the low bound');
   assert.equal(config.climb.speed, 10, 'climb speed clamps to the ceiling');
+  assert.equal(config.slide.rollDistance,2.85);
+  assert.equal(config.slide.rollPlaybackRate,1);
+  assert.equal(config.surfaceAdaptation.ikWeight,.82);
+  assert.equal(config.surfaceAdaptation.rootWarpWeight,1);
+  assert.equal(config.wallFlip.settleDuration,.55);
+  assert.equal(config.wallFlip.settleSpeedScale,.42);
+});
+
+test('the surface probe measures one near hit, outward normal and full obstacle depth', () => {
+  const collider=boxCollider(0,1,2,1,.5,.6);
+  const hit=ABILITIES.boxSurfaceProbe(collider,0,0,0,1);
+  assert.ok(hit);
+  assert.ok(Math.abs(hit.z-1.4)<1e-9,'near face');
+  assert.ok(Math.abs(hit.farZ-2.6)<1e-9,'far face');
+  assert.ok(Math.abs(hit.depth-1.2)<1e-9,'measured depth');
+  assert.deepEqual([hit.normalX,hit.normalZ],[0,-1],'normal points back toward the Character');
+});
+
+test('a Character can never vault, climb or hang from its own Logic Element collider', () => {
+  const GAME=fakeGame([]),pawn=fakePawn(GAME);
+  const own=boxCollider(0,1,1.2,12,1,12,{owner:pawn.owner,climbable:true});
+  GAME.world.colliders.box.push(own);
+  pawn.movementController.configure({height:1.8,stepHeight:.55,radius:.35});
+  pawn.state.grounded=false;pawn.state.airborne=true;pawn.state.velocityY=-1;
+  const abilities=ABILITIES.create(GAME,pawn,{});
+  assert.equal(abilities.probeLedge(),null);
+  assert.equal(abilities.probeClimbSurface(),null);
+  assert.equal(abilities.probeHangLedge(0,0),null);
+  assert.equal(abilities.preMovement(.016,{}),false);
+  assert.equal(abilities.isHanging(),false,'an oversized self collider cannot become an imaginary ledge');
+});
+
+test('a huge horizontal drive surface can be walked on but never grabbed as an invisible wall', () => {
+  const GAME=fakeGame([boxCollider(-89.05,.881,268.95,287.38,.991,285.12,{horizontalSurface:true,partName:'borders_6_0'})]);
+  const pawn=fakePawn(GAME);pawn.owner.position={x:5.76,y:0,z:55.04};pawn.state.grounded=false;pawn.state.airborne=true;pawn.state.velocityY=-1;
+  pawn.movementController.configure({height:1.8,stepHeight:.55,radius:.35});
+  const abilities=ABILITIES.create(GAME,pawn,{});
+  assert.equal(abilities.probeLedge(),null);
+  assert.equal(abilities.probeHangLedge(0,0),null);
+  assert.equal(abilities.preMovement(.016,{}),false);
+  assert.equal(abilities.isHanging(),false);
+});
+
+test('vault variants support primary, weighted random and dimensional overrides', () => {
+  const rules={defaultSlot:'vault',variants:[
+    {id:'front',slot:'vault',weight:1,minHeight:.5,maxHeight:1.3,minDepth:0,maxDepth:4},
+    {id:'long',slot:'vaultBox',weight:3,override:true,priority:5,minHeight:.7,maxHeight:1.1,minDepth:.7,maxDepth:1.4},
+  ]};
+  assert.equal(ABILITIES.selectVaultVariant(Object.assign({},rules,{selectionMode:'primary'}),{rise:.9,contact:{depth:1}}).slot,'vault');
+  assert.equal(ABILITIES.selectVaultVariant(Object.assign({},rules,{selectionMode:'random'}),{},()=>.99).slot,'vaultBox');
+  assert.equal(ABILITIES.selectVaultVariant(Object.assign({},rules,{selectionMode:'conditions'}),{rise:.9,contact:{depth:1}}).slot,'vaultBox','explicit dimensional override wins');
+  assert.equal(ABILITIES.selectVaultVariant(Object.assign({},rules,{selectionMode:'conditions'}),{rise:.6,contact:{depth:.2}}).slot,'vault','ordinary matching rule remains the fallback');
+});
+
+test('a running wall flip rebounds, walks softly into idle, then requires Run release before repeating', () => {
+  const GAME=fakeGame([boxCollider(0,2,1,3,2,.25)]),pawn=fakePawn(GAME);pawn.state.speed=6;pawn.movementController.configure({height:1.8,radius:.35});
+  const abilities=ABILITIES.create(GAME,pawn,{wallFlip:{duration:.25,minSpeed:4,minHeight:1.4,reach:.8,lift:.8,pushback:.6}}),start={x:pawn.owner.position.x,y:pawn.owner.position.y,z:pawn.owner.position.z};
+  assert.equal(abilities.preMovement(.016,{z:1,sprint:true}),true);assert.equal(abilities.mode(),'wallFlip');
+  for(let i=0;i<7;i++)abilities.preMovement(.016,{z:1,sprint:true});
+  assert.ok(pawn.owner.position.y>start.y+.3,'the rebound lifts the gameplay root with the somersault');
+  assert.ok(pawn.owner.position.z<start.z-.1,'the wall normal pushes the Pawn away from the contact face');
+  for(let i=0;i<24;i++)abilities.preMovement(.016,{z:1,sprint:true});
+  assert.ok(Math.abs(pawn.owner.position.y-start.y)<1e-9,'the arc lands back on the starting floor');
+  assert.ok(Math.abs(pawn.owner.position.z-(start.z-.6))<1e-9,'the authored pushback distance is retained after landing');
+  assert.equal(abilities.mode(),'none');
+  const settling={z:1,sprint:true,sprintAmount:1};
+  assert.equal(abilities.preMovement(.016,settling),false,'held Run returns control to ordinary locomotion after the take');
+  assert.equal(settling.sprint,false,'the approach uses walk locomotion instead of another sprint take');
+  const firstScale=abilities.movementScale(settling);assert.ok(firstScale>0&&firstScale<.5,'the approach begins slowly instead of freezing');
+  let lastScale=firstScale;
+  for(let i=0;i<40;i++){const move={z:1,sprint:true,sprintAmount:1};abilities.preMovement(.016,move);lastScale=abilities.movementScale(move);}
+  assert.equal(lastScale,0,'held Forward eases all the way into idle at the wall');
+  assert.equal(abilities.mode(),'none','holding forward cannot immediately repeat the flip');
+  abilities.preMovement(.016,{z:0,sprint:false});pawn.owner.position.z=start.z;pawn.state.speed=6;
+  assert.equal(abilities.preMovement(.016,{z:1,sprint:true}),true);assert.equal(abilities.mode(),'wallFlip','releasing and pressing Run arms a new flip');
+});
+
+test('a reachable wall remains mantle or vault territory instead of auto wall-flipping', () => {
+  const GAME=fakeGame([boxCollider(0,.9,1.2,2,.9,.9)]),pawn=fakePawn(GAME);pawn.state.speed=6;pawn.movementController.configure({height:1.8,stepHeight:.55,radius:.35});
+  const abilities=ABILITIES.create(GAME,pawn,{wallFlip:{minSpeed:4,minHeight:1.35,reach:.8},mantle:{maxHeight:2.35}});
+  const ledge=abilities.probeLedge();assert.ok(ledge&&ledge.kind==='mantle','the top is a valid reachable standing surface');
+  assert.equal(abilities.preMovement(.016,{z:1,sprint:true}),false,'running at a reachable top does not steal the traversal with Wall Flip');
+  assert.equal(abilities.mode(),'none');
+});
+
+test('saved shooter movement defaults migrate to a direct physical run speed while custom values survive', () => {
+  const legacy=GRAPH.normalizeGraph({characterPawn:{movement:{runSpeed:5.9,sprintMultiplier:1.28},abilities:{crouch:{speedScale:.42},wallFlip:{enabled:true}}},variables:[
+    {name:'RunSpeed',type:'number',value:5.9,exposed:true,binding:'movement.runSpeed'},
+    {name:'SprintMultiplier',type:'number',value:1.28,exposed:true,binding:'movement.sprintMultiplier'},
+    {name:'CrouchSpeed',type:'number',value:.42,exposed:true,binding:'abilities.crouch.speedScale'},
+  ]});
+  assert.equal(legacy.characterPawn.movement.runSpeed,4.8);assert.equal(legacy.characterPawn.movement.sprintMultiplier,1);
+  assert.equal(legacy.characterPawn.abilities.crouch.speedScale,.88,'old Character graphs receive the new crouch pace');
+  assert.equal(legacy.variables.find(item=>item.binding==='abilities.crouch.speedScale').value,.88,'the exposed binding cannot restore the obsolete 0.42 value');
+  assert.equal(legacy.variables.find(item=>item.binding==='movement.runSpeed').label,'Run Movement Speed (m/s)');
+  assert.equal(legacy.characterPawn.abilities.wallFlip.settleDuration,.55);
+  assert.ok(legacy.variables.some(item=>item.binding==='abilities.wallFlip.settleSpeedScale'),'old graphs expose the new settle controls');
+  const custom=GRAPH.normalizeGraph({characterPawn:{movement:{runSpeed:5.15,sprintMultiplier:1.12},abilities:{crouch:{speedScale:.67}}},variables:[]});
+  assert.equal(custom.characterPawn.movement.runSpeed,5.15);assert.equal(custom.characterPawn.movement.sprintMultiplier,1.12);
+  assert.equal(custom.characterPawn.abilities.crouch.speedScale,.67,'custom crouch pace remains unchanged');
+});
+
+test('traversal publishes named root, hand, foot and joint-pole goals in phase order', () => {
+  const GAME=fakeGame([boxCollider(0,.45,1.2,2,.45,.3)]),pawn=fakePawn(GAME);
+  pawn.movementController.configure({height:1.8,stepHeight:.55,radius:.35});pawn.state.speed=4;
+  const abilities=ABILITIES.create(GAME,pawn,{});
+  abilities.preMovement(.016,{jump:true});
+  for(let index=0;index<8;index++)abilities.preMovement(.016,{});
+  const goals=abilities.traversalTargets();
+  ['rootTarget','leftHand','rightHand','leftFoot','rightFoot','leftElbowPole','rightElbowPole','leftKneePole','rightKneePole'].forEach(name=>assert.ok(goals&&goals[name],name+' target'));
+  assert.ok(goals.depth>.5,'the animation goals carry measured obstacle depth');
+  assert.ok(goals.handWeight>goals.footWeight,'hands establish contact before feet');
+});
+
+test('one held Jump press cannot start the same surface traversal twice', () => {
+  const GAME=fakeGame([boxCollider(0,.45,1.2,2,.45,.3)]),pawn=fakePawn(GAME);pawn.state.speed=4;pawn.movementController.configure({height:1.8,stepHeight:.55,radius:.35});
+  let starts=0;const abilities=ABILITIES.create(GAME,pawn,{}),count=event=>{if(event&&event.detail&&event.detail.type==='OnCharacterVault')starts++;};
+  addEventListener('lk-character-event',count);
+  for(let frame=0;frame<120;frame++)abilities.preMovement(.016,{jump:true});
+  removeEventListener('lk-character-event',count);
+  assert.ok(starts<=1,'held Jump is an edge-triggered traversal request, got '+starts+' starts');
+});
+
+test('probe debug helpers exist only in Editor and retain one GPU attribute across frames', () => {
+  assert.equal(ABILITIES.editorDebugAllowed({state:{editorActive:false}},{debug:true}),false);
+  assert.equal(ABILITIES.editorDebugAllowed({state:{editorActive:true}},{debug:true}),true);
+  const GAME=fakeGame([boxCollider(0,.45,1.2,2,.45,.3)]);GAME.state.editorActive=true;GAME.core.scene=new THREE.Scene();
+  const pawn=fakePawn(GAME),abilities=ABILITIES.create(GAME,pawn,{surfaceAdaptation:{debug:true}});
+  abilities.updateProbePreview();
+  const helper=GAME.core.scene.children.find(child=>child.userData&&child.userData.traversalProbeHelper);
+  assert.ok(helper&&helper.userData.helperOnly&&helper.userData.editorOnly);
+  assert.equal(abilities.traversalTargets(),null,'debug preview never drives live Character IK');
+  const attribute=helper.userData.lines.geometry.getAttribute('position');
+  abilities.updateProbePreview();
+  assert.equal(helper.userData.lines.geometry.getAttribute('position'),attribute,'debug redraw reuses one GPU buffer');
+  GAME.state.editorActive=false;abilities.updateProbePreview();
+  assert.equal(GAME.core.scene.children.includes(helper),false,'standalone mode removes the editor helper');
+});
+
+test('saved Character graphs gain contact controls once and preserve authored tuning', () => {
+  const source={name:'Saved Character',scope:'element',variables:[
+    {name:'MyIK',type:'number',value:.31,exposed:true,binding:'abilities.surfaceAdaptation.ikWeight'},
+  ],characterPawn:{abilities:{surfaceAdaptation:{ikWeight:.27,handSpacing:.68,debug:true}}}};
+  const graph=GRAPH.normalizeGraph(source);
+  assert.equal(graph.characterPawn.abilities.surfaceAdaptation.ikWeight,.27,'authored Pawn value survives');
+  assert.equal(graph.characterPawn.abilities.surfaceAdaptation.handSpacing,.68);
+  assert.equal(graph.characterPawn.abilities.surfaceAdaptation.debug,true);
+  assert.equal(graph.variables.find(v=>v.binding==='abilities.surfaceAdaptation.ikWeight').value,.31,'existing Inspector value survives');
+  const bindings=graph.variables.filter(v=>/^abilities\.surfaceAdaptation\./.test(v.binding||'')).map(v=>v.binding);
+  assert.equal(bindings.length,new Set(bindings).size,'no duplicate Inspector rows');
+  assert.ok(bindings.includes('abilities.surfaceAdaptation.debug'));
+  const again=GRAPH.normalizeGraph(graph),againBindings=again.variables.filter(v=>/^abilities\.surfaceAdaptation\./.test(v.binding||''));
+  assert.equal(againBindings.length,bindings.length,'migration is idempotent');
 });
 
 test('crouch lowers the body and the eye, and standing up restores both exactly', () => {
@@ -113,6 +270,18 @@ test('crouch lowers the body and the eye, and standing up restores both exactly'
   assert.equal(abilities.mode(), 'none');
   assert.equal(Math.round(pawn.movementController.options().height * 1000) / 1000, 1.8, 'standing height returns exactly');
   assert.equal(Math.abs(rig.state.eyeOffset), 0, 'the eye returns to the configured height');
+});
+
+test('a scalar crouch trigger produces a proportional stance', () => {
+  const GAME = fakeGame();
+  const pawn = fakePawn(GAME);
+  pawn.movementController.configure({height:1.8});
+  const abilities = ABILITIES.create(GAME, pawn, {crouch:{toggle:false,blend:40,heightScale:.5}});
+  for(let i=0;i<30;i++) abilities.preMovement(.05,{crouch:true,crouchAmount:.4});
+  assert.ok(Math.abs(abilities.crouchAmount()-.4)<.02,
+    '40% trigger pressure should produce roughly 40% crouch, got '+abilities.crouchAmount());
+  assert.ok(pawn.movementController.options().height>1.4&&pawn.movementController.options().height<1.5,
+    'capsule height follows the same scalar stance');
 });
 
 test('sprinting stands the character up instead of refusing to run', () => {
@@ -153,6 +322,17 @@ test('slow walk is a speed scale, not a separate gait', () => {
   const abilities = ABILITIES.create(GAME, fakePawn(GAME), {});
   assert.equal(abilities.movementScale({}), 1);
   assert.ok(abilities.movementScale({slowWalk:true}) < .5, 'walking is much slower than running');
+});
+
+test('crouch walks only slightly slower and migrates the old shipped default', () => {
+  const GAME=fakeGame(),pawn=fakePawn(GAME);
+  const abilities=ABILITIES.create(GAME,pawn,{crouch:{speedScale:.42,blend:1000}});
+  abilities.preMovement(.05,{crouch:true});
+  assert.ok(Math.abs(abilities.movementScale({})-.88)<.001,'legacy 0.42 crouch speed migrates to 0.88');
+  assert.equal(abilities.config().crouch.speedVersion,2);
+  const custom=ABILITIES.create(GAME,fakePawn(GAME),{crouch:{speedScale:.67}});
+  custom.preMovement(.05,{crouch:true});
+  assert.ok(Math.abs(custom.movementScale({})-.67)<.001,'a custom crouch speed remains author-owned');
 });
 
 test('a low obstacle with clear floor beyond it is a vault, a tall one is a mantle', () => {
@@ -573,6 +753,124 @@ test('a single dodge tap does nothing, and the roll ends standing', () => {
   assert.ok(pawn.owner.position.z > .5, 'it carried the character forward');
 });
 
+// A body that carries a visual root, the way a Character Pawn does: either the
+// procedural placeholder rig or a GLB asset root, both parented to the Pawn.
+function poseRigPawn(GAME, heading){
+  const THREE = require('three');
+  const owner = new THREE.Group();
+  owner.rotation.y = heading || 0;
+  const body = new THREE.Group();
+  body.name = 'Character Placeholder - T-Pose';
+  body.userData.characterPlaceholderRig = true;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(.3, .3, .3), new THREE.MeshBasicMaterial());
+  head.name = 'head'; head.position.y = 1.6; body.add(head);
+  owner.add(body);
+  owner.updateMatrixWorld(true);
+  const pawn = fakePawn(GAME);
+  pawn.owner = owner;
+  return {pawn, owner, body, head};
+}
+
+test('the roll tumbles the body about the character own axis, not the world axis', () => {
+  const THREE = require('three');
+  const GAME = fakeGame();
+  // Facing +X. Tumbling the ROOT on rotation.x would turn about the world X and
+  // send the character sideways; a forward roll has to go over the head, whatever
+  // the heading is.
+  const {pawn, owner, body, head} = poseRigPawn(GAME, Math.PI / 2);
+  pawn.state.speed = 1.2;
+  const abilities = ABILITIES.create(GAME, pawn, {});
+  abilities.preMovement(.016, {dodge:true});
+  abilities.preMovement(.016, {dodge:false});
+  abilities.preMovement(.016, {dodge:true});
+  assert.equal(abilities.mode(), 'roll');
+  // Quarter of the way through the tumble the head must have moved along the
+  // TRAVEL direction, which for this heading is +X, and dropped.
+  owner.updateMatrixWorld(true);
+  const start = head.getWorldPosition(new THREE.Vector3());
+  let guard = 0;
+  while(abilities.mode() === 'roll' && guard++ < 12) abilities.preMovement(.016, {});
+  owner.updateMatrixWorld(true);
+  const mid = head.getWorldPosition(new THREE.Vector3());
+  const localTravel = new THREE.Vector3().subVectors(mid, start).applyAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+  assert.ok(localTravel.z > .05,
+    'the head leads the roll along the way the character faces, got local dz ' + localTravel.z.toFixed(3));
+  assert.ok(Math.abs(localTravel.x) < Math.abs(localTravel.z),
+    'and not sideways, got local dx ' + localTravel.x.toFixed(3));
+  assert.equal(Number(owner.rotation.x.toFixed(6)), 0, 'the Pawn root keeps its heading contract');
+  while(abilities.mode() === 'roll' && guard++ < 500) abilities.preMovement(.016, {});
+  assert.equal(Number(body.rotation.x.toFixed(6)), 0, 'the body pose is undone when the roll ends');
+  assert.equal(Number(body.position.y.toFixed(6)), 0);
+  assert.equal(Number(body.position.z.toFixed(6)), 0);
+});
+
+test('an authored roll clip replaces the procedural body tumble', () => {
+  const GAME = fakeGame();
+  const {pawn, owner, body} = poseRigPawn(GAME, 0);
+  pawn.state.speed = 1.2;
+  pawn.config.animations.roll = 'Falling To Roll';
+  let visualProgress=0;
+  pawn.locomotion={actionProgress:()=>visualProgress};
+  pawn.playAction = function(name){
+    this.state.actionClipPlaying = true;
+    this.state.actionClipName = name;
+    this.state.actionClipDuration = 1.8;
+    return true;
+  };
+  const abilities = ABILITIES.create(GAME, pawn, {});
+  abilities.preMovement(.016, {dodge:true});
+  abilities.preMovement(.016, {dodge:false});
+  abilities.preMovement(.016, {dodge:true});
+  assert.equal(abilities.mode(), 'roll');
+  for(let i=0;i<45;i++)abilities.preMovement(.016, {});
+  assert.equal(Number(body.rotation.x.toFixed(6)),0,'the imported clip is the only visual roll authority');
+  assert.equal(Number(owner.position.z.toFixed(6)),0,'the Pawn cannot slide while the AnimationAction is still on its first frame');
+  assert.equal(abilities.mode(),'roll','the controller remains in roll for the measured 1.8 s clip instead of ending at 0.62 s');
+  visualProgress=.5;abilities.preMovement(.016,{});
+  assert.ok(Math.abs(owner.position.z-1.425)<.03,'half the visible action advances half the authored travel');
+  visualProgress=1;pawn.state.actionClipPlaying=false;abilities.preMovement(.016,{});
+  let guard=0;while(abilities.mode()==='roll'&&guard++<200)abilities.preMovement(.016,{});
+  assert.ok(Math.abs(owner.position.z-2.85)<.06,'authored Roll Travel is preserved across the clip duration: '+owner.position.z);
+});
+
+test('a slide has a visible pose, and gives it back on the way out', () => {
+  const GAME = fakeGame();
+  const {pawn, body} = poseRigPawn(GAME, 0);
+  pawn.state.speed = 6.5;
+  const abilities = ABILITIES.create(GAME, pawn, {});
+  abilities.preMovement(.016, {dodge:true});
+  abilities.preMovement(.016, {dodge:false});
+  abilities.preMovement(.016, {dodge:true});
+  assert.equal(abilities.mode(), 'slide');
+  let settled = 0, guard = 0;
+  while(abilities.mode() === 'slide' && guard++ < 40){
+    abilities.preMovement(.016, {});
+    settled = Math.min(settled, body.rotation.x);
+  }
+  assert.ok(settled < -.2, 'the body lays back through the slide, got ' + settled.toFixed(3));
+  assert.ok(body.userData.characterBodyPoseRest, 'the rest pose is captured so it can be given back');
+  while(abilities.mode() === 'slide' && guard++ < 500) abilities.preMovement(.016, {});
+  assert.equal(Number(body.rotation.x.toFixed(6)), 0, 'a finished slide leaves no pose behind');
+  assert.equal(Number(body.position.y.toFixed(6)), 0);
+});
+
+test('reset gives back a body pose left mid-move', () => {
+  const GAME = fakeGame();
+  const {pawn, body} = poseRigPawn(GAME, 0);
+  pawn.state.speed = 6.5;
+  const abilities = ABILITIES.create(GAME, pawn, {});
+  abilities.preMovement(.016, {dodge:true});
+  abilities.preMovement(.016, {dodge:false});
+  abilities.preMovement(.016, {dodge:true});
+  for(let i = 0; i < 6; i++) abilities.preMovement(.016, {});
+  assert.ok(Math.abs(body.rotation.x) > .05, 'mid-slide there is a pose to give back');
+  abilities.reset();
+  assert.equal(Number(body.rotation.x.toFixed(6)), 0);
+  assert.equal(Number(body.position.y.toFixed(6)), 0);
+  assert.equal(pawn.state.sliding, false);
+  assert.equal(pawn.state.rolling, 0);
+});
+
 test('a Pawn can name its own sound set and falls back to the level one', () => {
   const stored = {id:'guard', name:'Guard', footsteps:{volume:1.4}};
   const audio = AUDIO.create({lookupSet:id => (id === 'guard' ? stored : null)});
@@ -609,7 +907,9 @@ test('health regenerates only after the delay and never past the maximum', () =>
 test('reaching zero health kills once and respawns after the delay', () => {
   const GAME = fakeGame();
   const pawn = fakePawn(GAME);
-  const vitals = VITALS.create(GAME, pawn, {maxHealth:50, respawnDelay:1});
+  // A respawn policy is now explicit: configuration that names no mode leaves the
+  // corpse down, so an authored mode is what this asserts.
+  const vitals = VITALS.create(GAME, pawn, {maxHealth:50, respawnDelay:1, respawnMode:'spawn'});
   vitals.applyDamage(80);
   assert.equal(vitals.state.dead, true);
   assert.equal(vitals.state.health, 0);
@@ -620,6 +920,34 @@ test('reaching zero health kills once and respawns after the delay', () => {
   for(let i = 0; i < 12; i++) vitals.step(.1, {});
   assert.equal(vitals.state.dead, false);
   assert.equal(vitals.state.health, 50);
+});
+
+test('a Character with no authored respawn policy stays down', () => {
+  const GAME = fakeGame();
+  const pawn = fakePawn(GAME);
+  const vitals = VITALS.create(GAME, pawn, {maxHealth:50, respawnDelay:1});
+  vitals.applyDamage(80);
+  assert.equal(vitals.state.dead, true);
+  for(let i = 0; i < 40; i++) vitals.step(.1, {});
+  assert.equal(vitals.state.dead, true, 'corpses stay dead unless a mode is chosen');
+});
+
+test('a respawn stands the Character up on the ground, whatever death did to it', () => {
+  const GAME = fakeGame();
+  const pawn = fakePawn(GAME);
+  const vitals = VITALS.create(GAME, pawn, {maxHealth:50, respawnDelay:1, respawnMode:'death'});
+  // Death physics tips the root over and sinks it; a respawn must undo both, or
+  // the Character walks at an angle and below the floor.
+  pawn.owner.position.y = -0.9;
+  if(pawn.owner.rotation){ pawn.owner.rotation.x = .5; pawn.owner.rotation.z = -.4; }
+  vitals.applyDamage(80);
+  pawn.owner.position.y = -1.4;
+  if(pawn.owner.rotation){ pawn.owner.rotation.x = 1.2; pawn.owner.rotation.z = .9; }
+  for(let i = 0; i < 12; i++) vitals.step(.1, {});
+  assert.equal(vitals.state.dead, false);
+  assert.equal(Number(pawn.owner.rotation.x.toFixed(4)), 0, 'no forward tilt survives a respawn');
+  assert.equal(Number(pawn.owner.rotation.z.toFixed(4)), 0, 'no side tilt survives a respawn');
+  assert.ok(pawn.owner.position.y > -0.5, 'the respawn re-grounds instead of keeping the corpse height, got ' + pawn.owner.position.y);
 });
 
 test('the Pawn owner mirrors the damageable contract, so the hitscan can hurt it', () => {
@@ -928,6 +1256,10 @@ test('third person configuration clamps and defaults independently of the eye', 
   assert.equal(config.thirdPerson.shoulder, -3, 'shoulder offset clamps');
   assert.equal(config.thirdPerson.fov, 20, 'fov clamps');
   assert.equal(FP.normalizeConfig({}).thirdPerson.distance, 3.3, 'a sane over-the-shoulder default');
+  assert.equal(FP.normalizeConfig({}).thirdPerson.autoDistance, false, 'distance is player-owned by default');
+  assert.equal(FP.normalizeConfig({}).thirdPerson.collisionMode, 'fixed', 'default framing snaps only when required to stay outside geometry');
+  assert.equal(FP.normalizeConfig({}).thirdPerson.minimumBodyDistance,.55,'the camera cannot collapse inside the Character mesh');
+  assert.equal(FP.normalizeConfig({thirdPerson:{collisionMode:'pull-in'}}).thirdPerson.collisionMode, 'pull-in', 'wall pull-in remains authorable');
 });
 
 test('the view toggle is edge triggered, so holding the key does not strobe', () => {

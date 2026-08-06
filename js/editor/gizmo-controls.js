@@ -524,13 +524,17 @@ function create(deps){
         deps.setGizmoSuppressSceneClick(true);
         if(deps.isGizmoUsingZUpProxy()) syncZUpProxyFromSelected();
         startAdvancedDrag(gizmo);
-        if(ED.colliderEdit) deps.beginColliderHistory(ED.selected);
+        const cinemaPathEdit = !!(ED.selected && ED.selected.userData && ED.selected.userData.cinemaPathHandle);
+        if(cinemaPathEdit && typeof ED.cinemaPathGizmoStart === 'function') ED.cinemaPathGizmoStart();
+        else if(ED.colliderEdit) deps.beginColliderHistory(ED.selected);
         else deps.beginTransformHistory();
         const activeOrbit = deps.getOrbit();
         if(activeOrbit) activeOrbit.enabled = false;
       });
       gizmo.addEventListener('mouseUp', () => {
-        if(ED.colliderEdit) deps.commitColliderHistory('Collider transform');
+        const cinemaPathEdit = !!(ED.selected && ED.selected.userData && ED.selected.userData.cinemaPathHandle);
+        if(cinemaPathEdit && typeof ED.cinemaPathGizmoEnd === 'function') ED.cinemaPathGizmoEnd();
+        else if(ED.colliderEdit) deps.commitColliderHistory('Collider transform');
         else deps.commitTransformHistory('Transform');
         endAdvancedDrag(gizmo);
         ED.gizmoPointerActive = false;

@@ -144,6 +144,16 @@ function create(graph, registry, context, options){
       getVariable: name => variables.get(String(name || '')),
       setVariable: (name, value) => variables.set(String(name || ''), window.LK_LOGIC_GRAPH.clone(value)),
       continue: pin => continueFrom(node, pin, state),
+      isOutputConnected: pin => outputExecEdges(node.id, pin).length > 0,
+      defer: pin => {
+        let fired = false;
+        return () => {
+          if(fired || stopped) return false;
+          fired = true;
+          continueFrom(node, pin || 'completed', {steps:0, stack:[], dataCache:new Map()});
+          return true;
+        };
+      },
       delay: (seconds, pin) => {
         const ms = Math.max(0, Number(seconds) || 0) * 1000;
         const timer = setTimeout(() => {
@@ -261,9 +271,23 @@ function create(graph, registry, context, options){
         if(wanted && wanted !== got) return;
       }
       if((eventType === 'OnKeyDown' || eventType === 'OnKeyUp') && n.data && n.data.key){
-        const wanted = String(n.data.key || '').toLowerCase();
-        const got = String(eventPayload.key || '').toLowerCase();
+        const inputService=context&&context.services&&context.services.input;
+        const semantic=eventPayload.semantic===true&&inputService&&typeof inputService.actionForLegacyKey==='function';
+        const wanted = String(semantic?inputService.actionForLegacyKey(n.data.key):(n.data.key || '')).toLowerCase();
+        const got = String(semantic?eventPayload.action:eventPayload.key || '').toLowerCase();
         if(wanted && wanted !== got) return;
+        if(!wanted) return;
+      }
+      if(eventType === 'OnInputActionDown' || eventType === 'OnInputActionUp'){
+        const wanted=String(readInput(n,def,'action',{stack:[],dataCache:new Map()})||'').toLowerCase();
+        const got=String(eventPayload.action||'').toLowerCase();
+        if(wanted&&wanted!==got)return;
+      }
+      if(eventType === 'OnPlayerInputActionDown' || eventType === 'OnPlayerInputActionUp'){
+        const wantedPlayer=Math.max(1,Math.min(4,Number(readInput(n,def,'playerId',{stack:[],dataCache:new Map()}))||1));
+        const wantedAction=String(readInput(n,def,'action',{stack:[],dataCache:new Map()})||'').toLowerCase();
+        if(wantedPlayer!==Number(eventPayload.playerId))return;
+        if(wantedAction&&wantedAction!==String(eventPayload.action||'').toLowerCase())return;
       }
       if((eventType === 'OnPointerDown' || eventType === 'OnPointerUp') && n.data && n.data.button !== 'any' && n.data.button != null){
         if(String(n.data.button) !== String(eventPayload.button)) return;
@@ -277,6 +301,12 @@ function create(graph, registry, context, options){
         const wanted=String(readInput(n,def,'channel',{stack:[],dataCache:new Map()})||'');
         const got=String(eventPayload.channel||'');
         if(wanted&&wanted!==got)return;
+      }
+      if(eventType === 'OnUiAction'){
+        const wantedElement=String(readInput(n,def,'elementId',{stack:[],dataCache:new Map()})||'');
+        const wantedAction=String(readInput(n,def,'action',{stack:[],dataCache:new Map()})||'');
+        if(wantedElement&&wantedElement!==String(eventPayload.elementId||''))return;
+        if(wantedAction&&wantedAction!==String(eventPayload.action||''))return;
       }
       if(n.type === 'event.tickEvery' && eventType === 'OnUpdate'){
         const interval = Math.max(.01, Number(readInput(n, def, 'seconds', {stack:[], dataCache:new Map()})) || .5);

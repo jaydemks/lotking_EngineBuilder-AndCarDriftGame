@@ -5,6 +5,10 @@
 (function(){
 'use strict';
 
+// Charge window where the strike is cleanest; the meter marks it and the
+// sweet-spot tick is positioned from the same two numbers.
+const SWEET_MIN = .62, SWEET_MAX = .88;
+
 function byId(id){ return document.getElementById(id); }
 
 function create(){
@@ -34,6 +38,8 @@ function create(){
   const soccerShotMeter = byId('soccerShotMeter');
   const soccerShotPower = byId('soccerShotPower');
   const soccerShotAim = byId('soccerShotAim');
+  const soccerShotHeight = byId('soccerShotHeight');
+  const soccerShotCurve = byId('soccerShotCurve');
   const soccerAimReticle = byId('soccerAimReticle');
   const legendTitle = byId('legendTitle');
   const legendBody = byId('legendBody');
@@ -45,7 +51,7 @@ function create(){
   let lastPenaltyResultSequence = 0;
   const vehicleByPlayer = new Map();
   const VEHICLE_CONTROLS = '<b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br><b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> look back · <b>C / R3</b> camera · <b>R / L3</b> reset<br><b>TAB / View</b> radio · <b>U / D-pad up</b> driving setup · <b>ESC / Start</b> menu · <b>H</b> help';
-  const SOCCER_CONTROLS = '<b>W A S D / arrows</b> move · <b>Shift</b> sprint · <b>Space</b> jump<br><b>Hold F / X</b> charge · <b>Mouse / right stick</b> aim · <b>release</b> shoot · <b>Shift while aiming</b> curve<br><b>Q / E</b> goalkeeper dive left / right · <b>C / R3</b> camera · <b>H</b> help';
+  const SOCCER_CONTROLS = '<b>W A S D / arrows</b> move · <b>Shift</b> sprint · <b>Space</b> jump<br><b>Hold F / LMB / X</b> charge (slow motion) · <b>Mouse / right stick</b> aim height and corner<br><b>Q / E</b> curve left / right while charging · <b>release</b> to strike · <b>G</b> pass · <b>C</b> tackle<br><b>B / R3</b> camera · <b>H</b> help';
   const CHARACTER_CONTROLS = '<b>W A S D / arrows</b> move · <b>Shift</b> sprint · <b>Space</b> jump · <b>F / X</b> interact<br><b>Mouse / RS</b> look around · <b>Scroll</b> zoom · <b>C / R3</b> camera<br><b>ESC / Start</b> menu · <b>H</b> help';
 
   function popup(txt, color, duration){
@@ -106,7 +112,9 @@ function create(){
   }
 
   function setContext(value){
-    const context = value === 'soccer' ? 'soccer' : (value === 'character' ? 'character' : 'vehicle');
+    const context = value === 'soccer'
+      ? 'soccer'
+      : (value === 'character' ? 'character' : (value === 'vehicle' ? 'vehicle' : 'none'));
     if(context === activeContext) return context;
     activeContext = context;
     if(root) root.dataset.context = context;
@@ -140,9 +148,23 @@ function create(){
     }
     if(soccer) soccer.dataset.phase = String(value.phase || '');
     const charging=value.charge!=null,showReticle=(charging||value.aiming===true)&&value.aimReticle!==false;
-    if(soccerShotMeter)soccerShotMeter.classList.toggle('on',charging);
-    if(soccerShotPower)soccerShotPower.style.width=(Math.max(0,Math.min(1,Number(value.charge)||0))*100).toFixed(1)+'%';
+    const charge01=Math.max(0,Math.min(1,Number(value.charge)||0));
+    if(soccerShotMeter){
+      soccerShotMeter.classList.toggle('on',charging);
+      // The bar turns as it fills so power reads at a glance without looking
+      // away from the goal, and marks when the strike is at its cleanest.
+      soccerShotMeter.dataset.power=charge01>=SWEET_MIN&&charge01<=SWEET_MAX?'sweet':(charge01>SWEET_MAX?'over':'low');
+      soccerShotMeter.classList.toggle('slowmo',value.slowMotion===true);
+    }
+    if(soccerShotPower)soccerShotPower.style.width=(charge01*100).toFixed(1)+'%';
     if(soccerShotAim)soccerShotAim.style.left=((Math.max(-1,Math.min(1,Number(value.aimX)||0))*.5+.5)*100).toFixed(1)+'%';
+    if(soccerShotHeight)soccerShotHeight.style.height=((Math.max(-1,Math.min(1,Number(value.aimY)||0))*.5+.5)*100).toFixed(1)+'%';
+    if(soccerShotCurve){
+      const curve=Math.max(-1,Math.min(1,Number(value.curve)||0));
+      // Grows from the centre in the direction the ball will bend.
+      soccerShotCurve.style.left=(curve<0?(50+curve*50):50).toFixed(1)+'%';
+      soccerShotCurve.style.width=(Math.abs(curve)*50).toFixed(1)+'%';
+    }
     if(soccerAimReticle){
       soccerAimReticle.classList.toggle('on',showReticle);
       soccerAimReticle.style.left=Number.isFinite(Number(value.reticleX))?Number(value.reticleX).toFixed(1)+'px':(50+Math.max(-1,Math.min(1,Number(value.aimX)||0))*22).toFixed(2)+'%';
@@ -151,7 +173,9 @@ function create(){
     }
   }
 
-  setContext('vehicle');
+  // A gameplay level is not implicitly a driving level. Vehicle UI becomes
+  // visible only after the runtime resolves an enabled, visible vehicle Pawn.
+  setContext('none');
   setActivePlayer(1);
   return {popup, setTotal, showDrift, hideDrift, setSpeedGear, setActivePlayer, setVehicleData, setContext, setSoccerData, activePlayer:() => activePlayerId, context:() => activeContext};
 }

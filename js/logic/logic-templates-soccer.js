@@ -71,11 +71,18 @@ function playerSoccerTemplateGraph(){
     {name:'Acceleration', type:'number', value:14, min:1, max:60, step:.5, exposed:true, binding:'movement.acceleration', label:'Acceleration', category:'Movement'},
     {name:'TurnRate', type:'number', value:10, min:.5, max:30, step:.5, exposed:true, binding:'movement.turnRate', label:'Turn Rate (rad/s)', category:'Movement'},
     {name:'JumpHeight', type:'number', value:1.1, min:0, max:5, step:.1, exposed:true, binding:'movement.jumpHeight', label:'Jump Height (m)', category:'Movement'},
+    {name:'StepHeight', type:'number', value:.55, min:0, max:3, step:.02, exposed:true, binding:'movement.stepHeight', label:'Step Height (m)', category:'Movement'},
     {name:'Gravity', type:'number', value:22, min:1, max:80, step:.5, exposed:true, binding:'movement.gravity', label:'Gravity (m/s²)', category:'Movement'},
-    {name:'InputMode', type:'string', value:'heading', exposed:true, binding:'movement.inputMode', label:'Movement Space', category:'Movement', ui:'select', options:[{value:'camera',label:'Camera relative'},{value:'heading',label:'Character heading (football)'}]},
-    {name:'FacingMode', type:'string', value:'heading', exposed:true, binding:'movement.facingMode', label:'Facing Behaviour', category:'Movement', ui:'select', options:[{value:'heading',label:'Keep heading / strafe (football)'},{value:'movement',label:'Turn toward movement'}]},
+    // These two are applied after the Pawn is built, so they overrule the
+    // role's control frame. 'heading' only moves a Pawn that something else
+    // steers — a keeper on its line, or an AI outfielder — and it leaves a
+    // player-controlled outfielder unable to turn at all. Camera-relative
+    // input with turn-into-the-run is the outfield default.
+    {name:'InputMode', type:'string', value:'camera', exposed:true, binding:'movement.inputMode', label:'Movement Space', category:'Movement', ui:'select', options:[{value:'camera',label:'Camera relative (outfield)'},{value:'heading',label:'Fixed heading — needs an external steer (keeper)'}]},
+    {name:'FacingMode', type:'string', value:'movement', exposed:true, binding:'movement.facingMode', label:'Facing Behaviour', category:'Movement', ui:'select', options:[{value:'movement',label:'Turn toward movement (outfield)'},{value:'heading',label:'Keep heading / strafe (keeper)'}]},
     {name:'BlendResponsiveness', type:'number', value:9, min:.5, max:30, step:.5, exposed:true, binding:'locomotion.responsiveness', label:'Motion Blend Responsiveness', category:'Movement / Motion Blend'},
     {name:'BlendPrediction', type:'number', value:.12, min:0, max:.6, step:.01, exposed:true, binding:'locomotion.predictionTime', label:'Motion Blend Prediction (s)', category:'Movement / Motion Blend'},
+    {name:'StepPoseStrength', type:'number', value:1, min:0, max:2, step:.05, exposed:true, binding:'locomotion.stepPoseStrength', label:'Stair Pose Strength', category:'Movement / Motion Blend'},
     {name:'KeeperDiveDistance', type:'number', value:2.6, min:.5, max:5, step:.1, exposed:true, binding:'keeper.diveDistance', label:'Dive Distance (m)', category:'Goalkeeper'},
     {name:'KeeperDiveDuration', type:'number', value:.55, min:.2, max:1.5, step:.05, exposed:true, binding:'keeper.diveDuration', label:'Dive Duration (s)', category:'Goalkeeper'},
     {name:'KeeperReach', type:'number', value:1.1, min:.4, max:2.5, step:.05, exposed:true, binding:'keeper.reach', label:'Save Reach (m)', category:'Goalkeeper'},
@@ -91,6 +98,8 @@ function playerSoccerTemplateGraph(){
     {name:'ShotChargeTime', type:'number', value:1.15, min:.3, max:3, step:.05, exposed:true, binding:'ball.shotChargeTime', label:'Full Charge Time (s)', category:'Soccer / Shot'},
     {name:'ShotCurve', type:'number', value:.65, min:0, max:1, step:.05, exposed:true, binding:'ball.shotCurve', label:'Maximum Curve', category:'Soccer / Shot'},
     {name:'AimReticle', type:'boolean', value:true, exposed:true, binding:'ball.aimReticle', label:'Show Aim Reticle', category:'Soccer / Shot'},
+    {name:'AimSlowMotion', type:'boolean', value:true, exposed:true, binding:'ball.aimSlowMotion', label:'Slow Motion While Aiming', category:'Soccer / Shot'},
+    {name:'AimTimeScale', type:'number', value:.18, min:.02, max:.9, step:.02, exposed:true, binding:'ball.aimTimeScale', label:'Aiming Time Scale', category:'Soccer / Shot'},
     {name:'PassPower', type:'number', value:10, min:2, max:30, step:.5, exposed:true, binding:'ball.passPower', label:'Pass Power (m/s)', category:'Soccer / Ball'},
     {name:'CrossPower', type:'number', value:16, min:2, max:35, step:.5, exposed:true, binding:'ball.crossPower', label:'Cross Power (m/s)', category:'Soccer / Ball'},
     {name:'ShirtColor', type:'string', value:'#e11d48', exposed:true, binding:'appearance.shirtColor', label:'Shirt Color', category:'Appearance', ui:'color'},
@@ -98,6 +107,7 @@ function playerSoccerTemplateGraph(){
     {name:'SocksColor', type:'string', value:'#e11d48', exposed:true, binding:'appearance.socksColor', label:'Socks Color', category:'Appearance', ui:'color'},
     {name:'HairColor', type:'string', value:'#2b2118', exposed:true, binding:'appearance.hairColor', label:'Hair Color', category:'Appearance', ui:'color'},
     {name:'SkinColor', type:'string', value:'#d8a184', exposed:true, binding:'appearance.skinColor', label:'Skin Color', category:'Appearance', ui:'color'},
+    {name:'CharacterImplementation', type:'string', value:'native', exposed:true, binding:'implementation', label:'Locomotion Backend', category:'Character', ui:'select', options:[{value:'native',label:'Engine character'},{value:'sketchbook',label:'Sketchbook character'}]},
     {name:'CameraMode', type:'string', value:'free', exposed:true, binding:'camera.mode', label:'Camera Mode', category:'Camera', ui:'select', options:[{value:'free',label:'Free'},{value:'arcade',label:'Arcade'},{value:'cinematic',label:'Cinematic'}]},
     {name:'CameraView', type:'string', value:'third', exposed:true, binding:'camera.view', label:'View', category:'Camera', ui:'select', options:[{value:'third',label:'Third person'},{value:'close',label:'Close third person'},{value:'first',label:'First person (lite)'}]},
     {name:'CameraDistance', type:'number', value:7.5, min:1, max:40, step:.1, exposed:true, binding:'camera.distance', label:'Distance', category:'Camera'},
@@ -114,19 +124,17 @@ function playerSoccerTemplateGraph(){
     node('on_start', 'event.onStart', 80, 100),
     node('get_self_start', 'pawn.getSelf', 330, 25),
     node('get_player_start', 'variable.get', 330, 145, {name:'ControllerPlayerId'}),
-    node('possess_self', 'pawn.possess', 590, 100, {force:true}),
+    node('possess_self', 'pawn.possess', 590, 100, {force:false}),
     node('get_camera_mode', 'variable.get', 580, 230, {name:'CameraMode'}),
     node('set_camera_start', 'pawn.setCamera', 850, 100, {possess:true}),
     node('print_ready', 'debug.print', 1120, 100, {message:'Player Soccer Pawn ready.', duration:3}),
     node('on_update', 'event.onUpdate', 80, 400),
     node('move_input', 'soccer.getMoveInput', 340, 380),
     node('set_move', 'soccer.setMoveInput', 640, 400),
-    node('on_key_dive_left', 'event.onKeyDown', 80, 780, {key:'q'}),
+    node('on_key_dive_left', 'event.onInputActionDown', 80, 780, {action:'diveLeft'}),
     node('play_dive_left', 'soccer.playAction', 380, 780, {action:'diveLeft'}),
-    node('on_key_dive_right', 'event.onKeyDown', 80, 940, {key:'e'}),
+    node('on_key_dive_right', 'event.onInputActionDown', 80, 940, {action:'diveRight'}),
     node('play_dive_right', 'soccer.playAction', 380, 940, {action:'diveRight'}),
-    node('on_key_jump', 'event.onKeyDown', 80, 1100, {key:' '}),
-    node('do_jump', 'soccer.jump', 380, 1100),
   ], [
     edge('e_start_possess', 'on_start', 'then', 'possess_self', 'exec'),
     edge('e_self_possess', 'get_self_start', 'pawn', 'possess_self', 'pawn'),
@@ -142,10 +150,9 @@ function playerSoccerTemplateGraph(){
     edge('e_input_action', 'move_input', 'action', 'set_move', 'action'),
     edge('e_key_dive_left', 'on_key_dive_left', 'then', 'play_dive_left', 'exec'),
     edge('e_key_dive_right', 'on_key_dive_right', 'then', 'play_dive_right', 'exec'),
-    edge('e_key_jump', 'on_key_jump', 'then', 'do_jump', 'exec'),
   ], [
     {id:'comment_pawn', title:'Soccer Pawn: possession + camera on start, heading-relative football movement with true lateral strafe and motion blending every update.', x:42, y:42, w:1330, h:460, color:'#4ade80'},
-    {id:'comment_actions', title:'Role actions: hold F/X to charge and aim, then release to shoot. Q/E = dive left/right (goalkeeper). Space = jump. Foot contact, ball physics and shot error are synchronized automatically; use Soccer Ball nodes only for custom scripted plays.', x:42, y:560, w:1080, h:640, color:'#fbbf24'},
+    {id:'comment_actions', title:'Role actions: hold F/X to charge and aim, then release to shoot. Q/E bend the shot curve; mapped Goalkeeper Dive Left/Right use J/L by default. Soccer has no Jump capability. Foot contact, ball physics and shot error are synchronized automatically.', x:42, y:560, w:1080, h:640, color:'#fbbf24'},
   ]);
 
   // Placeholder humanoid rig. Element names intentionally match the
@@ -169,9 +176,9 @@ function playerSoccerTemplateGraph(){
   g.soccerPawn = {
     template:true, schemaVersion:1, id:'player-soccer-logic', playerId:1, enabled:true, hidden:false, possessed:true,
     role:'striker',
-    movement:{walkSpeed:1.9, runSpeed:6, sprintMultiplier:1.35, acceleration:14, turnRate:10, jumpHeight:1.1, gravity:22, airControl:.35, inputMode:'heading', facingMode:'heading'},
+    movement:{walkSpeed:1.9, runSpeed:6, sprintMultiplier:1.35, acceleration:14, turnRate:10, jumpHeight:1.1, gravity:22, airControl:.35, stepHeight:.55, inputMode:'camera', facingMode:'movement'},
     animationLibrary:null,
-    locomotion:{responsiveness:9, predictionTime:.12},
+    locomotion:{responsiveness:9, predictionTime:.12, stepPoseStrength:1},
     keeper:{diveDistance:2.6, diveDuration:.55, reach:1.1, aiEnabled:true, aiReaction:.14, aiPrediction:1.15, aiReturnSpeed:3.8},
     fieldAI:{enabled:false,reaction:.32,shootDistance:1.05},
     ball:{autoControl:true, controlRadius:1.35, touchDistance:.68, shootPower:26, shotMinPower:10, shotChargeTime:1.15, shotCurve:.65, aimReticle:true, passPower:10, crossPower:16},

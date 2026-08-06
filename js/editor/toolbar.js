@@ -104,6 +104,21 @@ function create(deps){
     deps.syncToolbarState();
     if(!ED.pipOn) $('#lkPipFrame').classList.remove('on');
   });
+  // The MASTER aspect: one shape for every camera preview in the editor while
+  // framing, without touching what each camera or the level is authored to use.
+  // `auto` gives each camera its own again. Editor-only - it is never saved into a
+  // level and never affects Play, where the level default (or a phone) decides.
+  const masterAspect = $('#lkMasterAspect');
+  if(masterAspect){
+    masterAspect.value = ED.masterPreviewAspect || 'auto';
+    masterAspect.addEventListener('change', () => {
+      ED.masterPreviewAspect = masterAspect.value || 'auto';
+      masterAspect.classList.toggle('on', ED.masterPreviewAspect !== 'auto');
+      if(deps.status) deps.status(ED.masterPreviewAspect === 'auto'
+        ? tr('Camera previews use each camera aspect', 'Le anteprime usano il rapporto di ogni camera')
+        : tr('All camera previews forced to ' + ED.masterPreviewAspect, 'Tutte le anteprime forzate a ' + ED.masterPreviewAspect));
+    });
+  }
   const vpFold = $('#lkViewportToolbarFold');
   const vpSingle = $('#lkViewportSingle');
   const vpQuad = $('#lkViewportQuad');

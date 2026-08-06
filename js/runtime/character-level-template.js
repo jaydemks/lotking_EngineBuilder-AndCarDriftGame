@@ -129,14 +129,31 @@ function buildScene(baseScene){
   }
 
   const templates=window.LK_LOGIC_TEMPLATES;
+  // Puts a placed character on one of the bundled bodies. It moves the Pawn, the
+  // model element, the Body select and the Animations category together; a level
+  // that only set `characterPawn.bodyType` would leave the Inspector disagreeing
+  // with what is on screen.
+  function applyBody(graph,bodyId){
+    const pack=window.LK_LOGIC_TEMPLATES_CHARACTER;
+    if(pack&&pack.applyGraphBody) pack.applyGraphBody(graph,bodyId);
+    return graph;
+  }
   function logic(templateId,name,p,rotation,configure){
     const t=templates&&templates.get&&templates.get(templateId);if(!t||!t.graph)return;
     const graph=clone(t.graph);if(configure)configure(graph);
     scene.added.push({id:'sketch_street_'+String(++seq).padStart(3,'0'),kind:'logicElement',name,collide:false,graph,enabled:true,runInEditorPreview:true,
       asset:{key:'logic:template:'+templateId,name,source:SOURCE},t:{p:p.slice(),r:rotation.slice(),s:[1,1,1],v:true},templateGroup:'Characters'});
   }
-  logic('logic-template-player-character-normal','Player Character (Normal)',[0,groundH(14),14],[0,Math.PI,0],g=>{g.characterPawn.spawn={x:0,y:groundH(14),z:14,heading:Math.PI};g.characterPawn.movement=Object.assign({},g.characterPawn.movement,{walkSpeed:3.4,runSpeed:6.4,sprintMultiplier:1});g.characterPawn.camera=Object.assign({},g.characterPawn.camera,{distance:5.2,height:2.6,fov:55});});
-  logic('logic-template-talkable-civil-npc','Talkable Civil NPC',[2.2,groundH(-26.5),-26.5],[0,Math.PI*.75,0],g=>{g.characterPawn.spawn={x:2.2,y:groundH(-26.5),z:-26.5,heading:Math.PI*.75};});
+  logic('logic-template-player-character-normal','Player Character (Normal)',[0,groundH(14),14],[0,Math.PI,0],g=>{g.characterPawn.spawn={x:0,y:groundH(14),z:14,heading:Math.PI};g.characterPawn.movement=Object.assign({},g.characterPawn.movement,{walkSpeed:3.1,runSpeed:4.8,sprintMultiplier:1});g.characterPawn.camera=Object.assign({},g.characterPawn.camera,{distance:5.2,height:2.6,fov:55});});
+  // The NPC wears the FEMALE mannequin, and it is the only placement in any shipped
+  // level that does. Both default bodies had to be visible somewhere without the
+  // author building a level first - otherwise the Body select is a promise you have
+  // to take on faith. `bodyType` is all it takes now: the runtime resolves the
+  // model, the locomotion clips and the palette from it.
+  logic('logic-template-talkable-civil-npc','Talkable Civil NPC (Female)',[2.2,groundH(-26.5),-26.5],[0,Math.PI*.75,0],g=>{
+    g.characterPawn.spawn={x:2.2,y:groundH(-26.5),z:-26.5,heading:Math.PI*.75};
+    applyBody(g,'female');
+  });
 
   scene.characterGround={type:'slope-z',slopeStart:SLOPE_START,crestZ:CREST_Z,slope:SLOPE,baseY:0,minX:-3.45,maxX:3.45,minZ:CREST_Z+1.6,maxZ:16.5};
   scene.env=Object.assign({},scene.env||{},{skyTime:.34,dayLength:999999,procEnvEnabled:true,procEnvIntensity:1.05,backgroundColor:'#8edcd8',fog:{enabled:true,color:'#9fdede',near:45,far:110}});
@@ -146,4 +163,14 @@ function buildScene(baseScene){
 }
 
 window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE=Object.freeze({id:'character-movement-playground',name:'Sketch Street - Character Movement',buildScene,groundH});
+
+if(window.LK_LEVEL_TEMPLATES&&window.LK_LEVEL_TEMPLATES.register){
+  window.LK_LEVEL_TEMPLATES.register({
+    id:'character-movement-playground',name:'Sketch Street - Character Movement',nameIt:'Sketch Street - Movimento personaggio',
+    category:'Character',order:200,ground:'plane',keepBuiltinPlayer:false,
+    description:'Toon-shaded street playground for tuning character locomotion and traversal.',
+    descriptionIt:'Strada in stile toon per tarare locomozione e traversal del personaggio.',
+    build:function(scene){ return buildScene(scene); },
+  });
+}
 })();

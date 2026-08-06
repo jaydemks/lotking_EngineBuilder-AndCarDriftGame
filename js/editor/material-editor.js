@@ -67,6 +67,19 @@ function create(deps){
     };
   }
 
+  function normalizedSketchMaterial(value){
+    const source = value && typeof value === 'object' ? value : {};
+    const mode = source.mode === 'monochrome' ? 'monochrome' : (source.mode === 'color' ? 'color' : 'off');
+    return {
+      enabled:source.enabled === true && mode !== 'off',
+      mode,
+      toneBands:Math.max(3, Math.min(8, Math.round(Number(source.toneBands) || 5))),
+      preserveTexture:source.preserveTexture !== false,
+      paperTint:Math.max(0, Math.min(1, Number.isFinite(Number(source.paperTint)) ? Number(source.paperTint) : .12)),
+      pigmentStrength:Math.max(0, Math.min(1, Number.isFinite(Number(source.pigmentStrength)) ? Number(source.pigmentStrength) : .82)),
+    };
+  }
+
   function materialRoot(o){
     if(o && o.userData && o.userData.editorType === 'player' && GAME && GAME.player && GAME.player.getModel){
       return GAME.player.getModel() || o;
@@ -156,6 +169,10 @@ function create(deps){
       patch.carPaintOverride.enabled === true && !current.isMeshPhysicalMaterial ||
       patch.carPaintOverride.enabled === false && !!current.lkCarPaintOriginalMaterial
     ));
+    const sketchKindChanges = !!(patch && patch.sketchMaterial && current && (
+      patch.sketchMaterial.enabled === true && !current.lkSketchOriginalMaterial ||
+      patch.sketchMaterial.enabled === false && !!current.lkSketchOriginalMaterial
+    ));
     const dynamicShaderChanges = !!(patch && Object.prototype.hasOwnProperty.call(patch, 'dynamicMapType') && current && (
       (patch.dynamicMapType !== 'none' && patch.dynamicMapEnabled !== false) !== !!current.lkDynamicTextureController
     ));
@@ -168,6 +185,7 @@ function create(deps){
       transparencyChanges ||
       materialKindChanges ||
       carPaintKindChanges ||
+      sketchKindChanges ||
       dynamicShaderChanges ||
       dynamicUvShaderChanges
     ));
@@ -291,7 +309,8 @@ function create(deps){
       'ROUGH ' + ((mat && mat.roughness != null ? mat.roughness : 0).toFixed(2)) + '  ·  ' +
       'METAL ' + ((mat && mat.metalness != null ? mat.metalness : 0).toFixed(2)) + '  ·  ' +
       'OPACITY ' + Number(opacity).toFixed(3).replace(/0+$/,'').replace(/\.$/,'') +
-      (mat && mat.userData && mat.userData.lkCarPaintActive ? '  ·  PAINT OVERRIDE' : '');
+      (mat && mat.userData && mat.userData.lkCarPaintActive ? '  ·  PAINT OVERRIDE' : '') +
+      (mat && mat.userData && mat.userData.lkSketchMaterialActive ? '  ·  SKETCH MATERIAL' : '');
     text.textContent = '';
     text.append(title, facts);
   }
@@ -325,6 +344,7 @@ function create(deps){
     o.userData.materialEditorSlot = target;
     const mat = getMaterialForTarget(o, slots, targets[0]);
     if(!mat) return;
+    const authoredMat = mat.lkSketchOriginalMaterial || mat;
     const activeSlot = targets[0] === 'all' ? slots[0] : slots.find(slot => slot.key === targets[0]);
 
     sm.body.appendChild(el('<div class="lk-hint">' + tr(
@@ -413,15 +433,48 @@ function create(deps){
     });
     sm.body.appendChild(preset.root);
 
-    const paint = normalizedCarPaint(activeStored.carPaintOverride, mat);
+    const sketch = normalizedSketchMaterial(activeStored.sketchMaterial);
+    const sketchCard = el('<div class="lk-car-paint-card lk-sketch-material-card"><div class="lk-car-paint-head"><span><b>SKETCH MATERIAL</b><small>NON-DESTRUCTIVE TOON LAYER</small></span></div><div class="lk-car-paint-controls"></div></div>');
+    sketchCard.classList.toggle('on', sketch.enabled);
+    const sketchControls = sketchCard.querySelector('.lk-car-paint-controls');
+    const applySketch = patch => {
+      Object.assign(sketch, patch || {});
+      sketch.enabled = sketch.mode !== 'off';
+      patchMat({sketchMaterial:Object.assign({}, sketch)});
+    };
+    sketchControls.appendChild(selectRow(tr('Material visual style', 'Stile visivo materiale'), sketch.mode, [
+      {value:'off', label:tr('Original material', 'Materiale originale')},
+      {value:'color', label:tr('Color Sketch', 'Sketch a colori')},
+      {value:'monochrome', label:tr('Monochrome Ink', 'Inchiostro monocromatico')},
+    ], value => {
+      applySketch({mode:value, enabled:value !== 'off'});
+      buildInspector();
+    }).root);
+    sketchControls.appendChild(sliderRow(tr('Tonal drawing bands', 'Fasce tonali disegno'), sketch.toneBands, 3, 8, 1,
+      value => applySketch({toneBands:Math.round(value)}), value => Math.round(value) + tr(' bands', ' fasce')).root);
+    sketchControls.appendChild(sliderRow(tr('Warm paper tint', 'Tinta carta calda'), sketch.paperTint, 0, 1, .01,
+      value => applySketch({paperTint:value}), value => Math.round(value * 100) + '%').root);
+    sketchControls.appendChild(sliderRow(tr('Color pigment response', 'Risposta pigmento colore'), sketch.pigmentStrength, 0, 1, .01,
+      value => applySketch({pigmentStrength:value}), value => Math.round(value * 100) + '%').root);
+    if(checkRow){
+      sketchControls.appendChild(checkRow(tr('Preserve texture detail', 'Mantieni dettaglio texture'), sketch.preserveTexture,
+        value => applySketch({preserveTexture:value})).root);
+    }
+    sketchControls.appendChild(el('<div class="lk-hint">' + tr(
+      'This affects only the selected material slots and keeps the exact original instance underneath. Color Sketch derives an illustrated pigment texture and toon-lit shadow bands; Monochrome Ink derives a grayscale texture. Transparency, alpha, emission, normals and authored texture transforms are preserved.',
+      'Questo agisce solo sugli slot selezionati e mantiene sotto l’istanza originale esatta. Sketch a colori deriva una texture a pigmento illustrato e fasce d’ombra toon; Inchiostro monocromatico deriva una texture in scala di grigi. Trasparenza, alpha, emissione, normali e trasformazioni della texture vengono preservate.'
+    ) + '</div>'));
+    sm.body.appendChild(sketchCard);
+
+    const paint = normalizedCarPaint(activeStored.carPaintOverride, authoredMat);
     const paintCard = el('<div class="lk-car-paint-card"><div class="lk-car-paint-head"><span><b>CAR PAINT / VINYL</b><small>NON-DESTRUCTIVE OVERRIDE</small></span><label class="lk-car-paint-toggle"><input type="checkbox"><i></i></label></div><div class="lk-car-paint-stack"><div class="lk-car-paint-layer override"><i></i><span><b>Override layer</b><small></small></span></div><div class="lk-car-paint-connector">↓</div><div class="lk-car-paint-layer original"><i></i><span><b>Original GLB material</b><small>Protected · restored when override is off</small></span></div></div><div class="lk-car-paint-controls"></div></div>');
     paintCard.classList.toggle('on', paint.enabled);
     const paintToggle = paintCard.querySelector('input');
     const overrideSwatch = paintCard.querySelector('.lk-car-paint-layer.override > i');
     const originalSwatch = paintCard.querySelector('.lk-car-paint-layer.original > i');
     const overrideInfo = paintCard.querySelector('.lk-car-paint-layer.override small');
-    const originalMaterial = mat.lkCarPaintOriginalMaterial || mat;
-    const originalBase = mat.lkCarPaintBase || null;
+    const originalMaterial = authoredMat.lkCarPaintOriginalMaterial || authoredMat;
+    const originalBase = authoredMat.lkCarPaintBase || null;
     const originalColor = originalBase && originalBase.color || originalMaterial.color;
     const originalMap = originalBase && originalBase.map || originalMaterial.map;
     paintToggle.checked = paint.enabled;
@@ -511,27 +564,31 @@ function create(deps){
     }
     const dynamicOverrideEnabled = dynamicType !== 'none' && activeStored.dynamicMapEnabled !== false;
     sm.body.appendChild(el('<div class="lk-material-underlay-title"><span>BASE MATERIAL</span><b>' + tr(
-      paint.enabled || dynamicOverrideEnabled ? 'Original controls below the active override' : 'Direct material controls',
-      paint.enabled || dynamicOverrideEnabled ? 'Controlli originali sotto l’override attivo' : 'Controlli diretti del materiale'
+      paint.enabled || dynamicOverrideEnabled || sketch.enabled ? 'Original controls below the active override' : 'Direct material controls',
+      paint.enabled || dynamicOverrideEnabled || sketch.enabled ? 'Controlli originali sotto l’override attivo' : 'Controlli diretti del materiale'
     ) + '</b></div>'));
     const underlayControls = el('<div class="lk-material-underlay-controls"></div>');
-    if(paint.enabled || dynamicOverrideEnabled){
+    if(paint.enabled || dynamicOverrideEnabled || sketch.enabled){
       underlayControls.classList.add('locked');
       underlayControls.appendChild(el('<div class="lk-hint">' + tr(
-        dynamicOverrideEnabled
+        sketch.enabled
+          ? 'Disable the Sketch Material layer to edit the exact original material underneath.'
+          : dynamicOverrideEnabled
           ? 'Disable the media Base Color override to edit the protected material below it.'
           : 'Disable the paint override to edit the original scalar material. Its textures remain available to the Preserve detail option above.',
-        dynamicOverrideEnabled
+        sketch.enabled
+          ? 'Disattiva il livello Sketch Material per modificare il materiale originale esatto sottostante.'
+          : dynamicOverrideEnabled
           ? 'Disattiva l’override media Base Color per modificare il materiale protetto sottostante.'
           : 'Disattiva l’override vernice per modificare i valori originali del materiale. Le sue texture restano disponibili tramite Mantieni dettagli qui sopra.'
       ) + '</div>'));
     }
-    underlayControls.appendChild(colorRow('Base color', mat.color ? mat.color.getHex() : 0xffffff, v => patchMat({color:v})).root);
-    underlayControls.appendChild(colorRow('Emission color', mat.emissive ? mat.emissive.getHex() : 0x000000, v => patchMat({emissive:v})).root);
-    underlayControls.appendChild(sliderRow('Emission', mat.emissiveIntensity != null ? mat.emissiveIntensity : 0, 0, 3, .05, v => patchMat({emissiveIntensity:v}), v => (+v).toFixed(2)).root);
-    underlayControls.appendChild(sliderRow('Roughness', mat.roughness != null ? mat.roughness : .7, 0, 1, .01, v => patchMat({roughness:v}), v => Math.round(v * 100) + '%').root);
-    underlayControls.appendChild(sliderRow('Metallic', mat.metalness != null ? mat.metalness : 0, 0, 1, .01, v => patchMat({metalness:v}), v => Math.round(v * 100) + '%').root);
-    underlayControls.appendChild(sliderRow('Opacity', mat.opacity != null ? mat.opacity : 1, 0, 1, .01, v => patchMat({
+    underlayControls.appendChild(colorRow('Base color', authoredMat.color ? authoredMat.color.getHex() : 0xffffff, v => patchMat({color:v})).root);
+    underlayControls.appendChild(colorRow('Emission color', authoredMat.emissive ? authoredMat.emissive.getHex() : 0x000000, v => patchMat({emissive:v})).root);
+    underlayControls.appendChild(sliderRow('Emission', authoredMat.emissiveIntensity != null ? authoredMat.emissiveIntensity : 0, 0, 3, .05, v => patchMat({emissiveIntensity:v}), v => (+v).toFixed(2)).root);
+    underlayControls.appendChild(sliderRow('Roughness', authoredMat.roughness != null ? authoredMat.roughness : .7, 0, 1, .01, v => patchMat({roughness:v}), v => Math.round(v * 100) + '%').root);
+    underlayControls.appendChild(sliderRow('Metallic', authoredMat.metalness != null ? authoredMat.metalness : 0, 0, 1, .01, v => patchMat({metalness:v}), v => Math.round(v * 100) + '%').root);
+    underlayControls.appendChild(sliderRow('Opacity', authoredMat.opacity != null ? authoredMat.opacity : 1, 0, 1, .01, v => patchMat({
       opacity:v,
       transparent:v < 1,
       depthWrite:v >= 1,
@@ -540,34 +597,34 @@ function create(deps){
       const exact = Number(v);
       return Math.round(exact * 100) + '% · ' + exact.toFixed(3).replace(/0+$/,'').replace(/\.$/,'');
     }).root);
-    underlayControls.appendChild(sliderRow('Alpha cut', mat.alphaTest != null ? mat.alphaTest : 0, 0, .9, .01, v => patchMat({alphaTest:v}), v => (+v).toFixed(2)).root);
-    underlayControls.appendChild(selectRow('Alpha mode', mat.transparent ? 'blend' : (mat.alphaTest > 0 ? 'cutout' : 'opaque'), [
+    underlayControls.appendChild(sliderRow('Alpha cut', authoredMat.alphaTest != null ? authoredMat.alphaTest : 0, 0, .9, .01, v => patchMat({alphaTest:v}), v => (+v).toFixed(2)).root);
+    underlayControls.appendChild(selectRow('Alpha mode', authoredMat.transparent ? 'blend' : (authoredMat.alphaTest > 0 ? 'cutout' : 'opaque'), [
       {value:'opaque', label:'Opaque'},
       {value:'blend', label:'Blend transparent'},
       {value:'cutout', label:'Cutout / alpha test'},
     ], v => {
       if(v === 'blend') patchMat({transparent:true, depthWrite:false, alphaTest:0, materialKind:'standard'});
-      if(v === 'cutout') patchMat({transparent:false, depthWrite:true, alphaTest:Math.max(.1, mat.alphaTest || .35), materialKind:'standard'});
+      if(v === 'cutout') patchMat({transparent:false, depthWrite:true, alphaTest:Math.max(.1, authoredMat.alphaTest || .35), materialKind:'standard'});
       if(v === 'opaque') patchMat({materialKind:'standard', transparent:false, depthWrite:true, opacity:1, alphaTest:0, transmission:0});
       buildInspector();
     }).root);
-    underlayControls.appendChild(selectRow('Side', String(mat.side == null ? THREE.FrontSide : mat.side), [
+    underlayControls.appendChild(selectRow('Side', String(authoredMat.side == null ? THREE.FrontSide : authoredMat.side), [
       {value:String(THREE.FrontSide), label:'Front'},
       {value:String(THREE.DoubleSide), label:'Double side'},
       {value:String(THREE.BackSide), label:'Back'},
     ], v => patchMat({side:Number(v)})).root);
-    underlayControls.appendChild(selectRow('Depth write', mat.depthWrite === false ? 'off' : 'on', [
+    underlayControls.appendChild(selectRow('Depth write', authoredMat.depthWrite === false ? 'off' : 'on', [
       {value:'on', label:'On'},
       {value:'off', label:'Off'},
     ], v => patchMat({depthWrite:v === 'on'})).root);
     underlayControls.appendChild(sliderRow(tr('Render priority', 'Priorita render'), activeSlot && activeSlot.mesh ? (activeSlot.mesh.renderOrder || 0) : (o.renderOrder || 0), -20, 120, 1, v => patchMat({renderOrder:v}), v => String(Math.round(v))).root);
-    underlayControls.appendChild(sliderRow('Normal str.', mat.normalScale ? mat.normalScale.x : 1, 0, 2, .05, v => patchMat({normalScale:v}), v => (+v).toFixed(2)).root);
+    underlayControls.appendChild(sliderRow('Normal str.', authoredMat.normalScale ? authoredMat.normalScale.x : 1, 0, 2, .05, v => patchMat({normalScale:v}), v => (+v).toFixed(2)).root);
 
-    if(mat.transmission != null){
-      underlayControls.appendChild(sliderRow('Transmission', mat.transmission || 0, 0, 1, .01, v => patchMat({materialKind:'physical', transmission:v, transparent:v > 0 || mat.transparent, depthWrite:false}), v => Math.round(v * 100) + '%').root);
+    if(authoredMat.transmission != null){
+      underlayControls.appendChild(sliderRow('Transmission', authoredMat.transmission || 0, 0, 1, .01, v => patchMat({materialKind:'physical', transmission:v, transparent:v > 0 || authoredMat.transparent, depthWrite:false}), v => Math.round(v * 100) + '%').root);
     }
-    if(mat.ior != null){
-      underlayControls.appendChild(sliderRow('IOR', mat.ior || 1.45, 1, 2.4, .01, v => patchMat({materialKind:'physical', ior:v}), v => (+v).toFixed(2)).root);
+    if(authoredMat.ior != null){
+      underlayControls.appendChild(sliderRow('IOR', authoredMat.ior || 1.45, 1, 2.4, .01, v => patchMat({materialKind:'physical', ior:v}), v => (+v).toFixed(2)).root);
     }
 
     addTextureSlot(underlayControls, 'Base texture', tr('Albedo/base color map.', 'Mappa albedo/base color.'), 'mapSrc', 'mapDbKey', o, patch => patchMat(Object.assign({dynamicMapType:'none'}, patch)));
@@ -576,7 +633,7 @@ function create(deps){
     addTextureSlot(underlayControls, 'Metallic map', tr('Metalness channel map.', 'Mappa canale metallico.'), 'metalnessMapSrc', 'metalnessMapDbKey', o, patchMat);
     addTextureSlot(underlayControls, 'Alpha map', tr('Transparency/alpha channel map.', 'Mappa trasparenza/alpha.'), 'alphaMapSrc', 'alphaMapDbKey', o, patchMat);
     addTextureSlot(underlayControls, 'Emission map', tr('Emissive channel map.', 'Mappa canale emissione.'), 'emissiveMapSrc', 'emissiveMapDbKey', o, patchMat);
-    if(paint.enabled || dynamicOverrideEnabled) underlayControls.querySelectorAll('input,select,button,.lk-drop').forEach(control => {
+    if(paint.enabled || dynamicOverrideEnabled || sketch.enabled) underlayControls.querySelectorAll('input,select,button,.lk-drop').forEach(control => {
       if('disabled' in control) control.disabled = true;
       control.setAttribute('aria-disabled', 'true');
       if(control.classList && control.classList.contains('lk-drop')) control.style.pointerEvents = 'none';

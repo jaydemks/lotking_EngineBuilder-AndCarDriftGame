@@ -2,98 +2,99 @@
   "format": "LKEP_SPLIT_MANIFEST",
   "version": 1,
   "encoding": "utf-8-json-text-chunks",
+  "createdAt": "2026-08-06T22:23:16.610Z",
   "project": {
-    "name": "Demo project playground ( Create new level for more )",
-    "savedAt": "2026-07-30T23:09:33.495Z",
+    "name": "Local Project",
+    "savedAt": "2026-08-06T22:23:07.468Z",
     "format": "LKEP"
   },
-  "totalChars": 108598389,
-  "totalBytes": 108598389,
+  "totalChars": 108632355,
+  "totalBytes": 108632552,
   "chunkCharLimit": 8000000,
   "chunks": [
     {
       "file": "chunks/project-0001.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "0a6f18b81d2cca94b013e6fe02b339ce251db434aa0fbe9ab358be4891293b2a"
+      "sha256": "e74f560f4e2f77cd9fdb1d6d3ad4e3b526c88c404d9be65855b960afe41085bc"
     },
     {
       "file": "chunks/project-0002.lkep-part",
       "chars": 8000000,
-      "bytes": 8000000,
-      "sha256": "486cfeee66845fe8035e7229df54e94f0910badfcf4ba51432add5b75efcb6f9"
+      "bytes": 8000197,
+      "sha256": "3fbe280558d95946e3a3319569d94f21e7701bc0c7c5484808955eab878927f3"
     },
     {
       "file": "chunks/project-0003.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "4fee2b9eac25d1ac111e305b6c214b0078b83d4d72be772130b9a89f5853b1b9"
+      "sha256": "6a6a5c4999d0017deb83cb3b5fa8e643249e0c6c33f07a627d465a7124bee072"
     },
     {
       "file": "chunks/project-0004.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "aab9764297ffb803caad6f84e2f14ade5d6e2174af7b751e35538b4acc7fbaed"
+      "sha256": "8634cce4384b61b03a892f36da126e7ba281c3417ece2481c2b0f94720878395"
     },
     {
       "file": "chunks/project-0005.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "b7842fffbf334001d9e4de6d401cbbaeadb6007a70d9bb183d79f9d9feeaf51d"
+      "sha256": "4895aab0c82e3acd264c16dfc37ae09b08b9719b70aa4a222a1a736cf1ea6dee"
     },
     {
       "file": "chunks/project-0006.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "f19f41bffb0c3971d98604331f98c12f4998137c25046504cf69d92d1dd4b66c"
+      "sha256": "0a7d3ab3419f482b4d29f358f1cf266c59705b81de3f4b7752226a923af2f7ea"
     },
     {
       "file": "chunks/project-0007.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "b3ef099fd803cb7c9b852c297bba7141cacf347fd73d3fc68942bb114b873d53"
+      "sha256": "20aeca63624472005a4de8b5413963279c1b2b689120fe59c85931c63028d928"
     },
     {
       "file": "chunks/project-0008.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "8baac115b565215710b00c8bc9e2ee2201c44a380e3cbfc4e622bfdde7c65db5"
+      "sha256": "c9f3db637f8f71ebca1046d6bede5ae71d4bd0a4f967588164928af8540e94c3"
     },
     {
       "file": "chunks/project-0009.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "ef9ca02047e5757f442ff1ab00250c57295cc7920226e5da03010475ffc46edd"
+      "sha256": "cf23fc040793aed37786659a12c8d6faaa3b906f9ead0b081130e26994c7bb6b"
     },
     {
       "file": "chunks/project-0010.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "e5d08b92a519f413101daa28f583b83348230897fab9e0d6fcd16cba63c4999f"
+      "sha256": "ad2871df009aa881b3730d5de51a697d8f5400188ad2c938e71c75f66e60c849"
     },
     {
       "file": "chunks/project-0011.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "1a27b2e309c1a13cdb3f90593ecc0f9592bc03b2e854111c33a27ce1282128af"
+      "sha256": "51e8d41e946e54656c224cf5fff4076a0756bff8d4585fc0b1f13f807e7b8d6e"
     },
     {
       "file": "chunks/project-0012.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "2e795f3d6cdd6b93825e70cf11785cd537d8de6572b1d1640416eff906f863ef"
+      "sha256": "6f29339e067ac2d71d953d1d6698956c954b749a886ede3e04d44cff744cce5b"
     },
     {
       "file": "chunks/project-0013.lkep-part",
       "chars": 8000000,
       "bytes": 8000000,
-      "sha256": "0cd6f3216f74403ebfdabc79c00af032c74ad9db120e32f070bbc8eaf7d9fd5c"
+      "sha256": "a8cc5f1d1a3b8baa635955d3e2f610ad0e4200c73b4002c1312fa0195cdc59c2"
     },
     {
       "file": "chunks/project-0014.lkep-part",
-      "chars": 4598389,
-      "bytes": 4598389,
-      "sha256": "3012d9613e3c68e1524b0bbdd95b9779d05db195d2717996d7d4fa5417d153ea"
+      "chars": 4632355,
+      "bytes": 4632355,
+      "sha256": "4c340e4171fcf7b6f92bc52fe2949edf6eb302150298c7d87267a36a123859e2"
     }
   ]
 }

@@ -78,6 +78,8 @@ function createConfig(){
     letterboxColor: '#141518',   // fill outside the camera frame (dark grey by default)
     mode: 'free',
     fov: 62,
+    near: .1,
+    focusDistance: 12,
     fovSpeedGain: .16,
     fovSpeedMax: 20,
     minDist: 4.5,
@@ -105,6 +107,8 @@ function createConfig(){
     interiorLateral: INTERIOR_DEFAULTS.interiorLateral,
     interiorLookHeight: INTERIOR_DEFAULTS.interiorLookHeight,
     interiorFov: INTERIOR_DEFAULTS.interiorFov,
+    interiorNear: .1,
+    interiorFocusDistance: 9,
     interiorLag: INTERIOR_DEFAULTS.interiorLag,
     interiorGForceMotion: INTERIOR_DEFAULTS.interiorGForceMotion,
     interiorAccelerationMotion: INTERIOR_DEFAULTS.interiorAccelerationMotion,
@@ -118,30 +122,46 @@ function createConfig(){
   };
 }
 
+/** In PLAY the level's own default is the answer - a per-camera choice is an
+ *  authoring aid and does not get to fight it - except on a phone, which is forced
+ *  to 9:16 because letterboxing a portrait screen into a stripe is never right.
+ *  `gameAutoAspect` is the author saying the level has no opinion, so the viewport
+ *  fills; the phone rule still applies above it. See js/runtime/aspect-policy.js. */
+function resolveGameAspect(cfg, width, height){
+  const policy = window.LK_ASPECT_POLICY;
+  if(!policy){
+    // Kept so a shell that has not loaded the policy still renders something sane.
+    if(cfg.gameAutoAspect) return {ratio:width / height, scoped:false};
+    if(height > width) return {ratio:ASPECTS['9:16'], scoped:true};
+    const named = ASPECTS[cfg.aspect];
+    return named ? {ratio:named, scoped:true} : {ratio:width / height, scoped:false};
+  }
+  return policy.resolve({
+    mode:'game',
+    level:cfg.gameAutoAspect ? 'auto' : cfg.aspect,
+    width,
+    height,
+  });
+}
 function aspectValue(cfg, width, height){
-  if(cfg.gameAutoAspect) return width / height;
-  if(height > width) return ASPECTS['9:16'];
-  return ASPECTS[cfg.aspect] || (width / height);
+  return resolveGameAspect(cfg, width, height).ratio;
 }
 
 function renderRect(cfg, width, height){
-  const aspect = aspectValue(cfg, width, height);
-  const screenAspect = width / height;
-  let w = width;
-  let h = height;
-  const scopedAspect = cfg.gameAutoAspect ? null : (ASPECTS[cfg.aspect] || (height > width ? ASPECTS['9:16'] : null));
-  if(scopedAspect){
-    if(screenAspect > aspect) w = Math.round(height * aspect);
-    else h = Math.round(width / aspect);
-  }
-  return {
-    x: Math.round((width - w) / 2),
-    y: Math.round((height - h) / 2),
-    w,
-    h,
-    aspect,
-    scoped: !!scopedAspect,
-  };
+  const resolved = resolveGameAspect(cfg, width, height);
+  const policy = window.LK_ASPECT_POLICY;
+  const rect = policy
+    ? policy.fitRect(resolved, width, height)
+    : (function(){
+        let w = width, h = height;
+        if(resolved.scoped){
+          if(width / height > resolved.ratio) w = Math.round(height * resolved.ratio);
+          else h = Math.round(width / resolved.ratio);
+        }
+        return {x:Math.round((width - w) / 2), y:Math.round((height - h) / 2), w, h, ratio:resolved.ratio, scoped:resolved.scoped};
+      })();
+  // `aspect` is the long-standing key every caller reads; keep it.
+  return {x:rect.x, y:rect.y, w:rect.w, h:rect.h, aspect:resolved.ratio, scoped:!!rect.scoped};
 }
 
 function renderScoped(opts){
@@ -152,6 +172,10 @@ function renderScoped(opts){
   const ox = Math.round(opts.offsetX || 0);
   const oy = Math.round(opts.offsetY || 0);
   const clipped = rect.scoped || !!opts.clip;
+  const backend = window.LK_RUNTIME_RENDERING_BACKEND;
+  const viewportY = (bottomY, height) => backend && backend.viewportOriginY
+    ? backend.viewportOriginY(renderer, bottomY, height, innerHeight)
+    : (renderer && renderer.isWebGPURenderer ? innerHeight - bottomY - height : bottomY);
   camera.aspect = rect.aspect;
   camera.updateProjectionMatrix();
 
@@ -160,12 +184,14 @@ function renderScoped(opts){
     if(renderer.getClearColor) renderer.getClearColor(CLEAR_RESTORE_COLOR);
     if(opts.clearColor && renderer.setClearColor) renderer.setClearColor(opts.clearColor, 1);
     renderer.setScissorTest(true);
-    renderer.setViewport(ox, oy, opts.width, opts.height);
-    renderer.setScissor(ox, oy, opts.width, opts.height);
+    const outerY = viewportY(oy, opts.height);
+    renderer.setViewport(ox, outerY, opts.width, opts.height);
+    renderer.setScissor(ox, outerY, opts.width, opts.height);
     renderer.clear();
     if(opts.clearColor && renderer.setClearColor) renderer.setClearColor(CLEAR_RESTORE_COLOR, oldAlpha);
-    renderer.setViewport(ox + rect.x, oy + rect.y, rect.w, rect.h);
-    renderer.setScissor(ox + rect.x, oy + rect.y, rect.w, rect.h);
+    const frameY = viewportY(oy + rect.y, rect.h);
+    renderer.setViewport(ox + rect.x, frameY, rect.w, rect.h);
+    renderer.setScissor(ox + rect.x, frameY, rect.w, rect.h);
   }
 
   opts.render(rect);

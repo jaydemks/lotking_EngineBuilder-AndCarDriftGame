@@ -30,6 +30,20 @@ function finite(value, fallback){ const n = Number(value); return Number.isFinit
 function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
 function clone(value){ return value == null ? value : JSON.parse(JSON.stringify(value)); }
 
+const WEAPON_ACTION_KEYS = Object.freeze(['fire', 'reload', 'throw']);
+
+// A weapon may choose which Character action slot represents each operation.
+// The view rig still owns the operation itself (fire/reload/throw); this map
+// only selects the body clip, so a custom pickup never forks combat gameplay.
+function normalizeWeaponActions(source){
+  const src = source && typeof source === 'object' ? source : {};
+  return WEAPON_ACTION_KEYS.reduce((out, key) => {
+    const value = src[key];
+    out[key] = typeof value === 'string' ? value.trim() : '';
+    return out;
+  }, {});
+}
+
 const KINDS = Object.freeze(['weapon', 'health', 'armor', 'ammo', 'custom']);
 
 // ------------------------------------------------ descriptors
@@ -43,6 +57,12 @@ function normalizeItem(source){
     name:String(src.name || defaultName(kind, src)),
     amount:clamp(finite(src.amount, kind === 'health' ? 35 : 60), 0, 100000),
     weapon:src.weapon && typeof src.weapon === 'object' ? clone(src.weapon) : (src.preset ? {preset:src.preset} : null),
+    ammoState:src.ammoState && typeof src.ammoState === 'object' ? {
+      ammo:Number.isFinite(Number(src.ammoState.ammo)) && Number(src.ammoState.ammo) >= 0
+        ? Math.round(Number(src.ammoState.ammo)) : undefined,
+      reserve:Number.isFinite(Number(src.ammoState.reserve)) && Number(src.ammoState.reserve) >= 0
+        ? Math.round(Number(src.ammoState.reserve)) : undefined,
+    } : null,
     // A pickup can come back after a while, which is what makes an arena loop.
     respawn:clamp(finite(src.respawn, 0), 0, 600),
     radius:clamp(finite(src.radius, 1.5), .2, 12),
@@ -82,8 +102,14 @@ function defaultName(kind, src){
 // a "shotgun" is.
 function weaponDefinition(source){
   const api = window.LK_RUNTIME_FIRST_PERSON;
-  if(!api || !api.normalizeWeapon) return source ? clone(source) : null;
-  return api.normalizeWeapon(source || {});
+  const src = source && typeof source === 'object' ? source : {};
+  const weapon = api && api.normalizeWeapon ? api.normalizeWeapon(src) : clone(src);
+  if(!weapon) return null;
+  // normalizeWeapon intentionally retains combat fields only. Item metadata is
+  // reattached at this boundary because it belongs to the inventory/equip
+  // contract, not to the renderer or ballistics controller.
+  weapon.characterActions = normalizeWeaponActions(src.characterActions || src.actions);
+  return weapon;
 }
 
 // ------------------------------------------------ inventory (per Pawn)
@@ -129,6 +155,27 @@ function createInventory(pawn, options, hooks){
   const slots = [];
   const pack = [];
   let index = -1;
+  const baseCharacterActions = WEAPON_ACTION_KEYS.reduce((out, key) => {
+    const animations = pawn && pawn.config && pawn.config.animations;
+    out[key] = animations && animations[key] != null ? clone(animations[key]) : '';
+    return out;
+  }, {});
+
+  function applyCharacterActions(weapon){
+    if(!pawn) return;
+    const authored = normalizeWeaponActions(weapon && weapon.characterActions);
+    const patch = WEAPON_ACTION_KEYS.reduce((out, key) => {
+      out[key] = authored[key] || clone(baseCharacterActions[key]);
+      return out;
+    }, {});
+    const current = pawn.config && pawn.config.animations || {};
+    const changed = WEAPON_ACTION_KEYS.some(key => JSON.stringify(current[key] == null ? '' : current[key]) !== JSON.stringify(patch[key]));
+    if(!changed) return;
+    if(typeof pawn.setAnimations === 'function') pawn.setAnimations(patch);
+    else if(pawn.config){
+      pawn.config.animations = Object.assign({}, pawn.config.animations || {}, patch);
+    }
+  }
 
   // The seven roles, in number-key order. A weapon claims the slot it declares,
   // so picking up a knife never displaces a rifle: they are not competing for
@@ -182,15 +229,21 @@ function createInventory(pawn, options, hooks){
     stash();
     index = next;
     const entry = slots[index];
+    applyCharacterActions(entry.weapon);
     const view = rig();
     if(view && view.equipWeapon) view.equipWeapon(entry.weapon, {ammo:entry.ammo, reserve:entry.reserve});
     emit('OnWeaponEquipped', {weapon:entry.weapon.id, name:entry.weapon.name, slot:index});
     return true;
   }
 
-  function add(weaponSource, ammoState){
+  // `options.equip` overrides `config.autoEquip` for one call. Seeding a spawn
+  // loadout needs that: auto-equip means "a weapon you pick up goes into your
+  // hands", which is right during play and wrong while the starting kit is
+  // being filled - it left the Pawn holding whichever entry was authored LAST.
+  function add(weaponSource, ammoState, options){
     const weapon = weaponDefinition(weaponSource);
     if(!weapon) return false;
+    const wantsEquip = options && options.equip !== undefined ? options.equip !== false : (config.autoEquip || index < 0);
     // Same ROLE, different weapon: the new one takes the slot and the old one is
     // handed back, which is how a shotgun replaces a rifle without touching the
     // knife or the grenades.
@@ -233,7 +286,7 @@ function createInventory(pawn, options, hooks){
     // whatever order things were picked up in.
     slots.sort((a, b) => slotIndexOf(a.weapon) - slotIndexOf(b.weapon));
     const at = slots.indexOf(entry);
-    if(config.autoEquip || index < 0) equip(at);
+    if(wantsEquip) equip(at);
     else if(at <= index) index++;
     return 'weapon';
   }
@@ -269,7 +322,10 @@ function createInventory(pawn, options, hooks){
     index = slots.length ? clamp(index, 0, slots.length - 1) : -1;
     const view = rig();
     if(index >= 0) equip(index);
-    else if(view && view.equipWeapon) view.equipWeapon(null);
+    else {
+      applyCharacterActions(null);
+      if(view && view.equipWeapon) view.equipWeapon(null);
+    }
     if(emitEvent !== false) emit('OnWeaponDropped', {weapon:entry.weapon.name});
     return entry;
   }
@@ -311,8 +367,50 @@ function createInventory(pawn, options, hooks){
       return true;
     },
     hasWeapon:() => index >= 0,
-    clear(){ slots.length = 0; index = -1; const view = rig(); if(view && view.equipWeapon) view.equipWeapon(null); },
+    clear(){ slots.length = 0; index = -1; applyCharacterActions(null); const view = rig(); if(view && view.equipWeapon) view.equipWeapon(null); },
   });
+}
+
+// One attachment boundary for every armed Pawn, whether its view/weapon rig was
+// authored up front by Character Pawn Base or attached lazily by Actor Combat.
+// An existing inventory is authoritative: returning it unchanged keeps this
+// operation idempotent and avoids topping up ammo whenever a facade resolves.
+function attachInventory(GAME, pawn, options, loadout){
+  if(!pawn || !pawn.firstPerson) return pawn && pawn.inventory || null;
+  if(pawn.inventory) return pawn.inventory;
+  const inventory = createInventory(pawn, options || {}, {
+    onOverflow(entry){
+      const items = GAME && GAME.systems && GAME.systems.items;
+      if(!items || !pawn.owner) return;
+      const yaw = pawn.owner.rotation ? pawn.owner.rotation.y : 0;
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      items.spawnItem({kind:'weapon', name:entry.weapon.name, weapon:entry.weapon, radius:1.6},
+        {x:pawn.owner.position.x + fx * 1.1, y:pawn.owner.position.y + 1.1, z:pawn.owner.position.z + fz * 1.1},
+        {velocity:{x:fx * 2.6, y:1.4, z:fz * 2.6}});
+    },
+  });
+  pawn.inventory = inventory;
+  const rigConfig = typeof pawn.firstPerson.config === 'function' ? pawn.firstPerson.config() : null;
+  // The whole starting kit is seeded WITHOUT equipping, then the Pawn is put on
+  // the weapon it is meant to start with. Seeding with auto-equip on left the
+  // Character holding the last authored entry - a grenade, in every shipped FPS
+  // template - so it spawned with no usable firearm and stood in a throw pose
+  // that read as firing on its own.
+  const seed = entry => inventory.add(entry, null, {equip:false});
+  const primary = rigConfig && !rigConfig.startUnarmed && rigConfig.weapon ? rigConfig.weapon : null;
+  if(primary) seed(primary);
+  (Array.isArray(loadout) ? loadout : []).forEach(seed);
+  if(!inventory.current()){
+    // Prefer the rig's own weapon, then the first thing that can actually shoot,
+    // then whatever is carried - never nothing, or the Pawn has empty hands.
+    const preferred = primary && String(primary.slot || primary.assignedSlot || 'primary');
+    const shootable = inventory.slots().findIndex(entry => entry.weapon.kind !== 'unarmed' && entry.weapon.kind !== 'thrown');
+    if(!(preferred && inventory.equipSlot(preferred)) && !(shootable >= 0 && inventory.equip(shootable))) inventory.equip(0);
+  }
+  // Authored starting consumables use the same pack entries as world pickups;
+  // AI and Players therefore spend medkits through one inventory contract.
+  (options&&Array.isArray(options.items)?options.items:[]).forEach(entry=>inventory.store(normalizeItem(entry)));
+  return inventory;
 }
 
 // Spends a consumable on a Pawn. Shared by "used where it lies" and "used out
@@ -754,6 +852,23 @@ function create(GAME){
     return true;
   }
 
+  // Death/reset systems can reclaim a lightweight body before restoring the
+  // authored transform. Removing every matching entry also makes repeated
+  // kill/revive cycles leak-free.
+  function stopBody(object){
+    if(!object) return 0;
+    let removed = 0;
+    for(let index = flying.length - 1; index >= 0; index--){
+      const body = flying[index];
+      if(body.object !== object) continue;
+      body.vx = body.vy = body.vz = body.spin = 0;
+      body.resting = true;
+      flying.splice(index, 1);
+      removed++;
+    }
+    return removed;
+  }
+
   function groundAt(x, z, from, ignore){
     const world = GAME && GAME.world;
     let best = world && typeof world.characterGroundHeight === 'function' ? finite(world.characterGroundHeight(x, z), 0) : 0;
@@ -802,7 +917,7 @@ function create(GAME){
     const fuse = object.userData.thrown;
     if(!fuse) return false;
     const at = object.position;
-    const runtime = window.LK_RUNTIME_FIRST_PERSON;
+    const runtime = window.LK_RUNTIME_DAMAGE_CONTRACT || window.LK_RUNTIME_FIRST_PERSON;
     (registry() || []).forEach(target => {
       if(!target || !target.position || target === object) return;
       const dx = target.position.x - at.x, dy = target.position.y - at.y, dz = target.position.z - at.z;
@@ -813,8 +928,15 @@ function create(GAME){
       // off with distance. The old shared linear falloff made the first/nearest
       // target die while the rest of the same group were merely launched.
       const impulseFalloff = clamp(1 - distance / Math.max(.001, fuse.radius), 0, 1);
-      if(target.userData && target.userData.damageable && runtime && runtime.applyDamage){
-        const applied = runtime.applyDamage(target, fuse.damage);
+      let deathHandled = false;
+      if(target.userData && target.userData.damageable && runtime){
+        const apply = runtime.apply || runtime.applyDamage;
+        const applied = apply && apply.call(runtime, target, fuse.damage, {
+          source:'explosion', explosion:true, pawnId:fuse.pawnId,
+          point:target.position, origin:at,
+          direction:{x:dx, y:dy + distance * .4, z:dz}, force:fuse.damage * impulseFalloff,
+        });
+        deathHandled = !!(applied && applied.deathHandled);
         // Hitscan publishes the lethal result after applying damage; explosions
         // must cross the same event boundary. Without it the health reached
         // zero and the blast impulse launched the target, but its Logic graph
@@ -832,11 +954,12 @@ function create(GAME){
             killed:true,
             headshot:false,
             explosion:true,
+            deathHandled,
             preset:fuse.preset,
           });
         }
       }
-      impulse(target, {x:dx, y:dy + distance * .4, z:dz}, fuse.damage * impulseFalloff * .25);
+      if(!deathHandled) impulse(target, {x:dx, y:dy + distance * .4, z:dz}, fuse.damage * impulseFalloff * .25);
     });
     emit('OnExplosion', {
       pawnId:fuse.pawnId,
@@ -873,6 +996,7 @@ function create(GAME){
     const loose = !!(node.userData && (node.userData.item || node.userData.physicsBody ||
       (node.userData.interact && node.userData.interact.type === 'carry')));
     if(health && !loose && !detail.killed) return;
+    if(health && detail.killed && detail.deathHandled) return;
     const force = Math.max(2, finite(detail.damage, 20) * .35) * (detail.killed ? 4 : 1);
     impulse(node, direction, force);
   }
@@ -966,6 +1090,7 @@ function create(GAME){
     spawnItem,
     removeItem,
     impulse,
+    stopBody,
     detonate,
     update,
     warmup,
@@ -984,10 +1109,13 @@ function install(GAME){
 window.LK_RUNTIME_ITEMS = Object.freeze({
   KINDS,
   INVENTORY_MODES,
+  WEAPON_ACTION_KEYS,
   normalizeItem,
+  normalizeWeaponActions,
   normalizeInventory,
   weaponDefinition,
   createInventory,
+  attachInventory,
   create,
   install,
 });

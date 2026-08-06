@@ -233,7 +233,7 @@ function createTransformService(THREE, STORE){
   });
 }
 
-function createInputService(GAME){
+function createInputService(GAME, resolvePawn){
   const root = window;
   const state = root.LK_LOGIC_INPUT_STATE || {
     installed:false,
@@ -263,21 +263,107 @@ function createInputService(GAME){
     });
     root.LK_LOGIC_INPUT_STATE = state;
   }
-  return Object.freeze({
-    isKeyPressed: key => state.keys.has(String(key || '').toLowerCase()),
-    playerDrive: (playerId, contextId) => {
+  function selfPawn(){
+    return typeof resolvePawn === 'function' ? resolvePawn() || null : null;
+  }
+  function profileFor(pawn){
+    const router = root.LK_RUNTIME_PLAYER_ACTION_ROUTER;
+    if(router && typeof router.inputProfileForPawn === 'function') return router.inputProfileForPawn(pawn);
+    const explicit=String(pawn && (pawn.inputProfileId || pawn.inputActionProfile) || '').trim().toLowerCase();
+    if(explicit)return explicit;
+    const type=String(pawn && (pawn.pawnType || pawn.type) || '').trim().toLowerCase();
+    return type || null;
+  }
+  function contextFor(pawn){
+    const router = root.LK_RUNTIME_PLAYER_ACTION_ROUTER;
+    if(router && typeof router.contextForPawn === 'function') return router.contextForPawn(pawn);
+    const profile=profileFor(pawn);
+    return profile === 'vehicle' ? 'vehicle' : (profile ? 'character' : null);
+  }
+  function playerDrive(playerId, contextId){
       const id = Number(playerId);
       if(!Number.isFinite(id) || id < 1 || id > 4 || !GAME || !GAME.input || !GAME.input.player) return {steer:0, throttle:0, brake:0, handbrake:false, device:null};
+      const router=GAME.systems&&GAME.systems.playerActionRouter;
+      if(router&&typeof router.read==='function'){
+        const snapshot=router.read(id,contextId);
+        const view=snapshot&&snapshot.view,actions=root.LK_RUNTIME_INPUT_ACTIONS;
+        return Object.assign(actions&&actions.neutralDrive?actions.neutralDrive():{},snapshot&&snapshot.drive||{}, {
+          device:view&&view.device?view.device():null,
+        });
+      }
       if(GAME.input.ensurePlayerSlot) GAME.input.ensurePlayerSlot(id - 1);
       const view = GAME.input.player(id - 1);
-      const drive = view && view.drive ? view.drive(contextId) : {};
-      return {
-        steer:Number(drive.steer) || 0, throttle:Number(drive.throttle) || 0,
-        brake:Number(drive.brake) || 0, handbrake:drive.handbrake === true,
-        highBeams:drive.highBeams === true, reset:drive.reset === true,
+      let drive = view && view.drive ? view.drive(contextId) : {};
+      const pawn=GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(id):null;
+      const semantic=root.LK_RUNTIME_PLAYER_ACTION_ROUTER;
+      if(semantic&&typeof semantic.filterDriveForPawn==='function')drive=semantic.filterDriveForPawn(pawn,drive);
+      // Preserve the complete normalized action snapshot. Restricting this
+      // service to the old vehicle fields meant a Pawn using services.input
+      // silently lost Jump, Reload and every other context-owned action.
+      const actions = window.LK_RUNTIME_INPUT_ACTIONS;
+      return Object.assign(actions && actions.neutralDrive ? actions.neutralDrive() : {}, drive || {}, {
         device:view && view.device ? view.device() : null,
-      };
-    },
+      });
+  }
+  function actionSnapshot(){
+    const pawn=selfPawn();
+    const id=Number(pawn&&pawn.playerId);
+    if(!pawn||pawn.possessed===false||pawn.enabled===false||pawn.hidden===true||!Number.isFinite(id)||id<1||id>4)return null;
+    const router=GAME&&GAME.systems&&GAME.systems.playerActionRouter;
+    if(router&&typeof router.read==='function'){
+      const snapshot=router.read(id,contextFor(pawn));
+      // A graph can only observe input owned by its own possessed Pawn. This
+      // identity check prevents two graphs sharing a Player ID from sampling
+      // whichever registry entry happened to win lookup order.
+      if(!snapshot||snapshot.pawn!==pawn)return null;
+      return Object.assign({},snapshot,{drive:Object.assign({},snapshot.drive||{})});
+    }
+    const registered=GAME&&GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(id):pawn;
+    if(registered&&registered!==pawn)return null;
+    return {playerId:id,pawn,contextId:contextFor(pawn),drive:playerDrive(id,contextFor(pawn))};
+  }
+  function actionForLegacyKey(key){
+    const text=String(key==null?'':key).trim();
+    if(!text&&key!==' ')return null;
+    const normalized=(key===' '||/^space(?:bar)?$/i.test(text))?'space':text.toLowerCase().replace(/^key/,'');
+    const actions=root.LK_RUNTIME_INPUT_ACTIONS;
+    const neutral=actions&&actions.neutralDrive?actions.neutralDrive():{};
+    if(Object.prototype.hasOwnProperty.call(neutral,text))return text;
+    if(Object.prototype.hasOwnProperty.call(neutral,normalized))return normalized;
+    const profile=profileFor(selfPawn());
+    const onFoot=profile==='character'||profile==='animal';
+    const soccer=profile==='soccer';
+    const vehicle=profile==='vehicle';
+    const common={w:'throttle',arrowup:'throttle',s:'brake',arrowdown:'brake',shift:'sprint',shiftleft:'sprint',shiftright:'sprint',
+      escape:'pauseMenu',tab:'radioToggle',p:'radioPlay',n:'radioNext',u:'tuningMenu',m:'mute',h:'legend',
+      q:'leanLeft',e:'leanRight',i:'inventory',z:'nextWeapon',t:'useItem'};
+    if(normalized==='space')return vehicle?'handbrake':(onFoot?'jump':null);
+    if(normalized==='r')return vehicle?'reset':(onFoot?'reload':null);
+    if(normalized==='f')return vehicle?'highBeams':(soccer?'shoot':(profile==='animal'?'primaryAbility':(onFoot?'interact':null)));
+    if(normalized==='g')return soccer?'pass':(onFoot?'dropItem':null);
+    if(normalized==='c')return vehicle?'cameraMode':(soccer?'tackle':(onFoot?'crouch':null));
+    if(normalized==='b')return vehicle?'radioPrev':((onFoot||soccer)?'cameraMode':null);
+    if(normalized==='v')return vehicle?'lookBack':(onFoot?'swapShoulder':null);
+    if(soccer&&normalized==='j')return 'diveLeft';
+    if(soccer&&normalized==='l')return 'diveRight';
+    if(/^digit[1-7]$/.test(normalized))return 'slot'+normalized.slice(-1);
+    if(/^[1-7]$/.test(normalized))return 'slot'+normalized;
+    if(profile==='animal'&&normalized==='q')return 'voice';
+    if(profile==='animal'&&normalized==='e')return 'secondaryAbility';
+    return common[normalized]||null;
+  }
+  function isActionPressed(action){
+    const snapshot=actionSnapshot(),value=snapshot&&snapshot.drive&&snapshot.drive[action];
+    return value===true||(typeof value==='number'&&Math.abs(value)>.5);
+  }
+  return Object.freeze({
+    // Pawn graphs get a semantic compatibility adapter. Only graph contexts
+    // without a Pawn retain literal key polling for explicitly legacy logic.
+    isKeyPressed:key=>selfPawn()?isActionPressed(actionForLegacyKey(key)):state.keys.has(String(key||'').toLowerCase()),
+    isActionPressed,
+    actionForLegacyKey,
+    actionSnapshot,
+    playerDrive,
     pointer: () => Object.assign({}, state.pointer),
   });
 }
@@ -286,9 +372,11 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
   const registry = GAME && GAME.pawns
     ? GAME.pawns
     : (window.LK_RUNTIME_VEHICLE_PAWNS && GAME ? window.LK_RUNTIME_VEHICLE_PAWNS.install(GAME) : null);
+  const sketchbookDefinition = graph && graph.sketchbookPawn;
   const characterDefinition = graph && graph.characterPawn;
-  const soccerDefinition = !characterDefinition && graph && graph.soccerPawn;
-  const sourceDefinition = !characterDefinition && !soccerDefinition && graph && (graph.vehiclePawn || graph.playerPawnBlueprint) || null;
+  const animalDefinition = !characterDefinition && graph && graph.animalPawn;
+  const soccerDefinition = !characterDefinition && !animalDefinition && graph && graph.soccerPawn;
+  const sourceDefinition = !characterDefinition && !animalDefinition && !soccerDefinition && graph && (graph.vehiclePawn || graph.playerPawnBlueprint) || null;
   const variableValues = new Map((graph && Array.isArray(graph.variables) ? graph.variables : []).map(variable => [String(variable && variable.name || ''), variable && variable.value]));
   const definition = sourceDefinition ? Object.assign({}, sourceDefinition, {
     enabled:variableValues.has('PawnEnabled') ? variableValues.get('PawnEnabled') !== false : sourceDefinition.enabled,
@@ -342,8 +430,23 @@ function createPawnService(GAME, STORE, owner, graph, inputService){
   };
   if(definition) applyGraphBindings(definition);
   let self = null;
-  if(registry && owner && characterDefinition && window.LK_RUNTIME_CHARACTER_PAWNS){
+  if(registry && owner && sketchbookDefinition && window.LK_RUNTIME_SKETCHBOOK_PAWNS && window.LK_RUNTIME_SKETCHBOOK_PAWNS.createLogic){
+    self = window.LK_RUNTIME_SKETCHBOOK_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(sketchbookDefinition))), {input:inputService, graph, STORE});
+  } else if(registry && owner && characterDefinition && window.LK_RUNTIME_CHARACTER_IMPLEMENTATIONS){
+    // One authored Character Pawn, two interchangeable locomotion backends.
+    // The registry translates the descriptor into the selected backend's shape,
+    // so switching keeps the model, animations, spawn, camera and player.
+    // The backend id is read AFTER the graph bindings are applied: the exposed
+    // `Locomotion Backend` variable binds to `implementation`, so the raw
+    // descriptor is the stale copy of that choice.
+    const boundCharacter = applyGraphBindings(JSON.parse(JSON.stringify(characterDefinition)));
+    self = window.LK_RUNTIME_CHARACTER_IMPLEMENTATIONS.createCharacter(
+      GAME, owner, boundCharacter,
+      {input:inputService, graph, STORE}, boundCharacter.implementation);
+  } else if(registry && owner && characterDefinition && window.LK_RUNTIME_CHARACTER_PAWNS){
     self = window.LK_RUNTIME_CHARACTER_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(characterDefinition))), {input:inputService, graph, STORE});
+  } else if(registry && owner && animalDefinition && window.LK_RUNTIME_ANIMAL_PAWNS){
+    self = window.LK_RUNTIME_ANIMAL_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(animalDefinition))), {input:inputService, graph, STORE});
   } else if(registry && owner && soccerDefinition && window.LK_RUNTIME_SOCCER_PAWNS){
     self = window.LK_RUNTIME_SOCCER_PAWNS.createLogic(GAME, owner, applyGraphBindings(JSON.parse(JSON.stringify(soccerDefinition))), {input:inputService, graph, STORE});
   } else if(registry && owner && definition){
@@ -743,8 +846,21 @@ function createCameraService(GAME, THREE){
 
 function createCinemaService(){
   return Object.freeze({
-    playTimeline:(studio, startTime) => {
-      const detail = {studio:studio || '', time:Math.max(0, Number(startTime) || 0), fullscreen:true, playerIndex:0};
+    playTimeline:(studio, startTime, options) => {
+      const opts=options||{};
+      let completed=false;
+      const onComplete=typeof opts.onComplete==='function'?payload=>{
+        if(completed)return false;
+        completed=true;
+        opts.onComplete(payload||{});
+        return true;
+      }:null;
+      const detail = {
+        studio:studio || '', time:Math.max(0, Number(startTime) || 0), fullscreen:true, playerIndex:0,
+        playbackOverride:opts.playbackOverride==='once'?'once':null,
+        onComplete,
+        completion:opts.completion&&typeof opts.completion==='object'?opts.completion:null,
+      };
       window.dispatchEvent(new CustomEvent('lotking:cinemastart', {detail}));
       return true;
     },
@@ -856,13 +972,29 @@ function createNetworkService(){
   });
 }
 
+function createUiService(GAME,owner,graph){
+  const runtime=window.LK_RUNTIME_UI_ELEMENTS;
+  const manager=runtime&&runtime.install?runtime.install(GAME):null;
+  const ownerId=String(owner&&owner.userData&&(owner.userData.editorId||owner.userData.logicInstanceId)||owner&&owner.uuid||graph&&graph.name||'level-ui');
+  return Object.freeze({
+    ownerId,
+    mountAuthored:()=>manager&&graph&&graph.uiElement?manager.mount(ownerId,runtime.resolveAuthored(graph)):null,
+    create:(type,props,parent)=>manager?manager.createElement(ownerId,type,props,parent):null,
+    find:elementId=>manager?manager.find(ownerId,elementId):null,
+    set:(element,patch)=>manager?manager.update(element,patch):null,
+    remove:element=>!!(manager&&manager.remove(element)),
+    dispose:()=>manager?manager.disposeOwner(ownerId):0,
+  });
+}
+
 function createContext(opts){
   opts = opts || {};
   const GAME = opts.GAME || window.LOT_KING;
   const STORE = opts.STORE || window.LK_STORE;
   const THREERef = opts.THREE || window.THREE;
-  const inputService = createInputService(GAME);
-  const pawnService = createPawnService(GAME, opts.STORE || null, opts.owner || null, opts.graph || null, inputService);
+  let pawnService = null;
+  const inputService = createInputService(GAME, () => pawnService && pawnService.self());
+  pawnService = createPawnService(GAME, opts.STORE || null, opts.owner || null, opts.graph || null, inputService);
   return {
     GAME,
     STORE,
@@ -885,9 +1017,10 @@ function createContext(opts){
       animations: createAnimationService(STORE),
       soccer: createSoccerService(GAME),
       network: createNetworkService(),
+      ui: createUiService(GAME, opts.owner || null, opts.graph || null),
     },
   };
 }
 
-window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService, createSoccerService, createNetworkService});
+window.LK_LOGIC_SERVICES = Object.freeze({createContext, createDebugService, createObjectService, createTransformService, createInputService, createPawnService, createPhysicsService, createMaterialService, createRaycastService, createCameraService, createCinemaService, createAudioService, createAnimationService, createSoccerService, createNetworkService, createUiService});
 })();

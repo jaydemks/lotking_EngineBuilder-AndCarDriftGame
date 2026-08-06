@@ -124,6 +124,7 @@ function createSky(deps){
     pmrem: null,
     bucket: -1,
   };
+  let proceduralEnvDeferred=false;
   const ENV_ORIENTATION={background:0,environment:0};
   function applyEnvironmentOrientation(){
     if(scene.backgroundRotation)scene.backgroundRotation.y=THREE.MathUtils.degToRad(ENV_ORIENTATION.background);
@@ -145,8 +146,20 @@ function createSky(deps){
   }
   function initProceduralEnv(){
     if(PROC_ENV.pmrem || !renderer) return;
-    PROC_ENV.pmrem = new THREE.PMREMGenerator(renderer);
-    PROC_ENV.pmrem.compileEquirectangularShader();
+    if(renderer.isWebGPURenderer&&renderer.initialized!==true){
+      if(!proceduralEnvDeferred){
+        proceduralEnvDeferred=true;
+        addEventListener('lotking:renderer-ready',()=>{
+          proceduralEnvDeferred=false;
+          update(0);
+        },{once:true});
+      }
+      return;
+    }
+    const PMREM=renderer.isWebGPURenderer?THREE.WebGPUPMREMGenerator:THREE.PMREMGenerator;
+    if(typeof PMREM!=='function') return;
+    PROC_ENV.pmrem = new PMREM(renderer);
+    if(!renderer.isWebGPURenderer) PROC_ENV.pmrem.compileEquirectangularShader();
   }
   function rebuildProceduralEnv(v, force){
     if(!PROC_ENV.enabled) return false;
@@ -570,7 +583,9 @@ function createSky(deps){
   // attivo). Creazione lazy: se lo script arriva dopo, si aggancia comunque.
   let VC = null;
   function ensureVC(){
-    if(!VC && window.LK_RUNTIME_VOL_CLOUDS) VC = window.LK_RUNTIME_VOL_CLOUDS.create({scene});
+    // renderer serve solo per la capability detection (texture 3D / WebGL2):
+    // senza, il modulo compila comunque il percorso di fallback procedurale.
+    if(!VC && window.LK_RUNTIME_VOL_CLOUDS) VC = window.LK_RUNTIME_VOL_CLOUDS.create({scene, renderer});
     return VC;
   }
   ensureVC();
@@ -805,6 +820,13 @@ function createSky(deps){
       set: patch => { if(ensureVC()){ VC.set(patch); update(0); } },
       isEnabled: () => !!VC && VC.isEnabled(),
       defaults: () => ensureVC() ? VC.defaults() : {},
+      presets: () => window.LK_RUNTIME_VOL_CLOUDS ? window.LK_RUNTIME_VOL_CLOUDS.PRESETS : {},
+      applyPreset: id => {
+        if(!ensureVC() || !window.LK_RUNTIME_VOL_CLOUDS || !window.LK_RUNTIME_VOL_CLOUDS.preset) return false;
+        VC.set(window.LK_RUNTIME_VOL_CLOUDS.preset(id, VC.get()));
+        update(0);
+        return true;
+      },
       tick: dt => { if(VC) VC.tick(dt); },
     },
   };

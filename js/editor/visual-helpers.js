@@ -5,6 +5,15 @@
 (function(){
 'use strict';
 
+// The rendering backend owns the timing of a GPU free: immediate on WebGL, held
+// until the frame's submit has drained on WebGPU. Without it, free at once.
+function releaseGpu(release){
+  const backend = window.LK_RUNTIME_RENDERING_BACKEND;
+  if(backend && typeof backend.deferGpuRelease === 'function') return backend.deferGpuRelease(release);
+  release();
+  return false;
+}
+
 function create(deps){
   deps = deps || {};
   const THREE = deps.THREE;
@@ -17,19 +26,95 @@ function create(deps){
   let replaceDropHelper = null;
   let camRigHelper = null;
   let colliderHelpers = [];
+  let aiActionHelper = null;
 
   function registry(){
     return deps.registry ? (deps.registry() || []) : [];
   }
 
+  // Helpers are rebuilt while the viewport is being rendered - a selection change,
+  // a drag, a light moving - so the frees go through the rendering backend, which
+  // holds them until the frame's submit has drained on WebGPU. Freeing them here
+  // destroyed buffers a command buffer had already recorded.
   function disposeVisualHelper(helper){
     if(!helper) return;
     if(helper.parent) helper.parent.remove(helper);
-    helper.traverse && helper.traverse(node => {
-      if(node.geometry && node.geometry.dispose) node.geometry.dispose();
-      const materials = Array.isArray(node.material) ? node.material : [node.material];
-      materials.forEach(material => { if(material && material.dispose) material.dispose(); });
+    if(!helper.traverse) return;
+    const geometries = [], materials = [];
+    helper.traverse(node => {
+      if(node.geometry && node.geometry.dispose) geometries.push(node.geometry);
+      (Array.isArray(node.material) ? node.material : [node.material]).forEach(material => {
+        if(material && material.dispose) materials.push(material);
+      });
     });
+    releaseGpu(() => {
+      geometries.forEach(geometry => geometry.dispose());
+      materials.forEach(material => material.dispose());
+    });
+  }
+
+  function graphValue(graph,path,fallback){
+    const variable=(graph&&Array.isArray(graph.variables)?graph.variables:[]).find(item=>item&&item.exposed&&String(item.binding||'')===path);
+    if(variable)return variable.value;
+    const pawn=graph&&(graph.characterPawn||graph.animalPawn),keys=String(path||'').split('.');let cursor=pawn;
+    for(let index=0;cursor&&index<keys.length;index++)cursor=cursor[keys[index]];
+    return cursor==null?fallback:cursor;
+  }
+
+  function aiHelperConfig(owner){
+    const graph=owner&&owner.userData&&owner.userData.logicGraph,pawn=graph&&(graph.characterPawn||graph.animalPawn);
+    if(!(graph&&pawn&&pawn.behavior))return null;
+    const enabled=graphValue(graph,'behavior.actionArea.enabled',false)===true,show=graphValue(graph,'behavior.actionArea.showInEditor',true)!==false;
+    if(!enabled||!show)return null;
+    const finite=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+    return {
+      shape:String(graphValue(graph,'behavior.actionArea.shape','circle')).toLowerCase()==='box'?'box':'circle',
+      radius:Math.max(1,finite(graphValue(graph,'behavior.actionArea.radius',45),45)),
+      width:Math.max(1,finite(graphValue(graph,'behavior.actionArea.width',90),90)),
+      depth:Math.max(1,finite(graphValue(graph,'behavior.actionArea.depth',90),90)),
+      height:Math.max(.5,finite(graphValue(graph,'behavior.actionArea.height',12),12)),
+      offset:{x:finite(graphValue(graph,'behavior.actionArea.offset.x',0),0),y:finite(graphValue(graph,'behavior.actionArea.offset.y',0),0),z:finite(graphValue(graph,'behavior.actionArea.offset.z',0),0)},
+      action:String(graphValue(graph,'behavior.actionArea.action','attack')),
+      sightRange:Math.max(1,finite(graphValue(graph,'behavior.perception.sightRange',42),42)),
+      fov:Math.max(10,Math.min(360,finite(graphValue(graph,'behavior.perception.fieldOfViewDeg',130),130))),
+    };
+  }
+
+  function pushSegment(points,a,b){points.push(new THREE.Vector3(a[0],a[1],a[2]),new THREE.Vector3(b[0],b[1],b[2]));}
+  function lineSegments(points,color,opacity){
+    const geometry=new THREE.BufferGeometry().setFromPoints(points),material=new THREE.LineBasicMaterial({color,transparent:true,opacity,depthTest:false,depthWrite:false});
+    const line=new THREE.LineSegments(geometry,material);line.renderOrder=1001;line.userData.editorOnly=true;line.userData.nonExportable=true;return line;
+  }
+  function clearAiActionHelper(){disposeVisualHelper(aiActionHelper);aiActionHelper=null;}
+  function rebuildAiActionHelper(){
+    clearAiActionHelper();
+    const owner=ED.selected,cfg=aiHelperConfig(owner);if(!cfg||!helperGroup)return null;
+    const actionColors={observe:0x38bdf8,investigate:0xa78bfa,cover:0x22c55e,attack:0xef4444,flee:0xf59e0b,ignore:0x94a3b8};
+    const areaPoints=[],halfHeight=cfg.height*.5,steps=64;
+    if(cfg.shape==='box'){
+      const hx=cfg.width*.5,hz=cfg.depth*.5,corners=[[-hx,0,-hz],[hx,0,-hz],[hx,0,hz],[-hx,0,hz]];
+      for(let index=0;index<4;index++){pushSegment(areaPoints,corners[index],corners[(index+1)%4]);pushSegment(areaPoints,[corners[index][0],-halfHeight,corners[index][2]],[corners[index][0],halfHeight,corners[index][2]]);}
+    }else{
+      for(let index=0;index<steps;index++){const a=index*Math.PI*2/steps,b=(index+1)*Math.PI*2/steps;pushSegment(areaPoints,[Math.cos(a)*cfg.radius,0,Math.sin(a)*cfg.radius],[Math.cos(b)*cfg.radius,0,Math.sin(b)*cfg.radius]);}
+      for(let index=0;index<4;index++){const a=index*Math.PI*.5;pushSegment(areaPoints,[Math.cos(a)*cfg.radius,-halfHeight,Math.sin(a)*cfg.radius],[Math.cos(a)*cfg.radius,halfHeight,Math.sin(a)*cfg.radius]);}
+    }
+    const area=lineSegments(areaPoints,actionColors[cfg.action]||0x38bdf8,.9);area.position.set(cfg.offset.x,cfg.offset.y+.04,cfg.offset.z);area.userData.aiArea=true;
+    const fovPoints=[],half=cfg.fov*Math.PI/360,arcSteps=Math.max(12,Math.round(cfg.fov/8));
+    pushSegment(fovPoints,[0,.12,0],[-Math.sin(half)*cfg.sightRange,.12,Math.cos(half)*cfg.sightRange]);
+    pushSegment(fovPoints,[0,.12,0],[Math.sin(half)*cfg.sightRange,.12,Math.cos(half)*cfg.sightRange]);
+    for(let index=0;index<arcSteps;index++){const a=-half+index*(half*2/arcSteps),b=-half+(index+1)*(half*2/arcSteps);pushSegment(fovPoints,[Math.sin(a)*cfg.sightRange,.12,Math.cos(a)*cfg.sightRange],[Math.sin(b)*cfg.sightRange,.12,Math.cos(b)*cfg.sightRange]);}
+    const fov=lineSegments(fovPoints,0xfacc15,.92);fov.userData.aiFov=true;
+    aiActionHelper=new THREE.Group();aiActionHelper.add(area,fov);aiActionHelper.userData={editorOnly:true,nonExportable:true,aiActionAreaHelper:true,owner,cfgSignature:JSON.stringify(cfg)};helperGroup.add(aiActionHelper);updateAiActionHelper();return aiActionHelper;
+  }
+  function updateAiActionHelper(){
+    if(!aiActionHelper)return;
+    const owner=aiActionHelper.userData.owner,cfg=aiHelperConfig(owner);
+    if(!cfg||owner!==ED.selected){clearAiActionHelper();return;}
+    if(aiActionHelper.userData.cfgSignature!==JSON.stringify(cfg)){rebuildAiActionHelper();return;}
+    const world=owner&&owner.getWorldPosition?owner.getWorldPosition(new THREE.Vector3()):owner&&owner.position;
+    if(!world)return;aiActionHelper.position.copy(world);
+    const fov=aiActionHelper.children.find(child=>child.userData&&child.userData.aiFov);
+    if(fov){const quaternion=owner.getWorldQuaternion?owner.getWorldQuaternion(new THREE.Quaternion()):owner.quaternion,euler=new THREE.Euler().setFromQuaternion(quaternion||new THREE.Quaternion(),'YXZ');fov.rotation.y=euler.y;}
   }
 
   function clearColliderHelpers(){
@@ -310,6 +395,7 @@ function create(deps){
       }
     }
     refreshColliderHelperStyles();
+    rebuildAiActionHelper();
   }
 
   function refreshColliderHelperStyles(){
@@ -417,6 +503,7 @@ function create(deps){
       }
     }
     updateColliderHelpers();
+    updateAiActionHelper();
   }
 
   function updateCameraRigHelper(gameCam){
@@ -434,6 +521,8 @@ function create(deps){
     updateSelectionAndDropHelpers,
     rebuildColliderHelpers,
     clearColliderHelpers,
+    clearAiActionHelper,
+    rebuildAiActionHelper,
     updateCameraRigHelper,
     getSelectionBox: () => selBox,
     getLightHelper: () => lightHelper,

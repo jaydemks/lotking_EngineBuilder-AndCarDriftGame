@@ -195,6 +195,7 @@ function create(deps){
     GAME.world.unregister(o);
     if(o.parent) o.parent.remove(o);
     if(ED.selected === o) selectObject(null);
+    window.dispatchEvent(new CustomEvent('lotking:entity-removed', {detail:{object:o}}));
     requestPhysicsRebuild();
     deps.refreshSelectionHelpers();
     refreshOutliner();
@@ -220,6 +221,7 @@ function create(deps){
       }
     }
     if(o.userData.editorType === 'playerCamera' && GAME.player.syncCameraDummy) GAME.player.syncCameraDummy(o);
+    if(o.userData.pawnCameraDummy===true&&window.LK_LOGIC_GRAPH&&window.LK_LOGIC_GRAPH.syncPawnCameraNode)window.LK_LOGIC_GRAPH.syncPawnCameraNode(o);
     if(o.userData.editorType === 'playerDataWidget' && GAME.player.syncDataWidget) GAME.player.syncDataWidget(o);
     if(o.userData.editorType === 'playerSkid' && GAME.player.syncSkid) GAME.player.syncSkid(o);
     STORE.syncCollider(o);

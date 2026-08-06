@@ -33,6 +33,7 @@ function addStadiumEntries(scene, origin, seq){
       return;
     }
     const props = {color:item.color, roughness:item.roughness, metalness:item.metalness};
+    if(item.surfaceTexture) props.surfaceTexture = clone(item.surfaceTexture);
     if(item.emissive){ props.emissive = item.emissive; props.emissiveIntensity = 1.2; }
     scene.added.push({
       id, kind:'primitive', prim:item.prim, name:item.name,
@@ -63,6 +64,84 @@ function placeLogicElement(scene, seq, templateId, name, position, rotationY, co
     t:{p:position.slice(), r:[0, rotationY, 0], s:[1, 1, 1], v:true},
     templateGroup:templateId === 'logic-template-player-soccer' ? 'Characters' : 'Soccer Gameplay',
   });
+}
+
+/* ---------------------------------------------------------
+   Shootout direction (added on top of the shipped manager)
+
+   js/runtime/penalty-flow.js gained the kick sequence, the goalkeeper read
+   model, pressure and presentation cameras. The shipped `penalty.configure`
+   Logic node predates them, so the extra dials travel as exposed variables plus
+   a `penaltyShootout` descriptor, and the runtime director below feeds them to
+   the flow on Play. Same result, no change to the shared node pack.
+   --------------------------------------------------------- */
+
+const SHOOTOUT_DIRECTION = Object.freeze([
+  ['KeeperSkill', 'string', 'pro', {binding:'penaltyShootout.keeperSkill', label:'Goalkeeper Skill', category:'Shootout / Goalkeeper', ui:'select',
+    options:[{value:'rookie', label:'Rookie'}, {value:'amateur', label:'Amateur'}, {value:'pro', label:'Professional'}, {value:'worldClass', label:'World Class'}]}],
+  ['RunUpSeconds', 'number', .95, {min:.45, max:1.6, step:.05, binding:'penaltyShootout.runUpSeconds', label:'Run-up Length (s)', category:'Shootout / Kick'}],
+  ['PressureEnabled', 'boolean', true, {binding:'penaltyShootout.pressureEnabled', label:'Pressure Affects The Kick', category:'Shootout / Kick'}],
+  ['PresentationCameras', 'boolean', true, {binding:'penaltyShootout.presentationCameras', label:'Presentation Cameras Between Kicks', category:'Shootout / Presentation'}],
+  ['AutoAdvanceDelay', 'number', 2.2, {min:.2, max:10, step:.1, binding:'penaltyShootout.autoAdvanceDelay', label:'Delay Between Kicks (s)', category:'Shootout / Presentation'}],
+]);
+
+function addShootoutDirection(graph){
+  SHOOTOUT_DIRECTION.forEach(([name, type, value, options]) => {
+    graph.variables.push(Object.assign({name, type, value, exposed:true}, options));
+  });
+  graph.penaltyShootout = SHOOTOUT_DIRECTION.reduce((descriptor, [, , value, options]) => {
+    descriptor[options.binding.slice('penaltyShootout.'.length)] = value;
+    return descriptor;
+  }, {schemaVersion:1});
+  return graph;
+}
+
+/** Reads the authored dials back out of the live scene and applies them once. */
+function createShootoutDirector(GAME){
+  const state = {applied:false, descriptor:null};
+  function collect(){
+    const objects = GAME && GAME.world && Array.isArray(GAME.world.registry) ? GAME.world.registry : [];
+    for(let index = 0; index < objects.length; index++){
+      const graph = objects[index] && objects[index].userData && objects[index].userData.logicGraph;
+      if(!graph || !graph.penaltyShootout) continue;
+      (graph.variables || []).forEach(item => {
+        const binding = item && typeof item.binding === 'string' ? item.binding : '';
+        if(binding.indexOf('penaltyShootout.') !== 0) return;
+        graph.penaltyShootout[binding.slice('penaltyShootout.'.length)] = item.value;
+      });
+      return graph.penaltyShootout;
+    }
+    return null;
+  }
+  function apply(){
+    const descriptor = collect();
+    if(!descriptor) return false;
+    const flow = GAME && GAME.systems && GAME.systems.penaltyFlow;
+    if(!flow || !flow.configure) return false;
+    state.descriptor = descriptor;
+    flow.configure(descriptor);
+    state.applied = true;
+    return true;
+  }
+  function update(){
+    if(state.applied) return false;
+    if(!(GAME && GAME.state && GAME.state.started)) return false;
+    return apply();
+  }
+  return Object.freeze({apply, update, reset(){ state.applied = false; }, descriptor:() => state.descriptor, applied:() => state.applied});
+}
+
+function installDirector(GAME){
+  if(!GAME) return null;
+  GAME.systems = GAME.systems || {};
+  if(GAME.systems.penaltyShootoutDirector) return GAME.systems.penaltyShootoutDirector;
+  const director = createShootoutDirector(GAME);
+  GAME.systems.penaltyShootoutDirector = director;
+  if(GAME.hooks && Array.isArray(GAME.hooks.frame) && !GAME.hooks.__lkPenaltyShootoutDirectorFrame){
+    GAME.hooks.__lkPenaltyShootoutDirectorFrame = true;
+    GAME.hooks.frame.push(() => director.update());
+  }
+  return director;
 }
 
 function buildScene(baseScene){
@@ -105,6 +184,11 @@ function buildScene(baseScene){
       // aligned with the authored preset or they would turn this yellow keeper
       // back into the starter graph's red striker as Play begins.
       setVar(g, 'Role', 'goalkeeper');
+      // The Soccer Pawn template now defaults to the outfield control frame, so
+      // the keeper has to ask for its fixed one: it is steered by the keeper AI
+      // and the shootout director, and must stay square to the goal line.
+      setVar(g, 'InputMode', 'heading');
+      setVar(g, 'FacingMode', 'heading');
       setVar(g, 'ShirtColor', '#facc15');
       setVar(g, 'ShortsColor', '#111827');
       setVar(g, 'SocksColor', '#facc15');
@@ -130,6 +214,7 @@ function buildScene(baseScene){
       setVar(g, 'GoalId', 'penalty-goal'); setVar(g, 'BallId', 'penalty-ball');
       setVar(g, 'GoalX', goal.x); setVar(g, 'GoalZ', goal.z); setVar(g, 'GoalHeading', goal.heading);
       setVar(g, 'SpotX', spot.x); setVar(g, 'SpotZ', spot.z);
+      addShootoutDirection(g);
     });
   }
 
@@ -143,12 +228,26 @@ function buildScene(baseScene){
     backgroundColor:'#16283f', fog:{enabled:false},
   });
   scene.template = {
-    id:'penalty-shootout-stadium', name:'Penalty Shootout Stadium', version:4,
+    id:'penalty-shootout-stadium', name:'Penalty Shootout Stadium', version:5,
     nativeEditable:true,
     controls:{move:'WASD / arrows', sprint:'Shift', jump:'Space', shoot:'Hold F/X, aim with WASD, release'},
   };
   return scene;
 }
 
-window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE = Object.freeze({id:'penalty-shootout-stadium', name:'Penalty Shootout Stadium', buildScene});
+window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE = Object.freeze({
+  id:'penalty-shootout-stadium', name:'Penalty Shootout Stadium',
+  buildScene, addShootoutDirection, createShootoutDirector, install:installDirector,
+});
+if(window.LOT_KING) installDirector(window.LOT_KING);
+
+if(window.LK_LEVEL_TEMPLATES && window.LK_LEVEL_TEMPLATES.register){
+  window.LK_LEVEL_TEMPLATES.register({
+    id:'penalty-shootout-stadium', name:'Penalty Shootout Stadium (Soccer)', nameIt:'Stadio Rigori (Calcio)',
+    category:'Sports', order:400, ground:'plane', keepBuiltinPlayer:false,
+    description:'Stadium, goal, keeper and shot flow for the Soccer Pawn.',
+    descriptionIt:'Stadio, porta, portiere e flusso di tiro per il Pawn Calcio.',
+    build:function(scene){ return buildScene(scene); },
+  });
+}
 })();

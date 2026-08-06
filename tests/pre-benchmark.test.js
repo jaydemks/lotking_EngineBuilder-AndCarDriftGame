@@ -14,6 +14,12 @@ const renderingInspectorSource = fs.readFileSync(path.join(__dirname, '..', 'js'
 const editorRuntimeSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'editor', 'editor-runtime.js'), 'utf8');
 const engineAudioSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'engine-audio.js'), 'utf8');
 const vehiclePawnsSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'vehicle-pawns.js'), 'utf8');
+const characterPawnSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'character-pawn-base.js'), 'utf8');
+const occupancySource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'vehicle-occupancy.js'), 'utf8');
+const sketchbookSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'sketchbook-pawns.js'), 'utf8');
+const vehicleAudioSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'vehicle-engine-audio.js'), 'utf8');
+const vehicleDamageSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'vehicle-damage.js'), 'utf8');
+const logicRunnerSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'runtime', 'logic-elements-runner.js'), 'utf8');
 const sandbox = {window:{}, console};
 vm.runInNewContext(source, sandbox, {filename:'pre-benchmark.js'});
 const api = sandbox.window.LK_RUNTIME_PRE_BENCHMARK;
@@ -59,5 +65,40 @@ assert(lotKingSource.includes('Preparing vehicle Sound Designer banks') && lotKi
   'the native Player Car audio prewarm is visible and awaited by the shared preparation overlay');
 assert(vehiclePawnsSource.includes('audio.manager.prewarm()'),
   'Logic Element vehicle audio banks use the same awaited prewarm path');
+assert(vehiclePawnsSource.includes('async function prewarmAll(context)') && lotKingSource.includes('pawns.prewarmAll(context)'),
+  'the benchmark inventories every registered Pawn instead of hardcoding only the original car');
+assert(logicRunnerSource.includes('context.preparedPawns') && vehiclePawnsSource.includes('!prepared.has(pawn)'),
+  'Logic preparation and the global inventory share one transaction and never warm the same Pawn twice');
+assert(characterPawnSource.includes('pawn.prepareRuntime=async function(context)') && characterPawnSource.includes('occupancy.prewarmCharacter'),
+  'Character animation, cloth, colliders and vehicle seating are prepared before possession');
+assert(characterPawnSource.includes("typeof locomotion.resetPresentation==='function'")&&!characterPawnSource.includes("restartLocomotionPresentation('prebenchmark')"),
+  'pre-benchmark resets the already-bound controller without retargeting a live animation pose as rest');
+assert(characterPawnSource.includes('Play must enter through the same clean animation ownership boundary as') && characterPawnSource.includes('this.updateLocomotionFrame(.0001,neutralMove(),neutral)'),
+  'Pawn start must publish the same clean neutral presentation used after vehicle exit before its first visible frame');
+const sceneStoreSource = fs.readFileSync(path.join(__dirname, '..', 'js', 'engine', 'scene-store.js'), 'utf8');
+assert(sceneStoreSource.includes('if(node.userData && node.userData.logicCharacterLocomotionMixerOwner) return;'),
+  'generic Logic Element autoplay must never compete with an active Character-owned mixer');
+assert(occupancySource.includes('function prewarmCharacter') && occupancySource.includes('bones.forEach(entry=>'),
+  'seat IK warm-up restores the complete skeleton transactionally');
+assert(sketchbookSource.includes('engineAudioController.prewarm') && sketchbookSource.includes('damageRuntime.prewarm'),
+  'Sketchbook vehicles prepare their own audio and damage resources');
+assert(vehicleAudioSource.includes('async function prewarm()') && vehicleDamageSource.includes('function prewarm()'),
+  'per-vehicle audio decoding and damage particle pools expose explicit warm-up contracts');
+
+// The hidden-resource warm pass used to hold the loading screen open forever on
+// the Sketchbook Open World: 1502 hidden representatives, 427 of them physics
+// collision descriptors, each batch un-hiding ancestors and re-rendering a
+// 26 MB scene. Play never started because warming never finished.
+assert(source.includes('HIDDEN_WARM_BUDGET_MS'),
+  'the hidden-resource warm pass must be bounded so a heavy world cannot stall Play');
+assert(/performance\.now\(\) - started > HIDDEN_WARM_BUDGET_MS/.test(source),
+  'the warm budget must actually break the batch loop');
+assert(/tag === 'physics' \|\| tag === 'collision' \|\| tag === 'navmesh'/.test(source),
+  'collision and navigation descriptors are never rendered in play and must be excluded from warming');
+assert(source.includes('data.lkSketchbookMetadataHidden'),
+  'Sketchbook metadata hidden by the engine must be excluded from warming');
+const warmBudget = Number((source.match(/HIDDEN_WARM_BUDGET_MS\s*=\s*(\d+)/) || [])[1]);
+assert(Number.isFinite(warmBudget) && warmBudget > 0 && warmBudget <= 15000,
+  'the warm budget must be a finite, sane upper bound, got ' + warmBudget);
 
 console.log('pre-benchmark.test.js: all assertions passed');

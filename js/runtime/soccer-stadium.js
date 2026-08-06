@@ -26,8 +26,17 @@ const FIELD_WHITE = '#ffffff';
 const GOAL_WHITE = '#ffffff';
 const FAN_COLORS = ['#e11d48', '#2563eb', '#f59e0b', '#10b981', '#f8fafc', '#a855f7', '#f97316'];
 
+// `surface` names a kind from js/engine/procedural-surfaces.js, or carries a
+// full descriptor for tiling/rotation. Flat colour is what made this stadium
+// read as a greybox; every dressed entry now ships real PBR grain, generated at
+// runtime with no binary assets to package.
+function surfaceOf(value){
+  if(!value) return null;
+  return typeof value === 'string' ? {kind:value} : Object.assign({}, value);
+}
 function prim(primitive, name, p, s, options){
   const o = options || {};
+  const surface = surfaceOf(o.surface);
   return Object.assign({
     kind:'primitive', prim:primitive, name:'Stadium - ' + name,
     t:{p:[p[0], p[1], p[2]], r:o.r || [0,0,0], s:[s[0], s[1], s[2]], v:true},
@@ -36,7 +45,7 @@ function prim(primitive, name, p, s, options){
     metalness:o.metalness != null ? o.metalness : 0,
     collide:o.collide === true,
     driveSurface:o.driveSurface === true,
-  }, o.extra || {});
+  }, surface ? {surfaceTexture:surface} : null, o.extra || {});
 }
 function light(kindName, name, p, options){
   const o = options || {};
@@ -64,8 +73,13 @@ function buildEntries(origin){
   const halfL = SPEC.fieldLength / 2, halfW = SPEC.fieldWidth / 2;
 
   // ---- Pitch and surroundings ------------------------------------------
-  entries.push(prim('plane', 'Pitch Grass', [ox, 0, oz], [(SPEC.fieldWidth + 10) / 4, 1, (SPEC.fieldLength + 10) / 4], {color:PITCH_GREEN, roughness:.95, driveSurface:true}));
-  entries.push(prim('plane', 'Outer Apron', [ox, -.02, oz], [(SPEC.fieldWidth + 46) / 4, 1, (SPEC.fieldLength + 46) / 4], {color:'#20242c', roughness:1, driveSurface:true}));
+  // Mown stripes run goal-to-goal: the surface tile is the full light+dark
+  // period, so a 68 m-wide pitch lands on ~5 m bands like a real broadcast
+  // pitch. Rotate the surface to change the mowing direction from the editor.
+  entries.push(prim('plane', 'Pitch Grass', [ox, 0, oz], [(SPEC.fieldWidth + 10) / 4, 1, (SPEC.fieldLength + 10) / 4],
+    {color:PITCH_GREEN, roughness:.93, driveSurface:true, surface:{kind:'turfStriped', tile:10, rotate:90, strength:.9}}));
+  entries.push(prim('plane', 'Outer Apron', [ox, -.02, oz], [(SPEC.fieldWidth + 46) / 4, 1, (SPEC.fieldLength + 46) / 4],
+    {color:'#3d4148', roughness:.95, driveSurface:true, surface:{kind:'runningTrack', tile:3}}));
 
   // ---- Markings ---------------------------------------------------------
   entries.push(marking('Touchline West', [ox - halfW, oz], [LINE_W, SPEC.fieldLength]));
@@ -136,7 +150,8 @@ function buildEntries(origin){
       const y = tier * height;
       const center = stand.axis === 'x' ? [ox + stand.sign * offset, y, oz] : [ox, y, oz + stand.sign * offset];
       const size = stand.axis === 'x' ? [depth, height, stand.length] : [stand.length, height, depth];
-      entries.push(box('Stand ' + stand.name + ' Tier ' + (tier + 1), center, size, {color:tierColors[tier], roughness:.9, collide:tier === 0}));
+      entries.push(box('Stand ' + stand.name + ' Tier ' + (tier + 1), center, size,
+        {color:tierColors[tier], roughness:.88, collide:tier === 0, surface:{kind:'concrete', tile:2.6, seed:tier}}));
       // Fan blocks: bright crowd chunks sitting on each tier.
       const blocks = stand.axis === 'x' ? 8 : 6;
       for(let b = 0; b < blocks; b++){
@@ -148,26 +163,38 @@ function buildEntries(origin){
         entries.push(box('Fans ' + stand.name + ' T' + (tier + 1) + ' ' + (b + 1),
           [fx, y + height, fz],
           stand.axis === 'x' ? [depth * .6, .9, (stand.length - 6) / blocks * .8] : [(stand.length - 6) / blocks * .8, .9, depth * .6],
-          {color:FAN_COLORS[(b + tier + (stand.sign > 0 ? 0 : 3)) % FAN_COLORS.length], roughness:1}));
+          // Seat rows rather than a flat crowd slab: the moulded-shell grain is
+          // what stops a stand reading as a coloured box from pitch level.
+          {color:FAN_COLORS[(b + tier + (stand.sign > 0 ? 0 : 3)) % FAN_COLORS.length], roughness:.62,
+            surface:{kind:'stadiumSeat', tile:1.2, seed:(b + tier) % 4}}));
       }
     }
     // Back wall behind the top tier.
     const wallOffset = base + 3 * 4 + .5;
     const wallCenter = stand.axis === 'x' ? [ox + stand.sign * wallOffset, 0, oz] : [ox, 0, oz + stand.sign * wallOffset];
     const wallSize = stand.axis === 'x' ? [1, 8.5, stand.length + 2] : [stand.length + 2, 8.5, 1];
-    entries.push(box('Stand Wall ' + stand.name, wallCenter, wallSize, {color:'#2e3440', roughness:.95, collide:true}));
+    entries.push(box('Stand Wall ' + stand.name, wallCenter, wallSize,
+      {color:'#2e3440', roughness:.94, collide:true, surface:{kind:'concrete', tile:3.4, seed:1}}));
+
+    // Perimeter advertising hoarding between the pitch and the front tier.
+    const boardOffset = base - 1.4;
+    const boardCenter = stand.axis === 'x' ? [ox + stand.sign * boardOffset, 0, oz] : [ox, 0, oz + stand.sign * boardOffset];
+    const boardSize = stand.axis === 'x' ? [.22, 1, stand.length - 4] : [stand.length - 4, 1, .22];
+    entries.push(box('Advert Boards ' + stand.name, boardCenter, boardSize,
+      {color:'#12305c', roughness:.3, metalness:.05, collide:true, surface:{kind:'advertBoard', tile:3.2}}));
   });
 
   // ---- Entrances: players tunnel + two public gates ----------------------
-  entries.push(box('Players Tunnel Frame', [ox - 14, 0, oz - standInsetL + 1], [6, 4, 3], {color:'#5e81ac', roughness:.8, collide:true}));
+  entries.push(box('Players Tunnel Frame', [ox - 14, 0, oz - standInsetL + 1], [6, 4, 3],
+    {color:'#5e81ac', roughness:.8, collide:true, surface:{kind:'concreteSmooth', tile:2.2}}));
   entries.push(box('Players Tunnel Opening', [ox - 14, 0, oz - standInsetL - .6], [4, 3.2, .4], {color:'#0b0d12', roughness:1}));
-  entries.push(box('Public Gate East', [ox + standInsetW + 12.5, 0, oz + 20], [1.2, 5, 8], {color:'#0b0d12', roughness:1}));
-  entries.push(box('Public Gate West', [ox - standInsetW - 12.5, 0, oz - 20], [1.2, 5, 8], {color:'#0b0d12', roughness:1}));
+  entries.push(box('Public Gate East', [ox + standInsetW + 12.5, 0, oz + 20], [1.2, 5, 8], {color:'#3a3f47', roughness:.7, metalness:.35, surface:{kind:'metalPainted', tile:1.8}}));
+  entries.push(box('Public Gate West', [ox - standInsetW - 12.5, 0, oz - 20], [1.2, 5, 8], {color:'#3a3f47', roughness:.7, metalness:.35, surface:{kind:'metalPainted', tile:1.8, seed:1}}));
 
   // ---- Flags: 4 corner flags + 4 stadium flags ---------------------------
   const cornerFlag = (name, x, z) => {
     entries.push(cylinder('Corner Flag Pole ' + name, [x, 0, z], .025, 1.6, {color:'#f4f6f2', roughness:.6}));
-    entries.push(box('Corner Flag ' + name, [x + .28, 1.38, z], [.55, .34, .03], {color:'#e11d48', roughness:.8}));
+    entries.push(box('Corner Flag ' + name, [x + .28, 1.38, z], [.55, .34, .03], {color:'#e11d48', roughness:.86, surface:{kind:'tarp', tile:.7}}));
   };
   cornerFlag('NW', ox - halfW, oz + halfL);
   cornerFlag('NE', ox + halfW, oz + halfL);
@@ -175,7 +202,7 @@ function buildEntries(origin){
   cornerFlag('SE', ox + halfW, oz - halfL);
   const stadiumFlag = (name, x, z, color) => {
     entries.push(cylinder('Stadium Flag Pole ' + name, [x, 0, z], .08, 12, {color:'#8f9299', roughness:.6, metalness:.4, collide:true}));
-    entries.push(box('Stadium Flag ' + name, [x + 1.05, 11, z], [2, 1.1, .06], {color, roughness:.85}));
+    entries.push(box('Stadium Flag ' + name, [x + 1.05, 11, z], [2, 1.1, .06], {color, roughness:.86, surface:{kind:'tarp', tile:1.4}}));
   };
   stadiumFlag('NW', ox - standInsetW - 10, oz + standInsetL + 10, '#e11d48');
   stadiumFlag('NE', ox + standInsetW + 10, oz + standInsetL + 10, '#2563eb');
@@ -185,7 +212,7 @@ function buildEntries(origin){
   // ---- Floodlights --------------------------------------------------------
   [[-1, 1], [1, 1], [-1, -1], [1, -1]].forEach(([sx, sz], index) => {
     const x = ox + sx * (standInsetW + 6), z = oz + sz * (standInsetL + 6);
-    entries.push(cylinder('Floodlight Pole ' + (index + 1), [x, 0, z], .22, 18, {color:'#25282e', roughness:.6, metalness:.4, collide:true}));
+    entries.push(cylinder('Floodlight Pole ' + (index + 1), [x, 0, z], .22, 18, {color:'#25282e', roughness:.62, metalness:.4, collide:true, surface:{kind:'metalPainted', tile:2.2}}));
     entries.push(box('Floodlight Head ' + (index + 1), [x, 18.2, z], [2.6, 1.2, .5], {color:'#fff2c0', roughness:.4, extra:{emissive:'#ffe08a'}}));
     entries.push(light('point', 'Floodlight ' + (index + 1), [x, 17, z], {props:{color:'#fff2cc', intensity:1.15, distance:120}}));
   });

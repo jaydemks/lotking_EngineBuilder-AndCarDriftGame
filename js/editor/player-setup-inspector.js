@@ -172,6 +172,14 @@ function create(deps){
     sg.body.appendChild(tRow('ride', tr('Wheel stance', 'Assetto ruote'), -10, 10));
     sg.body.appendChild(tRow('roll', tr('Chassis roll', 'Rollio telaio'), -10, 10));
     sg.body.appendChild(tFloatRow('chassisLift', 'Chassis lift (m)', -0.35, 0.9, .01, 0));
+    // Steering pivot. An imported wheel almost never has its origin on the
+    // kingpin axis, so the wheel swings through an arc when it should turn in
+    // place. These nudge the rotation centre only; the wheel does not move.
+    // Stored as tuning so they persist with the blueprint like Chassis lift.
+    sg.body.appendChild(tFloatRow('steerPivotX', tr('Steer pivot X (lateral)', 'Pivot sterzo X (laterale)'), -.6, .6, .005, 0));
+    sg.body.appendChild(tFloatRow('steerPivotY', tr('Steer pivot Y (height)', 'Pivot sterzo Y (altezza)'), -.6, .6, .005, 0));
+    sg.body.appendChild(tFloatRow('steerPivotZ', tr('Steer pivot Z (fore/aft)', 'Pivot sterzo Z (avanti/dietro)'), -.6, .6, .005, 0));
+
     sg.body.appendChild(tFloatRow('reverseDelay', 'Ritardo retro (s)', 0, 2, .05, .5));
     box.appendChild(sg.root);
   }
@@ -317,16 +325,56 @@ function create(deps){
     box.appendChild(snd.root);
   }
 
+  function buildVehicleDamage(box, player, options){
+    if(!player || (!player.damage && !player.setDamageConfig)) return;
+    const api=window.LK_RUNTIME_VEHICLE_DAMAGE,opts=options||{},type=opts.type||player.pawnType||player.kind||'car';
+    const cfg=api&&api.normalizeConfig?api.normalizeConfig(player.damage||{},type):player.damage;
+    player.damage=cfg;
+    const damage=section(tr('VEHICLE ENERGY / DAMAGE','ENERGIA / DANNI VEICOLO'),false);
+    const commit=()=>{
+      const normalized=api&&api.normalizeConfig?api.normalizeConfig(cfg,type):cfg;
+      Object.keys(cfg).forEach(key=>delete cfg[key]);Object.assign(cfg,normalized);
+      if(player.setDamageConfig)player.damage=player.setDamageConfig(cfg)||cfg;
+      if(opts.onChange)opts.onChange(player.damage||cfg);
+      markDirty();
+    };
+    const number=(label,target,key,min,max,step)=>sliderRow(label,Number(target[key]),min,max,step,value=>{target[key]=Number(value);commit();},value=>step<1?Number(value).toFixed(step<=.01?2:1):Math.round(Number(value))).root;
+    const vector=(label,target)=>{
+      const row=el('<div class="lk-vec"></div>'),caption=document.createElement('label'),values=Array.isArray(target.position)?target.position.slice():[0,0,0];caption.textContent=label;row.appendChild(caption);
+      ['X','Y','Z'].forEach((axis,index)=>{const input=el('<input type="number" step=".05">');input.title=axis;input.value=Number(values[index]||0);input.addEventListener('change',()=>{const value=Number(input.value);if(Number.isFinite(value))values[index]=value;target.position=values.slice();commit();});row.appendChild(input);});return row;
+    };
+    damage.body.appendChild(el('<div class="lk-hint">'+tr('The fallback dummies are vehicle-local and remain editable. GLB nodes named fuel_tank/serbatoio, engine_smoke/motore and exhaust/marmitta take precedence automatically.','I dummy fallback sono locali al veicolo e restano modificabili. I nodi GLB fuel_tank/serbatoio, engine_smoke/motore ed exhaust/marmitta hanno automaticamente la precedenza.')+'</div>'));
+    damage.body.appendChild(checkRow(tr('Damage enabled','Danni abilitati'),cfg.enabled!==false,value=>{cfg.enabled=value;commit();}).root);
+    damage.body.appendChild(number(tr('Maximum energy','Energia massima'),cfg,'maxEnergy',1,100000,10));
+    damage.body.appendChild(vector(tr('Fuel Tank dummy','Dummy serbatoio'),cfg.fuelTank));
+    damage.body.appendChild(number(tr('Fuel Tank radius','Raggio serbatoio'),cfg.fuelTank,'radius',.08,5,.01));
+    damage.body.appendChild(number(tr('Fuel Tank damage multiplier','Moltiplicatore danno serbatoio'),cfg.fuelTank,'damageMultiplier',1,20,.1));
+    damage.body.appendChild(checkRow(tr('Show Fuel Tank dummy','Mostra dummy serbatoio'),cfg.fuelTank.dummyVisible!==false,value=>{cfg.fuelTank.dummyVisible=value;commit();}).root);
+    damage.body.appendChild(vector(tr('Engine smoke dummy','Dummy fumo motore'),cfg.engineSmoke));
+    damage.body.appendChild(vector(tr('Exhaust / muffler dummy','Dummy scarico / marmitta'),cfg.exhaust));
+    damage.body.appendChild(number(tr('Smoke energy threshold','Soglia energia fumo'),cfg,'smokeThreshold',0,1,.01));
+    damage.body.appendChild(number(tr('Fire energy threshold','Soglia energia fuoco'),cfg,'fireThreshold',0,1,.01));
+    damage.body.appendChild(number(tr('Explosion delay (s)','Ritardo esplosione (s)'),cfg.explosion,'delay',0,10,.05));
+    damage.body.appendChild(number(tr('Explosion radius','Raggio esplosione'),cfg.explosion,'radius',.5,40,.1));
+    damage.body.appendChild(number(tr('Explosion force','Forza esplosione'),cfg.explosion,'force',0,2000,5));
+    damage.body.appendChild(checkRow(tr('Detach wheels','Stacca ruote'),cfg.explosion.detachWheels!==false,value=>{cfg.explosion.detachWheels=value;commit();}).root);
+    damage.body.appendChild(checkRow(tr('Blacken destroyed body','Annerisci carrozzeria distrutta'),cfg.explosion.blacken!==false,value=>{cfg.explosion.blacken=value;commit();}).root);
+    const runtime=player.damageRuntime&&player.damageRuntime.snapshot?player.damageRuntime.snapshot():null;
+    if(runtime)damage.body.appendChild(el('<div class="lk-hint">'+tr('Runtime energy: ','Energia runtime: ')+Math.ceil(runtime.energy)+' / '+Math.ceil(runtime.maxEnergy)+(runtime.destroyed?' · '+tr('DESTROYED','DISTRUTTO'):'')+'</div>'));
+    box.appendChild(damage.root);
+  }
+
   function build(box, targetPlayer){
     const player = targetPlayer || deps.player || GAME.player;
     buildPawnInput(box, player);
     buildModel(box, player);
     buildDrivingTuning(box, player);
+    buildVehicleDamage(box, player);
     buildEngineSound(box, player);
     box.appendChild(btnRow([{label:'🔍 Focus', action: focusSelected}]));
   }
 
-  return Object.freeze({build});
+  return Object.freeze({build,buildEngineSound,buildVehicleDamage});
 }
 
 window.LK_EDITOR_PLAYER_SETUP_INSPECTOR = Object.freeze({create});

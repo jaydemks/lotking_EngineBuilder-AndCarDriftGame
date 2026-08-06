@@ -52,6 +52,16 @@ function projectRadarOffset(dx, dz, yaw){
   return {x:x === 0 ? 0 : x, y:y === 0 ? 0 : y};
 }
 
+function isOwnedPawnEvent(GAME, detail){
+  const runtime = window.LK_RUNTIME_FIRST_PERSON;
+  const pawn = runtime && runtime.activePawn ? runtime.activePawn(GAME, 1) : null;
+  if(!pawn) return false;
+  // Legacy player-only events were anonymous. AI/vitals events are attributed,
+  // and once attributed must match the Pawn whose HUD is currently visible.
+  if(detail == null || detail.pawnId == null || detail.pawnId === '') return true;
+  return String(detail.pawnId) === String(pawn.id);
+}
+
 function create(GAME){
   let root = null;
   let crosshair = null, marker = null, radar = null, radarCtx = null;
@@ -461,9 +471,10 @@ function create(GAME){
   window.addEventListener('lk-pawn-event', event => {
     const detail = event && event.detail || {};
     const type = detail.type;
-    if(type === 'OnTargetDown') flashMarker('kill');
-    else if(type === 'OnWeaponHit') flashMarker('hit');
-    else if(type === 'OnCharacterDamaged') vignetteTimer = .5;
+    const owned = isOwnedPawnEvent(GAME, detail);
+    if(type === 'OnTargetDown' && owned) flashMarker('kill');
+    else if(type === 'OnWeaponHit' && owned) flashMarker('hit');
+    else if(type === 'OnCharacterDamaged' && owned) vignetteTimer = .5;
     else if(type === 'OnItemPickedUp') toast(pickupLabel(detail), detail.kind);
     else if(type === 'OnWeaponEquipped' && detail.name) toast(detail.name, 'weapon');
     else if(type === 'OnWeaponDropped' && detail.weapon) toast('▼ ' + detail.weapon, 'drop');
@@ -496,5 +507,5 @@ function create(GAME){
   return Object.freeze({update, prewarm, dispose, toast, isVisible:() => visible});
 }
 
-window.LK_RUNTIME_FPS_HUD = Object.freeze({create, projectRadarOffset});
+window.LK_RUNTIME_FPS_HUD = Object.freeze({create, projectRadarOffset, isOwnedPawnEvent});
 })();

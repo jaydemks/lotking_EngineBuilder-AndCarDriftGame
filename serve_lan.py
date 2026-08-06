@@ -12,12 +12,18 @@ from __future__ import annotations
 
 import argparse
 import errno
+import ipaddress
 import os
 import socket
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from serve_local import LocalEditorHandler
 
 
-class QuietStaticHandler(SimpleHTTPRequestHandler):
+class LanEditorHandler(LocalEditorHandler):
+    """Static LAN server with a project bridge available only on this PC."""
+
     extensions_map = {
         **SimpleHTTPRequestHandler.extensions_map,
         ".glb": "model/gltf-binary",
@@ -26,16 +32,29 @@ class QuietStaticHandler(SimpleHTTPRequestHandler):
         ".wasm": "application/wasm",
     }
 
-    def end_headers(self) -> None:
-        self.send_header("Cache-Control", "no-store")
-        super().end_headers()
-
     def copyfile(self, source, outputfile) -> None:
         try:
             super().copyfile(source, outputfile)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
             self.close_connection = True
             self.log_message("client disconnected while sending %s", self.path)
+
+    def is_loopback_client(self) -> bool:
+        if super().is_loopback_client():
+            return True
+        try:
+            client = str(ipaddress.ip_address(self.client_address[0].split("%", 1)[0]))
+        except (ValueError, IndexError):
+            return False
+        return client in set(local_ips())
+
+    def do_GET(self) -> None:
+        # The bridge endpoint performs its own host check. Never let the
+        # underlying static handler expose the backing directory directly.
+        if self.path.split("?", 1)[0].startswith("/.lotking-local/"):
+            self.send_error(404)
+            return
+        super().do_GET()
 
 
 def local_ips() -> list[str]:
@@ -115,7 +134,8 @@ def main() -> None:
     args = parser.parse_args()
 
     root = os.path.abspath(args.dir)
-    handler = lambda *a, **kw: QuietStaticHandler(*a, directory=root, **kw)
+    LanEditorHandler.root = Path(root)
+    handler = lambda *a, **kw: LanEditorHandler(*a, directory=root, **kw)
     server, active_port = create_server(args.bind, args.port, handler, args.strict_port)
 
     print("Lot King LAN server")

@@ -74,23 +74,32 @@ void main(){
 
 function create(deps){
   const scene = deps.scene;
+  const renderer = deps.renderer || null;
+  const commonRenderer = !!(renderer && renderer.isWebGPURenderer);
   const audio = deps.audio || null;          // SFX runtime: getContext / getSfxGain
   const P = Object.assign({}, DEFAULTS);
   let fall = 0;
 
-  const geo = new THREE.InstancedBufferGeometry();
-  // Due triangoli per goccia. position.x e' il lato del ribbon e position.y
-  // distingue testa/coda; la posizione nel mondo viene costruita nello shader.
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-    -1,0,0,  1,0,0,  1,1,0,
-    -1,0,0,  1,1,0, -1,1,0,
-  ]), 3));
   const seed = new Float32Array(MAX_DROPS * 3);
   for(let i = 0; i < MAX_DROPS; i++){
     const sx = Math.random(), sy = Math.random(), sz = Math.random();
     seed[i * 3] = sx; seed[i * 3 + 1] = sy; seed[i * 3 + 2] = sz;
   }
-  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 3));
+  const fallbackDropLimit = 1200;
+  const fallbackPositions = commonRenderer ? new Float32Array(fallbackDropLimit * 3) : null;
+  const geo = commonRenderer ? new THREE.BufferGeometry() : new THREE.InstancedBufferGeometry();
+  if(commonRenderer){
+    geo.setAttribute('position',new THREE.BufferAttribute(fallbackPositions,3));
+    geo.setDrawRange(0,0);
+  }else{
+    // Due triangoli per goccia. position.x e' il lato del ribbon e position.y
+    // distingue testa/coda; la posizione nel mondo viene costruita nello shader.
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      -1,0,0,  1,0,0,  1,1,0,
+      -1,0,0,  1,1,0, -1,1,0,
+    ]), 3));
+    geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 3));
+  }
 
   const uniforms = {
     uFall:    {value: 0},
@@ -103,7 +112,10 @@ function create(deps){
     uColor:   {value: new THREE.Color(0xbdd2e8)},
     uOpacity: {value: P.opacity},
   };
-  const mat = new THREE.ShaderMaterial({
+  const mat = commonRenderer ? new THREE.PointsMaterial({
+    color:0xbdd2e8,size:.09,sizeAttenuation:true,transparent:true,opacity:P.opacity,
+    depthWrite:false,depthTest:true,fog:false,
+  }) : new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms,
@@ -113,7 +125,7 @@ function create(deps){
     fog: false,
     side: THREE.DoubleSide,
   });
-  const rainMesh = new THREE.Mesh(geo, mat);
+  const rainMesh = commonRenderer ? new THREE.Points(geo,mat) : new THREE.Mesh(geo, mat);
   rainMesh.name = 'LK_GPU_Rain';
   rainMesh.userData.lkSkipSsrOverride = true;
   rainMesh.frustumCulled = false;
@@ -151,8 +163,9 @@ function create(deps){
     uniforms.uOpacity.value = clamp(P.opacity, 0, 1);
     const a = (P.windAngle || 0) * Math.PI / 180;
     uniforms.uWind.value.set(Math.cos(a), Math.sin(a)).multiplyScalar(clamp(P.wind, 0, 1.5));
-    const drops = Math.round(clamp(P.intensity, 0, 1) * MAX_DROPS);
-    geo.instanceCount = drops;
+    const drops = Math.round(clamp(P.intensity, 0, 1) * (commonRenderer ? fallbackDropLimit : MAX_DROPS));
+    if(commonRenderer){geo.setDrawRange(0,drops);mat.opacity=P.opacity;mat.size=clamp(P.width*2.6,.025,.3);}
+    else geo.instanceCount = drops;
     rainMesh.visible = !!P.enabled && drops > 0 && P.opacity > 0;
     updateSound();
   }
@@ -211,6 +224,18 @@ function create(deps){
       fall += dt * clamp(P.speed, 5, 200);
       uniforms.uFall.value = fall;
       if(target) uniforms.uCenter.value.copy(target);
+      if(commonRenderer&&fallbackPositions){
+        const count=Math.min(fallbackDropLimit,geo.drawRange.count||0);
+        const center=uniforms.uCenter.value,wind=uniforms.uWind.value;
+        for(let i=0;i<count;i++){
+          const si=i*3;
+          const y=((seed[si+1]*P.height*7-fall*(.84+seed[si+2]*.32))%P.height+P.height)%P.height;
+          fallbackPositions[si]=center.x+(seed[si]*2-1)*P.area+wind.x*y;
+          fallbackPositions[si+1]=center.y+y;
+          fallbackPositions[si+2]=center.z+(seed[si+2]*2-1)*P.area+wind.y*y;
+        }
+        geo.attributes.position.needsUpdate=true;
+      }
     },
     get: () => Object.assign({}, P),
     set(patch){

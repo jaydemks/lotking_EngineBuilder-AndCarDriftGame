@@ -535,6 +535,7 @@ function create(deps){
   }
 
   function weaponEvent(type, weapon, pawn){
+    if(type === 'OnWeaponFired' && weapon && weapon.kind && weapon.kind !== 'firearm') return false;
     const active = setFor(pawn);
     const slots = weaponSlots(weapon, active);
     if(type === 'OnWeaponFired'){

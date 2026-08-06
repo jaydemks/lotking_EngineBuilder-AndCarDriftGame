@@ -23,6 +23,7 @@ const BROWSER_PROJECT_INDEX = 'lk.editor.projects.v1';
 const BROWSER_PROJECT_PREFIX = 'lk.editor.project.';
 const BROWSER_PROJECT_MARKER = 'lk.editor.browserProject.v1';
 const PROJECT_IDENTITY_VERSION = 4;
+const STARTUP_AUTHORITY_KEY = 'lk.projectStartupAuthority.v1';
 const DEMO_BLOCKED_SELECTOR = [
   '#lkSaveAsTrack',
   '#lkNewTrack',
@@ -90,6 +91,11 @@ function isPrivateBrowserDemo(){
   return state.mode === 'browser' && state.workspaceReady === true && state.sourceTemplate === 'demo';
 }
 
+function isPrivateBrowserProject(){
+  const state=loadState();
+  return state.mode==='browser'&&state.workspaceReady===true&&(state.sourceTemplate==='demo'||state.sourceTemplate==='browser');
+}
+
 function canPublishAuthorDemo(){
   const host = location.hostname;
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
@@ -99,8 +105,29 @@ function isEditorPage(){
   return !!window.__LK_STANDALONE_EDITOR || /(^|\/)engine_editor\.html$/i.test(location.pathname || '');
 }
 
+function startupAuthority(){
+  try { return String(sessionStorage.getItem(STARTUP_AUTHORITY_KEY) || ''); }
+  catch(err){ return ''; }
+}
+
+function setStartupAuthority(value){
+  try {
+    if(value) sessionStorage.setItem(STARTUP_AUTHORITY_KEY, String(value));
+    else sessionStorage.removeItem(STARTUP_AUTHORITY_KEY);
+  } catch(err){}
+}
+
+function shouldOpenAuthorDemoByDefault(){
+  if(!isEditorPage()) return false;
+  const authority=startupAuthority();
+  if(authority)return authority==='demo';
+  const state=loadState();
+  if(state.mode==='file'||state.mode==='folder'||state.startupTemplate==='empty')return false;
+  return true;
+}
+
 function requiresInitialChoice(){
-  return isEditorPage() && loadState().workspaceReady !== true;
+  return isEditorPage() && loadState().workspaceReady !== true && !shouldOpenAuthorDemoByDefault();
 }
 
 function loadState(){
@@ -192,6 +219,23 @@ function migrateBrowserProjectIdentityEarly(){
   }
 }
 
+function activeBrowserProjectRecord(){
+  try {
+    const index = JSON.parse(localStorage.getItem(BROWSER_PROJECT_INDEX) || 'null');
+    const marker = JSON.parse(localStorage.getItem(BROWSER_PROJECT_MARKER) || 'null');
+    if(!index || !Array.isArray(index.projects)) return null;
+    const activeId = slugifyWorkspaceName(index.activeId || marker && marker.id || '');
+    return index.projects.find(record => record && slugifyWorkspaceName(record.id) === activeId) || null;
+  } catch(err){
+    return null;
+  }
+}
+
+function isDiskBackedBrowserProject(){
+  const record = activeBrowserProjectRecord();
+  return !!(record && record.source === 'local-disk');
+}
+
 function requestPersistentBrowserStorage(){
   const storage=typeof navigator!=='undefined'&&navigator.storage;
   if(!storage)return Promise.resolve(null);
@@ -265,33 +309,50 @@ function getProjectFileHandle(){
   });
 }
 
-async function ensureWritableHandle(){
+function hasUserActivation(){
+  return !navigator.userActivation || navigator.userActivation.isActive === true;
+}
+
+async function ensureWritableHandle(options){
+  const opts = options || {};
+  const permissionMode = opts.mode === 'read' ? 'read' : 'readwrite';
   const handle = await getHandle();
   if(!handle) throw new Error('No project folder selected');
   if(typeof handle.queryPermission === 'function'){
-    let permission = await handle.queryPermission({mode:'readwrite'});
-    if(permission !== 'granted' && typeof handle.requestPermission === 'function'){
-      permission = await handle.requestPermission({mode:'readwrite'});
+    let permission = await handle.queryPermission({mode:permissionMode});
+    const canRequestPermission = opts.requestPermission !== false && hasUserActivation();
+    if(permission !== 'granted' && canRequestPermission && typeof handle.requestPermission === 'function'){
+      permission = await handle.requestPermission({mode:permissionMode});
     }
-    if(permission !== 'granted') throw new Error('Project folder permission denied');
+    if(permission !== 'granted'){
+      const error = new Error(!canRequestPermission
+        ? tr('Project folder access needs your confirmation. Open Workspace and press Load workspace.', 'L’accesso alla cartella del progetto richiede la tua conferma. Apri Workspace e premi Carica workspace.')
+        : 'Project folder permission denied');
+      if(!canRequestPermission) error.code = 'LK_USER_ACTIVATION_REQUIRED';
+      throw error;
+    }
   }
   return handle;
 }
 
-async function workspaceDir(handle){
+async function workspaceDir(handle, options){
   if(!handle || typeof handle.getDirectoryHandle !== 'function') throw new Error('Project folder is not writable');
-  return handle.getDirectoryHandle(PROJECT_DIR, {create:true});
+  return handle.getDirectoryHandle(PROJECT_DIR, {create:!(options && options.create === false)});
 }
 
-async function ensureWritableFileHandle(){
+async function ensureWritableFileHandle(options){
+  const opts = options || {};
+  const permissionMode = opts.mode === 'read' ? 'read' : 'readwrite';
   const handle = await getProjectFileHandle();
   if(!handle) throw new Error('No LKEP project file linked');
   if(typeof handle.queryPermission === 'function'){
-    let permission = await handle.queryPermission({mode:'readwrite'});
-    if(permission !== 'granted' && typeof handle.requestPermission === 'function'){
-      permission = await handle.requestPermission({mode:'readwrite'});
+    let permission = await handle.queryPermission({mode:permissionMode});
+    if(permission !== 'granted' && hasUserActivation() && typeof handle.requestPermission === 'function'){
+      permission = await handle.requestPermission({mode:permissionMode});
     }
-    if(permission !== 'granted') throw new Error('Project file permission denied');
+    if(permission !== 'granted') throw new Error(hasUserActivation()
+      ? 'Project file permission denied'
+      : tr('Project file access needs your confirmation. Open Workspace and reconnect the LKEP file.', 'L’accesso al file del progetto richiede la tua conferma. Apri Workspace e ricollega il file LKEP.'));
   }
   return handle;
 }
@@ -361,8 +422,8 @@ function normalizeWorkspaceCatalog(catalog){
   };
 }
 
-async function workspaceProjectsDir(dir){
-  return dir.getDirectoryHandle(PROJECTS_DIR, {create:true});
+async function workspaceProjectsDir(dir, options){
+  return dir.getDirectoryHandle(PROJECTS_DIR, {create:!(options && options.create === false)});
 }
 
 function uniqueWorkspaceProjectId(catalog, preferred){
@@ -446,11 +507,11 @@ async function upsertWorkspaceProject(dir, project, opts){
   return {record, project:projectCopy};
 }
 
-async function readWorkspaceProjectText(dir, record){
+async function readWorkspaceProjectText(dir, record, options){
   if(record && record.file){
     const parts = String(record.file).split('/').filter(Boolean);
     if(parts.length === 2 && parts[0] === PROJECTS_DIR){
-      const projectsDir = await workspaceProjectsDir(dir);
+      const projectsDir = await workspaceProjectsDir(dir, options);
       return readTextFile(projectsDir, parts[1]);
     }
   }
@@ -548,6 +609,7 @@ async function connectFolder(options){
     folderName:handle.name || 'Project folder',
     projectFile:PROJECT_DIR + '/' + PROJECT_FILE,
   });
+  setStartupAuthority('folder');
   return handle;
 }
 
@@ -602,6 +664,7 @@ async function connectProjectFile(){
     catch(err){ throw new Error(tr('The selected LKEP is not valid JSON.', 'Il file LKEP selezionato non contiene JSON valido.')); }
     await putProjectFileHandle(handle);
     saveState({mode:'file', onlineEditor:true, workspaceReady:true, sourceTemplate:null, demoSeedPending:false, fileName:handle.name || PROJECT_FILE, projectFile:handle.name || PROJECT_FILE, folderName:null});
+    setStartupAuthority('file');
     dispatchLoadedProject(text, handle.name || PROJECT_FILE);
     showToast('Linked LKEP project file: ' + (handle.name || PROJECT_FILE));
     return handle;
@@ -615,6 +678,7 @@ async function connectProjectFile(){
   catch(err){ throw new Error(tr('The selected LKEP is not valid JSON.', 'Il file LKEP selezionato non contiene JSON valido.')); }
   cachedFileHandle=null;
   saveState({mode:'browser',onlineEditor:true,workspaceReady:true,sourceTemplate:null,demoSeedPending:false,fileName:file.name||PROJECT_FILE,projectFile:null,folderName:null});
+  setStartupAuthority('browser');
   requestPersistentBrowserStorage();
   dispatchLoadedProject(text,file.name||PROJECT_FILE);
   showToast(tr('LKEP imported into browser storage.','LKEP importato nell’archivio del browser.'));
@@ -660,23 +724,31 @@ async function saveProject(project, opts){
 
 async function loadProjectText(){
   const fileHandle = await getProjectFileHandle();
-  if(fileHandle) return readFileHandleText(fileHandle);
-  const handle = await ensureWritableHandle();
-  const dir = await workspaceDir(handle);
+  if(fileHandle) return readFileHandleText(await ensureWritableFileHandle({mode:'read'}));
+  const handle = await ensureWritableHandle({mode:'read'});
+  const dir = await workspaceDir(handle, {create:false});
   const catalog = await readWorkspaceCatalog(dir);
   const record = await findWorkspaceProjectRecord(dir, catalog.activeId);
-  return readWorkspaceProjectText(dir, record);
+  return readWorkspaceProjectText(dir, record, {create:false});
 }
 
 async function readWorkspaceProjects(){
   if(!isFolderMode()) return {activeId:null, projects:[]};
-  const handle = await ensureWritableHandle();
-  const dir = await workspaceDir(handle);
+  // Startup catalog discovery is not a user gesture. Browsers correctly reject
+  // requestPermission() here, so only query an already-granted read permission;
+  // the visible Workspace Load button owns any permission prompt.
+  let handle = null;
+  try { handle = await ensureWritableHandle({mode:'read', requestPermission:false}); }
+  catch(err){
+    if(err && err.code === 'LK_USER_ACTIVATION_REQUIRED') return {activeId:null, projects:[], permissionRequired:true};
+    throw err;
+  }
+  const dir = await workspaceDir(handle, {create:false});
   const catalog = await readWorkspaceCatalog(dir);
   const projects = [];
   for(const record of catalog.projects || []){
     try {
-      projects.push({record, text:await readWorkspaceProjectText(dir, record)});
+      projects.push({record, text:await readWorkspaceProjectText(dir, record, {create:false})});
     } catch(err){}
   }
   if(!projects.length){
@@ -708,9 +780,47 @@ function setBrowserMode(patch){
   showToast(tr('Using this browser local database. Nothing is uploaded.', 'Uso del database locale del browser. Nessun dato viene caricato.'));
 }
 
+function activateLocalProject(){
+  setStartupAuthority('local');
+  return setBrowserMode({
+    startupTemplate:null,
+    sourceTemplate:null,
+    demoSeedPending:false,
+  });
+}
+
+function activateBrowserProject(options){
+  options=options||{};
+  setStartupAuthority(options.demo===true?'demo':'browser');
+  return setBrowserMode({
+    startupTemplate:null,
+    sourceTemplate:options.demo===true?'demo':'browser',
+    demoSeedPending:false,
+  });
+}
+
+async function openLocalBrowserProject(){
+  setStartupAuthority('local');
+  setBrowserMode({startupTemplate:null, sourceTemplate:null, demoSeedPending:false});
+  closeOverlay();
+  let io = window.LK_EDITOR_PROJECT_IO_INSTANCE;
+  for(let attempt = 0; !io && attempt < 50; attempt += 1){
+    await new Promise(resolve => setTimeout(resolve, 100));
+    io = window.LK_EDITOR_PROJECT_IO_INSTANCE;
+  }
+  if(io && typeof io.loadLocalBridgeProject === 'function'){
+    const opened = await io.loadLocalBridgeProject();
+    if(opened) return true;
+  }
+  if(io && typeof io.setProjectsOverlayOpen === 'function') io.setProjectsOverlayOpen(true);
+  showToast(tr('Choose the local project from Projects.', 'Scegli il progetto locale da Projects.'));
+  return false;
+}
+
 async function chooseEditorProject(template){
   const selectedTemplate = template === 'empty' ? 'empty' : 'demo';
   if(selectedTemplate === 'demo'){
+    setStartupAuthority('demo');
     setBrowserMode({
       startupTemplate:'demo',
       sourceTemplate:'demo',
@@ -718,6 +828,7 @@ async function chooseEditorProject(template){
     });
     showToast(tr('Creating your private browser copy of the author DEMO...', 'Creazione della tua copia browser privata del DEMO autore...'));
   } else {
+    setStartupAuthority('browser');
     setBrowserMode({startupTemplate:'empty'});
   }
   location.reload();
@@ -738,6 +849,7 @@ function consumeDemoSeedPending(){
 }
 
 function markDemoSession(){
+  setStartupAuthority('demo');
   const state = loadState();
   const needsSeed = state.demoSeedPending === true
     || state.startupTemplate === 'demo'
@@ -762,6 +874,7 @@ function markDemoSession(){
 function resetChoice(){
   cachedHandle = null;
   cachedFileHandle = null;
+  setStartupAuthority(null);
   saveState({mode:'browser', onlineEditor:isLocalOrigin() ? true : false, workspaceReady:false, startupTemplate:null, sourceTemplate:null, demoSeedPending:false, folderName:null, fileName:null, projectFile:null, lastProjectName:null, lastSavedAt:null});
   showToast('Workspace choice reset');
   if(!isLocalOrigin()) location.reload();
@@ -858,7 +971,7 @@ function renderOverlay(){
   const environment = overlay.querySelector('#lkWorkspaceEnvironment');
   if(environment) environment.textContent = hosted
     ? tr('Open the author DEMO directly, or connect a local folder only if you want file mirroring. Nothing is uploaded to this server.', 'Apri direttamente il DEMO dell’autore, oppure collega una cartella locale solo se vuoi una copia su file. Nulla viene caricato su questo server.')
-    : tr('LOCAL INSTALLATION · Browser project storage and local LKEP files are available.', 'INSTALLAZIONE LOCALE · Sono disponibili archivio progetti del browser e file LKEP locali.');
+    : tr('LOCAL INSTALLATION · Open the disk-backed Local Project; browser storage remains its working cache.', 'INSTALLAZIONE LOCALE · Apri il Local Project salvato su disco; l’archivio browser resta la sua cache di lavoro.');
   if(hosted){
     const kicker = overlay.querySelector('.lk-workspace-kicker');
     const title = overlay.querySelector('#lkWorkspaceTitle');
@@ -872,6 +985,11 @@ function renderOverlay(){
     if(browserDesc) browserDesc.textContent = tr('Work in this browser with local IndexedDB storage. Compatible with Safari, Chrome, Edge and Firefox; nothing is uploaded.', 'Lavora nel browser usando IndexedDB locale. Compatibile con Safari, Chrome, Edge e Firefox; nulla viene caricato online.');
     if(fileTitle) fileTitle.textContent = canUseDirectoryPicker()?tr('Optional local folder mirror','Copia opzionale su cartella locale'):tr('Import an existing LKEP','Importa un LKEP esistente');
     if(fileDesc) fileDesc.textContent = canUseDirectoryPicker()?tr('Authorize a folder for automatic file mirroring.','Autorizza una cartella per la copia automatica su file.'):tr('Safari imports the portable file into browser storage; Save/Export downloads a new LKEP.','Safari importa il file portabile nel browser; Salva/Esporta scarica un nuovo LKEP.');
+  } else {
+    const browserTitle = overlay.querySelector('#lkWorkspaceBrowser b');
+    const browserDesc = overlay.querySelector('#lkWorkspaceBrowser span');
+    if(browserTitle) browserTitle.textContent = tr('Open Local Project', 'Apri Local Project');
+    if(browserDesc) browserDesc.textContent = tr('Loads the complete disk LKEP automatically, even when this browser origin or port has a different Local DB.', 'Carica automaticamente il LKEP completo su disco, anche se questa origine o porta del browser ha un Local DB differente.');
   }
   const guideCard = overlay.querySelector('#lkWorkspaceGuide');
   if(guideCard) guideCard.style.display = hosted ? '' : 'none';
@@ -907,8 +1025,11 @@ function renderOverlay(){
         if(initialChoice)location.reload();else closeOverlay();
         return;
       }
-      setBrowserMode();
-      syncOverlayStatus();
+      openLocalBrowserProject().catch(err => {
+        const message = friendlyError(err, tr('Local project could not be opened.', 'Impossibile aprire il progetto locale.'));
+        showToast(message);
+        syncOverlayStatus(message);
+      });
     });
   }
   overlay.querySelector('#lkWorkspaceGuide').addEventListener('click', openGuide);
@@ -994,12 +1115,13 @@ function updateBadge(state){
   const privateDemo = isPrivateBrowserDemo();
   const file = state.mode === 'file';
   const folder = state.mode === 'folder';
-  badge.textContent = privateDemo ? 'Workspace: private DEMO' : (file ? 'Workspace: ' + (state.fileName || 'LKEP') : (folder ? 'Workspace: ' + (state.folderName || 'folder') : 'Workspace: local DB'));
-  badge.classList.toggle('folder', folder || file);
+  const disk = !privateDemo && !file && !folder && isDiskBackedBrowserProject();
+  badge.textContent = privateDemo ? 'Workspace: private DEMO' : (file ? 'Workspace: ' + (state.fileName || 'LKEP') : (folder ? 'Workspace: ' + (state.folderName || 'folder') : (disk ? 'Workspace: Local Project' : 'Workspace: local DB')));
+  badge.classList.toggle('folder', folder || file || disk);
   badge.classList.remove('demo');
   badge.title = privateDemo
     ? tr('Private author DEMO copy saved only in this browser profile', 'Copia privata del DEMO autore salvata solo in questo profilo browser')
-    : (file ? tr('Syncing saves to linked LKEP file', 'Salvataggi sincronizzati nel file LKEP collegato') : (folder && state.projectFile ? tr('Mirroring saves to ', 'Copia dei salvataggi in ') + state.projectFile : tr('Using this browser localStorage and IndexedDB', 'Uso di localStorage e IndexedDB del browser')));
+    : (file ? tr('Syncing saves to linked LKEP file', 'Salvataggi sincronizzati nel file LKEP collegato') : (folder && state.projectFile ? tr('Mirroring saves to ', 'Copia dei salvataggi in ') + state.projectFile : (disk ? tr('Disk-backed LKEP with browser working cache', 'LKEP su disco con cache di lavoro nel browser') : tr('Using this browser localStorage and IndexedDB', 'Uso di localStorage e IndexedDB del browser'))));
 }
 
 function openOverlay(){
@@ -1017,8 +1139,9 @@ function workspaceButtonMarkup(compact){
   const privateDemo = isPrivateBrowserDemo();
   const file = state.mode === 'file';
   const folder = state.mode === 'folder';
-  if(compact) return '<span>' + (privateDemo ? 'DEMO · PRIVATE' : (file ? 'LKEP LINKED' : (folder ? 'FOLDER WORKSPACE' : 'WORKSPACE'))) + '</span>';
-  return '<b>' + (privateDemo ? 'AUTHOR DEMO' : (file ? 'LKEP PROJECT FILE' : (folder ? 'FOLDER WORKSPACE' : 'LOCAL WORKSPACE'))) + '</b><small>' + (privateDemo ? tr('private browser copy', 'copia privata browser') : (file ? 'sync on save' : (folder ? 'folder linked' : 'local DB'))) + '</small>';
+  const disk = !privateDemo && !file && !folder && isDiskBackedBrowserProject();
+  if(compact) return '<span>' + (privateDemo ? 'DEMO · PRIVATE' : (file ? 'LKEP LINKED' : (folder ? 'FOLDER WORKSPACE' : (disk ? 'LOCAL PROJECT' : 'WORKSPACE')))) + '</span>';
+  return '<b>' + (privateDemo ? 'AUTHOR DEMO' : (file ? 'LKEP PROJECT FILE' : (folder ? 'FOLDER WORKSPACE' : (disk ? 'LOCAL PROJECT' : 'LOCAL WORKSPACE')))) + '</b><small>' + (privateDemo ? tr('private browser copy', 'copia privata browser') : (file ? 'sync on save' : (folder ? 'folder linked' : (disk ? tr('disk LKEP + browser cache', 'LKEP su disco + cache browser') : 'local DB')))) + '</small>';
 }
 
 function syncWorkspaceButtons(){
@@ -1321,9 +1444,11 @@ window.LK_PROJECT_WORKSPACE = Object.freeze({
   isFileMode,
   isOnlineDemoMode,
   isPrivateBrowserDemo,
+  isPrivateBrowserProject,
   canPublishAuthorDemo,
   markDemoSession,
   isEditorPage,
+  shouldOpenAuthorDemoByDefault,
   requiresInitialChoice,
   connectProjectFile,
   connectFolder,
@@ -1336,6 +1461,8 @@ window.LK_PROJECT_WORKSPACE = Object.freeze({
   canUseDirectoryPicker,
   consumeStartupTemplate,
   consumeDemoSeedPending,
+  activateLocalProject,
+  activateBrowserProject,
 });
 
 })();

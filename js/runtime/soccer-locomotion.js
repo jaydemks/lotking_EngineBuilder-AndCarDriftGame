@@ -10,11 +10,40 @@
 'use strict';
 
 const LOCOMOTION_SLOTS = ['idle', 'walk', 'run', 'strafeLeft', 'strafeRight'];
-const PROCEDURAL_FALLBACK_SLOTS = ['idle','walk','run','strafeLeft','strafeRight','jump','land','shoot','pass','cross','tackle','save','diveLeft','diveRight','celebrate','defeat','interact'];
+const PROCEDURAL_FALLBACK_SLOTS = ['idle','walk','run','strafeLeft','strafeRight','jump','land','shoot','pass','cross','tackle','save','diveLeft','diveRight','celebrate','defeat','interact','fireSingleIdle','fireSingleWalk','fireSingleRun','fireAutoIdle','fireAutoWalk','fireAutoRun'];
 
 function finite(value, fallback){
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+function positiveModulo(value, divisor){
+  const d = Math.max(.0001, finite(divisor, 1));
+  return ((finite(value, 0) % d) + d) % d;
+}
+
+// Blend-space clips must agree on WHERE they are inside a gait cycle, not on
+// their raw time in seconds. A 0.8 s Run and a 1.1 s Walk left free-running are
+// smooth individually but periodically oppose their planted feet; the blend
+// then reads as two tiny steps before returning to normal. Locking normalized
+// phase once per update removes that beat without touching weights, playback
+// rate or non-looping Jump/Land/Action clips.
+function synchronizeLoopPhases(selected, actions){
+  const loops = (selected || []).map(item => {
+    const entry = item && item.entry;
+    const action = entry && actions && actions[entry.id];
+    const clip = action && action.getClip && action.getClip();
+    const duration = Math.max(.0001, finite(clip && clip.duration, 0));
+    return entry && entry.state === 'grounded' && entry.loop !== false && entry.speed > .08 && action && clip
+      ? {entry, action, duration, weight:Math.max(0, finite(item.weight, 0))} : null;
+  }).filter(Boolean);
+  if(loops.length < 2) return false;
+  loops.sort((a, b) => b.weight - a.weight);
+  const anchor = loops[0];
+  const phase = positiveModulo(anchor.action.time, anchor.duration) / anchor.duration;
+  for(let index = 1; index < loops.length; index++){
+    loops[index].action.time = phase * loops[index].duration;
+  }
+  return true;
 }
 
 function normalizeName(name){
@@ -24,8 +53,11 @@ function normalizeName(name){
 function animationSpec(value){
   let parsed=value;
   if(typeof parsed==='string'&&parsed.trim().charAt(0)==='{')try{parsed=JSON.parse(parsed);}catch(err){}
-  if(parsed&&typeof parsed==='object')return {clip:String(parsed.clip||parsed.name||''),asset:parsed.asset&&typeof parsed.asset==='object'?parsed.asset:null};
-  return {clip:String(parsed||''),asset:null};
+  if(parsed&&typeof parsed==='object'){
+    const asset=parsed.asset&&typeof parsed.asset==='object'?parsed.asset:null;
+    return {clip:String(parsed.clip||parsed.name||''),asset,playbackRate:finite(parsed.playbackRate,finite(asset&&asset.playbackRate,1))};
+  }
+  return {clip:String(parsed||''),asset:null,playbackRate:1};
 }
 function animationAssetKey(ref){return ref&&typeof ref==='object'?String(ref.dbKey||ref.key||ref.id||ref.src||''):'';}
 function motionCurveCorrection(entry,phase){
@@ -72,7 +104,14 @@ function normalizedTrackNode(name){
   // Armature|mixamorig:Hips, Armature/Hips and mixamorigHips.  PropertyBinding
   // needs the authored target name, while matching needs one canonical key.
   value=value.split(/[\\/|:]/).pop()||value;
-  value=value.replace(/^(?:mixamorig|armature|skeleton|rig)/i,'');
+  // Three PropertyBinding removes ':' from FBX names. A source namespace such
+  // as `mixamorig5:Hips` therefore arrives as `mixamorig5Hips`, not as the
+  // target mannequin's `mixamorigHips`. Strip exporter-added numeric namespace
+  // suffixes together with the rig prefix so both canonicalize to `hips`.
+  // `RightArm` starts with the letters "rig" too. Do not mistake that side
+  // name for a generic Rig namespace or the complete right arm disappears
+  // from retargeting and post-animation weapon posing.
+  value=value.replace(/^(?:mixamorig|armature|skeleton|rig(?!ht))(?:[_\-\s]*\d+)?[_\-\s]*/i,'');
   return value.replace(/[^a-z0-9]/gi,'').toLowerCase();
 }
 function trackNodeBinding(name){
@@ -304,6 +343,8 @@ function createController(options){
     runSpeed:Math.max(.2, finite(opts.runSpeed, 6)),
     responsiveness:Math.max(.5, finite(opts.responsiveness, 9)),
     predictionTime:Math.max(0, finite(opts.predictionTime, .12)),
+    stepPoseStrength:Math.max(0,Math.min(2,finite(opts.stepPoseStrength,1))),
+    stair:{amount:0,side:1,rise:0},
     bound:false,
     finishedHandler:null,
     modelRoot:null,
@@ -313,20 +354,43 @@ function createController(options){
     postUpdateGuard:null,
     fallbackClips:{},
     rigBones:new Map(),
+    stairBones:{},
+    lastStairDeltas:new Map(),
+    lastStairMixerTime:null,
     lastRigCorrections:new Map(),
     lastRigMixerTime:null,
+    weaponPose:null,
+    lastWeaponPoseMixerTime:null,
+    weaponPoseFaulted:false,
+    traversalPose:null,
+    lastTraversalPoseMixerTime:null,
+    traversalPoseFaulted:false,
+    oneShotBlend:null,
+    // Runtime Character locomotion must advance its own mixer. Imported
+    // Logic Element mixers are also known by scene-store, so use an identity
+    // token to transfer ownership without ever updating the same mixer twice.
+    mixerOwnerToken:{},
+    ownsMixerUpdate:false,
   };
 
   function restoreMotionRoot(){
     const root=state.motionRoot,rest=state.motionRootRest;if(!root||!rest)return;
     root.position.copy(rest.position);root.quaternion.copy(rest.quaternion);root.scale.copy(rest.scale);root.updateMatrixWorld(true);
   }
-  function dispose(){
+  function dispose(preserveMixerActions,preservePresentationRoot){
     if(state.node&&state.node.userData&&state.node.userData.logicCharacterRigPostUpdate===state.postUpdateGuard)delete state.node.userData.logicCharacterRigPostUpdate;
+    if(state.node&&state.node.userData&&state.node.userData.logicCharacterLocomotionMixerOwner===state.mixerOwnerToken)delete state.node.userData.logicCharacterLocomotionMixerOwner;
     if(state.mixer && state.finishedHandler) state.mixer.removeEventListener('finished', state.finishedHandler);
     clearAppliedRigCorrections();
-    restoreMotionRoot();
-    Object.keys(state.actions).forEach(slot => { const a = state.actions[slot]; if(a) a.stop(); });
+    clearAppliedStairPose();
+    // A replacement controller snapshots the clean root before this controller
+    // is retired. Restoring the old root after that bind can overwrite/rebase
+    // the new baseline, so replacement disposal explicitly leaves it alone.
+    if(preservePresentationRoot!==true)restoreMotionRoot();
+    if(preserveMixerActions!==true){
+      const managed=new Set(Object.values(state.actions).concat(Object.values(state.motionActions)).filter(Boolean));
+      managed.forEach(action=>action.stop&&action.stop());
+    }
     state.actions = {};
     state.motionActions = {};
     state.motionWeights = {};
@@ -345,9 +409,28 @@ function createController(options){
     state.clips = [];
     state.fallbackClips = {};
     state.rigBones = new Map();
+    state.stairBones = {};
+    state.lastStairDeltas = new Map();
+    state.lastStairMixerTime = null;
+    state.stair = {amount:0,side:1,rise:0};
     state.lastRigCorrections = new Map();
     state.lastRigMixerTime = null;
+    state.weaponPose = null;
+    state.lastWeaponPoseMixerTime = null;
+    state.weaponPoseFaulted = false;
+    state.traversalPose = null;
+    state.lastTraversalPoseMixerTime = null;
+    state.traversalPoseFaulted = false;
+    state.oneShotBlend = null;
     state.ownsMixerUpdate = false;
+  }
+
+  function oneShotWeight(){
+    return state.oneShot ? Math.max(0,Math.min(1,finite(state.oneShot.blendWeight,1))) : 0;
+  }
+  function oneShotSharesMotionAction(){
+    const action=state.oneShot&&state.oneShot.action;
+    return !!action&&Object.keys(state.motionActions).some(key=>state.motionActions[key]===action);
   }
 
   function captureRigGuard(root){
@@ -367,6 +450,12 @@ function createController(options){
     if(state.node&&state.node.userData){state.node.userData.characterAnimationPoseError=reason;if(state.node.userData.characterAnimationBinding)state.node.userData.characterAnimationBinding.bound=false;}
     return false;
   }
+  function restoreRigRest(){
+    const guard=state.rigGuard;if(!guard)return false;
+    clearAppliedRigCorrections();clearAppliedStairPose();
+    guard.rest.forEach((value,object)=>{if(!object||!object.position||!object.quaternion||!object.scale)return;object.position.copy(value.position);object.quaternion.copy(value.quaternion);object.scale.copy(value.scale);});
+    if(state.modelRoot)state.modelRoot.updateMatrixWorld(true);return true;
+  }
   function enforceRigProportions(){
     const guard=state.rigGuard;if(!guard)return;
     guard.rest.forEach((value,object)=>{object.position.copy(value.position);object.scale.copy(value.scale);if(object===state.modelRoot&&!object.isBone)object.quaternion.copy(value.quaternion);});
@@ -379,9 +468,9 @@ function createController(options){
     // correction, so Play can fall back to the original imported inclination.
     const root=state.motionRoot,rest=state.motionRootRest,setRuntime=window.LK_RUNTIME_CHARACTER_ANIMATION_SET;if(!root||!rest||!setRuntime)return;
     const position=[0,0,0],rotation=[0,0,0];let total=0;
-    const add=(entry,weight)=>{if(!entry||weight<=.0001)return;const transform=setRuntime.motionTransform?setRuntime.motionTransform(entry.motionTransform):entry.motionTransform;if(!transform)return;for(let i=0;i<3;i++){position[i]+=finite(transform.position&&transform.position[i],0)*weight;rotation[i]+=finite(transform.rotation&&transform.rotation[i],0)*weight;}total+=weight;};
-    state.motionSet.forEach(entry=>add(entry,Math.max(0,finite(state.motionWeights[entry.id],0))));
-    if(state.oneShot&&state.oneShot.entry)add(state.oneShot.entry,1);
+    const add=(entry,action,weight)=>{if(!entry||weight<=.0001)return;const clip=action&&action.getClip&&action.getClip(),duration=Math.max(.0001,finite(clip&&clip.duration,1)),phase=action?(((finite(action.time,0)%duration)+duration)%duration/duration):0,sample=setRuntime.samplePoseTimeline&&setRuntime.samplePoseTimeline(entry.poseTimeline,phase),base=setRuntime.motionTransform?setRuntime.motionTransform(entry.motionTransform):entry.motionTransform,animated=sample&&sample.motionTransform;for(let i=0;i<3;i++){position[i]+=(finite(base&&base.position&&base.position[i],0)+finite(animated&&animated.position&&animated.position[i],0))*weight;rotation[i]+=(finite(base&&base.rotation&&base.rotation[i],0)+finite(animated&&animated.rotation&&animated.rotation[i],0))*weight;}total+=weight;};
+    state.motionSet.forEach(entry=>add(entry,state.motionActions[entry.id],Math.max(0,finite(state.motionWeights[entry.id],0))));
+    if(state.oneShot&&state.oneShot.entry&&!oneShotSharesMotionAction())add(state.oneShot.entry,state.oneShot.action,oneShotWeight());
     if(total>1){for(let i=0;i<3;i++){position[i]/=total;rotation[i]/=total;}}
     const transform={position,rotation};
     if(setRuntime.applyMotionTransform)setRuntime.applyMotionTransform(THREE,root,rest,transform);
@@ -397,7 +486,7 @@ function createController(options){
     let x=0,y=0,z=0,total=0;
     const add=(entry,action,blend)=>{if(!entry||!action||!action.getClip)return;const clip=action.getClip(),duration=Math.max(.0001,Number(clip&&clip.duration)||1),phase=((Number(action.time)||0)%duration+duration)%duration/duration,point=motionCurveCorrection(entry,phase),weight=Math.max(0,Number(blend)||0);x+=point.x*weight;y+=point.y*weight;z+=point.z*weight;total+=weight;};
     state.motionSet.forEach(entry=>{const action=state.motionActions[entry.id];if(action)add(entry,action,state.motionWeights[entry.id]);});
-    if(state.oneShot&&state.oneShot.entry)add(state.oneShot.entry,state.oneShot.action,1);
+    if(state.oneShot&&state.oneShot.entry&&!oneShotSharesMotionAction())add(state.oneShot.entry,state.oneShot.action,oneShotWeight());
     if(total>1){x/=total;y/=total;z/=total;}
     // The correction is authored in Pawn/world metres. modelRoot normally
     // lives below the fitted Character holder, so compensate its parent scale
@@ -412,11 +501,88 @@ function createController(options){
     if(sameFrame)state.lastRigCorrections.forEach((delta,bone)=>{if(bone&&bone.quaternion)bone.quaternion.multiply(delta.clone().invert()).normalize();});
     state.lastRigCorrections.clear();state.lastRigMixerTime=mixerTime;
     const totals={};
-    const add=(entry,weight)=>{const corrections=entry&&entry.rigCorrections;if(!corrections||weight<=.0001)return;Object.keys(corrections).forEach(key=>{const angles=corrections[key];if(!Array.isArray(angles))return;const sum=totals[key]||(totals[key]=[0,0,0]);sum[0]+=finite(angles[0],0)*weight;sum[1]+=finite(angles[1],0)*weight;sum[2]+=finite(angles[2],0)*weight;});};
-    state.motionSet.forEach(entry=>add(entry,Math.max(0,finite(state.motionWeights[entry.id],0))));
-    if(state.oneShot&&state.oneShot.entry)add(state.oneShot.entry,1);
+    const add=(entry,action,weight)=>{if(!entry||weight<=.0001)return;const clip=action&&action.getClip&&action.getClip(),duration=Math.max(.0001,finite(clip&&clip.duration,1)),phase=action?(((finite(action.time,0)%duration)+duration)%duration/duration):0,sample=window.LK_RUNTIME_CHARACTER_ANIMATION_SET&&window.LK_RUNTIME_CHARACTER_ANIMATION_SET.samplePoseTimeline&&window.LK_RUNTIME_CHARACTER_ANIMATION_SET.samplePoseTimeline(entry.poseTimeline,phase),sources=[entry.rigCorrections,sample&&sample.rigCorrections];sources.forEach(corrections=>{if(!corrections)return;Object.keys(corrections).forEach(key=>{const angles=corrections[key];if(!Array.isArray(angles))return;const sum=totals[key]||(totals[key]=[0,0,0]);sum[0]+=finite(angles[0],0)*weight;sum[1]+=finite(angles[1],0)*weight;sum[2]+=finite(angles[2],0)*weight;});});};
+    state.motionSet.forEach(entry=>add(entry,state.motionActions[entry.id],Math.max(0,finite(state.motionWeights[entry.id],0))));
+    if(state.oneShot&&state.oneShot.entry&&!oneShotSharesMotionAction())add(state.oneShot.entry,state.oneShot.action,oneShotWeight());
     Object.keys(totals).forEach(key=>{const bone=state.rigBones.get(key);if(!bone||!bone.quaternion)return;const angles=totals[key],delta=new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(angles[0]),THREE.MathUtils.degToRad(angles[1]),THREE.MathUtils.degToRad(angles[2]),'XYZ'));bone.quaternion.multiply(delta).normalize();state.lastRigCorrections.set(bone,delta);});
     if(state.modelRoot)state.modelRoot.updateMatrixWorld(true);
+  }
+  function resolveStairBones(){
+    const candidates={
+      kneeLeft:['leftleg','leftlowerleg','leftcalf','leftshin'],kneeRight:['rightleg','rightlowerleg','rightcalf','rightshin'],
+      footLeft:['leftfoot','leftankle'],footRight:['rightfoot','rightankle'],
+    },out={};
+    Object.keys(candidates).forEach(role=>{
+      const keys=candidates[role];
+      for(let index=0;index<keys.length&&!out[role];index++)out[role]=state.rigBones.get(keys[index])||null;
+      if(!out[role])for(const [key,bone] of state.rigBones){if(keys.some(candidate=>key.endsWith(candidate))){out[role]=bone;break;}}
+    });
+    state.stairBones=out;return out;
+  }
+  function applyStairPose(want,dt){
+    if(!state.mixer||!THREE)return;
+    const grounded=want.groundContact!==false&&want.grounded!==false,rise=Math.max(0,finite(want.stepRise,0));
+    if(grounded&&rise>.001){
+      const maxRise=Math.max(.02,finite(want.stepHeight,.55));
+      const speed=Math.max(finite(want.speed,0),Math.hypot(finite(want.x,0),finite(want.z,0)));
+      const speedScale=.45+.55*Math.max(0,Math.min(1,speed/Math.max(.1,state.walkSpeed)));
+      state.stair.amount=Math.max(state.stair.amount,Math.max(0,Math.min(1,rise/maxRise))*speedScale*state.stepPoseStrength);
+      state.stair.side=finite(want.stepSide,state.stair.side)>=0?1:-1;state.stair.rise=rise;
+    } else state.stair.amount*=Math.exp(-8*Math.max(.0001,dt));
+    const mixerTime=finite(state.mixer.time,0),sameFrame=state.lastStairMixerTime===mixerTime;
+    if(sameFrame)state.lastStairDeltas.forEach((delta,bone)=>{if(bone&&bone.quaternion)bone.quaternion.multiply(delta.clone().invert()).normalize();});
+    state.lastStairDeltas.clear();state.lastStairMixerTime=mixerTime;
+    const amount=Math.max(0,Math.min(1.5,state.stair.amount));if(amount<.002)return;
+    const left=state.stair.side<0,angles={
+      kneeLeft:(left?.82:.22)*amount,kneeRight:(left?.22:.82)*amount,
+      footLeft:(left?-.34:-.08)*amount,footRight:(left?-.08:-.34)*amount,
+    };
+    Object.keys(angles).forEach(role=>{const bone=state.stairBones[role];if(!bone||!bone.quaternion)return;const delta=new THREE.Quaternion().setFromEuler(new THREE.Euler(angles[role],0,0,'XYZ'));bone.quaternion.multiply(delta).normalize();state.lastStairDeltas.set(bone,delta);});
+    if(state.modelRoot)state.modelRoot.updateMatrixWorld(true);
+  }
+  function clearAppliedStairPose(){
+    state.lastStairDeltas.forEach((delta,bone)=>{if(bone&&bone.quaternion)bone.quaternion.multiply(delta.clone().invert()).normalize();});
+    state.lastStairDeltas.clear();state.lastStairMixerTime=null;
+  }
+  function applyWeaponPose(){
+    const runtime=window.LK_RUNTIME_CHARACTER_WEAPON_POSE,pose=state.weaponPose;
+    if(state.weaponPoseFaulted||!runtime||!runtime.apply||!pose||!state.modelRoot||!state.mixer)return false;
+    const blend=state.oneShotBlend;
+    const shot=state.oneShot,shotClip=shot&&shot.action&&shot.action.getClip&&shot.action.getClip(),slot=String(shot&&shot.slot||'').toLowerCase().replace(/[^a-z0-9]+/g,''),authoredFire=pose.kind==='firearm'&&/^(?:fire|firing)/.test(slot)&&shotClip&&!(shotClip.userData&&shotClip.userData.lkProceduralPlaceholder);
+    // A real authored Fire take owns its arm chains; the weapon now follows its
+    // trigger hand, so forcing full grip IK over that take would erase exactly
+    // the recoil/hand motion the artist supplied. Procedural Fire still needs
+    // full IK, as do held Aim/Reload poses. Body-locked actions fade it with the
+    // locomotion complement as before.
+    const layer=authoredFire
+      ?Math.max(0,Math.min(1,finite(blend&&blend.locomotionWeight,0)))
+      :(blend&&blend.category!=='upper-body'&&blend.category!=='generic'
+        ?Math.max(0,Math.min(1,finite(blend.locomotionWeight,0))):1);
+    if(layer<=.002)return false;
+    const mixerTime=finite(state.mixer.time,0);
+    if(state.lastWeaponPoseMixerTime===mixerTime)return false;
+    state.lastWeaponPoseMixerTime=mixerTime;
+    try{return runtime.apply(THREE,state.modelRoot,pose,pose.kind==='unarmed'?.9:.84,layer);}
+    catch(error){
+      // A cosmetic post-animation layer must never abort movement, camera,
+      // input, HUD or the remaining Pawns in the shared frame.
+      state.weaponPoseFaulted=true;
+      console.error('LotKing Character: disabled weapon pose for an incompatible rig; gameplay continues.',error);
+      return false;
+    }
+  }
+  function applyTraversalPose(){
+    const runtime=window.LK_RUNTIME_CHARACTER_WEAPON_POSE,pose=state.traversalPose;
+    if(state.traversalPoseFaulted||!runtime||!runtime.applyTraversal||!pose||!state.modelRoot||!state.mixer)return false;
+    const mixerTime=finite(state.mixer.time,0);
+    if(state.lastTraversalPoseMixerTime===mixerTime)return false;
+    state.lastTraversalPoseMixerTime=mixerTime;
+    try{return runtime.applyTraversal(THREE,state.modelRoot,pose,1);}
+    catch(error){
+      state.traversalPoseFaulted=true;
+      console.error('LotKing Character: disabled traversal contact IK for an incompatible rig; gameplay continues.',error);
+      return false;
+    }
   }
   function clearAppliedRigCorrections(){
     // AnimationMixer must always evaluate the uncorrected clip pose. Leaving
@@ -465,6 +631,7 @@ function createController(options){
     state.motionRoot=node.position&&node.quaternion&&node.scale?node:null;
     state.motionRootRest=state.motionRoot?{position:state.motionRoot.position.clone(),quaternion:state.motionRoot.quaternion.clone(),scale:state.motionRoot.scale.clone()}:null;
     if(modelRoot.traverse)modelRoot.traverse(object=>{if(object&&object.isBone&&object.name){const key=normalizedTrackNode(object.name);if(key&&!state.rigBones.has(key))state.rigBones.set(key,object);}});
+    resolveStairBones();
     const authoredRig=captureRigGuard(modelRoot);
     const setRuntime=window.LK_RUNTIME_CHARACTER_ANIMATION_SET,normalizedSet=setRuntime?setRuntime.normalize(animationSet||opts.animationSet,clipMap||{}):[];
     const entryForClip=clip=>{const key=clip&&clip.userData&&clip.userData.lkAnimationAssetKey;return normalizedSet.find(entry=>entry&&(!key||animationAssetKey(entry.asset)===key)&&(!entry.clip||entry.clip===clip.name))||normalizedSet.find(entry=>entry&&key&&animationAssetKey(entry.asset)===key)||null;};
@@ -490,12 +657,11 @@ function createController(options){
     if(!merged.length) return false;
     let mixer = node.userData.logicAnimationMixer;
     if(!mixer){
-      // Mesh-only GLB + separate animation library: create our own mixer on
-      // the model root and drive it from update() (scene-store only updates
-      // mixers it created itself).
+      // Mesh-only GLB + separate animation library: create a mixer on the
+      // model root. Runtime locomotion drives both this mixer and imported
+      // scene-store mixers while the Character Pawn is active.
       if(!modelRoot) return false;
       mixer = new THREE.AnimationMixer(modelRoot);
-      state.ownsMixerUpdate = true;
     }
     state.node = node;
     state.mixer = mixer;
@@ -540,12 +706,24 @@ function createController(options){
     // when no usable Motion Set entry could actually bind.
     if(!Object.keys(state.motionActions).length)bindLegacyActions();
     state.finishedHandler = event => {
-      if(state.oneShot && event.action === state.oneShot.action) finishOneShot();
+      if(!state.oneShot || event.action !== state.oneShot.action)return;
+      if(state.oneShot.holdLastFrame){
+        const clip=event.action.getClip&&event.action.getClip();
+        event.action.time=Math.max(0,finite(clip&&clip.duration,1));
+        event.action.paused=true;
+        state.oneShot.held=true;
+        return;
+      }
+      finishOneShot();
     };
     state.mixer.addEventListener('finished', state.finishedHandler);
     state.bound = Object.keys(state.motionActions).length > 0||Object.keys(state.actions).length > 0;
+    // Transfer update ownership only after at least one locomotion action is
+    // truly bound. A failed bind must leave ordinary scene animation intact.
+    state.ownsMixerUpdate = state.bound;
+    if(state.bound)node.userData.logicCharacterLocomotionMixerOwner = state.mixerOwnerToken;
     state.rigGuard=authoredRig||captureRigGuard(modelRoot);
-    state.postUpdateGuard=()=>{enforceRigProportions();applyMotionTransformCorrections();applyRigCorrections();rigPoseIsSane();};
+    state.postUpdateGuard=()=>{enforceRigProportions();applyMotionTransformCorrections();applyRigCorrections();applyStairPose(state.lastDesired||{},0);applyTraversalPose();applyWeaponPose();rigPoseIsSane();};
     node.userData.logicCharacterRigPostUpdate=state.postUpdateGuard;
     const diagnostics=selectedClips.map(clip=>({name:clip.name||'Animation',binding:clip.userData&&clip.userData.lkBinding||analyzeClipBinding(clip,node)}));
     node.userData.characterAnimationBinding={bound:state.bound,clips:diagnostics};
@@ -555,8 +733,12 @@ function createController(options){
   function finishOneShot(){
     const shot = state.oneShot;
     state.oneShot = null;
+    state.oneShotBlend = null;
     if(shot && shot.action){
-      shot.action.fadeOut(Math.max(.02, shot.fadeOut));
+      // Weight is crossfaded explicitly against locomotion below. Leaving a
+      // second AnimationAction fade running multiplies both weights and exposes
+      // the bind/T-pose in the missing remainder.
+      shot.action.stop();
     }
     if(shot && typeof shot.onDone === 'function'){
       try { shot.onDone(shot.name); } catch(err){ /* author callback */ }
@@ -569,28 +751,51 @@ function createController(options){
     const o = actionOptions || {};
     let spec = animationSpec(clipName);
     const requested=String(spec.clip||clipName||'');
-    const motionEntry=state.motionSet.find(entry=>entry.state==='action'&&(entry.action===requested||entry.name===requested||entry.id===requested));
-    if(motionEntry)spec={clip:motionEntry.clip,asset:motionEntry.asset};
+    const slot=String(o.slot||''),motionEntry=state.motionSet.find(entry=>entry.state==='action'&&(entry.action===slot||entry.id===slot||entry.action===requested||entry.name===requested||entry.id===requested));
+    if(motionEntry)spec={clip:motionEntry.clip,asset:motionEntry.asset,playbackRate:finite(motionEntry.playbackRate,finite(motionEntry.asset&&motionEntry.asset.playbackRate,spec.playbackRate))};
     const authored=state.clips.filter(item=>!(item.userData&&item.userData.lkProceduralPlaceholder));
     const fallbackSlot=String(o.slot||requested||'');
     const clip = findClip(authored, spec, normalizeName(spec.clip))||state.fallbackClips[fallbackSlot]||state.fallbackClips[normalizeName(fallbackSlot)];
     if(!clip) return false;
-    if(state.oneShot && state.oneShot.action) state.oneShot.action.fadeOut(.08);
+    if(state.oneShot && state.oneShot.action) state.oneShot.action.stop();
     const action = state.mixer.clipAction(clip);
     action.reset();
     action.setLoop(o.loop === true ? THREE.LoopRepeat : THREE.LoopOnce, o.loop === true ? Infinity : 1);
     action.clampWhenFinished = o.loop !== true;
-    action.setEffectiveTimeScale(Math.max(.05, finite(o.speed, 1)));
+    // `speedScale` composes a gameplay move's tempo with the author-owned
+    // Motion Set Playback Rate. `speed` remains the explicit absolute override
+    // used by existing callers. A traversal may also fit an unusually long take
+    // inside a maximum duration without making shorter/faster authored takes
+    // slower again.
+    const authoredRate=finite(spec.playbackRate,1),requestedRate=o.speed!=null
+      ?finite(o.speed,1)
+      :authoredRate*finite(o.speedScale,1);
+    let playbackRate=Math.abs(requestedRate)<.05?(requestedRate<0?-.05:.05):requestedRate;
+    const fitDuration=Math.max(0,finite(o.fitDuration,0));
+    if(fitDuration>0){
+      const minimumRate=Math.max(.05,finite(clip.duration,1)/fitDuration),sign=playbackRate<0?-1:1;
+      if(Math.abs(playbackRate)<minimumRate)playbackRate=sign*minimumRate;
+    }
+    if(playbackRate<0)action.time=Math.max(.001,finite(clip.duration,1));
+    action.setEffectiveTimeScale(playbackRate);
     action.setEffectiveWeight(1);
-    action.fadeIn(Math.max(.02, finite(o.fadeIn, .12)));
     action.play();
     state.oneShot = {
       name:clip.name,
+      slot:String(o.slot||requested||clip.name||''),
       action,
       entry:motionEntry||null,
       fadeOut:Math.max(.02, finite(o.fadeOut, .18)),
+      fadeIn:Math.max(0, finite(o.fadeIn, .12)),
+      elapsed:0,
       onDone:o.onDone,
       loop:o.loop === true,
+      holdLastFrame:o.holdLastFrame === true,
+      held:false,
+      releaseStart:o.releaseStart,
+      releaseEnd:o.releaseEnd,
+      locomotionFloor:o.locomotionFloor,
+      blendWeight:1,
     };
     return true;
   }
@@ -612,6 +817,7 @@ function createController(options){
     const clip=action.getClip?action.getClip():null,duration=Math.max(.001,finite(clip&&clip.duration,1));
     action.time=Math.max(0,Math.min(duration*.94,duration*Math.max(0,Math.min(.94,finite(progress,.3)))));
     action.paused=true;
+    shot.held=true;
     if(state.mixer)state.mixer.update(0);
     return true;
   }
@@ -620,7 +826,9 @@ function createController(options){
     const action=state.oneShot&&state.oneShot.action;
     if(!action)return false;
     action.paused=false;
-    action.setEffectiveTimeScale(Math.max(.05,finite(speed,1)));
+    state.oneShot.held=false;
+    const requested=speed==null?finite(action.timeScale,1):finite(speed,1);
+    action.setEffectiveTimeScale(Math.abs(requested)<.05?(requested<0?-.05:.05):requested);
     return true;
   }
 
@@ -631,14 +839,66 @@ function createController(options){
     return Math.max(0,Math.min(1,finite(action.time,0)/duration));
   }
 
+  function actionDuration(){
+    const action=state.oneShot&&state.oneShot.action;
+    if(!action)return 0;
+    const clip=action.getClip?action.getClip():null,duration=Math.max(.001,finite(clip&&clip.duration,0));
+    const scale=Math.max(.05,Math.abs(finite(action.getEffectiveTimeScale?action.getEffectiveTimeScale():action.timeScale,1)));
+    return Math.max(0,duration-finite(action.time,0))/scale;
+  }
+
+  function updateOneShotBlend(want,dt){
+    const shot=state.oneShot;
+    if(!shot){state.oneShotBlend=null;return {actionWeight:0,locomotionWeight:1};}
+    const blendRuntime=window.LK_RUNTIME_CHARACTER_ANIMATION_BLEND;
+    const progress=actionProgress();
+    // A held/paused take still has to blend IN; only its clip time is frozen.
+    // Tying the envelope clock to `held` would leave a pose held on frame zero
+    // permanently at zero weight.
+    shot.elapsed+=Math.max(0,finite(dt,0));
+    const baseBlend=blendRuntime&&blendRuntime.profile?blendRuntime.profile({
+      slot:shot.slot||shot.name,
+      progress,
+      desired:want,
+      loop:shot.loop,
+      held:shot.held,
+      releaseStart:shot.releaseStart,
+      releaseEnd:shot.releaseEnd,
+      locomotionFloor:shot.locomotionFloor,
+    }):{slot:shot.slot||shot.name,category:'legacy',progress,actionWeight:1,locomotionWeight:0,releaseStart:1};
+    // One complementing crossfade owns the skeleton. Three's fadeIn/fadeOut
+    // interpolant used to multiply `actionWeight` a second time, so the action
+    // plus gait could total far below one and reveal the bind pose after landing.
+    const linear=shot.fadeIn>0?Math.max(0,Math.min(1,shot.elapsed/shot.fadeIn)):1;
+    const fadeIn=linear*linear*(3-2*linear);
+    const actionWeight=Math.max(0,Math.min(1,baseBlend.actionWeight*fadeIn));
+    const blend=Object.freeze(Object.assign({},baseBlend,{actionWeight,locomotionWeight:1-actionWeight,fadeIn}));
+    shot.blendWeight=blend.actionWeight;
+    if(shot.action&&shot.action.setEffectiveWeight)shot.action.setEffectiveWeight(blend.actionWeight);
+    state.oneShotBlend=blend;
+    return blend;
+  }
+
   // desired: local-space target velocity {x (lateral, +right), z (forward)} in m/s.
   function update(desired, dt){
     if(!state.bound) return;
     const h = Math.max(.0001, finite(dt, .016));
+    const want = desired || {x:0, z:0};
+    const blendRuntime=window.LK_RUNTIME_CHARACTER_ANIMATION_BLEND;
+    // Keep this fact for the whole frame. `mixer.update()` can synchronously
+    // dispatch `finished`, clear state.oneShot and call back into the Pawn, but
+    // `want` is already this frame's snapshot and can still contain the stale
+    // action name. A repeated jump on that exact frame must select Jump/Fall,
+    // not an empty action phase.
+    const hadLayeredOneShot=!!state.oneShot;
+    if(state.oneShot&&blendRuntime&&blendRuntime.shouldInterrupt&&blendRuntime.shouldInterrupt(state.oneShot.slot||state.oneShot.name,want))finishOneShot();
     clearAppliedRigCorrections();
+    clearAppliedStairPose();
     if(state.ownsMixerUpdate && state.mixer) state.mixer.update(h);
     enforceRigProportions();
-    const want = desired || {x:0, z:0};
+    state.lastDesired=want;
+    state.weaponPose=want.weapon||null;
+    state.traversalPose=want.traversalTargets||null;
     // Exponential damping toward the desired velocity approximates the
     // character acceleration curve...
     const k = 1 - Math.exp(-state.responsiveness * h);
@@ -648,30 +908,63 @@ function createController(options){
     // blends start slightly before the pose is needed (motion-matching-lite).
     state.predicted.x = state.velocity.x + (finite(want.x, 0) - state.velocity.x) * state.predictionTime * state.responsiveness;
     state.predicted.z = state.velocity.z + (finite(want.z, 0) - state.velocity.z) * state.predictionTime * state.responsiveness;
+    const oneShotBlend=updateOneShotBlend(want,h);
 
     const setRuntime=window.LK_RUNTIME_CHARACTER_ANIMATION_SET;
     if(setRuntime&&state.motionSet.length&&Object.keys(state.motionActions).length){
       const context=Object.assign({},want,{x:state.predicted.x,z:state.predicted.z,speed:finite(want.speed,Math.hypot(state.predicted.x,state.predicted.z))});
-      const selected=setRuntime.select(state.motionSet,context,3),targets={};
+      // `pawn.state.action` describes the one-shot layer that is already owned
+      // by `state.oneShot`; it must not also replace the base motion phase.
+      // In particular, a moving landing sets action=landMoving. Passing that to
+      // the Motion Set asks for state=action entries, finds none, and leaves the
+      // complementing locomotionWeight with no clip behind it: the uncovered
+      // skeleton is the bind/T-pose until the landing take finishes. Select the
+      // base from grounded/jump/fall telemetry while the one-shot is active;
+      // its complementary weight below still decides how much of that gait is
+      // visible, so body-locked actions remain fully locked.
+      const baseContext=(hadLayeredOneShot||state.oneShot)&&context.action?Object.assign({},context,{action:null}):context;
+      const selected=setRuntime.select(state.motionSet,baseContext,3),targets={};
       selected.forEach(item=>{targets[item.entry.id]=item.weight;});
-      const suppress=state.oneShot&&!state.oneShot.loop?.05:1,blendK=1-Math.exp(-state.responsiveness*1.4*h);
+      const suppress=state.oneShot ? oneShotBlend.locomotionWeight : 1;
+      const blendK=1-Math.exp(-state.responsiveness*1.4*h);
       Object.keys(state.motionActions).forEach(key=>{
         const action=state.motionActions[key],entry=state.motionSet.find(item=>item.id===key),wanted=(targets[key]||0)*suppress;
+        // Motion Set and Character Abilities can address the same landing
+        // AnimationAction. Keep one owner and crossfade that action against the
+        // selected gait; assigning both independently caused bind-pose gaps.
+        if(state.oneShot&&state.oneShot.action===action){
+          state.motionWeights[key]=oneShotBlend.actionWeight;
+          action.setEffectiveWeight(oneShotBlend.actionWeight);
+          return;
+        }
         const current=finite(state.motionWeights[key],0);
         if(wanted>.001&&current<=.001&&entry&&entry.loop===false)action.reset().play();
-        const weight=state.motionSelectionInitialized?current+(wanted-current)*blendK:wanted;state.motionWeights[key]=weight;
+        // The one-shot envelope already IS the crossfade. Applying the normal
+        // gait smoothing on top leaves old gait weight behind when the landing
+        // rises (pose amplification), or delays the requested gait when it
+        // releases (an uncovered bind/T-pose). During the whole layered frame,
+        // including the exact frame where the mixer finishes/interruption
+        // clears it, assign the complementary target directly. Ordinary gait
+        // changes keep their acceleration smoothing outside one-shots.
+        const layeredCrossfade=hadLayeredOneShot||!!state.oneShot;
+        const weight=layeredCrossfade?wanted:(state.motionSelectionInitialized?current+(wanted-current)*blendK:wanted);state.motionWeights[key]=weight;
         action.setEffectiveWeight(Math.max(0,Math.min(1,weight)));
         if(entry&&entry.state==='grounded'&&entry.speed>.1){
-          const rate=Math.max(.45,Math.min(1.8,context.speed/entry.speed))*entry.playbackRate;
+          // Stick/trigger magnitude is allowed to reach the animation. The old
+          // .45 floor made a barely tilted stick play almost half-speed strides,
+          // while 1.8 made full input exceed the authored clip. Zero..one keeps
+          // the feet proportional and caps at the animation's natural rate.
+          const rate=Math.max(.02,Math.min(1,context.speed/entry.speed))*entry.playbackRate;
           action.setEffectiveTimeScale(rate);
         }
       });
+      synchronizeLoopPhases(selected, state.motionActions);
       state.motionSelectionInitialized=true;
       state.motionSelection=selected.map(item=>({id:item.entry.id,name:item.entry.name,weight:item.weight,score:item.score}));
       applyMotionTransformCorrections();
       // Scene-store owns imported GLB mixers and applies the correction in its
       // post-update hook. Locally-owned mixers have already advanced above.
-      if(state.ownsMixerUpdate)applyRigCorrections();
+      if(state.ownsMixerUpdate){applyRigCorrections();applyStairPose(want,h);applyTraversalPose();applyWeaponPose();}
       rigPoseIsSane();
       return;
     }
@@ -696,19 +989,24 @@ function createController(options){
     if(!state.actions.strafeLeft) target.walk = Math.max(target.walk, lateral < 0 ? strafeAmount : 0);
     if(!state.actions.strafeRight) target.walk = Math.max(target.walk, lateral > 0 ? strafeAmount : 0);
 
-    const oneShotSuppression = state.oneShot && !state.oneShot.loop ? .08 : 1;
+    const oneShotSuppression = state.oneShot ? oneShotBlend.locomotionWeight : 1;
     const blendK = 1 - Math.exp(-12 * h);
     LOCOMOTION_SLOTS.forEach(slot => {
       const action = state.actions[slot];
       if(!action) return;
       const wanted = (target[slot] || 0) * oneShotSuppression;
-      state.weights[slot] += (wanted - state.weights[slot]) * blendK;
+      if(hadLayeredOneShot||state.oneShot)state.weights[slot]=wanted;
+      else state.weights[slot] += (wanted - state.weights[slot]) * blendK;
       action.setEffectiveWeight(Math.max(0, Math.min(1, state.weights[slot])));
       // Stride matching-lite: scale walk/run playback with real speed.
-      if(slot === 'walk') action.setEffectiveTimeScale(Math.max(.5, Math.min(1.8, speed / Math.max(.5, state.walkSpeed))));
-      if(slot === 'run') action.setEffectiveTimeScale(Math.max(.6, Math.min(1.7, speed / Math.max(1, state.runSpeed))));
+      if(slot === 'walk') action.setEffectiveTimeScale(Math.max(.02, Math.min(1, speed / Math.max(.5, state.walkSpeed))));
+      if(slot === 'run') action.setEffectiveTimeScale(Math.max(.02, Math.min(1, speed / Math.max(1, state.runSpeed))));
     });
-    applyMotionTransformCorrections();if(state.ownsMixerUpdate)applyRigCorrections();rigPoseIsSane();
+    synchronizeLoopPhases(LOCOMOTION_SLOTS.map(slot => ({
+      entry:{id:slot,state:'grounded',loop:true,speed:slot === 'idle' ? 0 : 1},
+      weight:state.weights[slot] || 0,
+    })), state.actions);
+    applyMotionTransformCorrections();if(state.ownsMixerUpdate){applyRigCorrections();applyStairPose(want,h);applyTraversalPose();applyWeaponPose();}rigPoseIsSane();
   }
 
   function configure(patch){
@@ -717,6 +1015,67 @@ function createController(options){
     if(p.runSpeed != null) state.runSpeed = Math.max(.2, finite(p.runSpeed, state.runSpeed));
     if(p.responsiveness != null) state.responsiveness = Math.max(.5, finite(p.responsiveness, state.responsiveness));
     if(p.predictionTime != null) state.predictionTime = Math.max(0, finite(p.predictionTime, state.predictionTime));
+    if(p.stepPoseStrength != null) state.stepPoseStrength = Math.max(0,Math.min(2,finite(p.stepPoseStrength,state.stepPoseStrength)));
+  }
+
+  // Vehicle seating, traversal contact and weapon IK are post-mixer layers.
+  // At an ownership boundary they must all be forgotten before a saved clean
+  // skeleton is restored; otherwise their cached inverse can be applied to the
+  // restored pose on the next frame and make otherwise valid clips look rigid.
+  function releaseExternalPose(){
+    // Older Sketchbook seating started a Scene Store `driving` action on this
+    // Character-owned mixer. It is not in actions/motionActions, so locomotion
+    // never changes its weight and it keeps fighting every clip after exit.
+    // Stop only that foreign action, then re-arm the managed actions (the
+    // foreign clip can resolve to the same AnimationAction as a managed slot).
+    const data=state.node&&state.node.userData,foreign=data&&data.logicAnimationAction;
+    if(foreign){
+      foreign.stop&&foreign.stop();
+      data.logicAnimationAction=null;
+      delete data.logicAnimationClipName;
+      const managed=new Set(Object.values(state.actions).concat(Object.values(state.motionActions)).filter(Boolean));
+      managed.forEach(action=>{action.enabled=true;action.paused=false;action.play&&action.play();});
+      state.motionSelectionInitialized=false;
+    }
+    clearAppliedRigCorrections();
+    clearAppliedStairPose();
+    const poseRuntime=window.LK_RUNTIME_CHARACTER_WEAPON_POSE;
+    if(poseRuntime&&poseRuntime.release&&state.modelRoot)poseRuntime.release(state.modelRoot);
+    state.weaponPose=null;state.traversalPose=null;
+    state.lastWeaponPoseMixerTime=null;state.lastTraversalPoseMixerTime=null;
+    state.lastRigMixerTime=null;state.lastStairMixerTime=null;
+    // Motion Set transforms and timeline offsets are animation output on the
+    // Character Model holder, not structural/bind transforms. Ownership
+    // boundaries must remove them before another controller takes a baseline.
+    restoreMotionRoot();
+    if(state.modelRoot)state.modelRoot.updateMatrixWorld(true);
+    return true;
+  }
+
+  // Reset the already-bound controller instead of retargeting and binding the
+  // same live skeleton again. Rebinding at pre-benchmark/vehicle exit promoted
+  // the current animation frame into a new rig rest pose; repeated exits then
+  // accumulated holder offsets and bone rotations until the mesh was inverted.
+  function resetPresentation(){
+    if(!state.bound)return false;
+    releaseExternalPose();
+    if(state.oneShot&&state.oneShot.action)state.oneShot.action.stop();
+    state.oneShot=null;state.oneShotBlend=null;
+    if(state.mixer)state.mixer.stopAllAction();
+    restoreRigRest();restoreMotionRoot();
+    const managed=new Set(Object.values(state.actions).concat(Object.values(state.motionActions)).filter(Boolean));
+    managed.forEach(action=>{action.reset();action.enabled=true;action.paused=false;action.setEffectiveWeight(0);action.play();});
+    Object.keys(state.weights).forEach(key=>state.weights[key]=key==='idle'?1:0);
+    Object.keys(state.actions).forEach(key=>state.actions[key].setEffectiveWeight(key==='idle'?1:0));
+    Object.keys(state.motionWeights).forEach(key=>state.motionWeights[key]=0);
+    const neutral=state.motionSet.filter(entry=>entry&&entry.state==='grounded').sort((a,b)=>Math.abs(finite(a.speed,0))-Math.abs(finite(b.speed,0)))[0];
+    if(neutral&&state.motionActions[neutral.id]){state.motionWeights[neutral.id]=1;state.motionActions[neutral.id].setEffectiveWeight(1);}
+    state.velocity.x=0;state.velocity.z=0;state.predicted.x=0;state.predicted.z=0;
+    state.motionSelectionInitialized=false;state.motionSelection=[];state.lastDesired=null;
+    if(state.mixer)state.mixer.update(0);
+    restoreMotionRoot();
+    if(state.modelRoot)state.modelRoot.updateMatrixWorld(true);
+    return true;
   }
 
   return Object.freeze({
@@ -728,14 +1087,22 @@ function createController(options){
     holdActionAtProgress,
     resumeAction,
     actionProgress,
+    actionDuration,
+    releaseExternalPose,
+    resetPresentation,
+    prepareForReplacement:()=>{releaseExternalPose();restoreRigRest();restoreMotionRoot();return true;},
+    restorePresentationRoot:()=>{restoreMotionRoot();return true;},
     configure,
     dispose,
+    // A replacement controller has already armed its actions on this same
+    // mixer. Retire listeners/caches without stopping those shared actions.
+    disposeForReplacement:()=>dispose(true,true),
     isBound:() => state.bound,
     availableClips:() => state.clips.map(clip => clip.name || 'Animation'),
-    debugState:() => ({velocity:Object.assign({}, state.velocity), weights:Object.assign({}, state.weights), motionWeights:Object.assign({},state.motionWeights), selection:(state.motionSelection||[]).slice(), oneShot:state.oneShot ? state.oneShot.name : null}),
+    debugState:() => ({velocity:Object.assign({}, state.velocity), weights:Object.assign({}, state.weights), motionWeights:Object.assign({},state.motionWeights), selection:(state.motionSelection||[]).slice(), stair:Object.assign({},state.stair),stairBones:Object.keys(state.stairBones).filter(key=>!!state.stairBones[key]),oneShot:state.oneShot ? state.oneShot.name : null,oneShotBlend:state.oneShotBlend?Object.assign({},state.oneShotBlend):null}),
   });
 }
 
-window.LK_RUNTIME_CHARACTER_LOCOMOTION = Object.freeze({createController, findClip, retargetClipNames, retargetClipToSkeleton, protectRuntimeMainMeshProportions, analyzeClipBinding, analyzeClipMotion, motionCurveCorrection, lockQuaternionYawDrift, lockClipRootYaw, normalizedTrackNode, LOCOMOTION_SLOTS, PROCEDURAL_FALLBACK_SLOTS});
+window.LK_RUNTIME_CHARACTER_LOCOMOTION = Object.freeze({createController, findClip, retargetClipNames, retargetClipToSkeleton, protectRuntimeMainMeshProportions, analyzeClipBinding, analyzeClipMotion, motionCurveCorrection, synchronizeLoopPhases, lockQuaternionYawDrift, lockClipRootYaw, normalizedTrackNode, LOCOMOTION_SLOTS, PROCEDURAL_FALLBACK_SLOTS});
 window.LK_RUNTIME_SOCCER_LOCOMOTION = window.LK_RUNTIME_CHARACTER_LOCOMOTION;
 })();

@@ -16,7 +16,7 @@ This starts the local server on port `5700`, makes it reachable from the local n
 http://localhost:5700/
 ```
 
-The server window also prints addresses such as `http://192.168.1.20:5700/engine_editor.html`. Open one of those on a Mac or another computer on the same network. Each device receives an independent browser-only project database; remote devices do not write the host's `.lotking-local` disk bridge.
+The normal `avvio.bat` server is intentionally available only on this computer and does not request Windows Firewall network access. To open the editor on a Mac or another computer, use the separate `serve_lan_windows.bat` launcher described in the LAN section. Remote devices receive an independent browser-only project database and cannot write the host's `.lotking-local` disk bridge.
 
 The Engine Editor is loaded only after you press **ENGINE EDITOR**. To bypass the landing menu intentionally, run `set PAGE=engine_editor.html` before `avvio.bat`.
 
@@ -45,7 +45,7 @@ These are different storage buckets:
 - `http://localhost:8000`
 - `http://192.168.x.x:5700`
 
-`avvio.bat` and `serve_local.py` keep the complete project in `.lotking-local/active-project.lkep.json`. When another localhost port is selected, the editor restores every level and migrates embedded assets into that origin's IndexedDB automatically. The previous disk snapshot is also retained before each replacement.
+`avvio.bat` and `serve_local.py` keep the complete project in `.lotking-local/active-project.lkep.json`. Repeated launches reuse the same LOT KING server on port `5700`, keeping the browser origin stable. If you intentionally select another localhost port, the editor restores every level and migrates embedded assets into that origin's IndexedDB automatically. The previous disk snapshot is also retained before each replacement.
 
 While **Dev → Performance Debugger** is open, the same local server updates `.lotking-local/developer-performance-latest.md` about every five seconds. It is a concise, generated report of frame timing, renderer/scene load, particles, recent diagnostics and the heaviest authored elements. Use **Export log** in the overlay for the complete JSON report. Both local bridge files are ignored by Git.
 
@@ -97,7 +97,7 @@ For the normal Windows workflow, `avvio.bat` now already binds to the LAN. The s
 
 Open **Plugins → P2P Sessions & Coworking** to connect two browser instances through an encrypted WebRTC DataChannel. The host and guest exchange temporary offer/answer codes manually, so same-LAN testing needs no account or cloud signaling service.
 
-The initial coworking policy has one explicit editing authority, live selected-object transforms and opt-in portable LKEP snapshots. Logic Elements also expose Network send, receive, connection and session-studio nodes. See [P2P Sessions And Coworking](docs/P2P_SESSIONS_AND_COWORKING.md) for the security model, workflow and Internet limitations.
+Coworking supports simultaneous authors with host-arbitrated per-element leases, coordinated local saves and a persistent toolbar monitor for connected users, removal and guided re-invitation. Logic Elements also expose Network send, receive, connection and session-studio nodes. See [P2P Sessions And Coworking](docs/P2P_SESSIONS_AND_COWORKING.md) for the security model, workflow and Internet limitations.
 
 ## Firewall / LAN Troubleshooting
 

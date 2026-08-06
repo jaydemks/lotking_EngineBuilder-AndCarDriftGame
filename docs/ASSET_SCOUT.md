@@ -1,6 +1,6 @@
 # Asset Scout
 
-> **Status in v0.7.7: temporarily disabled.** The current Poly Haven API terms permit
+> **Status in v0.7.8: temporarily disabled.** The current Poly Haven API terms permit
 > commercial integrations but require every live request to identify the application
 > through a matching `Referer` or `User-Agent`. Browser JavaScript cannot reliably set
 > either protected header when the editor runs from localhost or generic static hosting.

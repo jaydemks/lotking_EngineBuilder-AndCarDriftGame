@@ -49,6 +49,20 @@ function headingFromQuaternion(quaternion){
   return Math.atan2(forwardX, forwardZ);
 }
 
+function resolveVehicleTarget(GAME, pawn){
+  if(pawn){
+    const vehicle = pawn.pawnType === 'vehicle' || pawn.kind === 'native-adapter' || pawn.id === 'native-player-car';
+    const owner = pawn.owner || null;
+    const ownerData = owner && owner.userData || {};
+    if(!vehicle || pawn.possessed === false || pawn.enabled === false || pawn.hidden === true ||
+      !owner || owner.visible === false || ownerData.hidden === true || ownerData.logicEnabled === false) return null;
+    return {object:owner, pawn};
+  }
+  if(!GAME || !GAME.player || GAME.player.enabled === false || GAME.player.hidden === true) return null;
+  const object = GAME.player.car;
+  return object && object.visible !== false ? {object, pawn:null} : null;
+}
+
 function create(GAME){
   const config = Object.assign({}, DEFAULTS);
   const headingQuaternion = window.THREE ? new window.THREE.Quaternion() : null;
@@ -122,10 +136,7 @@ function create(GAME){
     const pawn = activePawn();
     // Character and Soccer Pawns own their dedicated HUDs. Never stack this
     // vehicle map over the FPS radar just because they also occupy Player 1.
-    if(pawn && pawn.pawnType && pawn.pawnType !== 'vehicle') return null;
-    if(pawn && pawn.owner) return {object:pawn.owner, pawn};
-    const object = GAME && GAME.player && GAME.player.car;
-    return object ? {object, pawn:null} : null;
+    return resolveVehicleTarget(GAME, pawn);
   }
 
   function visible(){
@@ -134,7 +145,7 @@ function create(GAME){
     // project/menu state finishes synchronising in the background.
     if(editorPreview) return true;
     const state = GAME && GAME.state;
-    return !!(state && (state.started || state.editorPreview) && !editing());
+    return !!(state && (state.started || state.editorPreview) && !editing() && target());
   }
 
   function worldPosition(object){
@@ -202,7 +213,7 @@ function create(GAME){
     if(config.showObstacles !== false){
       const boxes = GAME && GAME.world && GAME.world.colliders && GAME.world.colliders.box || [];
       for(const col of boxes){
-        if(!col || col.enabled === false || col.compoundRoot) continue;
+        if(!col || col.enabled === false || col.compoundRoot || col.horizontalSurface) continue;
         if(Math.abs(col.x - origin.x) > range + finite(col.hx, 0)) continue;
         if(Math.abs(col.z - origin.z) > range + finite(col.hz, 0)) continue;
         const floorLike = finite(col.hy, 1) < .35 || finite(col.y, 0) + finite(col.hy, 0) < origin.y + .25;
@@ -297,6 +308,7 @@ function create(GAME){
 window.LK_RUNTIME_VEHICLE_RADAR = Object.freeze({
   create,
   defaults:() => Object.assign({}, DEFAULTS),
+  resolveVehicleTarget,
   projectRadarOffset,
   headingFromQuaternion,
 });

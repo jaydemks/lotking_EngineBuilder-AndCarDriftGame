@@ -38,7 +38,11 @@ Cloth Studio's separated-skinned-garment, vertex-color mask and bone-collider au
 
 The future GPU backend boundary references the official [Three.js WebGPU compute-cloth example](https://github.com/mrdoob/three.js/blob/a58e9ecf225b50e4a28a934442e854878bc2a959/examples/webgpu_compute_cloth.html) at commit `a58e9ecf225b50e4a28a934442e854878bc2a959`. It is covered by the Three.js MIT license and copyright notice above.
 
-## MIT License (three.js, cannon.js, JSZip, three-simplecloth, three-gpu-pathtracer, three-mesh-bvh and xatlas-web)
+## Sketchbook gameplay systems and placeholder assets
+
+The advanced on-foot controller, enter/exit vehicle flow, arcade car, airplane and helicopter systems, Open World metadata and the bundled placeholder GLBs are adapted from [swift502/Sketchbook](https://github.com/swift502/Sketchbook), `Copyright (c) 2020 swift502`. Lot King uses a native Three.js r185/Cannon.js integration rather than redistributing Sketchbook's older application bundle. Thanks to Jan Bláha (`swift502`) and the Sketchbook contributors for making this substantial engine upgrade possible under the MIT License. The unmodified upstream notice is also included beside the assets at `models/sketchbook/LICENSE-Sketchbook-MIT.txt`.
+
+## MIT License (three.js, cannon.js, JSZip, Sketchbook, three-simplecloth, three-gpu-pathtracer, three-mesh-bvh and xatlas-web)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

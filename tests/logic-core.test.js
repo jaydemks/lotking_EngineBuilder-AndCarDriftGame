@@ -52,6 +52,24 @@ test('starter graph validates without diagnostics', () => {
   assert.deepEqual(result.warnings, []);
 });
 
+test('Logic input adapters preserve Pawn semantics instead of physical-key overlap', () => {
+  let pawn={inputProfileId:'vehicle'};
+  const service=global.LK_LOGIC_SERVICES.createInputService({systems:{},input:null},()=>pawn);
+  assert.equal(service.actionForLegacyKey('v'),'lookBack','legacy V means Look Back for Vehicle Pawns');
+  assert.equal(service.actionForLegacyKey('b'),'radioPrev','legacy B means Radio Previous for Vehicle Pawns');
+  pawn={inputProfileId:'character'};
+  assert.equal(service.actionForLegacyKey('v'),'swapShoulder','legacy V adapts to Character Shoulder Swap');
+  assert.equal(service.actionForLegacyKey('r'),'reload','legacy R adapts to Character Reload');
+  pawn={inputProfileId:'animal'};
+  assert.equal(service.actionForLegacyKey('f'),'primaryAbility');
+  assert.equal(service.actionForLegacyKey('q'),'voice');
+  pawn={inputProfileId:'soccer'};
+  assert.equal(service.actionForLegacyKey('j'),'diveLeft');
+  assert.equal(service.actionForLegacyKey(' '),null,'Soccer has no Jump capability');
+  assert.ok(registry.get('event.onInputActionDown'));
+  assert.ok(registry.get('event.onPlayerInputActionDown'));
+});
+
 test('Pawn Core lifecycle and component registry are reusable beyond vehicles', () => {
   const calls = [];
   const human = global.LK_RUNTIME_PAWN_CORE.createRecord({
@@ -123,6 +141,26 @@ test('inactive native Player Car never reserves a Player slot', () => {
   assert.equal(registry.getByPlayerId(1),native,'reactivating from Scene may claim its configured Player slot');
   player.enabled=false;player.hidden=true;registry.syncNativeFromPlayer();
   assert.equal(registry.getByPlayerId(1),null,'deactivation must immediately release the Player slot');
+});
+
+test('native Player Car restores its authored engine bank when entered from a Character', () => {
+  const audioCalls=[];
+  const authoredSet={id:'custom-flat-six',name:'Custom Flat Six'};
+  const player={
+    enabled:true,hidden:false,controllerIndex:null,car:{},engineAudio:{setId:authoredSet.id,set:authoredSet},
+    setControllerIndex(index){this.controllerIndex=index;},
+  };
+  const game={player,systems:{
+    engineAudio:{start(options){audioCalls.push(['start',options||null]);},stop(){audioCalls.push(['stop']);}},
+    audio:{stopEngineSynth(){audioCalls.push(['stop-synth']);}},
+  }};
+  const registry=global.LK_RUNTIME_VEHICLE_PAWNS.createRegistry(game),native=registry.createNative(player);
+  assert.equal(native.config.engineAudio.setId,authoredSet.id,'the dormant native Pawn keeps the saved Sound Designer set');
+  assert.equal(native.possess(1,true),true);
+  assert.deepEqual(audioCalls[0],['start',null],'entering restarts the authored sample manager');
+  native.unpossess();
+  assert.equal(audioCalls.some(call=>call[0]==='stop'),true,'exiting stops the native sample manager');
+  assert.equal(audioCalls.some(call=>call[0]==='stop-synth'),true,'the native synth cannot leak after exit');
 });
 
 test('Logic Pawn eye deactivates runtime camera possession instead of hiding only its mesh', () => {
@@ -345,6 +383,17 @@ test('legacy Player Car snapshots migrate to stable Vehicle Pawn v2 authoring da
   assert.deepEqual(roundTrip.playerPawnBlueprint, legacy.playerPawnBlueprint);
 });
 
+test('old Outpost AI graphs migrate once to editable Observer action areas', () => {
+  const graph=global.LK_LOGIC_GRAPH.createEmptyGraph('Old Outpost Enemy','element');
+  graph.variables.push({name:'BehaviorProfile',type:'string',value:'tactical',exposed:true,binding:'behavior.profile',category:'AI / Behavior'});
+  graph.characterPawn={playerId:null,possessed:false,behavior:{enabled:true,profile:'tactical',squadId:'outpost-squad',perception:{sightRange:42,fieldOfViewDeg:125},tactics:{guardRadius:55}}};
+  const migrated=global.LK_LOGIC_GRAPH.normalizeGraph(graph),behavior=migrated.characterPawn.behavior;
+  assert.equal(behavior.schemaVersion,global.LK_LOGIC_GRAPH.ACTOR_BEHAVIOR_VERSION);assert.equal(behavior.profile,'observer');assert.equal(behavior.actionArea.enabled,true);assert.equal(behavior.actionArea.action,'observe');
+  assert.equal(migrated.variables.find(item=>item.binding==='behavior.profile').value,'observer');
+  for(const binding of ['behavior.perception.confirmSeconds','behavior.actionArea.enabled','behavior.actionArea.radius','behavior.actionArea.action','behavior.actionArea.exitAction','behavior.actionArea.showInEditor'])assert.ok(migrated.variables.some(item=>item.binding===binding),binding+' must be authorable');
+  const roundTrip=global.LK_LOGIC_GRAPH.normalizeGraph(migrated);assert.equal(roundTrip.variables.filter(item=>item.binding==='behavior.actionArea.radius').length,1,'migration is idempotent');
+});
+
 test('old built-in Pawn camera default migrates to working Free camera once', () => {
   const graph=global.LK_LOGIC_GRAPH.createEmptyGraph('Old Character Template','element');
   graph.variables.push({name:'CameraMode',type:'string',value:'arcade',binding:'camera.mode'});
@@ -358,6 +407,14 @@ test('old built-in Pawn camera default migrates to working Free camera once', ()
   const explicit=global.LK_LOGIC_GRAPH.normalizeGraph(migrated);
   assert.equal(explicit.characterPawn.camera.mode,'arcade','a later explicit Arcade choice must survive normalization');
   assert.equal(explicit.variables.find(item=>item.name==='CameraMode').value,'arcade');
+
+  const oldSketchbook=global.LK_LOGIC_GRAPH.createEmptyGraph('Old Sketchbook Character','element');
+  oldSketchbook.variables.push({name:'CameraMode',type:'string',value:'arcade',binding:'camera.mode'});
+  oldSketchbook.sketchbookPawn={template:true,schemaVersion:1,kind:'advanced-character',camera:{mode:'arcade'}};
+  const migratedSketchbook=global.LK_LOGIC_GRAPH.normalizeGraph(oldSketchbook);
+  assert.equal(migratedSketchbook.sketchbookPawn.camera.mode,'free');
+  assert.equal(migratedSketchbook.variables.find(item=>item.name==='CameraMode').value,'free');
+  assert.equal(migratedSketchbook.sketchbookPawn.cameraDefaultVersion,1);
 });
 
 test('legacy vehicle cockpit defaults migrate left while authored cameras survive', () => {
@@ -524,6 +581,47 @@ test('Tick Every respects its configured interval', () => {
   runtime.update(1.1);
   assert.deepEqual(logs, ['tick', 'tick']);
   runtime.stop();
+});
+
+test('Play Cinema Timeline completes at the final frame and overrides Loop only when Completed is connected', () => {
+  const logs=[];
+  let requested=null;
+  const graph=global.LK_LOGIC_GRAPH.createEmptyGraph('Cinema Completion Contract','level');
+  graph.nodes.push(
+    global.LK_LOGIC_GRAPH.node('start','event.onStart',0,0),
+    global.LK_LOGIC_GRAPH.node('cinema','cinema.playTimeline',220,0,{studio:'intro',startTime:0,endMode:'blend',blendDuration:.75,returnPlayerId:1}),
+    global.LK_LOGIC_GRAPH.node('started','debug.print',460,-80,{message:'started'}),
+    global.LK_LOGIC_GRAPH.node('finished','debug.print',460,80,{message:'finished'})
+  );
+  graph.edges.push(
+    global.LK_LOGIC_GRAPH.edge('start-cinema','start','then','cinema','exec'),
+    global.LK_LOGIC_GRAPH.edge('cinema-started','cinema','started','started','exec'),
+    global.LK_LOGIC_GRAPH.edge('cinema-finished','cinema','completed','finished','exec')
+  );
+  const ctx=context(logs);
+  ctx.services.cinema={playTimeline(studio,time,options){requested={studio,time,options};return true;}};
+  const runtime=global.LK_LOGIC_RUNTIME.create(graph,registry,ctx);
+  runtime.start();
+  assert.deepEqual(logs,['started'],'Started is immediate while Completed waits');
+  assert.equal(requested.options.playbackOverride,'once');
+  assert.deepEqual(requested.options.completion,{mode:'blend',duration:.75,playerId:1},'the node forwards its camera-exit override independently from the Studio asset');
+  requested.options.onComplete();
+  assert.deepEqual(logs,['started','finished'],'Completed continues the graph only after playback ends');
+  requested.options.onComplete();
+  assert.deepEqual(logs,['started','finished'],'completion is idempotent');
+  runtime.stop();
+
+  const loopGraph=global.LK_LOGIC_GRAPH.createEmptyGraph('Cinema Loop Preserved','level');
+  loopGraph.nodes.push(
+    global.LK_LOGIC_GRAPH.node('start','event.onStart',0,0),
+    global.LK_LOGIC_GRAPH.node('cinema','cinema.playTimeline',220,0,{studio:'ambient-loop',startTime:0})
+  );
+  loopGraph.edges.push(global.LK_LOGIC_GRAPH.edge('start-cinema','start','then','cinema','exec'));
+  let loopOptions='not-called';
+  const loopCtx=context([]);
+  loopCtx.services.cinema={playTimeline(studio,time,options){loopOptions=options;return true;}};
+  global.LK_LOGIC_RUNTIME.create(loopGraph,registry,loopCtx).start();
+  assert.equal(loopOptions,null,'without a Completed edge the Cinema Studio playback setting remains authoritative');
 });
 
 test('Call Subgraph runs reusable Entry graph and syncs shared variables', () => {

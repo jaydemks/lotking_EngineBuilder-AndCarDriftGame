@@ -1,10 +1,11 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
-const store=new Map();
+const store=new Map(),sessionStore=new Map();
 class Renderer{constructor(options){this.options=options;this.userData={};this.disposed=false;this.compiled=false;this.info={render:{calls:7,triangles:1234},memory:{textures:5,geometries:6},programs:[{}]};}dispose(){this.disposed=true;}getContext(){return null;}getSize(target){target.x=800;target.y=450;return target;}getPixelRatio(){return 2;}compile(){this.compiled='sync';}compileAsync(){this.compiled='async';return Promise.resolve();}}
+class WebGPURenderer extends Renderer{constructor(options){super(options);this.isWebGPURenderer=true;this.backend={isWebGPUBackend:true};}init(){this.initialized=true;return Promise.resolve(this);}}
 class Vector2{constructor(){this.x=0;this.y=0;}}
-const window={THREE:{REVISION:'185',WebGLRenderer:Renderer,Vector2,GTAOPass:function(){}},dispatchEvent(){}};
-const sandbox={window,navigator:{},localStorage:{getItem:key=>store.get(key)||null,setItem:(key,value)=>store.set(key,value)},isSecureContext:true,CustomEvent:function(type,init){this.type=type;this.detail=init&&init.detail;},setTimeout(){},requestIdleCallback:fn=>fn(),console};
+const window={THREE:{REVISION:'185',WebGLRenderer:Renderer,WebGPURenderer,TSL:{},Vector2,GTAOPass:function(){}},dispatchEvent(){},addEventListener(){}};
+const sandbox={window,navigator:{},localStorage:{getItem:key=>store.get(key)||null,setItem:(key,value)=>store.set(key,value)},sessionStorage:{getItem:key=>sessionStore.get(key)||null,setItem:(key,value)=>sessionStore.set(key,value)},isSecureContext:true,CustomEvent:function(type,init){this.type=type;this.detail=init&&init.detail;},setTimeout(){},requestIdleCallback:fn=>fn(),console};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../js/runtime/rendering-backend.js'),'utf8'),sandbox,{filename:'rendering-backend.js'});
 const api=window.LK_RUNTIME_RENDERING_BACKEND;
 assert.ok(api);
@@ -12,15 +13,33 @@ assert.equal(api.normalize('garbage'),'auto');
 assert.equal(api.setPreference('webgpu'),'webgpu');
 assert.equal(api.preference(),'webgpu');
 assert.equal(api.syncCapabilities().revision,'185');
+assert.equal(api.syncCapabilities().webgpuPlatformCandidate,false);
 assert.equal(api.syncCapabilities().webgpuCandidate,false);
+assert.equal(api.migrationReadiness().defaultSafe,false);
+assert.equal(api.migrationReadiness().mobileQualified,false);
+assert.equal(api.gpuQuarantined(),false);
+assert.equal(api.gpuDiagnostics().groups.length,0);
+assert.ok(api.migrationReadiness().blockers.some(item=>item.id==='legacy-post'));
 const renderer=api.createWebGL({antialias:true},'test-preview');
 assert.equal(api.describe(renderer).effective,'webgl');
 assert.equal(api.describe(renderer).role,'test-preview');
+assert.equal(api.viewportOriginY(renderer,30,600,720),30,'WebGL keeps its lower-left viewport origin');
 assert.match(api.describe(renderer).fallbackReason,/using (?:the validated )?WebGL/);
 assert.equal(api.describe(renderer).registeredRenderers,1);
 assert.equal(api.metrics(renderer).triangles,1234);
 assert.equal(api.metrics(renderer).estimatedFramebufferBytes,800*450*4*8);
 assert.equal(api.compatibilityProfile(renderer).conservativePost,false);
+store.set('lotking.renderBackend.v1','webgpu');
+sandbox.navigator.gpu={requestAdapter:async()=>({info:{vendor:'test'}})};
+const unprovenRenderer=api.createRenderer({antialias:true},'test-unproven-webgpu');
+assert.equal(unprovenRenderer.isWebGPURenderer,undefined,'an unproven adapter must not allocate the common renderer fallback');
+assert.equal(unprovenRenderer.userData.lkRequestedBackend,'webgpu');
+sessionStore.set('lotking.webgpu.adapter.v1','available');
+const commonRenderer=api.createRenderer({antialias:true},'test-webgpu');
+assert.equal(commonRenderer.isWebGPURenderer,true);
+assert.equal(api.isActualWebGPU(commonRenderer),true);
+assert.equal(api.viewportOriginY(commonRenderer,30,600,720),90,'the common renderer receives the equivalent upper-left viewport origin');
+store.set('lotking.renderBackend.v1','webgpu');
 const appleRenderer=new Renderer();
 appleRenderer.getContext=()=>({RENDERER:1,VENDOR:2,MAX_TEXTURE_SIZE:3,MAX_SAMPLES:4,getExtension:name=>name==='WEBGL_debug_renderer_info'?{UNMASKED_RENDERER_WEBGL:5,UNMASKED_VENDOR_WEBGL:6}:name==='EXT_color_buffer_float'?{}:null,getParameter:key=>key===5?'ANGLE (Apple, Apple M2, Metal)':key===6?'Apple':key===3?16384:key===4?4:'WebGL'});
 const appleProfile=api.compatibilityProfile(appleRenderer);
@@ -34,7 +53,24 @@ assert.equal(api.supportsAsyncCompile(renderer),true);
 const syncRenderer=new Renderer();
 syncRenderer.getContext=()=>({getExtension:()=>null});
 assert.equal(api.supportsAsyncCompile(syncRenderer),false);
-api.scheduleWarmup(renderer,{},{}).then(status=>{
+sandbox.navigator.userAgent='Mozilla/5.0 (Linux; Android 15; Mobile)';
+sandbox.navigator.gpu={requestAdapter:async options=>({info:{vendor:'test-mobile'},options})};
+api.probe().then(report=>{
+  assert.equal(report.webgpuPlatformCandidate,true);
+  assert.equal(report.webgpuCandidate,true);
+  assert.equal(report.adapterAvailable,true);
+  const readiness=api.migrationReadiness(report);
+  assert.equal(readiness.platformAvailable,true);
+  assert.equal(readiness.runtimeIncluded,true);
+  assert.equal(readiness.mobile,true);
+  assert.equal(readiness.defaultSafe,false);
+  assert.ok(!readiness.blockers.some(item=>item.id==='runtime-bundle'));
+  return api.initialize(commonRenderer);
+}).then(report=>{
+  assert.equal(report.effective,'webgpu');
+  assert.equal(commonRenderer.initialized,true);
+  return api.scheduleWarmup(renderer,{},{});
+}).then(status=>{
   assert.equal(status.state,'ready');
   assert.equal(status.mode,'sync-webgl-r185-safe');
   assert.equal(renderer.compiled,'sync');
@@ -49,6 +85,8 @@ api.scheduleWarmup(renderer,{},{}).then(status=>{
   assert.equal(status.state,'failed');
   assert.match(status.error,/synthetic compile failure/);
   renderer.dispose();
+  unprovenRenderer.dispose();
+  commonRenderer.dispose();
   assert.equal(api.describe(renderer).registeredRenderers,0);
   console.log('rendering-backend.test.js: all assertions passed');
 }).catch(error=>{console.error(error);process.exitCode=1;});

@@ -24,8 +24,12 @@ function create(){
     for(let index = 0; index < wheels.length; index++) vehicle.setSteeringValue(steering.includes(index) ? steer : 0, index);
     const brakes = Array.isArray(opts.brakes) ? opts.brakes : [];
     for(let index = 0; index < wheels.length; index++) vehicle.setBrake(Math.max(0, Number(brakes[index]) || 0), index);
+    // The weather director supplies one grip scale for the current surface and
+    // conditions. It stays an explicit input so this stage remains stateless:
+    // absent or invalid, it is exactly 1 and behaviour is unchanged.
+    const gripScale = Number.isFinite(Number(opts.gripMultiplier)) ? Math.max(.05, Number(opts.gripMultiplier)) : 1;
     const grip = Array.isArray(opts.frictionSlip) ? opts.frictionSlip : [];
-    grip.forEach((value, index) => { if(wheels[index] && Number.isFinite(Number(value))) wheels[index].frictionSlip = Number(value); });
+    grip.forEach((value, index) => { if(wheels[index] && Number.isFinite(Number(value))) wheels[index].frictionSlip = Number(value) * gripScale; });
     return true;
   }
   return Object.freeze({apply});

@@ -6,7 +6,7 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The current `v0.7.7` release expands the production workflow around frame-accurate Cinema Studio export, pre-benchmark/runtime-stutter reduction, split GitHub-safe projects, interior vehicle cameras and steering rigs, improved drift drivetrain tuning, dynamic in-world displays, car-paint and decal material authoring, and an explicitly experimental Path Tracing mode. It also retains the FPS stability work for first/third-person camera switching and lethal explosive damage.
+The `v0.7.8` release adds the illustrated-sketch pipeline, experimental WebGPU dual-backend work with automatic WebGL fallback, procedural terrain and water, expanded Character/Animal authoring, terrestrial/water/air vehicle foundations, reusable Cinema Studio sequences, P2P coworking and multiplayer, and Blender Live Link. It builds on the v0.7.7 production workflow for frame-accurate video export, runtime preparation, GitHub-safe split projects, vehicle authoring and material effects.
 
 The released `v0.7.5` milestone adds **Asset Scout** (free online model and texture search imported straight into the project) and a **first-person Pawn** with its own FPS Shooter Test level. Both are additive: the existing import paths and the third-person character path are unchanged.
 
@@ -16,7 +16,7 @@ Every Play/Simulate session includes a visible, reversible runtime pre-benchmark
 
 Car racing and drifting remain the most complete gameplay path. Character Pawns can already use a custom rigged Main Mesh and independent Mixamo/FBX/GLB motion sources, but character authoring, retargeting and gameplay integration remain strongly experimental. More gameplay categories and reusable game rules will be added incrementally instead of presenting every current template as equally mature.
 
-It is not yet a finished general-purpose engine, a photoreal renderer or a replacement for dedicated DCC modelling software. Complex vehicle, character and environment meshes are authored externally and imported; the editor can place them and modify supported transform, mesh-part, material, texture and animation properties. Reusable editor-authored objectives, broader game rules, simple project-specific UI authoring and several high-level Logic Element workflows are still being built. Experimental features can change and some combinations still need browser and device hardening.
+It is not yet a finished general-purpose engine, a photoreal renderer or a replacement for dedicated DCC modelling software. Complex vehicle, character and environment meshes are authored externally and imported; the editor can place them and modify supported transform, mesh-part, material, texture and animation properties. Reusable editor-authored objectives and starter game-mode templates now exist, while broader game rules, simple project-specific UI authoring and several high-level Logic Element workflows are still being built. Experimental features can change and some combinations still need browser and device hardening.
 
 ## Main pages
 
@@ -33,9 +33,9 @@ The editor runs entirely in the browser and includes projects, levels, an outlin
 
 Play Preview runs the authored level inside the editor viewport. Simulate uses the same runtime, event and physics path while keeping the editor tools active, so logic can be tested without taking control away from the editor.
 
-The environment tools include procedural sky and day/night state, fog, lighting, sun bloom, lens flare, volumetric clouds, rain and shared rendering profiles. Video settings expose normal WebGL, screen-space Ray Lighting, and an isolated progressive Path Tracing mode. Path Tracing uses a BVH-accelerated static-world pass with responsive raster overlays for vehicles, characters and transient effects, and falls back to WebGL when WebGL2 or the path-tracing pipeline is unavailable.
+The environment tools include procedural sky and day/night state, fog, lighting, sun bloom, lens flare, volumetric clouds, rain, island terrain, water and shared rendering profiles. Video settings expose stable WebGL 2, experimental WebGPU with automatic fallback, screen-space Ray Lighting, illustrated-sketch controls and an isolated progressive Path Tracing mode. Path Tracing uses a BVH-accelerated static-world pass with responsive raster overlays for vehicles, characters and transient effects, and falls back to WebGL when WebGL2 or the path-tracing pipeline is unavailable.
 
-Vehicle cameras include Free, Arcade, Cinematic and Interior modes. Interior position, sight height, stabilization and FOV are authored once and consumed by both the native vehicle and Vehicle Logic Element runtime. Imported car rigs may expose `steering_wheel_pivot` plus `steering_wheel_mesh`; the bundled Blender 5.0+ Car Wheel GLB Rigger 0.2.2 creates that hierarchy and exports axis, direction, driver-side and lock-to-lock metadata. Both native and Logic vehicle Inspectors can override those values per vehicle, while unrigged steering meshes remain untouched.
+Vehicle cameras include Free, Arcade, Cinematic and Interior modes. Interior position, sight height, stabilization and FOV are authored once and consumed by both the native vehicle and Vehicle Logic Element runtime. Imported car rigs may expose `steering_wheel_pivot` plus `steering_wheel_mesh`; the bundled Blender 5.0+ Vehicle GLB Rigger 0.3.0 preserves that workflow and adds guided Normal/Sketchbook car, airplane and helicopter profiles. Both native and Logic vehicle Inspectors can override supported values per vehicle, while unrigged steering meshes remain untouched.
 
 The Material Editor can bind a selected GLB material slot to a throttled CanvasTexture dashboard (Sport, Minimal or Telemetry) driven by the possessed vehicle, or to a direct CORS-enabled MP4/WebM VideoTexture. These surfaces stay in the responsive raster layer during Path Tracing. YouTube URLs are not decoded or scraped as media files: a YouTube integration must use the [official visible iframe player](https://developers.google.com/youtube/iframe_api_reference), whose documented viewport minimum is 200 × 200 px, and remains separate from in-world WebGL textures.
 
@@ -47,7 +47,7 @@ Projects are stored in LocalStorage, while larger imported files use IndexedDB. 
 
 Editor Settings → Storage provides an origin-scoped inventory of Lot King LocalStorage, SessionStorage, IndexedDB asset/workspace stores, Cache Storage and service-worker registrations. The Cleanup Assistant marks the currently active project/level, other catalogued saves, current preferences/system records, out-of-catalog review candidates and safely rebuildable temporary/cache data. Embedded save dates are shown when available; the interface explicitly explains that suffixes such as `.v1` identify a data schema rather than an older chronological copy. Filters and assisted selection keep active/valid records separate from review candidates. Individual entries can then be removed without exposing or deleting unrelated application keys. The same panel reports catalog/blob discrepancies, exports a metadata-only inventory, backs up and restores Lot King LocalStorage, requests persistent browser storage and links to the normal portable LKEP export. High-impact project, level and asset cleanup requires an explicit backup acknowledgement and typed confirmation. Regular browser HTTP cache cannot be enumerated selectively by a web page, so the panel explains when browser site-data controls or a hard reload are required.
 
-On `localhost`, `serve_local.py` also keeps the complete authoritative project under `.lotking-local/`. This disk bridge can restore levels and embedded assets when the local port changes. Disk backup, DEMO publishing and performance endpoints are restricted to the host loopback address; LAN browsers cannot overwrite them.
+On `localhost`, `serve_local.py` also keeps the complete authoritative project under `.lotking-local/`. This disk bridge can restore levels and embedded assets when the local port changes. The server itself is loopback-only, so it does not request Windows Firewall network access. LAN use is deliberately separated into `serve_lan.py` / `serve_lan_windows.bat`; remote browsers cannot access the local disk bridge.
 
 The normal Windows launcher is:
 
@@ -55,7 +55,7 @@ The normal Windows launcher is:
 avvio.bat
 ```
 
-It starts port `5700`, opens the landing page and prints usable LAN URLs. You can also run the server directly:
+It starts port `5700`, opens the landing page and reuses an existing LOT KING server on that exact origin. It does not run PowerShell or expose the editor to the LAN. You can also run the server directly:
 
 ```bash
 python3 serve_local.py 5700 --bind 127.0.0.1
@@ -81,7 +81,7 @@ Models, materials, mesh parts, transforms, lights, primitives, text, effects and
 
 This is an assembly and gameplay-authoring workflow, not full mesh creation. Complex topology, sculpting, rig creation and complete texture authoring remain tasks for Blender or another dedicated content tool.
 
-**Asset Scout is temporarily disabled in v0.7.7.** Poly Haven's live API is
+**Asset Scout remains temporarily disabled in v0.7.8.** Poly Haven's live API is
 commercially usable, but its current service terms require requests to carry an
 application-identifying `Referer` or `User-Agent`. A static browser application cannot
 reliably set those protected headers when it runs from localhost or generic hosting.
@@ -106,7 +106,7 @@ The same authored character height, uniform world scale and orientation rules ar
 
 Gameplay settings include a persistent Easy/Medium/Hard difficulty contract intended for every project category. Soccer currently consumes it for goalkeeper reaction, prediction, reach, tracking and dives, plus opt-in unpossessed field-player opponent reaction, pace and shot accuracy.
 
-The same Pawn Studio shell can be extended through plugins for future Animal, Aircraft, Boat and other Pawn categories.
+The same Pawn Studio shell now exposes the Animal Pawn adapter for cat, dog, horse and generic species, and can still be extended through plugins for future Aircraft, Boat and other Pawn categories.
 
 The default-enabled **Cloth Studio** plugin extends Character and Soccer Pawns with separated-garment discovery, pin-mask painting, wind/gravity/quality settings, mesh diagnostics and per-bone collision spheres. Its saved component behaves identically in the isolated viewport, Play Preview and exported gameplay through a portable CPU solver; its backend boundary is ready for the official Three.js WebGPU compute approach once engine-wide WebGPU parity is complete. See [Cloth Studio](docs/CLOTH_STUDIO.md).
 
@@ -158,7 +158,7 @@ The graph editor makes JavaScript-backed behavior accessible visually, while exp
 
 ## P2P sessions and coworking
 
-The default P2P plugin creates encrypted WebRTC DataChannels through a temporary manual invite/answer exchange. It supports Logic Element messages, peer presence, paced large-message transfer, host-authoritative live transforms and reviewed portable project snapshots.
+The default P2P plugin creates encrypted WebRTC DataChannels through a temporary manual invite/answer exchange. It supports Logic Element messages, peer presence, paced large-message transfer, lease-protected multi-author editing, coordinated saves, a persistent session monitor and reviewed portable project snapshots.
 
 This is not a central cloud collaboration service. Each browser keeps its own data, and project changes are exchanged deliberately to avoid silently overwriting another workspace.
 
@@ -210,6 +210,7 @@ For an inspectable online project, the author can publish a bundled DEMO. On the
 - `js/lot-king.js` — runtime bridge, main game setup and `LOT_KING` API.
 - `js/runtime/` — gameplay, physics, cameras, audio, HUD, input and track flow.
 - `js/runtime/vehicle-pawns.js` — Vehicle Pawn registry and runtime adapters.
+- `js/runtime/sketchbook-pawns.js` — separate MIT-attributed advanced character and arcade car/airplane/helicopter Pawn family, including driver/passenger seats, linked doors, possession transfer, Open World physics conversion and path/scenario/spawn registries.
 - `js/editor/` — editor UI and authoring tools.
 - `js/logic/` — graph model, nodes, validator, runtime, templates and exporter.
 - `js/plugins/` — plugin API, manager and built-in plugins.
@@ -244,7 +245,7 @@ Vehicle backend authorship, licenses and adapter changes are tracked in [VEHICLE
 - Complete Vehicle Logic Element parity with the built-in Player Car.
 - Extract plugin-ready vehicle physics components.
 - Add more Logic Element nodes, compiler coverage and real project tests.
-- Add reusable objectives and high-level game rules.
+- Expand the current reusable objective system with broader high-level game rules.
 - Continue GPU/rendering parity work without breaking portable WebGL export.
 - Complete the external asset provenance and attribution pass.
 
@@ -262,7 +263,7 @@ Vehicle backend authorship, licenses and adapter changes are tracked in [VEHICLE
 
 `models_sources/` contains local Blender/source assets and is intentionally ignored by Git. Runtime assets needed to reproduce the playable state should remain in the repository or use the project publishing plan.
 
-The project includes project-authored work, AI-assisted/generated assets, bundled samples and external references. The bundled music is AI-generated by the project owner. Runtime and design references include Three.js, cannon.js, JSZip, Anderson Mancini's R3F Ultimate Lens Flare work, Garrett Johnson's MIT-licensed `three-gpu-pathtracer`, Erich Loftis' CC0 browser path-tracing research and demos, and bandinopla's MIT-licensed `three-simplecloth`, itself based on the official Three.js WebGPU compute-cloth example. Exact notices and links are kept in [THIRD_PARTY_LICENSES.md](vendor/THIRD_PARTY_LICENSES.md); the wider asset-by-asset provenance audit remains in progress.
+The project includes project-authored work, AI-assisted/generated assets, bundled samples and external references. The bundled music is AI-generated by the project owner. Runtime and design references include Three.js, cannon.js, JSZip, Jan Bláha's MIT-licensed Sketchbook systems and placeholder assets, Anderson Mancini's R3F Ultimate Lens Flare work, Garrett Johnson's MIT-licensed `three-gpu-pathtracer`, Erich Loftis' CC0 browser path-tracing research and demos, and bandinopla's MIT-licensed `three-simplecloth`, itself based on the official Three.js WebGPU compute-cloth example. Exact notices and links are kept in [THIRD_PARTY_LICENSES.md](vendor/THIRD_PARTY_LICENSES.md); the wider asset-by-asset provenance audit remains in progress.
 
 The original one-file drift prototype was generated from a single Fable 5 prompt. Continued implementation with GPT-5.6 Sol then expanded it into the current multi-module editor and runtime, under the project owner's design direction, testing and final decisions. Maintaining that growth requires repeated refactoring, cross-browser checks, export verification and documentation work; AI assistance does not replace those acceptance steps.
 

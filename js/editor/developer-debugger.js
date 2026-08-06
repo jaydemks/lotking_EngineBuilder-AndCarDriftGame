@@ -27,12 +27,13 @@ function create(deps){
   const samples=[];
   const diagnostics=[];
   const maxSamples=240,maxDiagnostics=120;
-  let open=false,lastFrame=0,lastUi=0,lastAudit=0,raf=0,auditPending=false;
+  let open=false,lastFrame=0,lastUi=0,lastAudit=0,raf=0,auditPending=false,disposed=false;
   let lastShortLog=0,shortLogPending=false;
   let auditGeneration=0,telemetryWorker=null,workerSequence=0;
   const workerJobs=new Map();
   let frameAverage=0,frameP95=0,fps=0,maxFrame=0,stutterCount=0;
   let diagnosticsRevision=0,renderedDiagnosticsRevision=-1;
+  let gpuLogTimer=0;
   let inventory=[];
   let cleanInventoryCache=[];
   let renderedInventoryMarkup='';
@@ -45,7 +46,7 @@ function create(deps){
     if(telemetryWorker) return telemetryWorker;
     if(typeof Worker!=='function') return null;
     try {
-      const url=new URL('js/editor/developer-debugger-worker.js?v=0.7.7-overlay-worker-3',document.baseURI);
+      const url=new URL('js/editor/developer-debugger-worker.js?v=0.7.8-overlay-worker-3',document.baseURI);
       telemetryWorker=new Worker(url);
       telemetryWorker.addEventListener('message',event=>{
         const message=event&&event.data||{};
@@ -117,8 +118,24 @@ function create(deps){
     const reason=event&&event.reason;
     record('error','Unhandled promise rejection',reason&&reason.message||reason||'Unknown rejection');
   }
-  addEventListener('error',onError);
-  addEventListener('unhandledrejection',onRejection);
+  window.addEventListener('error',onError);
+  window.addEventListener('unhandledrejection',onRejection);
+  function onGpuDiagnostic(event){
+    const detail=event&&event.detail||{};
+    const count=Number(detail.count)||1;
+    if(count===1||count===10||count===100||count===1000){
+      record('error','WebGPU ×'+count,detail.sample||detail.signature||'GPU validation error');
+    }
+    clearTimeout(gpuLogTimer);
+    gpuLogTimer=setTimeout(()=>writeShortLog(true),700);
+  }
+  window.addEventListener('lotking:gpu-diagnostic',onGpuDiagnostic);
+  const initialGpuDiagnostics=window.LK_RUNTIME_RENDERING_BACKEND&&window.LK_RUNTIME_RENDERING_BACKEND.gpuDiagnostics
+    ? window.LK_RUNTIME_RENDERING_BACKEND.gpuDiagnostics():null;
+  if(initialGpuDiagnostics&&initialGpuDiagnostics.total){
+    (initialGpuDiagnostics.groups||[]).slice(0,12).forEach(item=>record('error','WebGPU ×'+item.count,item.sample||item.signature));
+    gpuLogTimer=setTimeout(()=>writeShortLog(true),700);
+  }
   let longTaskObserver=null;
   if(typeof PerformanceObserver==='function'){
     try {
@@ -130,10 +147,13 @@ function create(deps){
   }
 
   function frame(time){
+    if(disposed) return;
     if(lastFrame){
       const delta=Math.min(1000,time-lastFrame);
       samples.push(delta);
-      if(samples.length>maxSamples) samples.shift();
+      // Trimming in batches avoids shifting a full telemetry array on every
+      // frame forever once the buffer reaches capacity.
+      if(samples.length>maxSamples+60) samples.splice(0,samples.length-maxSamples);
       if(delta>=50&&document.visibilityState==='visible'){
         stutterCount++;
         record('stutter','Frame hitch',delta.toFixed(1)+' ms · '+Math.max(1,Math.round(1000/delta))+' FPS');
@@ -572,11 +592,12 @@ function create(deps){
     computeFrames();
     const rs=rendererStats(),gpu=gpuDetails(),memory=performance.memory;
     return {
-      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.7',mode:reportMode(),
+      schema:'lotking.developer-performance.v1',generatedAt:new Date().toISOString(),version:GAME&&GAME.version||'0.7.8',mode:reportMode(),
       project:projectContext(),
       performance:{fps,frameAverageMs:frameAverage,frameP95Ms:frameP95,worstRecentFrameMs:maxFrame,stutterCount,sampleCount:samples.length,frameSamplesMs:samples.slice()},
       renderer:Object.assign({},rs,{pixelRatio:renderer.getPixelRatio?renderer.getPixelRatio():devicePixelRatio||1,width:renderer.domElement.width,height:renderer.domElement.height}),
       hardware:{gpu:gpu.renderer,gpuVendor:gpu.vendor,webgl:gpu.webgl,renderBackend:gpu.backend||null,maxTextureSize:gpu.maxTextureSize,maxSamples:gpu.maxSamples,logicalCores:navigator.hardwareConcurrency||null,deviceMemoryGb:navigator.deviceMemory||null,userAgent:navigator.userAgent,jsHeap:memory?{usedBytes:memory.usedJSHeapSize,totalBytes:memory.totalJSHeapSize,limitBytes:memory.jsHeapSizeLimit}:null},
+      gpuDiagnostics:window.LK_RUNTIME_RENDERING_BACKEND&&window.LK_RUNTIME_RENDERING_BACKEND.gpuDiagnostics?window.LK_RUNTIME_RENDERING_BACKEND.gpuDiagnostics():null,
       scene:Object.assign({authoredElements:inventory.length},sceneStats),
       diagnostics:diagnostics.slice(),
       elements:cleanInventory(),
@@ -647,6 +668,23 @@ function create(deps){
   }
   function clear(){ diagnostics.length=0;diagnosticsRevision++;stutterCount=0;samples.length=0;renderEvents(true);updateMetrics();drawChart(); }
 
+  function dispose(){
+    if(disposed) return false;
+    disposed=true;
+    cancelAnimationFrame(raf);
+    clearTimeout(gpuLogTimer);
+    if(longTaskObserver){ try { longTaskObserver.disconnect(); } catch(error){} longTaskObserver=null; }
+    window.removeEventListener('error',onError);
+    window.removeEventListener('unhandledrejection',onRejection);
+    window.removeEventListener('lotking:gpu-diagnostic',onGpuDiagnostic);
+    window.removeEventListener('lotking:runtime-dispose',dispose);
+    workerJobs.forEach(job=>clearTimeout(job.timer));
+    workerJobs.clear();
+    if(telemetryWorker){ try { telemetryWorker.terminate(); } catch(error){} telemetryWorker=null; }
+    return true;
+  }
+  window.addEventListener('lotking:runtime-dispose',dispose,{once:true});
+
   $('#lkDbgClose').addEventListener('click',()=>setOpen(false));
   $('#lkDbgClear').addEventListener('click',clear);
   $('#lkDbgRefresh').addEventListener('click',refreshIncremental);
@@ -673,7 +711,7 @@ function create(deps){
     header.addEventListener('pointermove',move);header.addEventListener('pointerup',up);header.addEventListener('pointercancel',up);
   });
 
-  return Object.freeze({open:()=>setOpen(true),close:()=>setOpen(false),toggle:()=>setOpen(!open),refresh,isOpen:()=>open,record});
+  return Object.freeze({open:()=>setOpen(true),close:()=>setOpen(false),toggle:()=>setOpen(!open),refresh,isOpen:()=>open,record,dispose});
 }
 
 window.LK_EDITOR_DEVELOPER_DEBUGGER=Object.freeze({create});

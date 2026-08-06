@@ -22,6 +22,7 @@ const ASSET_DB_NAME = 'lotking-assets';
 const ASSET_DB_STORE = 'blobs';
 const BUNDLED_DEMO_PROJECT_URL = 'demo/demo-project.lkep.json';
 const MENU_ROLE_MANIFEST_URL = 'demo/menu-roles.json';
+const MENU_ROLE_CACHE_VERSION = '0.7.8-menu-role-2';
 const BUNDLED_DEMO_LEVEL_ID = 'online-demo';
 const assetUrlCache = new Map();
 const logicElementAssetCache = new Map();
@@ -102,13 +103,18 @@ function runSurfaceWarmup(GAME){
 // applied, and the editor keeps changing it. Both applyT and syncCollider call
 // this so a scaled object re-tiles instead of stretching its texels.
 function refreshSurfaceTiling(obj){
-  const surface = obj && obj.userData && obj.userData.lkSurface;
-  const api = surface && surfaces();
-  if(!api) return false;
-  const scale = [obj.scale.x, obj.scale.y, obj.scale.z];
+  const api = surfaces();
+  if(!obj || !api) return false;
   let changed = false;
-  forEachMaterial(obj, material => {
-    if(api.retile(material, {prim:surface.prim, scale})) changed = true;
+  const targets=[];
+  obj.traverse(node=>{if(node&&node.userData&&node.userData.lkSurface)targets.push(node);});
+  targets.forEach(node=>{
+    const surface=node.userData.lkSurface,worldScale=new THREE.Vector3();
+    if(node.updateWorldMatrix)node.updateWorldMatrix(true,false);
+    node.getWorldScale(worldScale);
+    forEachMaterial(node, material => {
+      if(api.retile(material, {prim:surface.prim, scale:[worldScale.x,worldScale.y,worldScale.z]})) changed = true;
+    });
   });
   scheduleSurfaceWarmup();
   return changed;
@@ -331,9 +337,21 @@ function loadProject(){
     return raw ? parseProject(JSON.parse(raw)) : projectFromScene(blank());
   } catch(err){ console.warn('LotKing store: progetto corrotto, ignorato', err); return projectFromScene(blank()); }
 }
-function save(data, meta){
+function save(data, meta, options){
   try {
-    const project = projectFromScene(data, meta);
+    options = options || {};
+    const expectedActiveId = normalizeLevelId(options.expectedActiveId);
+    if(expectedActiveId){
+      const actualActiveId = normalizeLevelId(ensureLibrary().activeId);
+      if(actualActiveId !== expectedActiveId){
+        console.warn('LotKing store: save refused because the active level changed', expectedActiveId, '→', actualActiveId);
+        return false;
+      }
+    }
+    const saveMeta = expectedActiveId
+      ? Object.assign({}, meta || {}, {trackId: expectedActiveId})
+      : meta;
+    const project = projectFromScene(data, saveMeta);
     localStorage.setItem(KEY, JSON.stringify(project));
     return !!upsertActiveLevel(project);
   }
@@ -459,17 +477,88 @@ function logicElementSceneElements(graph){
   const g = ensureLogicElementScene(graph);
   return [g.logicScene.root].concat(g.logicScene.elements || []);
 }
+// Every texture slot, not only `map`. A PBR material here can carry a normal,
+// roughness, metalness, emissive, ao or alpha map plus the derived sketch/pigment
+// layers, and each one is a separate GPU allocation. Freeing `map` alone left the
+// rest resident, which is most of the texture memory a scene reload leaked.
+// Textures a surface pack shares between materials are skipped: they outlive any
+// single object and are owned by the pack.
+const DISPOSABLE_TEXTURE_SLOTS = Object.freeze([
+  'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap',
+  'bumpMap', 'displacementMap', 'lightMap', 'envMap', 'specularMap', 'clearcoatMap',
+  'clearcoatNormalMap', 'clearcoatRoughnessMap', 'sheenColorMap', 'sheenRoughnessMap',
+  'transmissionMap', 'thicknessMap', 'iridescenceMap', 'anisotropyMap', 'gradientMap', 'matcap',
+]);
+function disposeMaterialTextures(material, seen, liveTextures){
+  if(!material) return;
+  DISPOSABLE_TEXTURE_SLOTS.forEach(slot => {
+    const texture = material[slot];
+    if(!texture || !texture.isTexture || !texture.dispose) return;
+    if(isSharedSurfaceTexture(texture)) return;
+    if(liveTextures && liveTextures.has(texture)) return;
+    if(seen){ if(seen.has(texture)) return; seen.add(texture); }
+    texture.dispose();
+  });
+}
+// Most callers below dispose from inside a frame, and under WebGPU a dispose()
+// destroys the GPU buffer immediately - including buffers a command buffer has
+// already recorded. The rendering backend owns that timing: it delays the release
+// past the frame's submit on WebGPU and runs it straight away on WebGL.
+function releaseGpuResources(release){
+  const backend = typeof window !== 'undefined' && window.LK_RUNTIME_RENDERING_BACKEND;
+  if(backend && typeof backend.deferGpuRelease === 'function') return backend.deferGpuRelease(release);
+  release();
+  return false;
+}
 function disposeObject3D(node){
   if(!node) return;
+  // One texture can be shared by several materials in the same object; disposing
+  // it twice is harmless but the set keeps the sweep O(textures).
+  const seen = typeof Set === 'function' ? new Set() : null;
+  // The traverse runs now, while the object graph is still whole; only the frees
+  // themselves are allowed to wait.
+  const geometries = [], materials = [], skeletons = [], excluded = new Set();
   node.traverse(child => {
-    if(child.geometry && child.geometry.dispose) child.geometry.dispose();
+    excluded.add(child);
+    if(child.geometry && child.geometry.dispose) geometries.push(child.geometry);
     if(child.material){
       const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.forEach(mat => {
-        if(mat && mat.map && mat.map.dispose && !isSharedSurfaceTexture(mat.map)) mat.map.dispose();
-        if(mat && mat.dispose) mat.dispose();
-      });
+      mats.forEach(mat => { if(mat) materials.push(mat); });
     }
+    // A skinned mesh keeps its own skeleton texture.
+    if(child.isSkinnedMesh && child.skeleton && child.skeleton.boneTexture && child.skeleton.boneTexture.dispose) skeletons.push(child.skeleton);
+  });
+  releaseGpuResources(() => {
+    // Imported GLBs, clones, warm-up objects and engine pools can share the
+    // exact same geometry/material/texture object. Disposing one detached root
+    // must never retire a resource still referenced by the live scene. Resolve
+    // references at release time, after unregister/detach has completed.
+    const liveGeometries=new Set(),liveMaterials=new Set(),liveTextures=new Set();
+    const GAME=typeof window!=='undefined'&&window.LOT_KING;
+    const roots=[];
+    if(GAME&&GAME.core&&GAME.core.scene)roots.push(GAME.core.scene);
+    if(GAME&&GAME.world&&Array.isArray(GAME.world.registry))GAME.world.registry.forEach(root=>{if(root&&!roots.includes(root))roots.push(root);});
+    roots.forEach(root=>{if(!root||!root.traverse)return;root.traverse(child=>{
+      if(excluded.has(child))return;
+      if(child.geometry)liveGeometries.add(child.geometry);
+      const list=child.material?(Array.isArray(child.material)?child.material:[child.material]):[];
+      list.forEach(material=>{
+        if(!material)return;liveMaterials.add(material);
+        DISPOSABLE_TEXTURE_SLOTS.forEach(slot=>{if(material[slot])liveTextures.add(material[slot]);});
+      });
+      if(child.isSkinnedMesh&&child.skeleton&&child.skeleton.boneTexture)liveTextures.add(child.skeleton.boneTexture);
+    });});
+    geometries.forEach(geometry => {if(!liveGeometries.has(geometry))geometry.dispose();});
+    materials.forEach(mat => {
+      disposeMaterialTextures(mat, seen, liveTextures);
+      if(mat.dispose&&!liveMaterials.has(mat)) mat.dispose();
+    });
+    skeletons.forEach(skeleton => {
+      if(skeleton.boneTexture && skeleton.boneTexture.dispose&&!liveTextures.has(skeleton.boneTexture)){
+        skeleton.boneTexture.dispose();
+        skeleton.boneTexture = null;
+      }
+    });
   });
 }
 function logicElementElementPosition(element){
@@ -583,21 +672,20 @@ function createLogicElementPreviewNode(THREERef, element){
     node = group;
   } else if(type === 'camera'){
     const group = new THREERef.Group();
-    const mat = logicElementMaterial(THREERef, element, {line:true, helper:true});
-    const pts = [
-      new THREERef.Vector3(-.28,-.18,0), new THREERef.Vector3(.28,-.18,0),
-      new THREERef.Vector3(.28,-.18,0), new THREERef.Vector3(.28,.18,0),
-      new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(-.28,.18,0),
-      new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.28,-.18,0),
-      new THREERef.Vector3(-.28,-.18,0), new THREERef.Vector3(-.55,-.35,-.65),
-      new THREERef.Vector3(.28,-.18,0), new THREERef.Vector3(.55,-.35,-.65),
-      new THREERef.Vector3(.28,.18,0), new THREERef.Vector3(.55,.35,-.65),
-      new THREERef.Vector3(-.28,.18,0), new THREERef.Vector3(-.55,.35,-.65),
-    ];
-    const helper = new THREERef.LineSegments(new THREERef.BufferGeometry().setFromPoints(pts), mat);
-    helper.userData.logicElementRuntimeVisual = false;
-    helper.visible = element && element.dummyVisible === true;
-    group.add(helper);
+    // Same compact camera body used by the native Player Car. The previous
+    // oversized frustum looked unlike every other camera dummy and, as a child
+    // of a Pawn, could expand authoring bounds several metres behind it.
+    const visual = new THREERef.Group();
+    const material = new THREERef.MeshBasicMaterial({color:element && element.color || '#9db4ff',wireframe:true,depthTest:false,transparent:true,opacity:.9});
+    const body = new THREERef.Mesh(new THREERef.BoxGeometry(.58,.38,.3),material);
+    const lens = new THREERef.Mesh(new THREERef.ConeGeometry(.15,.36,12),material);
+    lens.rotation.x=Math.PI/2;lens.position.z=-.3;
+    visual.add(body,lens);
+    visual.visible=element&&element.dummyVisible===true;
+    visual.userData.logicElementCameraVisual=true;
+    visual.traverse(child=>{child.renderOrder=1000;child.userData.logicElementRuntimeVisual=false;child.userData.editorOnly=true;child.userData.helperOnly=true;child.userData.nonExportable=true;child.userData.lkFlareIgnore=true;});
+    group.add(visual);
+    group.userData.logicElementCameraVisual=visual;
     node = group;
   } else if(type === 'text'){
     node = createLogicElementTextNode(THREERef, element);
@@ -688,6 +776,10 @@ function startLogicElementAnimations(target, runtimeMode){
   if(!target || !target.traverse) return 0;
   let started = 0;
   target.traverse(node => {
+    // A live Character Pawn owns this mixer exclusively. Starting the generic
+    // imported-model autoplay after prewarming makes that foreign action fight
+    // locomotion until a vehicle exit happens to reset the presentation.
+    if(node.userData && node.userData.logicCharacterLocomotionMixerOwner) return;
     const config = node.userData && node.userData.logicAnimationConfig;
     if(!config || config.enabled === false || config.autoplay === false) return;
     if(!runtimeMode && config.playInEditor === false) return;
@@ -760,20 +852,48 @@ function loadLogicElementAsset(asset){
       : (asset.dbKey && window.LK_ASSET_BLOBS
         ? window.LK_ASSET_BLOBS.getUrl(asset.dbKey)
         : Promise.reject(new Error('Logic Element asset source missing')));
-    pending = source.then(src => loadGlb(src, Math.max(.05, Number(asset.fit) || 1))).catch(error=>loadLogicElementFbxFallback(asset,error));
+    // An asset that declares itself FBX goes straight to the FBX path. Trying the
+    // canonical GLB loader on a `.fbx` is a guaranteed failure that still fetches
+    // and parses the whole file, and it reports a GLTF error for a file that was
+    // never a GLB - which reads as a broken asset rather than a bundled FBX.
+    // Only when there is nothing else to try: an imported asset keeps a converted
+    // GLB in `dbKey` and its original FBX as the fallback, and that order stays.
+    const canonicalGlb = !!(asset.dbKey || (asset.src && !/\.fbx$/i.test(String(asset.src))));
+    const declaresFbx = !canonicalGlb && (String(asset.sourceFormat || '').toLowerCase() === 'fbx'
+      || /\.fbx$/i.test(String(asset.src || '')));
+    pending = declaresFbx
+      ? loadLogicElementFbxFallback(asset, new Error('asset is FBX source'))
+      : source.then(src => loadGlb(src, Math.max(.05, Number(asset.fit) || 1))).catch(error=>loadLogicElementFbxFallback(asset,error));
     logicElementAssetCache.set(key, pending);
     pending.catch(() => logicElementAssetCache.delete(key));
   }
   return pending.then(cloneLogicElementAsset);
 }
 const CHARACTER_PLACEHOLDER_ID=/^(torso_|hips_|leg_sock_|arm_skin_|hand_skin_|head_skin|hair_top)/;
-function setCharacterPlaceholderVisibility(owner,visible){if(!owner||!owner.traverse)return;owner.traverse(child=>{const id=child&&child.userData&&child.userData.logicElementSceneId;if(id&&CHARACTER_PLACEHOLDER_ID.test(String(id)))child.visible=visible!==false;});}
+function setCharacterPlaceholderVisibility(owner,visible){if(!owner||!owner.traverse)return;const shown=visible!==false;owner.traverse(child=>{const data=child&&child.userData,id=data&&data.logicElementSceneId;if(!id||!CHARACTER_PLACEHOLDER_ID.test(String(id)))return;data.characterPlaceholderSuppressedByAsset=!shown;if(data.firstPersonBaseVisible!==undefined)data.firstPersonBaseVisible=shown;child.visible=shown;});}
 function removeCharacterAssetFallback(owner){const fallback=owner&&owner.userData&&owner.userData.characterAssetFallback;if(!fallback)return;if(fallback.parent)fallback.parent.remove(fallback);disposeObject3D(fallback);delete owner.userData.characterAssetFallback;}
 function ensureCharacterAssetFallback(owner,parent,definition){
   if(!owner||!parent||!window.LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION||!LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.createVisual)return null;
   const current=owner.userData&&owner.userData.characterAssetFallback;if(current&&current.parent)return current;
   const visual=LK_RUNTIME_CHARACTER_PLACEHOLDER_LOCOMOTION.createVisual(window.THREE,definition&&definition.appearance);if(!visual)return null;
   visual.userData.characterAssetFallback=true;visual.userData.logicElementInternal=true;visual.userData.logicElementRuntimeVisual=true;visual.traverse(child=>{child.userData.logicElementInternal=true;child.userData.logicElementRuntimeVisual=true;child.userData.editorLocked=true;child.userData.nonExportable=true;});parent.add(visual);owner.userData.characterAssetFallback=visual;return visual;
+}
+function hideSketchbookLogicAssetMetadata(model, owner){
+  const graph = owner && owner.userData && owner.userData.logicGraph;
+  if(!model || !model.traverse || !graph || !graph.sketchbookPawn) return 0;
+  let hidden = 0;
+  model.traverse(child => {
+    const data = child && child.userData || {};
+    const tag = String(data.data || data.kind || '').toLowerCase();
+    // Source-authored physics/navigation helpers remain in the hierarchy for
+    // Pawn metadata scanning, but they are not vehicle body visuals.
+    if(tag !== 'collision' && tag !== 'physics' && tag !== 'navmesh') return;
+    child.visible = false;
+    child.userData.lkSketchbookMetadataHidden = true;
+    hidden++;
+  });
+  model.userData.lkSketchbookHiddenMetadataCount = hidden;
+  return hidden;
 }
 function hydrateLogicElementPreviewAsset(node, element, owner){
   if(!node || !element || !element.asset) return Promise.resolve(node);
@@ -788,6 +908,7 @@ function hydrateLogicElementPreviewAsset(node, element, owner){
       node.remove(child);
       disposeObject3D(child);
     });
+    hideSketchbookLogicAssetMetadata(model, owner);
     model.traverse(child => {
       child.userData.logicElementAssetVisual = true;
       child.userData.logicElementInternal = true;
@@ -819,6 +940,26 @@ function hydrateLogicElementPreviewAsset(node, element, owner){
     throw error;
   });
 }
+function sketchbookLogicAssetHierarchyReady(object, graph){
+  if(!object || !object.traverse || !graph || !graph.sketchbookPawn) return false;
+  const expected = logicElementSceneElements(graph).filter(element => element && element.linked !== false && element.asset).length;
+  if(!expected) return false;
+  let roots = 0;
+  let placeholders = 0;
+  object.traverse(node => {
+    const data = node && node.userData || {};
+    if(data.logicElementAssetPlaceholder) placeholders++;
+    if(data.logicElementAssetVisual && !(node.parent && node.parent.userData && node.parent.userData.logicElementAssetVisual)) roots++;
+  });
+  return placeholders === 0 && roots === expected;
+}
+function retagLogicElementOwner(object){
+  if(!object || !object.traverse || !object.userData) return;
+  const ownerId = object.userData.editorId || object.userData.logicInstanceId || null;
+  object.traverse(node => {
+    if(node && node.userData && node.userData.logicElementInternal) node.userData.logicElementOwnerId = ownerId;
+  });
+}
 function removeLogicElementColliders(object, GAME){
   const refs = object && object.userData && object.userData.logicElementColliderRefs;
   if(!Array.isArray(refs) || !GAME || !GAME.world || !GAME.world.colliders) return;
@@ -826,6 +967,14 @@ function removeLogicElementColliders(object, GAME){
     const list = ref && ref.kind === 'circle' ? GAME.world.colliders.circle : GAME.world.colliders.box;
     const index = list && list.indexOf(ref);
     if(index >= 0) list.splice(index, 1);
+    const body=ref&&ref.cannonBody;
+    if(body){
+      if(body.__lkLogicColliderHandler&&body.removeEventListener)body.removeEventListener('collide',body.__lkLogicColliderHandler);
+      if(body.__lkLogicColliderRef===ref)body.__lkLogicColliderRef=null;
+      body.__lkLogicColliderHandler=null;
+      body.logicObject=null;
+      ref.cannonBody=null;
+    }
     if(ref && ref.owner && ref.owner.userData) delete ref.owner.userData.collider;
   });
   object.userData.logicElementColliderRefs = [];
@@ -1008,6 +1157,25 @@ function applyLogicElementPreviewTransform(THREERef, node, element){
   node.rotation.set(THREERef.MathUtils.degToRad(rot[0]), THREERef.MathUtils.degToRad(rot[1]), THREERef.MathUtils.degToRad(rot[2]));
   node.scale.set(scale[0], scale[1], scale[2]);
 }
+function sketchbookStoredAssetRef(value){
+  if(value&&typeof value==='object')return cloneData(value);
+  const text=String(value==null?'':value).trim();if(!text)return null;
+  if(text.charAt(0)==='{')try{const parsed=JSON.parse(text);if(parsed&&typeof parsed==='object')return parsed;}catch(err){}
+  return {src:text,name:text.split('/').pop()||'DollBody Pawn GLB',kind:'glb'};
+}
+function syncSketchbookModelAsset(graph){
+  const definition=graph&&graph.sketchbookPawn,scene=graph&&graph.logicScene;if(!definition||!scene)return null;
+  const variables=graph.variables||[],assetVariable=variables.find(variable=>variable&&(variable.name==='ModelAsset'||variable.ui==='sketchbook-model-asset'||variable.binding==='modelAsset'||variable.binding==='modelAsset.src'));
+  const fitVariable=variables.find(variable=>variable&&(variable.name==='ModelFit'||variable.binding==='modelAsset.fit'));
+  const elements=[scene.root].concat(scene.elements||[]),kind=String(definition.kind||definition.type||''),modelElement=elements.find(element=>element&&element.id===kind+'_model')||elements.find(element=>element&&element.asset);
+  const current=cloneData(definition.modelAsset||modelElement&&modelElement.asset||{}),selected=sketchbookStoredAssetRef(assetVariable&&assetVariable.value);
+  let descriptor=current;if(selected){const sameSource=selected.src&&current.src&&String(selected.src)===String(current.src);descriptor=sameSource?Object.assign({},current,selected):Object.assign({},selected);}
+  const fit=Number(fitVariable&&fitVariable.value!=null?fitVariable.value:descriptor&&descriptor.fit!=null?descriptor.fit:current.fit);if(Number.isFinite(fit)&&fit>0)descriptor.fit=fit;
+  if(!descriptor.kind)descriptor.kind='glb';definition.modelAsset=cloneData(descriptor);
+  if(modelElement){modelElement.asset=cloneData(descriptor);modelElement.linked=true;}
+  if(assetVariable){assetVariable.type='asset';assetVariable.binding='modelAsset';assetVariable.ui='sketchbook-model-asset';assetVariable.value=cloneData(descriptor);}
+  return descriptor;
+}
 function syncLogicElementSceneObject(object, graph, opts){
   if(!object || !window.THREE) return object;
   opts = opts || {};
@@ -1061,23 +1229,112 @@ function syncLogicElementSceneObject(object, graph, opts){
     if(normalized.soccerPawn.ball.shotChargeTime==null)normalized.soccerPawn.ball.shotChargeTime=1.15;
     if(normalized.soccerPawn.ball.shotCurve==null)normalized.soccerPawn.ball.shotCurve=.65;
     if(normalized.soccerPawn.ball.aimReticle==null)normalized.soccerPawn.ball.aimReticle=true;
+    if(normalized.soccerPawn.ball.aimSlowMotion==null)normalized.soccerPawn.ball.aimSlowMotion=true;
+    if(normalized.soccerPawn.ball.aimTimeScale==null)normalized.soccerPawn.ball.aimTimeScale=.18;
     const addShotVariable=spec=>{if(!variables.some(variable=>variable&&(variable.name===spec.name||variable.binding===spec.binding)))variables.push(spec);};
     addShotVariable({name:'ShotMinPower',type:'number',value:normalized.soccerPawn.ball.shotMinPower,min:4,max:25,step:.5,exposed:true,binding:'ball.shotMinPower',label:'Minimum Shot Power (m/s)',category:'Soccer / Shot'});
     addShotVariable({name:'ShotChargeTime',type:'number',value:normalized.soccerPawn.ball.shotChargeTime,min:.3,max:3,step:.05,exposed:true,binding:'ball.shotChargeTime',label:'Full Charge Time (s)',category:'Soccer / Shot'});
     addShotVariable({name:'ShotCurve',type:'number',value:normalized.soccerPawn.ball.shotCurve,min:0,max:1,step:.05,exposed:true,binding:'ball.shotCurve',label:'Maximum Curve',category:'Soccer / Shot'});
     addShotVariable({name:'AimReticle',type:'boolean',value:normalized.soccerPawn.ball.aimReticle!==false,exposed:true,binding:'ball.aimReticle',label:'Show Aim Reticle',category:'Soccer / Shot'});
+    addShotVariable({name:'AimSlowMotion',type:'boolean',value:normalized.soccerPawn.ball.aimSlowMotion!==false,exposed:true,binding:'ball.aimSlowMotion',label:'Slow Motion While Aiming',category:'Soccer / Shot'});
+    addShotVariable({name:'AimTimeScale',type:'number',value:normalized.soccerPawn.ball.aimTimeScale,min:.02,max:.9,step:.02,exposed:true,binding:'ball.aimTimeScale',label:'Aiming Time Scale',category:'Soccer / Shot'});
+  }
+  const sketchbookDefinition=normalized.sketchbookPawn;
+  if(sketchbookDefinition&&normalized.logicScene)syncSketchbookModelAsset(normalized);
+  if(sketchbookDefinition&&(sketchbookDefinition.type==='advanced-character'||sketchbookDefinition.kind==='advanced-character')&&normalized.logicScene&&Number(sketchbookDefinition.animationDefaultVersion||0)<1){
+    // Old Sketchbook instances inherited the generic GLB autoplay defaults.
+    // With no selected clip that means "play the first animation", which is a
+    // seated door/hand sequence in boxman.glb. At runtime that action then
+    // competed with locomotion. Migrate only the old default contract; an
+    // explicitly authored animation object keeps every value it owns.
+    const elements=normalized.logicScene.elements||[];
+    const modelElement=elements.find(element=>element&&element.asset&&(element.id==='advanced-character_model'||/boxman\.glb(?:$|[?#])/i.test(String(element.asset.src||''))));
+    if(modelElement)modelElement.animation=Object.assign({enabled:true,clip:'idle',autoplay:false,loop:'repeat',speed:1,playInEditor:false},modelElement.animation||{});
+    sketchbookDefinition.animationDefaultVersion=1;
   }
   const characterDefinition=normalized.characterPawn||normalized.soccerPawn;
+  // Saved Normal Characters predate the shared FPS/TPS player contract.  Bring
+  // those instances forward in place so the Author DEMO keeps its model,
+  // animations and authored tuning while gaining weapons, inventory and the
+  // same-body eye/shoulder view rig.  Vehicle interior cameras remain owned by
+  // vehicle possession and are never written into this Character descriptor.
+  if(normalized.characterPawn&&window.LK_LOGIC_TEMPLATES_CHARACTER&&window.LK_LOGIC_TEMPLATES_CHARACTER.upgradeLegacyPlayerCharacterGraph){
+    window.LK_LOGIC_TEMPLATES_CHARACTER.upgradeLegacyPlayerCharacterGraph(normalized,object.userData&&object.userData.logicVariableOverrides||{});
+  }
+  // Camera mounts must be generated AFTER the legacy Character upgrade: old
+  // Parking Lot saves do not carry `firstPerson` until the call above.
+  if(window.LK_LOGIC_GRAPH&&window.LK_LOGIC_GRAPH.ensurePawnCameraRigs)window.LK_LOGIC_GRAPH.ensurePawnCameraRigs(normalized);
+  // Old embedded Characters exposed Input Mode but did not persist its matching
+  // facing frame. In heading mode that omission formed a feedback loop (turn,
+  // reinterpret input from the new heading, turn again) and looked exactly like
+  // an invisible wall. Persist a stable pair and expose it to the current level.
+  if(characterDefinition&&Number(characterDefinition.movementDirectionDefaultVersion||0)<1){
+    const movement=characterDefinition.movement||(characterDefinition.movement={});
+    const variables=normalized.variables||(normalized.variables=[]);
+    const inputVariable=variables.find(variable=>variable&&variable.binding==='movement.inputMode');
+    const inputMode=String(inputVariable&&inputVariable.value||movement.inputMode||'camera').toLowerCase()==='heading'?'heading':'camera';
+    if(movement.facingMode!=='heading'&&movement.facingMode!=='movement')movement.facingMode=inputMode==='heading'?'heading':'movement';
+    let facingVariable=variables.find(variable=>variable&&variable.binding==='movement.facingMode');
+    if(!facingVariable){
+      facingVariable={name:'FacingMode',type:'string',value:movement.facingMode,exposed:true,binding:'movement.facingMode',label:'Facing Mode',category:'Movement',ui:'select',options:[{value:'movement',label:'Face movement direction'},{value:'heading',label:'Preserve character / aim heading'}],description:'Heading-relative input should preserve heading. Camera-relative movement may rotate the body toward travel.'};
+      variables.push(facingVariable);
+    }
+    characterDefinition.movementDirectionDefaultVersion=1;
+  }
+  // Player Pawns used to inherit the Enemy-friendly "never respawn" default.
+  // Upgrade embedded levels once, but preserve an explicit inspector override
+  // and every unpossessed AI/civilian Character (those must still stay dead).
+  if(characterDefinition&&Number(characterDefinition.playerRespawnDefaultVersion||0)<1){
+    const playerId=Number(characterDefinition.playerId),vitals=characterDefinition.vitals||(characterDefinition.vitals={});
+    const team=String(vitals.team||'player').toLowerCase();
+    const playerOwned=Number.isFinite(playerId)&&playerId>=1&&team!=='enemy'&&team!=='civilian';
+    const variables=normalized.variables||(normalized.variables=[]);
+    const respawnVariable=variables.find(variable=>variable&&variable.binding==='vitals.respawnMode');
+    const overrides=object.userData&&object.userData.logicVariableOverrides||{};
+    const explicitlyAuthored=!!(respawnVariable&&Object.prototype.hasOwnProperty.call(overrides,respawnVariable.name));
+    if(playerOwned&&!explicitlyAuthored&&String(vitals.respawnMode||'none').toLowerCase()==='none'){
+      vitals.respawnMode='spawn';
+      vitals.respawnOnDeath=true;
+      if(respawnVariable&&String(respawnVariable.value||'none').toLowerCase()==='none')respawnVariable.value='spawn';
+    }
+    characterDefinition.playerRespawnDefaultVersion=1;
+  }
+  if(characterDefinition&&characterDefinition.abilities&&characterDefinition.abilities.slide){
+    const slide=characterDefinition.abilities.slide;
+    if(slide.rollDistance==null)slide.rollDistance=Math.max(.1,(Number(slide.rollSpeed)||4.6)*(Number(slide.rollDuration)||.62));
+    if(slide.rollPlaybackRate==null)slide.rollPlaybackRate=1;
+    const variables=normalized.variables||(normalized.variables=[]);
+    const addRollVariable=spec=>{if(!variables.some(variable=>variable&&(variable.name===spec.name||variable.binding===spec.binding)))variables.push(spec);};
+    addRollVariable({name:'TpsRollDistance',type:'number',value:slide.rollDistance,min:.1,max:12,step:.05,exposed:true,binding:'abilities.slide.rollDistance',label:'Roll Travel (m)',category:'Traversal',description:'Total forward distance while the authored roll clip plays. Duration is synchronized to the clip.'});
+    addRollVariable({name:'TpsRollPlaybackRate',type:'number',value:slide.rollPlaybackRate,min:.25,max:3,step:.05,exposed:true,binding:'abilities.slide.rollPlaybackRate',label:'Roll Animation Speed',category:'Traversal',description:'Playback multiplier for the roll clip; movement duration follows it automatically.'});
+  }
+  if(characterDefinition){
+    characterDefinition.abilities=characterDefinition.abilities||{};
+    const wall=characterDefinition.abilities.wallFlip=characterDefinition.abilities.wallFlip||{};
+    // v1 was an in-place one-second animation latch. Migrate only that exact
+    // untouched default; deliberately authored non-default durations survive.
+    if(Number(characterDefinition.wallFlipReboundVersion||0)<1){
+      if(wall.duration==null||Math.abs(Number(wall.duration)-1)<.000001)wall.duration=.72;
+      characterDefinition.wallFlipReboundVersion=1;
+    }
+    if(wall.playbackRate==null)wall.playbackRate=1.15;
+    if(wall.lift==null)wall.lift=.72;
+    if(wall.pushback==null)wall.pushback=.62;
+    if(wall.reach==null)wall.reach=.72;
+    const variables=normalized.variables||(normalized.variables=[]),addWallVariable=spec=>{if(!variables.some(variable=>variable&&(variable.name===spec.name||variable.binding===spec.binding)))variables.push(spec);};
+    addWallVariable({name:'TpsWallFlipDuration',type:'number',value:wall.duration,min:.2,max:2,step:.01,exposed:true,binding:'abilities.wallFlip.duration',label:'Wall Flip Maximum Duration (s)',category:'Traversal',description:'Fits a long source take into this gameplay window.'});
+    addWallVariable({name:'TpsWallFlipPlayback',type:'number',value:wall.playbackRate,min:.25,max:4,step:.05,exposed:true,binding:'abilities.wallFlip.playbackRate',label:'Wall Flip Gameplay Playback',category:'Traversal',description:'Multiplier composed with the Motion Set playback rate.'});
+    addWallVariable({name:'TpsWallFlipLift',type:'number',value:wall.lift,min:0,max:3,step:.02,exposed:true,binding:'abilities.wallFlip.lift',label:'Wall Flip Upward Rebound (m)',category:'Traversal'});
+    addWallVariable({name:'TpsWallFlipPushback',type:'number',value:wall.pushback,min:0,max:3,step:.02,exposed:true,binding:'abilities.wallFlip.pushback',label:'Wall Flip Pushback (m)',category:'Traversal'});
+    addWallVariable({name:'TpsWallFlipReach',type:'number',value:wall.reach,min:.2,max:2,step:.02,exposed:true,binding:'abilities.wallFlip.reach',label:'Wall Flip Detection Reach (m)',category:'Traversal'});
+  }
   if(characterDefinition&&window.LK_RUNTIME_CLOTH){
     characterDefinition.cloth=window.LK_RUNTIME_CLOTH.normalizeConfig(characterDefinition.cloth||{});
   }
   if(characterDefinition&&normalized.logicScene){
-    // Camera is Pawn configuration, never a spatial child. Early Character /
-    // Soccer instances embedded a visible camera_anchor inside every Pawn,
-    // which could survive at the sideline even after the native car was hidden.
-    const removedPawnCameraIds=new Set((normalized.logicScene.elements||[]).filter(element=>element&&element.type==='camera').map(element=>element.id));
-    normalized.logicScene.elements=(normalized.logicScene.elements||[]).filter(element=>!(element&&removedPawnCameraIds.has(element.id)));
-    normalized.logicScene.components=(normalized.logicScene.components||[]).filter(component=>!(component&&removedPawnCameraIds.has(component.elementId)));
+    // Character cameras are real authoring mounts now. They remain editor-only
+    // and outside collision/bounds, while their transforms are mirrored into
+    // firstPerson config consumed by Play.
     const sceneElements=normalized.logicScene.elements;
     const modelElement=sceneElements.find(element=>element&&element.id==='character_model');
     if(!characterDefinition.model&&modelElement&&modelElement.asset)characterDefinition.model=cloneData(modelElement.asset);
@@ -1091,14 +1348,22 @@ function syncLogicElementSceneObject(object, graph, opts){
   disposeLogicElementAnimations(object);
   object.userData.logicAnimationUpdate = dt => {
     const mixers = object.userData.logicElementMixers || [];
-    mixers.forEach(entry => entry && entry.mixer && entry.mixer.update(Math.max(0, Number(dt) || 0)));
-    mixers.forEach(entry => {const post=entry&&entry.node&&entry.node.userData&&entry.node.userData.logicCharacterRigPostUpdate;if(typeof post==='function')post();});
+    // An active Character Pawn owns its locomotion mixer so animation cannot
+    // freeze when the editor/effect hook registry changes. Scene-store keeps
+    // driving every other imported animation, including authoring previews.
+    // Skipping the matching post hook also prevents applying rig/weapon
+    // corrections twice in the same rendered frame.
+    const characterOwnsMixer=entry=>!!(entry&&entry.node&&entry.node.userData&&entry.node.userData.logicCharacterLocomotionMixerOwner);
+    mixers.forEach(entry => {if(!characterOwnsMixer(entry)&&entry&&entry.mixer)entry.mixer.update(Math.max(0, Number(dt) || 0));});
+    mixers.forEach(entry => {if(characterOwnsMixer(entry))return;const post=entry&&entry.node&&entry.node.userData&&entry.node.userData.logicCharacterRigPostUpdate;if(typeof post==='function')post();});
   };
   const old = (object.children || []).filter(child => {
     if(child.userData && (child.userData.logicElementInternal || child.userData.logicElementShell)) return true;
     return object.userData && (object.userData.editorType === 'logicElement' || object.userData.addedEntry && object.userData.addedEntry.kind === 'logicElement');
   });
   old.forEach(child => {
+    const detachedCameraVisual=child.userData&&child.userData.pawnCameraVisual;
+    if(detachedCameraVisual&&detachedCameraVisual.parent!==child)disposeObject3D(detachedCameraVisual);
     object.remove(child);
     disposeObject3D(child);
   });
@@ -1112,6 +1377,7 @@ function syncLogicElementSceneObject(object, graph, opts){
   }
   const nodes = new Map();
   const assetLoads = [];
+  object.userData.pawnCameraDummies=[];
   elements.forEach(element => {
     if(!element || element.linked === false) return;
     const node = createLogicElementPreviewNode(THREERef, element);
@@ -1125,17 +1391,38 @@ function syncLogicElementSceneObject(object, graph, opts){
     node.userData.editorLocked = true;
     node.userData.nonExportable = true;
     node.userData.logicElementRuntimeVisual = element.runtimeVisual !== false;
+    if(element.cameraRigRole){
+      node.userData.pawnCameraDummy=true;
+      node.userData.pawnCameraRole=element.cameraRigRole;
+      node.userData.editorType='pawnCamera';
+      node.userData.editorId=(object.userData.editorId||object.userData.logicInstanceId||'logic')+':'+element.id;
+      node.userData.editorName=element.name||element.id;
+      node.userData.linkParentId=object.userData.editorId||null;
+      node.userData.editorLocked=false;
+      node.userData.editorOnly=true;
+      node.__lkSkipControls=true;
+      node.__lkSkipContext=true;
+      object.userData.pawnCameraDummies.push(node);
+    }
     node.traverse(child => {
       child.userData.logicElementInternal = true;
       child.userData.logicElementSceneId = element.id;
       child.userData.logicElementOwnerId = object.userData.editorId || null;
       child.userData.editorLocked = true;
       child.userData.nonExportable = true;
+      if(element.editorOnly===true||element.cameraRigRole)child.userData.editorOnly=true;
       if(element.runtimeVisual === false) child.userData.logicElementRuntimeVisual = false;
       else if(child.userData.logicElementRuntimeVisual == null) child.userData.logicElementRuntimeVisual = !(
         element.type === 'empty' || element.type === 'camera' || (element.type === 'light' && !child.isLight)
       );
     });
+    if(element.cameraRigRole&&node.userData.logicElementCameraVisual){
+      // Keep the transform node under the Pawn, but detach its render geometry.
+      // It is reattached only while THIS camera is selected, so the Character
+      // bounds/collider can never include a camera several metres away.
+      node.userData.pawnCameraVisual=node.userData.logicElementCameraVisual;
+      node.remove(node.userData.pawnCameraVisual);
+    }
     nodes.set(element.id, node);
     if(element.asset) assetLoads.push(hydrateLogicElementPreviewAsset(node, element, object));
     else if(element.id === 'vehicle_model' && normalized.vehiclePawn && normalized.vehiclePawn.proceduralFallback && window.LOT_KING && LOT_KING.player && LOT_KING.player.visual){
@@ -1223,16 +1510,21 @@ function syncLogicElementSceneObject(object, graph, opts){
   if(normalized.vehiclePawn && window.LK_RUNTIME_PLAYER_MODEL && window.LK_RUNTIME_PLAYER_MODEL.applyModelShading){
     window.LK_RUNTIME_PLAYER_MODEL.applyModelShading(object, normalized.vehiclePawn.modelShading || 'original', THREERef);
   }
-  object.userData.logicElementAssetReady = Promise.allSettled(assetLoads);
+  const assetReady = Promise.allSettled(assetLoads);
+  object.userData.logicElementAssetReady = normalized.sketchbookPawn ? assetReady.then(results => {
+    const rejected = results.find(result => result && result.status === 'rejected');
+    if(rejected) throw rejected.reason;
+    return results;
+  }) : assetReady;
   return object;
 }
 function blank(){
-  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, characterGround:null, characterSoundSetId:null, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
+  return {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, proceduralWorld:null, player:{}, characterGround:null, characterSoundSetId:null, ui:{}, logic:{levelGraph:defaultLevelLogicGraph()}};
 }
 function sceneFromProject(data){
   if(!data) return null;
   if(data.format === PROJECT_FORMAT && data.scene) return data.scene;
-  if(data.transforms || data.added || data.player || data.env || data.ui) return data;
+  if(data.transforms || data.added || data.player || data.env || data.proceduralWorld || data.ui) return data;
   return null;
 }
 function projectFromScene(scene, meta){
@@ -1725,12 +2017,19 @@ function hasLocalMenuRoleProject(){
   const idx = readIndex();
   return idx.levels.some(entry => {
     const project = entry && readLevelProject(entry.id);
-    const role = project && project.meta && project.meta.levelRole || entry && entry.levelRole;
-    return isMenuLevelRole(role);
+    // An interrupted browser save can leave the small index entry behind after
+    // its actual project record disappeared. Such an orphan is not a usable
+    // menu and must not suppress the bundled ROLE fallback.
+    const role = project && project.meta && project.meta.levelRole;
+    return !!project && isMenuLevelRole(role);
   });
 }
 function shouldUseBundledDemoProject(){
   try {
+    if(window.__LK_STANDALONE_EDITOR && window.LK_PROJECT_WORKSPACE
+      && typeof window.LK_PROJECT_WORKSPACE.shouldOpenAuthorDemoByDefault === 'function'){
+      return window.LK_PROJECT_WORKSPACE.shouldOpenAuthorDemoByDefault();
+    }
     const workspace = JSON.parse(localStorage.getItem('lk.projectWorkspace.v1') || 'null');
     if(window.__LK_STANDALONE_EDITOR && (!workspace || workspace.workspaceReady !== true)) return false;
     if(workspace && workspace.startupTemplate === 'demo') return true;
@@ -1738,7 +2037,10 @@ function shouldUseBundledDemoProject(){
       // Keep the author's current local ROLE level when it exists. A new LAN
       // browser has no such level yet, so its menu iframe must use the published
       // DEMO immediately instead of showing the fallback world until refresh.
-      if(window.__LK_MENU_PREVIEW) return !hasLocalMenuRoleProject();
+      // The landing background is an exported DEMO role, not whichever local
+      // authoring level happened to be active yesterday. Local ROLE projects
+      // remain editable in the workspace but never replace the published menu.
+      if(window.__LK_MENU_PREVIEW) return true;
       return false;
     }
     return !workspace || workspace.onlineEditor !== true || workspace.startupTemplate === 'demo';
@@ -1763,7 +2065,8 @@ function objectLocalVisualBox(obj){
         if(current.visible === false) return;
         if(current === obj) break;
       }
-      if(node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle)) return;
+      const data=node.userData||{},authoredLogicVisual=data.logicElementInternal&&data.logicElementRuntimeVisual!==false;
+      if(data.colliderPreview || data.editorOnly || (data.nonExportable&&!authoredLogicVisual) || data.lightPickHandle) return;
       if(!node.geometry.boundingBox) node.geometry.computeBoundingBox();
       const bb = node.geometry.boundingBox;
       if(!bb || bb.isEmpty()) return;
@@ -1799,7 +2102,8 @@ function objectLocalMeshBoxes(obj){
       if(current.visible === false) return;
       if(current === obj) break;
     }
-    if(node.userData && (node.userData.colliderPreview || node.userData.editorOnly || node.userData.nonExportable || node.userData.lightPickHandle)) return;
+    const data=node.userData||{},authoredLogicVisual=data.logicElementInternal&&data.logicElementRuntimeVisual!==false;
+    if(data.colliderPreview || data.editorOnly || (data.nonExportable&&!authoredLogicVisual) || data.lightPickHandle) return;
     if(!node.geometry.boundingBox) node.geometry.computeBoundingBox();
     const bb = node.geometry.boundingBox;
     if(!bb || bb.isEmpty()) return;
@@ -2016,14 +2320,44 @@ async function installBundledDemoProject(project){
   return parsed;
 }
 
-function ensureBundledDemoProject(){
-  if(!shouldUseBundledDemoProject()) return Promise.resolve(null);
-  if(bundledDemoReady) return bundledDemoReady;
-  try {
-    bundledDemoRequestedLevelId = sessionStorage.getItem('lk.autolaunch') || sessionStorage.getItem('lk.playableActive') || null;
-  } catch(err){}
+function menuPreviewRoles(){
+  return window.__LK_MENU_PREVIEW === 'game'
+    ? ['game-menu','editor-menu']
+    : ['editor-menu','game-menu'];
+}
+async function loadBundledMenuPreviewProject(){
+  reportBundledDemoProgress({progress:8, step:'locating lightweight role menu'});
+  const manifest = await readMenuRoleManifest();
+  const refs = refsFromMenuRoleManifest(manifest);
+  let selected = null;
+  for(const role of menuPreviewRoles()){
+    selected = refs.find(ref => ref && ref.role === role);
+    if(selected) break;
+  }
+  if(!selected) return null;
+  const baseUrl = sidecarUrl(selected.sidecar || selected.url || selected.projectUrl);
+  if(!baseUrl) return null;
+  const separator = baseUrl.indexOf('?') >= 0 ? '&' : '?';
+  const url = baseUrl + separator + 'v=' + MENU_ROLE_CACHE_VERSION;
+  const text = await fetchTextWithProgress(url, 10, 42, 'downloading lightweight role menu');
+  if(!text) return null;
+  reportBundledDemoProgress({progress:54, step:'parsing lightweight role menu', url});
+  const project = parseProject(text);
+  const meta = project.meta || {};
+  const role = isMenuLevelRole(selected.role) ? selected.role : meta.levelRole;
+  const id = normalizeLevelId(selected.id || selected.levelId || meta.trackId || role);
+  const name = selected.name || meta.trackName || meta.levelName || (role === 'editor-menu' ? 'Editor Menu' : 'Game Menu');
+  project.meta = Object.assign({}, meta, {trackId:id, trackName:name, levelRole:role, onlineDemo:true, menuRoleSidecar:true});
+  bundledDemoProjectCache = project;
+  reportBundledDemoProgress({progress:58, step:'preparing lightweight role menu assets', url});
+  await hydrateBundledProjectAssets(project, 'role menu');
+  reportBundledDemoProgress({progress:64, step:'lightweight role menu ready', url});
+  return project;
+}
+function loadBundledFullDemoProject(options){
+  const opts=options||{};
   const url = bundledDemoProjectUrl();
-  bundledDemoReady = fetchTextWithProgress(url, 8, 42, 'downloading demo project')
+  return fetchTextWithProgress(url, 8, 42, 'downloading demo project')
     .then(async text => {
       if(!text) return null;
       const splitProject = window.LK_RUNTIME_SPLIT_PROJECT;
@@ -2042,33 +2376,20 @@ function ensureBundledDemoProject(){
       const meta = project.meta || {};
       const name = meta.trackName || meta.levelName || 'Online Demo';
       const savedAt = project.savedAt || new Date().toISOString();
-      project.meta = Object.assign({}, meta, {trackId:BUNDLED_DEMO_LEVEL_ID, trackName:name, onlineDemo:true});
+      project.meta = Object.assign({}, meta, {trackId:BUNDLED_DEMO_LEVEL_ID, trackName:name, projectName:name, onlineDemo:true});
       project.savedAt = savedAt;
       bundledDemoProjectCache = project;
       reportBundledDemoProgress({progress:60, step:'demo project ready in memory', url});
-      const isMenuPreviewFrame = !!(window.__LK_MENU_PREVIEW && window.parent && window.parent !== window);
-      if(isMenuPreviewFrame){
-        // The landing background runs in an isolated iframe and intentionally
-        // does not install the published project in localStorage. It still has
-        // to hydrate portable assets into IndexedDB before apply(): otherwise a
-        // cold browser profile cannot resolve dbKey-backed GLB/textures, while
-        // a later refresh appears to work only because another editor/runtime
-        // frame happened to populate the asset database in the meantime.
-        reportBundledDemoProgress({progress:61, step:'preparing role menu assets', url});
-        // Deduplicated payloads may live in another level. Hydrate the complete
-        // snapshot before applying the selected menu role so a cold profile is
-        // as complete as a refresh.
-        await hydrateBundledProjectAssets(project, 'role menu');
-        reportBundledDemoProgress({progress:64, step:'role menu assets ready', url});
-      } else {
-        if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.markDemoSession){
-          LK_PROJECT_WORKSPACE.markDemoSession();
-        }
-        if(window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.consumeStartupTemplate){
-          LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
-        }
-        await installBundledDemoProject(cloneData(project));
+      if(!opts.memoryOnly&&window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.markDemoSession){
+        LK_PROJECT_WORKSPACE.markDemoSession();
       }
+      if(!opts.memoryOnly&&window.LK_PROJECT_WORKSPACE && LK_PROJECT_WORKSPACE.consumeStartupTemplate){
+        LK_PROJECT_WORKSPACE.consumeStartupTemplate('demo');
+      }
+      // The landing iframe reads the authoritative DEMO in memory. Installing
+      // it into the author's Local Workspace DB would generate cross-frame
+      // storage events and could reload the menu while its renderer is alive.
+      if(!opts.memoryOnly)await installBundledDemoProject(cloneData(project));
       const scene = sceneFromProject(project);
       if(scene){
         const player = scene && scene.player;
@@ -2076,7 +2397,18 @@ function ensureBundledDemoProject(){
         console.info('LotKing demo: bundled LKEP loaded from ' + url + ' · ' + ((scene && scene.added && scene.added.length) || 0) + ' added · ' + playerRef);
       }
       return project;
-    })
+    });
+}
+function ensureBundledDemoProject(){
+  if(!shouldUseBundledDemoProject()) return Promise.resolve(null);
+  if(bundledDemoReady) return bundledDemoReady;
+  try {
+    bundledDemoRequestedLevelId = sessionStorage.getItem('lk.autolaunch') || sessionStorage.getItem('lk.playableActive') || null;
+  } catch(err){}
+  const isMenuPreviewFrame = !!(window.__LK_MENU_PREVIEW && window.parent && window.parent !== window);
+  bundledDemoReady = (isMenuPreviewFrame
+    ? loadBundledFullDemoProject({memoryOnly:true}).then(project => project || loadBundledMenuPreviewProject())
+    : loadBundledFullDemoProject())
     .catch(err => {
       console.warn('LotKing demo: bundled LKEP not loaded', err);
       // Fail closed. Falling through to the procedural parking lot made a
@@ -2485,6 +2817,7 @@ function collectPlayerBlueprint(GAME){
     dataWidgets: cloneData(GAME.player.dataWidgets || {}),
     exhaust: cloneData(GAME.player.exhaust || {}),
     skids: cloneData(GAME.player.skids || {}),
+    damage: cloneData(GAME.player.damage || {}),
     collision: cloneData(GAME.player.collision || {}),
     modelShading: GAME.player.getModelShading ? GAME.player.getModelShading() : (GAME.player.car && GAME.player.car.userData.modelShading || 'original'),
     steeringWheel: cloneData(GAME.player.getSteeringWheelConfig ? GAME.player.getSteeringWheelConfig() : (GAME.player.steeringWheel || {})),
@@ -2679,6 +3012,7 @@ function playerTemplateFromLevelLibrary(GAME){
       dataWidgets: cloneData(GAME.player.dataWidgets || {}),
       exhaust: cloneData(GAME.player.exhaust || {}),
       skids: cloneData(GAME.player.skids || {}),
+      damage: cloneData(GAME.player.damage || {}),
       collision: cloneData(GAME.player.collision || {}),
       modelShading: GAME.player.getModelShading ? GAME.player.getModelShading() : 'original',
       steeringWheel: cloneData(GAME.player.getSteeringWheelConfig ? GAME.player.getSteeringWheelConfig() : (GAME.player.steeringWheel || {})),
@@ -2713,6 +3047,88 @@ function writeLoadingMusicHint(tracks){
     return false;
   }
 }
+
+/** Shared baseline ground every template starts from. Templates that ship their
+ *  own terrain declare `ground:'none'` and get a clean scene. */
+function applyTemplateGround(scene, mode){
+  if(mode === 'none') return scene;
+  if(mode === 'drift-apron'){
+    // Large drivable apron under the track (the track ships its own grass at y=0)
+    scene.added.push({
+      id: 'lvlground_' + Date.now().toString(36),
+      prim: 'plane',
+      name: 'Ground',
+      collide: false,
+      driveSurface: true,
+      props: {color: 0x2a2f39, roughness: .98, metalness: 0},
+      t: {p:[6, -0.03, -40], r:[0, 0, 0], s:[90, 1, 90], v: true},
+      asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
+    });
+    return scene;
+  }
+  scene.added.push({
+    id: 'lvlground_' + Date.now().toString(36),
+    prim: 'plane',
+    name: 'Ground',
+    collide: false,
+    props: {color: 0x39404d, roughness: .95, metalness: 0},
+    t: {p:[0, 0, 0], r:[0, 0, 0], s:[40, 1, 40], v: true},
+    asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
+  });
+  return scene;
+}
+
+/** The two templates whose content is implemented inside this module. Every
+ *  other template registers itself from its own runtime module.
+ *  Script order is not guaranteed across the HTML shells and the lazy editor
+ *  loader, so this is idempotent and retried from templateScene(). */
+let storeLevelTemplatesRegistered = false;
+function registerStoreLevelTemplates(){
+  if(storeLevelTemplatesRegistered) return true;
+  const registry = window.LK_LEVEL_TEMPLATES;
+  if(!registry || !registry.register) return false;
+  storeLevelTemplatesRegistered = true;
+  registry.register([
+    {
+      id:'drift-track-minami', name:'Drift Track - Minami Drift Park', nameIt:'Tracciato Drift - Minami Drift Park',
+      category:'Vehicle', order:500, ground:'drift-apron', keepBuiltinPlayer:true,
+      description:'Generated drift circuit with the native player car spawned on the start line.',
+      build(scene){
+        const gen = window.LK_RUNTIME_DRIFT_TRACK;
+        if(!gen) return scene;
+        const params = gen.defaultParams();
+        let spawn = null;
+        try {
+          const built = gen.build(THREE, params);
+          spawn = built.spawn;
+          disposeObject3D(built.group);
+        } catch(err){ console.warn('LotKing drift template: spawn probe failed', err); }
+        scene.added.push({
+          id: 'drifttrack_' + Date.now().toString(36),
+          kind: 'driftTrack',
+          name: 'Drift Track (Minami)',
+          collide: false,
+          physics: false,
+          props: params,
+          asset: {key:'level:driftTrack', name:'Drift Track', source:'Drift Track generator'},
+          t: {p:[0, 0, 0], r:[0, 0, 0], s:[1, 1, 1], v: true},
+        });
+        if(spawn && scene.player){
+          scene.player.spawn = Object.assign({}, scene.player.spawn, {x: spawn.position[0], z: spawn.position[2], heading: spawn.yaw});
+        }
+        return scene;
+      },
+    },
+    {
+      id:'empty', name:'Empty Level', nameIt:'Livello vuoto',
+      category:'Blank', order:900, ground:'plane', keepBuiltinPlayer:true,
+      description:'Ground plane, default lighting and the native player car. Build from here.',
+      build(scene){ return scene; },
+    },
+  ]);
+  return true;
+}
+registerStoreLevelTemplates();
 
 const LEVELS = {
   list(opts){
@@ -2892,14 +3308,14 @@ const LEVELS = {
     syncCatalog();
     return id;
   },
-  // template "livello vuoto": via i mesh/effetti del parking lot (restano luci
-  // globali e player), un piano semplice come terreno, pieno giorno fisso.
+  // Open World is the normal authored-project default. This function owns only
+  // the shared baseline (builtin sweep, ground, env, player, radio HUD);
+  // template content itself lives in the LK_LEVEL_TEMPLATES registry.
   templateScene(GAME, templateId){
+    registerStoreLevelTemplates();
+    const registry = window.LK_LEVEL_TEMPLATES;
+    const template = registry && registry.resolve ? registry.resolve(templateId) : null;
     const d = blank();
-    const characterTemplate = templateId === 'character-movement-playground';
-    const penaltyTemplate = templateId === 'penalty-shootout-stadium';
-    const driftTemplate = templateId === 'drift-track-minami';
-    const fpsTemplate = templateId === 'fps-shooter-test';
     const seen = new Set();
     if(GAME && GAME.world && GAME.world.registry){
       for(const o of GAME.world.registry){
@@ -2907,71 +3323,20 @@ const LEVELS = {
         seen.add(o.userData.editorId);
         if(o.isLight || o.userData.light) continue;
         const type = o.userData.editorType || '';
-        if(!characterTemplate && !penaltyTemplate && !fpsTemplate && (type === 'player' || type.indexOf('player') === 0)) continue;
+        // Templates that own their own player Pawn delete the builtin car; the
+        // legacy vehicle/blank templates keep it as their starting player.
+        if((!template || template.keepBuiltinPlayer) && (type === 'player' || type.indexOf('player') === 0)) continue;
         d.deleted.push(o.userData.editorId);
       }
     }
     for(const id of builtinIds){ if(!seen.has(id)) d.deleted.push(id); }
-    if(driftTemplate){
-      // Large drivable apron under the track (the track ships its own grass at y=0)
-      d.added.push({
-        id: 'lvlground_' + Date.now().toString(36),
-        prim: 'plane',
-        name: 'Ground',
-        collide: false,
-        driveSurface: true,
-        props: {color: 0x2a2f39, roughness: .98, metalness: 0},
-        t: {p:[6, -0.03, -40], r:[0, 0, 0], s:[90, 1, 90], v: true},
-        asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
-      });
-    } else {
-      d.added.push({
-        id: 'lvlground_' + Date.now().toString(36),
-        prim: 'plane',
-        name: 'Ground',
-        collide: false,
-        props: {color: 0x39404d, roughness: .95, metalness: 0},
-        t: {p:[0, 0, 0], r:[0, 0, 0], s:[40, 1, 40], v: true},
-        asset: {key:'primitive:plane', name:'Primitive Plane', source:'Editor primitive'},
-      });
-    }
-    d.env = {skyTime: .3, dayLength: 999999};
+    applyTemplateGround(d, template ? template.ground : 'plane');
+    d.env = Object.assign({skyTime: .3, dayLength: 999999}, template && template.env || {});
     d.player = playerTemplateFromLevelLibrary(GAME);
     const radioHud = radioHudTemplateFromLevelLibrary(GAME);
     if(radioHud) d.ui.radioHud = radioHud;
-    if(characterTemplate && window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE){
-      return window.LK_RUNTIME_CHARACTER_LEVEL_TEMPLATE.buildScene(d);
-    }
-    if(penaltyTemplate && window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE){
-      return window.LK_RUNTIME_PENALTY_SHOOTOUT_LEVEL_TEMPLATE.buildScene(d);
-    }
-    if(fpsTemplate && window.LK_RUNTIME_FPS_ARENA_LEVEL_TEMPLATE){
-      return window.LK_RUNTIME_FPS_ARENA_LEVEL_TEMPLATE.buildScene(d);
-    }
-    if(driftTemplate && window.LK_RUNTIME_DRIFT_TRACK){
-      const gen = window.LK_RUNTIME_DRIFT_TRACK;
-      const params = gen.defaultParams();
-      let spawn = null;
-      try {
-        const built = gen.build(THREE, params);
-        spawn = built.spawn;
-        disposeObject3D(built.group);
-      } catch(err){ console.warn('LotKing drift template: spawn probe failed', err); }
-      d.added.push({
-        id: 'drifttrack_' + Date.now().toString(36),
-        kind: 'driftTrack',
-        name: 'Drift Track (Minami)',
-        collide: false,
-        physics: false,
-        props: params,
-        asset: {key:'level:driftTrack', name:'Drift Track', source:'Drift Track generator'},
-        t: {p:[0, 0, 0], r:[0, 0, 0], s:[1, 1, 1], v: true},
-      });
-      if(spawn && d.player){
-        d.player.spawn = Object.assign({}, d.player.spawn, {x: spawn.position[0], z: spawn.position[2], heading: spawn.yaw});
-      }
-    }
-    return d;
+    if(!template) return d;
+    return registry.build(template.id, d, {GAME, THREE, disposeObject3D});
   },
   // dal menu del gioco: prepara il lancio di un livello della libreria.
   // Ritorna 'reload' se la pagina sta per ricaricarsi (scena già applicata).
@@ -3017,6 +3382,10 @@ function catalogTracks(){
   return list.map(l => ({
     id: l.id,
     name: l.name,
+    // Menu roles were filtered immediately above. Preserve the positive role
+    // too: dropping it made Editor Play fall back to a stale ED.levelRole from
+    // a previously opened menu project and start an FPS scene as a menu.
+    levelRole:'gameplay',
     active: normalizeLevelId(l.id) === activeId,
     primary: normalizeLevelId(l.id) === activeId || !!l.__lkExportPrimary,
     tag: normalizeLevelId(l.id) === activeId ? 'EDITOR TRACK' : 'CUSTOM TRACK',
@@ -3106,6 +3475,34 @@ function syncCollider(obj){
   const mode = shape.mode === 'complex' ? 'complex' : 'simple';
   col.ref.colliderMode = mode;
   col.ref.meshCollider = false;
+  // Three PlaneGeometry is authored in local XY and normally rotated onto XZ.
+  // Treating its local height as collider `hy` creates a many-metres-tall box;
+  // the Character solver then sees an unreachable top while Cannon happens to
+  // see a thin rotated slab. Normalize an untouched horizontal drive plane to
+  // the shared world-space thin-surface convention used by both runtimes.
+  const directPlane = col.kind !== 'circle' && obj.isMesh && obj.geometry && obj.geometry.type === 'PlaneGeometry';
+  const planeShapeOverride = ['hx','hy','hz','rotX','rotY','rotZ','rot','offsetX','offsetY','offsetZ'].some(key=>Number.isFinite(Number(shape[key])));
+  if(directPlane && obj.userData.driveSurface === true && !planeShapeOverride){
+    const worldBox = new THREE.Box3().setFromObject(obj);
+    const worldSize = worldBox.getSize(new THREE.Vector3());
+    if(worldSize.x > .03 && worldSize.z > .03 && worldSize.y <= .08){
+      const worldCenter = worldBox.getCenter(new THREE.Vector3()), halfThickness = .025;
+      col.ref.x = worldCenter.x;
+      col.ref.y = worldCenter.y - halfThickness;
+      col.ref.z = worldCenter.z;
+      col.ref.hx = worldSize.x / 2;
+      col.ref.hy = halfThickness;
+      col.ref.hz = worldSize.z / 2;
+      col.ref.rotX = col.ref.rotY = col.ref.rotZ = col.ref.rot = 0;
+      // `horizontalSurface` is reserved for complex mesh parts carrying a
+      // partMeshUuid and exact triangle sampling. This direct plane is already
+      // an exact rectangle, so its normalized box is the authoritative floor.
+      col.ref.horizontalSurface = false;
+      removeCompoundColliderParts(col.ref);
+      return;
+    }
+  }
+  col.ref.horizontalSurface = false;
   if(col.kind === 'circle'){
     removeCompoundColliderParts(col.ref);
     const r = Number(shape.r);
@@ -3136,11 +3533,22 @@ function syncCollider(obj){
     col.ref.rot = col.ref.rotY;
     if(mode === 'complex'){
       const list = colliderBoxList(col.ref);
-      const meshBoxes = objectLocalMeshBoxes(obj).filter(partInfo => {
+      const colliderCandidates = objectLocalMeshBoxes(obj);
+      // Keep the established solid-part ordering so existing per-part edits do
+      // not move to another mesh. Horizontal zero/thin meshes (roads, asphalt,
+      // floors) are then appended as shallow boxes: older filtering discarded
+      // them entirely and the Character fell through to the editor grid.
+      const solidParts = colliderCandidates.filter(partInfo => {
         const partBox = partInfo && partInfo.box ? partInfo.box : partInfo;
         const s = partBox.getSize(new THREE.Vector3());
         return s.x > .03 && s.y > .03 && s.z > .03;
       }).slice(0, 24);
+      const horizontalParts = colliderCandidates.filter(partInfo => {
+        const partBox = partInfo && partInfo.box ? partInfo.box : partInfo;
+        const s = partBox.getSize(new THREE.Vector3());
+        return s.x > .03 && s.z > .03 && s.y <= .03;
+      }).slice(0, 8).map(partInfo=>Object.assign({},partInfo,{horizontalSurface:true}));
+      const meshBoxes = solidParts.concat(horizontalParts);
       if(list && meshBoxes.length > 1){
         const worldScale = obj.getWorldScale(new THREE.Vector3());
         col.ref.compoundRoot = true;
@@ -3167,9 +3575,15 @@ function syncCollider(obj){
           part.partIndex = i;
           part.partName = partName;
           part.partMeshUuid = partInfo && partInfo.uuid;
+          // A moved/rescaled complex model invalidates the Character's cached
+          // exact ground sample for this mesh part.
+          part._lkGroundRaySample = null;
+          part._lkGroundMesh = null;
+          part._lkGroundWorldBounds = null;
           part.partMode = partMode;
           part.colliderMode = partMode;
           part.meshCollider = partMode === 'complex';
+          part.horizontalSurface = partInfo&&partInfo.horizontalSurface===true;
           part.enabled = col.ref.enabled !== false && partMode !== 'off';
           part.physics = !!col.ref.physics;
           part.mass = col.ref.mass;
@@ -3251,7 +3665,11 @@ function applyBuiltinRuntimeProps(GAME, obj, props){
   if(props.physicsImpact != null) obj.userData.physicsImpact = physicsImpactFrom(props.physicsImpact);
   if(!hasCollisionState && props.driveSurface == null && props.physicsMass == null && props.physicsImpact == null) return;
   const wantsPhysics = props.physics === true;
-  const wantsCollider = props.collide === true || wantsPhysics;
+  // Drive Surface is a gameplay support contract, not a visual-only tag. Older
+  // projects could save it beside Collision=false, leaving vehicles and Pawns
+  // to fall through the surface until they happened to meet lower geometry.
+  const wantsDriveSurface = props.driveSurface === true || (props.driveSurface == null && obj.userData.driveSurface === true);
+  const wantsCollider = props.collide === true || wantsPhysics || wantsDriveSurface;
   let ref = obj.userData.collider && obj.userData.collider.ref;
   if(wantsCollider){
     ref = ensureStoredCollider(GAME, obj, props.colliderKind);
@@ -4016,6 +4434,8 @@ function applyDynamicTextureTransform(controller){
 
 function installDynamicSaturationShader(material, controller){
   if(!material || !controller) return;
+  const activeRenderer=window.LOT_KING&&window.LOT_KING.core&&window.LOT_KING.core.renderer;
+  if(activeRenderer&&activeRenderer.isWebGPURenderer) return;
   const saturation = Math.max(0, Math.min(2, Number(controller.props.dynamicSaturation == null ? 1 : controller.props.dynamicSaturation)));
   if(controller.saturationUniform) controller.saturationUniform.value = saturation;
   if(controller.shaderMaterial === material) return;
@@ -4289,6 +4709,198 @@ function applyMatProps(obj, p){
       side: base.side != null ? base.side : THREE.FrontSide,
     }), base);
   };
+  const sketchMonoTextureCache = new WeakMap();
+  const sketchColorTextureCache = new WeakMap();
+  const sketchGradientTextures = new Map();
+  const sketchLuminance = color => color ? Math.max(0, Math.min(1,
+    color.r * .2126 + color.g * .7152 + color.b * .0722)) : 1;
+  const sketchGradientMap = bands => {
+    const count = Math.max(3, Math.min(8, Math.round(Number(bands) || 5)));
+    if(sketchGradientTextures.has(count)) return sketchGradientTextures.get(count);
+    const values = new Uint8Array(count);
+    for(let i=0;i<count;i++) values[i] = Math.round(28 + (225 * i / Math.max(1, count - 1)));
+    const texture = new THREE.DataTexture(values, count, 1, THREE.RedFormat);
+    texture.name = 'Lot King sketch tone bands ' + count;
+    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    texture.userData = Object.assign({}, texture.userData, {lkSharedSketchGradient:true});
+    sketchGradientTextures.set(count, texture);
+    return texture;
+  };
+  const copySketchTextureTransform = (target, source) => {
+    if(!target || !source) return target;
+    ['wrapS','wrapT','magFilter','minFilter','anisotropy','mapping','channel','flipY','premultiplyAlpha','unpackAlignment','colorSpace'].forEach(key => {
+      if(source[key] != null) target[key] = source[key];
+    });
+    if(source.repeat && target.repeat) target.repeat.copy(source.repeat);
+    if(source.offset && target.offset) target.offset.copy(source.offset);
+    if(source.center && target.center) target.center.copy(source.center);
+    if(source.rotation != null) target.rotation = source.rotation;
+    target.needsUpdate = true;
+    return target;
+  };
+  const monochromeSketchMap = source => {
+    if(!source || typeof document === 'undefined') return null;
+    const cached = sketchMonoTextureCache.get(source);
+    if(cached) return cached;
+    const image = source.image;
+    const width = Math.max(1, Math.min(1536, Number(image && (image.naturalWidth || image.videoWidth || image.width)) || 0));
+    const height = Math.max(1, Math.min(1536, Number(image && (image.naturalHeight || image.videoHeight || image.height)) || 0));
+    if(!image || !width || !height) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', {alpha:true});
+      if(!context) return null;
+      context.filter = 'grayscale(1) contrast(1.08)';
+      context.drawImage(image, 0, 0, width, height);
+      const texture = copySketchTextureTransform(new THREE.CanvasTexture(canvas), source);
+      texture.name = (source.name || 'Material map') + ' · monochrome sketch';
+      texture.userData = Object.assign({}, texture.userData, {lkRuntimeSketchDerived:true});
+      sketchMonoTextureCache.set(source, texture);
+      return texture;
+    } catch(error){
+      console.warn('LotKing sketch: material texture could not be converted to monochrome; using tonal base color.', error);
+      return null;
+    }
+  };
+  const colorSketchMap = (source, settings) => {
+    if(!source || typeof document === 'undefined') return null;
+    const bands=Math.max(3,Math.min(8,Math.round(Number(settings&&settings.toneBands)||5)));
+    const pigment=Math.max(0,Math.min(1,Number(settings&&settings.pigmentStrength)||0));
+    const paperTint=Math.max(0,Math.min(1,Number(settings&&settings.paperTint)||0));
+    const signature=bands+'|'+pigment.toFixed(2)+'|'+paperTint.toFixed(2);
+    let variants=sketchColorTextureCache.get(source);
+    if(variants&&variants.has(signature))return variants.get(signature);
+    const image=source.image;
+    const sourceWidth=Number(image&&(image.naturalWidth||image.videoWidth||image.width))||0;
+    const sourceHeight=Number(image&&(image.naturalHeight||image.videoHeight||image.height))||0;
+    if(!image||!sourceWidth||!sourceHeight)return null;
+    const scale=Math.min(1,1536/Math.max(sourceWidth,sourceHeight));
+    const width=Math.max(1,Math.round(sourceWidth*scale));
+    const height=Math.max(1,Math.round(sourceHeight*scale));
+    try{
+      const canvas=document.createElement('canvas');
+      canvas.width=width;canvas.height=height;
+      const context=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+      if(!context)return null;
+      context.drawImage(image,0,0,width,height);
+      const pixels=context.getImageData(0,0,width,height),data=pixels.data;
+      const paletteSteps=8+Math.round(bands*.85),toneSteps=Math.max(2,bands-1);
+      for(let i=0;i<data.length;i+=4){
+        const r=data[i]/255,g=data[i+1]/255,b=data[i+2]/255;
+        const l=r*.2126+g*.7152+b*.0722;
+        const tone=Math.round(l*toneSteps)/toneSteps;
+        const saturation=.82+pigment*.32;
+        const grain=((((i>>2)*1103515245+12345)>>>16)&255)/255-.5;
+        const channel=value=>{
+          const painted=tone+(value-l)*saturation;
+          const banded=Math.round(Math.max(0,Math.min(1,painted))*paletteSteps)/paletteSteps;
+          const deposited=painted*(1-pigment*.58)+banded*(pigment*.58)+grain*pigment*.035;
+          return Math.max(0,Math.min(1,deposited*(1-paperTint*.035)+paperTint*.035));
+        };
+        data[i]=Math.round(channel(r)*255);
+        data[i+1]=Math.round(channel(g)*250+paperTint*5);
+        data[i+2]=Math.round(channel(b)*242+paperTint*13);
+      }
+      context.putImageData(pixels,0,0);
+      const texture=copySketchTextureTransform(new THREE.CanvasTexture(canvas),source);
+      texture.name=(source.name||'Material map')+' · color pigment sketch';
+      texture.userData=Object.assign({},texture.userData,{lkRuntimeSketchDerived:true,lkSketchPigmentSignature:signature});
+      if(!variants){variants=new Map();sketchColorTextureCache.set(source,variants);}
+      variants.set(signature,texture);
+      return texture;
+    }catch(error){
+      console.warn('LotKing sketch: material texture could not be filtered into color pigment; preserving source texture.',error);
+      return null;
+    }
+  };
+  const normalizedSketchMaterial = (settings, material) => {
+    const source = settings && typeof settings === 'object' ? settings : {};
+    const mode = source.mode === 'monochrome' ? 'monochrome' : (source.mode === 'color' ? 'color' : 'off');
+    return {
+      enabled:source.enabled === true && mode !== 'off',
+      mode,
+      toneBands:Math.max(3, Math.min(8, Math.round(Number(source.toneBands) || 5))),
+      preserveTexture:source.preserveTexture !== false,
+      paperTint:Math.max(0, Math.min(1, Number.isFinite(Number(source.paperTint)) ? Number(source.paperTint) : .12)),
+      pigmentStrength:Math.max(0, Math.min(1, Number.isFinite(Number(source.pigmentStrength)) ? Number(source.pigmentStrength) : .82)),
+      sourceColor:source.sourceColor == null && material && material.color ? material.color.getHex() : source.sourceColor,
+    };
+  };
+  const applySketchMaterialLayer = (material, settings) => {
+    if(!material) return material;
+    const source = material.lkSketchOriginalMaterial || material;
+    const next = normalizedSketchMaterial(settings, source);
+    const oldMap = material.map;
+    const oldGradient = material.gradientMap;
+    const baseColor = source.color && source.color.clone ? source.color.clone() : new THREE.Color(0xffffff);
+    if(next.mode === 'monochrome'){
+      const luma = sketchLuminance(baseColor);
+      material.color.setRGB(luma, luma, luma);
+      material.map = next.preserveTexture ? monochromeSketchMap(source.map) : null;
+    } else {
+      const luma=sketchLuminance(baseColor),saturation=.82+next.pigmentStrength*.32;
+      material.color.setRGB(
+        Math.max(0,Math.min(1,luma+(baseColor.r-luma)*saturation)),
+        Math.max(0,Math.min(1,luma+(baseColor.g-luma)*saturation)),
+        Math.max(0,Math.min(1,luma+(baseColor.b-luma)*saturation))
+      );
+      material.map = next.preserveTexture ? colorSketchMap(source.map,next) || source.map || null : null;
+    }
+    if(next.paperTint > 0 && material.color){
+      material.color.lerp(new THREE.Color(0xfff1d5), next.paperTint * .12);
+    }
+    material.gradientMap = sketchGradientMap(next.toneBands);
+    material.userData = material.userData || {};
+    material.userData.lkSketchMaterial = next;
+    material.userData.lkSketchMaterialActive = true;
+    if(oldMap !== material.map || oldGradient !== material.gradientMap) material.needsUpdate = true;
+    return material;
+  };
+  const convertToSketchMaterial = (material, settings) => {
+    if(!material || !THREE.MeshToonMaterial) return material;
+    if(material.lkSketchOriginalMaterial) return applySketchMaterialLayer(material, settings);
+    const toon = preserveMaterialMeta(new THREE.MeshToonMaterial({
+      color:material.color && material.color.clone ? material.color.clone() : new THREE.Color(0xffffff),
+      map:material.map || null,
+      normalMap:material.normalMap || null,
+      alphaMap:material.alphaMap || null,
+      emissiveMap:material.emissiveMap || null,
+      emissive:material.emissive && material.emissive.clone ? material.emissive.clone() : new THREE.Color(0x000000),
+      emissiveIntensity:material.emissiveIntensity == null ? 1 : material.emissiveIntensity,
+      transparent:!!material.transparent,
+      opacity:material.opacity == null ? 1 : material.opacity,
+      alphaTest:material.alphaTest == null ? 0 : material.alphaTest,
+      depthTest:material.depthTest !== false,
+      depthWrite:material.depthWrite !== false,
+      blending:material.blending,
+      vertexColors:material.vertexColors === true,
+      fog:material.fog !== false,
+      side:material.side == null ? THREE.FrontSide : material.side,
+    }), material);
+    toon.lkSketchOriginalMaterial = material;
+    return applySketchMaterialLayer(toon, settings);
+  };
+  const restoreOriginalSketchMaterial = material => {
+    if(!material || !material.lkSketchOriginalMaterial) return material;
+    const original = material.lkSketchOriginalMaterial;
+    if(material.lkDynamicTextureController){
+      original.lkDynamicTextureController = material.lkDynamicTextureController;
+      bindDynamicMaterialTexture(original.lkDynamicTextureController, original);
+      delete material.lkDynamicTextureController;
+    }
+    if(original.userData){
+      delete original.userData.lkSketchMaterial;
+      delete original.userData.lkSketchMaterialActive;
+    }
+    if(material.dispose) material.dispose();
+    original.needsUpdate = true;
+    return original;
+  };
   const captureCarPaintBase = material => {
     if(!material || material.lkCarPaintBase) return;
     material.lkCarPaintBase = {
@@ -4442,6 +5054,10 @@ function applyMatProps(obj, p){
     obj.traverse(o => {
       if(!o.isMesh || !o.material) return;
       if(o.userData && o.userData.lkDynamicSurfaceProxy) return;
+      if(patch.sketchMaterial && patch.sketchMaterial.enabled === false){
+        const restoreSketch = (m, i) => materialSlotMatches(o, meshIndex, i, targetSlot) ? restoreOriginalSketchMaterial(m) : m;
+        o.material = Array.isArray(o.material) ? o.material.map(restoreSketch) : restoreSketch(o.material, 0);
+      }
       if(patch.carPaintOverride && patch.carPaintOverride.enabled === true){
         const makePaintPhysical = (m, i) => {
           if(!materialSlotMatches(o, meshIndex, i, targetSlot) || !m) return m;
@@ -4640,6 +5256,11 @@ function applyMatProps(obj, p){
           .some(key => Object.prototype.hasOwnProperty.call(patch, key));
         if(!m.lkDynamicTextureController || dynamicShaderPatch) m.needsUpdate = true;
       });
+      if(patch.sketchMaterial && patch.sketchMaterial.enabled === true){
+        const makeSketch = (m, i) => materialSlotMatches(o, meshIndex, i, targetSlot)
+          ? convertToSketchMaterial(m, patch.sketchMaterial) : m;
+        o.material = Array.isArray(o.material) ? o.material.map(makeSketch) : makeSketch(o.material, 0);
+      }
       if(patch.castShadow != null) o.castShadow = patch.castShadow;
       meshIndex++;
     });
@@ -4663,11 +5284,11 @@ function applyPlayerMaterialProps(GAME, props){
 
 // ------------------------------------------------ factories: primitives
 const PRIM_DEFS = {
-  box:      () => new THREE.BoxGeometry(2, 2, 2),
-  sphere:   () => new THREE.SphereGeometry(1.2, 24, 18),
-  cylinder: () => new THREE.CylinderGeometry(1, 1, 2, 20),
+  box:      props => { const s=props&&props.geometry&&props.geometry.segments||{};return new THREE.BoxGeometry(2,2,2,Math.max(1,Number(s.width)||1),Math.max(1,Number(s.height)||1),Math.max(1,Number(s.depth)||1)); },
+  sphere:   props => { const s=props&&props.geometry&&props.geometry.segments||{};return new THREE.SphereGeometry(1.2,Math.max(3,Number(s.radial)||24),Math.max(2,Number(s.height)||18)); },
+  cylinder: props => { const s=props&&props.geometry&&props.geometry.segments||{};return new THREE.CylinderGeometry(1,1,2,Math.max(3,Number(s.radial)||20),Math.max(1,Number(s.height)||1)); },
   cone:     () => new THREE.ConeGeometry(1, 2, 20),
-  plane:    () => new THREE.PlaneGeometry(4, 4),
+  plane:    props => { const s=props&&props.geometry&&props.geometry.segments||{};return new THREE.PlaneGeometry(4,4,Math.max(1,Number(s.width)||1),Math.max(1,Number(s.depth)||1)); },
   torus:    () => new THREE.TorusGeometry(1.4, .4, 12, 28),
   arc:      () => {
     const arc=1.85,g=new THREE.TorusGeometry(9.15, .06, 6, 56, arc);
@@ -4730,7 +5351,7 @@ function createPrimitive(prim, props){
     lines.castShadow=false;lines.receiveShadow=false;group.add(lines);
     return group;
   }
-  const geo = (PRIM_DEFS[prim] || PRIM_DEFS.box)();
+  const geo = (PRIM_DEFS[prim] || PRIM_DEFS.box)(props);
   const materialOptions = {color:props.color != null ? props.color : 0x8899aa, side:prim === 'plane' || prim === 'triangle' ? THREE.DoubleSide : THREE.FrontSide};
   let mat;
   if(props.materialModel === 'unlit') mat = new THREE.MeshBasicMaterial(materialOptions);
@@ -4775,6 +5396,27 @@ function createPrimitive(prim, props){
     gp.userData.coneResetRotation = [0, 0, 0];
   }
   return gp;
+}
+
+function proceduralAssets(){return typeof window!=='undefined'?window.LK_ENGINE_PROCEDURAL_ASSETS:null;}
+function createProceduralAsset(source){
+  const api=proceduralAssets();
+  if(!api||typeof api.create!=='function')return createPrimitive('box',{color:0x67e8f9,centered:true});
+  return api.create(source,{THREE,createPrimitive,retile:refreshSurfaceTiling});
+}
+function rebuildProceduralAsset(root,source){
+  const api=proceduralAssets();
+  if(!root||!api||typeof api.rebuild!=='function')return null;
+  const recipe=api.normalize(source);
+  api.rebuild(root,recipe,{THREE,createPrimitive,retile:refreshSurfaceTiling});
+  const entry=root.userData&&root.userData.addedEntry;
+  if(entry){
+    const fresh=api.entry(recipe.type,recipe);
+    const authoredProps=cloneData(entry.props||{});
+    entry.procedural=cloneData(recipe);entry.props=Object.assign({},cloneData(fresh.props),authoredProps);
+    applyMatProps(root,entry.props);
+  }
+  refreshSurfaceTiling(root);syncCollider(root);return root;
 }
 
 // ------------------------------------------------ factories: text
@@ -5048,6 +5690,8 @@ function installTextureSurfaceShader(mat, props){
     baseInfluence:Math.max(0, Math.min(1, Number(props && props.surfaceBaseInfluence) || 0)),
     shader:null,
   };
+  const activeRenderer=window.LOT_KING&&window.LOT_KING.core&&window.LOT_KING.core.renderer;
+  if(activeRenderer&&activeRenderer.isWebGPURenderer) return;
   mat.onBeforeCompile = shader => {
     state.shader = shader;
     shader.uniforms.lkSurfaceBaseMap = {value:state.baseMap || placeholderTexture()};
@@ -5580,6 +6224,11 @@ function normalizeCameraProps(props){
     preview:true,
     activeLevelCamera:false,
     outputPlayerIndex:null,
+    // A scene camera had no aspect at all, so a preview had nothing of its own to
+    // honour and fell back to the PLAYER camera's ratio - which is why every camera
+    // previewed as the same shape. `auto` means "no opinion": the level default, and
+    // then the viewport, answer instead. See js/runtime/aspect-policy.js.
+    aspect:'auto',
   }, props || {});
 }
 
@@ -5662,7 +6311,7 @@ function createSceneCamera(props){
 
 function normalizeCinemaStudioProps(props){
   const out = Object.assign({
-    version:2,
+    version:4,
     duration:6,
     fps:24,
     playback:'one-shot',
@@ -5678,14 +6327,28 @@ function normalizeCinemaStudioProps(props){
     lensTracks:[],
     eventTracks:[],
     markers:[],
+    completion:{mode:'cut',duration:1,curve:'ease-in-out',playerId:null,pawnId:''},
   }, props || {});
-  out.version = Math.max(2, Number(out.version) || 1);
+  out.version = Math.max(4, Number(out.version) || 1);
+  out.duration = Math.max(.1, Math.min(86400, Number(out.duration) || 6));
   if(!Array.isArray(out.cameraCuts)) out.cameraCuts = Array.isArray(out.movieTrack) ? out.movieTrack : [];
   out.movieTrack = out.cameraCuts;
   if(!Array.isArray(out.objectTracks)) out.objectTracks = [];
+  out.objectTracks.forEach(track => {
+    track.pathMode = ['linear','smooth','bezier'].includes(track.pathMode) ? track.pathMode : 'linear';
+    track.pathVisible = track.pathVisible !== false;
+  });
   if(!Array.isArray(out.lensTracks)) out.lensTracks = [];
   if(!Array.isArray(out.eventTracks)) out.eventTracks = [];
   if(!Array.isArray(out.markers)) out.markers = [];
+  const completion=Object.assign({mode:'cut',duration:1,curve:'ease-in-out',playerId:null,pawnId:''},out.completion||{});
+  completion.mode=completion.mode==='blend'?'blend':'cut';
+  completion.duration=Math.max(0,Math.min(30,Number(completion.duration)||0));
+  completion.curve=['linear','ease-in','ease-out','ease-in-out'].includes(completion.curve)?completion.curve:'ease-in-out';
+  const playerId=Number(completion.playerId);
+  completion.playerId=Number.isInteger(playerId)&&playerId>=1&&playerId<=4?playerId:null;
+  completion.pawnId=typeof completion.pawnId==='string'?completion.pawnId.trim():'';
+  out.completion=completion;
   return out;
 }
 
@@ -6361,6 +7024,20 @@ function normalizeVehicleGlbRoot(root){
   root.updateMatrixWorld(true);
   return true;
 }
+function hideGlbPhysicsMetadata(root){
+  let hidden = 0;
+  if(!root || !root.traverse) return hidden;
+  root.traverse(node => {
+    const data = node && node.userData || {};
+    const tag = String(data.data || data.kind || '').toLowerCase();
+    if(tag !== 'physics' && !data.sketchbookPhysics) return;
+    node.visible = false;
+    node.userData.lkPhysicsMetadataHidden = true;
+    hidden++;
+  });
+  root.userData.lkHiddenPhysicsMetadataCount = hidden;
+  return hidden;
+}
 function loadGlb(src, fit, opts){
   opts = opts || {};
   return new Promise((resolve, reject) => {
@@ -6368,6 +7045,10 @@ function loadGlb(src, fit, opts){
     const loader = new THREE.GLTFLoader();
     loader.load(src, g => {
       const root = g.scene;
+      // Sketchbook physics nodes contain ordinary renderable meshes. Hide them
+      // as soon as GLTFLoader yields the scene, before it can be registered or
+      // rendered for a frame; Cannon materialization may happen later.
+      if(opts.hidePhysicsMetadata) hideGlbPhysicsMetadata(root);
       // An imported model brings its own maps, and a 4K PBR set is 67 MB per
       // map before mipmaps. The cap applies here, once, rather than being
       // rediscovered as a stutter later.
@@ -6400,7 +7081,11 @@ function loadGlb(src, fit, opts){
   });
 }
 function loadGlbEntry(entry){
-  const opts = {vehicleLike: vehicleLikeGlbEntry(entry), suppressEmbeddedLights:!!entry.embeddedLightsExtracted};
+  const opts = {
+    vehicleLike:vehicleLikeGlbEntry(entry),
+    suppressEmbeddedLights:!!entry.embeddedLightsExtracted,
+    hidePhysicsMetadata:entry.physicsBackend === 'sketchbook-metadata' || entry.metadataMode === 'gltf-extras',
+  };
   if(entry.src) return loadGlb(entry.src, entry.fit, opts).then(root => applyMeshEdits(root, entry.meshEdits));
   const dbKey = entry.dbKey || (entry.asset && entry.asset.dbKey);
   if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey).then(url => loadGlb(url, entry.fit, opts)).then(root => applyMeshEdits(root, entry.meshEdits));
@@ -6507,6 +7192,7 @@ function createFromEntry(entry, GAME, restoreSources){
   if(entry.kind === 'text') return Promise.resolve(createText(entry.textKind || '2d', entry.props));
   if(entry.kind === 'texture') return Promise.resolve(createTexture(entry.textureKind || (entry.props && entry.props.mode) || 'decal', entry.props));
   if(entry.kind === 'glb') return loadGlbEntry(entry);
+  if(entry.kind === 'proceduralAsset') return Promise.resolve(createProceduralAsset(entry.procedural));
   if(entry.kind === 'clone'){
     let src = GAME && GAME.world.registry.find(o => o.userData.editorId === entry.srcId)
       || restoreSources && restoreSources[entry.srcId];
@@ -6647,7 +7333,7 @@ function registerAdded(GAME, obj, entry){
   }
   const wantPhysics = !!(entry && entry.physics) && entry.kind !== 'driftTrack';
   let colliderOpt = null;
-  const hasCollider = entry.kind !== 'driftTrack' && !!(entry && (entry.collide || wantPhysics));
+  const hasCollider = entry.kind !== 'driftTrack' && !!(entry && (entry.collide || wantPhysics || entry.driveSurface === true));
   if(hasCollider){
     const colliderKind = colliderKindFrom(entry && entry.colliderKind);
     const col = colliderKind === 'circle'
@@ -6670,7 +7356,15 @@ function registerAdded(GAME, obj, entry){
   if(entry.kind === 'logicElement') obj.userData.logicInstanceId = obj.userData.editorId || entry.id;
   GAME.core.scene.add(obj);
   applyT(obj, entry.t);
-  if(entry.kind === 'logicElement') syncLogicElementSceneObject(obj, obj.userData.logicGraph || entry.graph || entry.logic);
+  if(entry.kind === 'logicElement'){
+    const graph = obj.userData.logicGraph || entry.graph || entry.logic;
+    // createFromEntry already awaited this exact bundled Sketchbook hierarchy.
+    // Rebuilding it here would dispose the real GLB, recreate a placeholder and
+    // start a second unobserved hydration. Pending/editor-created instances still
+    // take the normal sync path; every other Logic Element is unchanged.
+    if(!groundPlacementMigrated && graph && graph.sketchbookPawn && sketchbookLogicAssetHierarchyReady(obj, graph)) retagLogicElementOwner(obj);
+    else syncLogicElementSceneObject(obj, graph);
+  }
   if(entry.kind === 'driftTrack') syncDriftTrackColliders(GAME, obj);
   if(hasCollider) syncCollider(obj);
   return obj;
@@ -6766,20 +7460,24 @@ function snapshotAddedEntry(obj, baseEntry){
   } else if(ud.matProps){
     entry.props = cloneData(ud.matProps);
   }
-  if(ud.assetKey) entry.asset = {key:ud.assetKey, name:ud.assetName, source:ud.assetSource};
+  if(ud.assetKey) entry.asset = Object.assign({}, entry.asset || {}, {key:ud.assetKey, name:ud.assetName, source:ud.assetSource});
   return entry;
 }
 
 // ------------------------------------------------ effects hook (game + editor loops)
-let _hooked = false;
-let _dynamicSurfaceInteractionInstalled = false;
+const sceneStoreEffectHookToken = {};
 function installDynamicSurfaceInteraction(GAME){
-  if(_dynamicSurfaceInteractionInstalled || !GAME || !GAME.core) return;
+  if(!GAME || !GAME.core) return;
   const renderer = GAME.core.renderer;
   const canvas = renderer && renderer.domElement;
   const scene = GAME.core.scene;
   if(!canvas || !scene) return;
-  _dynamicSurfaceInteractionInstalled = true;
+  const slot='__lkDynamicSurfaceInteraction',previous=GAME[slot];
+  if(previous&&previous.token===sceneStoreEffectHookToken&&previous.canvas===canvas)return;
+  if(previous){
+    if(previous.pointerDown)window.removeEventListener('pointerdown',previous.pointerDown,true);
+    if(previous.pointerUp)window.removeEventListener('pointerup',previous.pointerUp,true);
+  }
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const localPoint = new THREE.Vector3();
@@ -6928,24 +7626,48 @@ function installDynamicSurfaceInteraction(GAME){
   // every real editor/game control.
   window.addEventListener('pointerdown', pointerDown, true);
   window.addEventListener('pointerup', pointerUp, true);
+  const registration={token:sceneStoreEffectHookToken,canvas,pointerDown,pointerUp};
+  try{Object.defineProperty(GAME,slot,{value:registration,writable:true,configurable:true});}catch(err){GAME[slot]=registration;}
 }
 
 function ensureEffectHook(GAME){
   installDynamicSurfaceInteraction(GAME);
-  if(_hooked) return;
-  _hooked = true;
-  GAME.hooks.frame.push(dt => {
+  if(!GAME || !GAME.hooks || !Array.isArray(GAME.hooks.frame)) return;
+  const slot='__lkSceneStoreEffectFrameHook',previous=GAME[slot];
+  if(previous&&previous.__lkSceneStoreEffectHookToken===sceneStoreEffectHookToken&&GAME.hooks.frame.includes(previous)){if(previous.__lkRefreshEffectTargets)previous.__lkRefreshEffectTargets(true);return;}
+  // A lazy/hot reload evaluates this module with fresh closures. Remove the
+  // prior marked hook from the shared GAME before installing the replacement;
+  // otherwise every reload advances Sketchbook mixers and runtime visuals one
+  // extra time per frame.
+  if(previous){for(let index=GAME.hooks.frame.length-1;index>=0;index--)if(GAME.hooks.frame[index]===previous)GAME.hooks.frame.splice(index,1);}
+  for(let index=GAME.hooks.frame.length-1;index>=0;index--){const hook=GAME.hooks.frame[index];if(hook&&hook.__lkSceneStoreEffectHook===true)GAME.hooks.frame.splice(index,1);}
+  let effectTargets=[],effectRegistry=null,effectRegistryLength=-1,effectRefreshElapsed=Infinity;
+  const refreshEffectTargets=force=>{
+    const registry=GAME.world&&Array.isArray(GAME.world.registry)?GAME.world.registry:[];
+    if(!force&&effectRegistry===registry&&effectRegistryLength===registry.length&&effectRefreshElapsed<.75)return;
+    effectRegistry=registry;effectRegistryLength=registry.length;effectRefreshElapsed=0;
+    effectTargets=registry.filter(object=>object&&object.userData&&(typeof object.userData.effectUpdate==='function'||typeof object.userData.logicAnimationUpdate==='function'));
+  };
+  refreshEffectTargets(true);
+  const hook=dt => {
     dynamicMaterialTextures.forEach(controller => {
       if(controller.type === 'vehicle-hud') drawDynamicVehicleHud(controller, false);
       else if(controller.type === 'radio-hud') drawDynamicRadioHud(controller, false);
       else if(controller.video && controller.video.paused && !controller.audioFocusPaused && !document.hidden) controller.video.play().catch(() => {});
     });
-    for(const o of GAME.world.registry){
-      if(o.userData.effectUpdate) o.userData.effectUpdate(dt);
-      if(o.userData.logicAnimationUpdate) o.userData.logicAnimationUpdate(dt);
+    effectRefreshElapsed+=Math.max(0,Number(dt)||0);
+    const registry=GAME.world&&Array.isArray(GAME.world.registry)?GAME.world.registry:[];
+    if(effectRegistry!==registry||effectRegistryLength!==registry.length||effectRefreshElapsed>=.75)refreshEffectTargets(false);
+    for(const o of effectTargets){
+      const data=o&&o.userData;
+      if(data&&typeof data.effectUpdate==='function')data.effectUpdate(dt);
+      if(data&&typeof data.logicAnimationUpdate==='function')data.logicAnimationUpdate(dt);
     }
     runSurfaceWarmup(GAME);
-  });
+  };
+  Object.defineProperties(hook,{__lkSceneStoreEffectHook:{value:true},__lkSceneStoreEffectHookToken:{value:sceneStoreEffectHookToken},__lkRefreshEffectTargets:{value:refreshEffectTargets}});
+  GAME.hooks.frame.push(hook);
+  try{Object.defineProperty(GAME,slot,{value:hook,writable:true,configurable:true});}catch(err){GAME[slot]=hook;}
 }
 
 // ------------------------------------------------ apply the whole saved scene at boot
@@ -6978,6 +7700,12 @@ function applyEnvironment(GAME, env){
   if(env.sunBloom && GAME.systems.sky.sunBloom) GAME.systems.sky.sunBloom.set(env.sunBloom);
   if(env.volClouds && GAME.systems.sky.volClouds) GAME.systems.sky.volClouds.set(env.volClouds);
   if(env.rain && GAME.systems.rain) GAME.systems.rain.set(env.rain);
+  // Applied after rain/clouds: an enabled weather preset is the authority and
+  // must overwrite the individual look values it owns.
+  if(env.weather && window.LK_RUNTIME_WEATHER){
+    const weather = GAME.systems.weather || window.LK_RUNTIME_WEATHER.install(GAME);
+    if(weather) weather.set(env.weather);
+  }
   if(GAME.systems.physics && GAME.systems.physics.setSurfaceWorldCollision && env.surfaceWorldCollision != null){
     GAME.systems.physics.setSurfaceWorldCollision(env.surfaceWorldCollision !== false);
   }
@@ -7008,13 +7736,40 @@ function collectEnvironment(GAME){
   if(GAME.systems.sky.sunBloom) env.sunBloom = GAME.systems.sky.sunBloom.get();
   if(GAME.systems.sky.volClouds && GAME.systems.sky.volClouds.get()) env.volClouds = GAME.systems.sky.volClouds.get();
   if(GAME.systems.rain) env.rain = GAME.systems.rain.get();
+  if(GAME.systems.weather) env.weather = GAME.systems.weather.get();
   if(GAME.systems.physics && GAME.systems.physics.getSurfaceWorldCollision) env.surfaceWorldCollision = GAME.systems.physics.getSurfaceWorldCollision();
   return env;
+}
+
+/** Tear down every object a previous `apply` added: unregister it, detach it and
+ *  free its GPU resources.
+ *
+ *  A Logic Element owns more than meshes - a Pawn, a Cannon body, a mixer - so
+ *  the object's own registered teardown runs first where the world provides one,
+ *  and `disposeObject3D` only frees what is left. Builtins are never touched:
+ *  they are the player, the sky and the ground rig, and `data.deleted` is how the
+ *  scene describes removing one of those. */
+function releaseAddedObjects(GAME){
+  const registry = GAME && GAME.world && Array.isArray(GAME.world.registry) ? GAME.world.registry : null;
+  if(!registry) return 0;
+  const stale = registry.filter(object => object && object.userData && object.userData.addedEntry && !object.userData.builtin);
+  stale.forEach(object => {
+    try {
+      GAME.world.unregister(object);
+      // Mixers and cached clips are not part of the object graph.
+      disposeLogicElementAnimations(object);
+    }
+    catch(err){ console.warn('LotKing store: teardown of "' + (object.name || object.userData.editorId) + '" failed', err); }
+    if(object.parent) object.parent.remove(object);
+    disposeObject3D(object);
+  });
+  return stale.length;
 }
 
 function apply(GAME, sceneOverride, options){
   options = options || {};
   const strict = options.strict === true;
+  const menuBackground = options.menuBackground === true;
   builtinIds = GAME.world.registry.filter(o => o.userData.builtin).map(o => o.userData.editorId);
   ensureEffectHook(GAME);
   const data = sceneOverride || load();
@@ -7023,6 +7778,25 @@ function apply(GAME, sceneOverride, options){
     return Promise.resolve(null);
   }
   GAME.state.sceneReady = false;
+  if(GAME.systems&&GAME.systems.proceduralWorld&&GAME.systems.proceduralWorld.set){
+    GAME.systems.proceduralWorld.set(data.proceduralWorld,{scene:data,rebuild:false,menuBackground});
+  }
+  // Enemy Outpost v5 changes only its generated player presentation: it is the
+  // full Character/TPS showcase now, while fps-shooter-test remains the
+  // explicit arms-only sample. Upgrade saved copies of the template in place so
+  // recreating the level or clearing storage is not required.
+  if(data.template && data.template.id === 'fps-enemy-outpost' && (Number(data.template.version) || 0) < 5){
+    (data.added || []).forEach(entry => {
+      const pawn=entry&&entry.graph&&entry.graph.characterPawn,view=pawn&&pawn.firstPerson;
+      if(!view || pawn.playerId === null || !(entry.asset&&entry.asset.key==='logic:template:logic-template-player-first-person')) return;
+      view.view='third';view.presentation='body';view.hideOwnBody=false;view.showLegs=false;
+      view.thirdPerson=Object.assign({},view.thirdPerson||{},{autoDistance:false,collisionMode:'fixed'});
+      const presentation=(entry.graph.variables||[]).find(variable=>variable&&variable.binding==='firstPerson.presentation');
+      if(presentation)presentation.value='body';
+      entry.name='Player Character (Third Person / Full Body Eye)';
+    });
+    data.template.version=5;
+  }
   // v0.7.1's first penalty preset accidentally authored 20:52 (.62 on the
   // sunrise-based clock) while intending a fixed daytime scene. Migrate only
   // that exact generated value so deliberate user-authored lighting remains
@@ -7092,21 +7866,48 @@ function apply(GAME, sceneOverride, options){
 
   // Vehicle light config can create extra built-in light anchors; do it before
   // transform replay so custom Aux 3/4/... offsets have real targets.
+  let preserveDisabledPlayerVisual = false;
   if(data.player){
     // The native singleton has one scene-level activation state. Historical
     // `enabled + hidden` snapshots are migrated to inactive so a visually
     // absent car cannot retain physics, input, audio or camera ownership.
     const nativePlayerId = GAME.player && GAME.player.car && GAME.player.car.userData && GAME.player.car.userData.editorId;
     const nativeTransform = nativePlayerId && data.transforms && data.transforms[nativePlayerId];
-    const nativePlayerActive = data.player.enabled !== false && data.player.hidden !== true && !(nativeTransform && nativeTransform.v === false);
+    const authoredPlayerVisible = data.player.hidden !== true && !(nativeTransform && nativeTransform.v === false);
+    preserveDisabledPlayerVisual = menuBackground && data.player.enabled === false && authoredPlayerVisible;
+    const nativePlayerActive = data.player.enabled !== false && authoredPlayerVisible;
     if(GAME.player.setEnabled) GAME.player.setEnabled(nativePlayerActive);
     else { GAME.player.enabled = nativePlayerActive; GAME.player.hidden = !nativePlayerActive; }
+    if(preserveDisabledPlayerVisual){
+      // A ROLE menu may use the native vehicle as a non-interactive scene prop.
+      // setEnabled(false) correctly releases control/physics, but its normal
+      // gameplay contract also hides the visual. Restore only that authored
+      // visibility for the isolated menu-background runtime.
+      GAME.player.enabled = false;
+      GAME.player.hidden = false;
+      if(GAME.player.car) GAME.player.car.visible = true;
+    }
   }
   if(data.player && GAME.player.setControllerIndex) GAME.player.setControllerIndex(Object.prototype.hasOwnProperty.call(data.player, 'controllerIndex') ? data.player.controllerIndex : 0);
   if(data.player && data.player.lights && GAME.player.setLights) GAME.player.setLights(data.player.lights);
   if(data.player && data.player.collision && GAME.player.setCollision) GAME.player.setCollision(data.player.collision);
   if(data.player && data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
   if(data.player && data.player.skids && GAME.player.setSkids) GAME.player.setSkids(data.player.skids);
+  if(data.player && data.player.damage && GAME.player.setDamageConfig) GAME.player.setDamageConfig(data.player.damage);
+
+  // Everything a previous apply ADDED is torn down here, before the new entries
+  // are built. `apply` describes the whole scene - `data.deleted` only records
+  // builtins the author removed - and the added loop below unconditionally
+  // constructs one object per entry.
+  //
+  // Without this sweep the two facts combined: applying a scene on top of a
+  // scene kept both. Measured on the FPS level, each apply added ~2000 objects,
+  // ~900 geometries and ~2280 textures and released none of them, so a few level
+  // loads or Play cycles exhausted GPU memory and the tab stopped responding.
+  // The JS heap looked innocent throughout, because textures and geometry live
+  // on the GPU - which is also why the symptom survived a page reload and only a
+  // machine restart appeared to clear it.
+  releaseAddedObjects(GAME);
 
   const byId = {};
   for(const o of GAME.world.registry) byId[o.userData.editorId] = o;
@@ -7123,7 +7924,7 @@ function apply(GAME, sceneOverride, options){
     else delete o.userData.colliderDummyVisibility;
     syncCollider(o);
   }
-  if(GAME.player && GAME.player.car) GAME.player.car.visible = GAME.player.enabled !== false && GAME.player.hidden !== true;
+  if(GAME.player && GAME.player.car) GAME.player.car.visible = preserveDisabledPlayerVisual || (GAME.player.enabled !== false && GAME.player.hidden !== true);
   for(const id in data.transforms){
     const o = byId[id];
     if(o) applyParentLink(o, GAME);
@@ -7152,6 +7953,8 @@ function apply(GAME, sceneOverride, options){
     if(!o) continue;
     GAME.world.unregister(o);
     if(o.parent) o.parent.remove(o);
+    // Detaching an object from the scene graph does not free its GPU buffers.
+    disposeObject3D(o);
   }
   // added objects
   for(const entry of data.added || []){
@@ -7308,11 +8111,12 @@ function apply(GAME, sceneOverride, options){
     if(data.player.dataWidgets && GAME.player.setDataWidgets) GAME.player.setDataWidgets(data.player.dataWidgets);
     if(data.player.exhaust && GAME.player.setExhaust) GAME.player.setExhaust(data.player.exhaust);
     if(data.player.skids && GAME.player.setSkids) GAME.player.setSkids(data.player.skids);
+    if(data.player.damage && GAME.player.setDamageConfig) GAME.player.setDamageConfig(data.player.damage);
     applyPlayerRigTransforms(GAME, data.player);
     if(data.player.engineAudio && GAME.player.setEngineSound){
       // il set embedded entra in libreria se manca, poi si applica per id
       if(data.player.engineAudio.set) SOUND_SETS.upsertImported(data.player.engineAudio.set);
-      GAME.player.setEngineSound(data.player.engineAudio.setId || null);
+      GAME.player.setEngineSound(data.player.engineAudio.setId || null, data.player.engineAudio.set || null);
     }
     if(data.player.headlight && !data.player.lights){
       // headlight loads slightly later than this script → retry briefly
@@ -7333,7 +8137,8 @@ function apply(GAME, sceneOverride, options){
       throw new Error('Caricamento scena atomico fallito (' + failed.length + ' risorse): ' + String(first && first.message || first || 'errore'));
     }
     for(const o of GAME.world.registry) syncCollider(o);
-    if(GAME.systems.physics) GAME.systems.physics.rebuild();
+    if(GAME.systems.proceduralWorld&&GAME.systems.proceduralWorld.rebuildFromScene)GAME.systems.proceduralWorld.rebuildFromScene(data);
+    if(GAME.systems.physics) GAME.systems.physics.rebuild(true);
     GAME.state.sceneReady = true;
     return data;
   });
@@ -7360,6 +8165,8 @@ function collect(GAME){
   if(freezeRuntimeTransforms && old && Array.isArray(old.added)){
     old.added.forEach(entry => { if(entry && entry.id) oldAddedById.set(entry.id, entry); });
   }
+  if(old && old.template != null) d.template = cloneData(old.template);
+  if(old && old.sketchbook != null) d.sketchbook = cloneData(old.sketchbook);
   d.counter = Math.max(old ? old.counter || 0 : 0, _sessionCounter);
   const liveBuiltin = new Set();
   for(const o of GAME.world.registry){
@@ -7453,6 +8260,7 @@ function collect(GAME){
   d.env = freezeRuntimeTransforms
     ? cloneData(GAME.state.editorPreviewManualEnvironment || old && old.env || collectEnvironment(GAME))
     : collectEnvironment(GAME);
+  d.proceduralWorld=GAME.systems&&GAME.systems.proceduralWorld&&GAME.systems.proceduralWorld.get?GAME.systems.proceduralWorld.get():cloneData(old&&old.proceduralWorld||null);
   if(GAME.ui && GAME.ui.radioHud) d.ui.radioHud = JSON.parse(JSON.stringify(GAME.ui.radioHud));
   if(GAME.ui && GAME.ui.vehicleRadar) d.ui.vehicleRadar = JSON.parse(JSON.stringify(GAME.ui.vehicleRadar));
   if(GAME.settings && GAME.settings.getVideoProject) d.ui.video = cloneData(GAME.settings.getVideoProject());
@@ -7598,7 +8406,7 @@ function ensureMenuBackgroundApplied(GAME, preferredRoles){
     appliedMode = 'menu-background';
     appliedLevelId = menuLevel.id;
     reportBundledDemoProgress({progress:66, step:'applying role menu level', level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
-    return apply(GAME || window.LOT_KING, scene, {strict:true})
+    return apply(GAME || window.LOT_KING, scene, {strict:true, menuBackground:true})
       .then(data => {
         reportBundledDemoProgress({progress:84, step:'role menu level applied', level:{id:menuLevel.id, name:menuLevel.name, role:menuLevel.role}});
         return {data, menuLevel};
@@ -7639,7 +8447,7 @@ window.LK_STORE = {
   refreshSurfaceTiling, applySurfaceTexture, isSharedSurfaceTexture,
   lightProps, applyLightProps, applyMatProps, stageMatProps, snapshotAddedEntry,
   verifyPersistenceRoundTrip, persistenceDifferences,
-	  createPrimitive, createText, updateTextObject, createTexture, updateTextureObject, matchTextureSurface, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createDriftTrack, rebuildDriftTrack, syncDriftTrackColliders, removeDriftTrackColliders, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded, normalizeStoredMatProps,
+	  createPrimitive, createProceduralAsset, rebuildProceduralAsset, createText, updateTextObject, createTexture, updateTextureObject, matchTextureSurface, createSceneCamera, updateSceneCameraObject, createCinemaStudio, createLogicElement, syncLogicElementSceneObject, loadLogicElementAsset, playLogicElementAnimation, stopLogicElementAnimation, setLogicElementAnimationSpeed, startLogicElementAnimations, stopLogicElementAnimations, removeLogicElementColliders, updateLogicElementColliderRefs, createDriftTrack, rebuildDriftTrack, syncDriftTrackColliders, removeDriftTrackColliders, createLight, createEmitter, loadGlb, loadGlbRaw, extractEmbeddedLights, applyMeshEdits, normalizeMeshEdits, assignMeshEditIds, createFromEntry, registerAdded, normalizeStoredMatProps,
   EFFECT_PRESETS, PRIM_DEFS,
   apply, ensureApplied, ensureMenuBackgroundApplied, findMenuBackgroundLevel, collect, nextId,
   ensureBundledDemoProject,

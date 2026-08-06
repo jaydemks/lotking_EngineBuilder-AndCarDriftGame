@@ -151,6 +151,10 @@ const EXPECTED_KINDS = [
   'concrete', 'concreteSmooth', 'asphalt', 'dirt', 'gravel', 'sand',
   'metalPainted', 'metalCorrugated', 'metalRusted', 'metalTread',
   'wood', 'plywood', 'sandbag', 'brick', 'cinderblock', 'rubber', 'tarp', 'plaster',
+  // sport / stadium family
+  'turf', 'turfStriped', 'stadiumSeat', 'runningTrack', 'advertBoard',
+  // snow family (snowboarding level template)
+  'snowPowder', 'snowGroomed', 'snowPacked', 'snowIce', 'snowRock',
 ];
 
 // ------------------------------------------------ registry
@@ -164,7 +168,7 @@ test('every level-dressing kind is registered with a label, a group and defaults
   entries.forEach(entry => {
     assert.ok(entry.label && typeof entry.label === 'string', entry.id + ' has no label');
     assert.ok(entry.labelIt && typeof entry.labelIt === 'string', entry.id + ' has no italian label');
-    assert.ok(['ground', 'concrete', 'metal', 'wood', 'masonry', 'fabric', 'misc'].includes(entry.group), entry.id + ' has an unknown group');
+    assert.ok(['ground', 'concrete', 'metal', 'wood', 'masonry', 'fabric', 'sport', 'snow', 'misc'].includes(entry.group), entry.id + ' has an unknown group');
     assert.ok(entry.tile > 0, entry.id + ' has no default tile');
     assert.ok(entry.roughness >= 0 && entry.roughness <= 1, entry.id + ' roughness hint out of range');
     assert.ok(entry.metalness >= 0 && entry.metalness <= 1, entry.id + ' metalness hint out of range');
@@ -494,7 +498,21 @@ test('scene-store materialises surfaceTexture and protects shared maps on delete
   assert.ok(source.includes("props.surfaceTexture != null && props.materialModel !== 'unlit'"), 'unlit glow panels must stay flat');
   assert.ok(source.includes("hasOwnProperty.call(patch, 'surfaceTexture')"), 'applyMatProps must carry surfaceTexture');
   assert.ok(source.includes('function refreshSurfaceTiling'), 'tiling must be refreshed from the live scale');
-  assert.ok(source.includes('!isSharedSurfaceTexture(mat.map)'), 'disposeObject3D must not dispose shared surface maps');
+  // disposeObject3D now frees every texture slot, not only `map`, so the shared
+  // surface guard lives in the per-slot sweep it delegates to. What matters is
+  // that a pack-owned texture is still never freed with one object.
+  assert.ok(source.includes('function disposeMaterialTextures'), 'material textures need a single disposal sweep');
+  assert.ok(/function disposeMaterialTextures[\s\S]{0,600}if\(isSharedSurfaceTexture\(texture\)\) return;/.test(source),
+    'the texture sweep must skip shared surface textures');
+  // Read the whole function rather than a byte budget from its opening line: the
+  // frees now sit inside a deferred release closure, so the guarded sweep is
+  // further down than it used to be without being any less required.
+  // Match the CALL, not its argument list: the sweep has since grown a third
+  // parameter (the set of textures a live object still uses), and pinning the exact
+  // two-argument form failed on a change that was entirely correct.
+  const sweep = source.slice(source.indexOf('function disposeObject3D'), source.indexOf('function logicElementElementPosition'));
+  assert.match(sweep, /disposeMaterialTextures\(mat, seen/,
+    'disposeObject3D must go through that guarded sweep');
   assert.ok(source.includes('!isSharedSurfaceTexture(material[key])'), 'the mesh-edit disposal must not dispose shared surface maps');
   assert.ok(source.includes('surfaces().adopt(material)'), 'duplicated objects need their own texture instances');
 });

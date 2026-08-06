@@ -5,6 +5,14 @@
 (function(){
 'use strict';
 
+function runtimeAvailability(options){
+  const state = options || {};
+  if(state.editorPreview === true) return true;
+  if(state.config && state.config.enabled === false) return false;
+  if(typeof state.resolveAvailability !== 'function') return false;
+  return !!state.resolveAvailability(state.config || {}, state.playerId);
+}
+
 function createRadioHud(deps){
   const tr = (en, it) => window.LOT_KING && LOT_KING.i18n && LOT_KING.i18n.lang === 'it' ? (it || en) : en;
   const paths = deps.paths;
@@ -17,7 +25,7 @@ function createRadioHud(deps){
     : function(){ return false; };
   const resolveAvailability = typeof deps.resolveAvailability === 'function'
     ? deps.resolveAvailability
-    : function(){ return true; };
+    : function(){ return false; };
   const musicLib = window.LK_RUNTIME_MUSIC_LIBRARY;
 
   const cfg = {
@@ -494,10 +502,15 @@ function createRadioHud(deps){
     canvas.classList.toggle('slowmo', open && !editorPreview);
   }
   function syncAvailability(){
-    // Explicitly authoring a Radio HUD material is itself a valid radio binding.
-    // Without this, the mesh could animate as clicked while every action was
-    // rejected because the vehicle-level Radio toggle happened to be off.
-    const next = editorPreview || materialSurfaceAvailable || !!resolveAvailability(cfg);
+    // Radio is a vehicle capability, never ambient level music. An authored
+    // material surface may mirror/control it, but cannot create playback when
+    // the active player has no enabled, visible vehicle.
+    const next = runtimeAvailability({
+      editorPreview,
+      resolveAvailability,
+      config:cfg,
+      playerId:activePlayerId,
+    });
     if(next === available) return available;
     available = next;
     el.radio.classList.toggle('unavailable', !available);
@@ -720,6 +733,8 @@ function createRadioHud(deps){
   function surfaceAction(action, value){
     // A material-surface click is itself an explicit user gesture. It may
     // control the same player even while the large TAB overlay is closed.
+    syncAvailability();
+    if(!available && !editorPreview) return false;
     const playFromSurface = () => {
       if(!library.count()){
         popup(tr('RADIO: NO TRACKS', 'RADIO: NESSUN BRANO'), '#ff5566');
@@ -789,5 +804,5 @@ function createRadioHud(deps){
     getTrackIndex: () => idx};
 }
 
-window.LK_RUNTIME_RADIO_HUD = Object.freeze({create: createRadioHud});
+window.LK_RUNTIME_RADIO_HUD = Object.freeze({create: createRadioHud, runtimeAvailability});
 })();

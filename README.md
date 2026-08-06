@@ -4,9 +4,9 @@
 [![Sponsor on GitHub](https://img.shields.io/badge/SPONSOR-jaydemks-ea4aaa?style=for-the-badge&logo=githubsponsors)](https://github.com/sponsors/jaydemks)
 
 > It started as a parking-lot drift prototype.<br>
-> Now it is growing into a browser-native engine for building many kinds of games and interactive 3D experiences.
+> It is now a local-first, browser-native engine for building, testing, collaborating on and exporting playable 3D experiences.
 
-**Current version: `v0.7.7` · Experimental Alpha**
+**Current version: `v0.7.8` · Experimental Alpha**
 
 [Open Lot King Online](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/) ·
 [Technical README](README_TECHNICAL.md) ·
@@ -17,23 +17,46 @@
 
 ## What is Lot King?
 
-Lot King is an experimental, local-first 3D game engine and visual editor that runs entirely in the browser.
+Lot King is an experimental, local-first 3D game engine and visual editor that runs entirely in the browser. Version `0.7.8` broadens the original vehicle foundation with illustrated rendering, procedural worlds, improved Character and Animal Pawns, more vehicle families, Cinema Studio sequencing, browser-to-browser collaboration and multiplayer, and an optional Blender Live Link.
 
 It began as a small car drift game, but it is not a car-only editor. It is gradually growing into a tool for assembling imported 3D assets into levels, interactive visuals and playable browser projects, then connecting them through physics, animation, cinematics, sound and visual JavaScript logic.
 
 Lot King is not a complete 3D modelling package. Vehicles, characters and other complex meshes are normally created in Blender or another dedicated tool and then imported as GLB, GLTF or FBX assets. Inside Lot King you can place and transform them, adjust supported mesh, material, texture and animation properties, and connect them to gameplay systems.
 
-For four-wheel vehicles, `tools/blender 5.0+` includes the optional open-source Car Wheel GLB Rigger 0.2.2 source and Blender-built ZIP. In addition to wheels, discs and calipers, it can detect and rig an interior steering wheel for the shared native/Logic vehicle runtime.
+For vehicles, `tools/blender 5.0+` includes the optional open-source Vehicle GLB Rigger 0.3.0 source and Blender-built ZIP. It supports the established car wheel, brake and steering setup plus guided Normal and DollBody-compatible vehicle and aircraft workflows.
 
 The main workflow is simple:
 
 **Assemble an experience → test it immediately → export it for the browser.**
 
-Today, the easiest ready-to-use results are still simple games and 3D visuals, with car racing and drifting as the most complete gameplay path. Friendly one-step tools for common objectives, game rules and fully customizable UI flows are still being developed.
+Today, the easiest ready-to-use results are still simple games and 3D visuals, with car racing and drifting as the most complete gameplay path. Editable starter templates and a shared objective system cover several additional game types; broader one-step rules and fully customizable UI flows are still being developed.
 
 Logic Elements already provide a Blueprint-inspired way to create many custom interactions and gameplay dynamics through visual JavaScript logic. The system will become broader and easier over time, with development guided by real testing, feedback, contributions and other forms of community support.
 
 Lot King is not intended to replace established engines. It is an ongoing attempt to see how far a local-first, browser-only engine can be pushed.
+
+For me, Lot King is already a major project and something I am proud of. It is not perfect—hundreds of fixes, refinements and additions remain—but even at this stage, what it can already do is remarkable.
+
+---
+
+## v0.7.8 editor screenshots
+
+Captured directly from the `v0.7.8` release.
+
+<table>
+  <tr>
+    <td><img src="docs/media/Editor_sample_1.png" alt="Lot King v0.7.8 editor sample 1"></td>
+    <td><img src="docs/media/Editor_sample_2.png" alt="Lot King v0.7.8 editor sample 2"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/Editor_sample_3.png" alt="Lot King v0.7.8 editor sample 3"></td>
+    <td><img src="docs/media/Editor_sample_4.png" alt="Lot King v0.7.8 editor sample 4"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/Editor_sample_5.png" alt="Lot King v0.7.8 editor sample 5"></td>
+    <td><img src="docs/media/Editor_sample_6.png" alt="Lot King v0.7.8 editor sample 6"></td>
+  </tr>
+</table>
 
 ---
 
@@ -47,35 +70,25 @@ https://github.com/user-attachments/assets/9c1c8dc2-2d93-4434-958f-23d9f546ac55
 
 https://github.com/user-attachments/assets/c481af98-95d2-46b7-aac4-99a6be812e85
 
-The current `v0.7.7` contains additional systems and fixes that are not shown in these videos yet.
+The `v0.7.8` release contains additional systems and fixes that are not shown in these videos yet.
 
 ---
 
 ## What can it do now?
 
-- Build projects with multiple levels and custom 3D menu scenes.
-- Import GLB, GLTF and FBX-based assets, then place, transform and configure their supported properties.
-- Import local GLB, GLTF, FBX and PBR texture assets through the editor asset library.
-- Build simple playable browser projects and interactive 3D visuals.
-- Create custom interactions and reusable gameplay behavior with Logic Elements.
-- Create and tune Race or Drift vehicle gameplay.
-- Edit collision, physics, cameras, lights, effects, sound and the currently supported HUD systems.
-- Configure Vehicle, Character and Soccer Pawns around imported assets or placeholders.
-- Build first- **and** third-person shooter gameplay from one rig: eye camera or over-the-shoulder camera, aim down sights, telescopic sights with real magnification, configurable hitscan weapons, arms and a visible weapon.
-- Give characters a full traversal move set — crouch, slow walk, slide, roll, vault, mantle, ladders, climbable walls and ledge hanging with pull-up — shared by both camera views.
-- Author doors, ladders, carryable crates, delivery pads, buttons and pickups as plain data on any object, so a primitive or an imported model becomes interactive without a second code path.
-- Choose the shape of the inventory per project — no inventory, weapon slots, or a backpack that stores consumables — and drop, throw, swap and pick weapons back up off the ground.
-- Give characters health, armour, stamina and respawn through the same damage contract that makes props shootable.
-- See the rounds fly: tracers shaped by the weapon calibre and impact flashes, drawn from a fixed pool so sustained fire never costs more than the first shot.
-- Drop, throw and shoot loose objects and watch them fall, bounce and settle according to their mass.
-- Design on-foot audio in the Character Sound Designer: footsteps that change with the surface underfoot, weapon fire per weapon class, jump, landing and breathing. Every sound is synthesised procedurally by default, so a project has full character audio with no media files; any slot can be replaced with your own sample.
-- Assign rigged characters and Mixamo animations through Pawn Studio.
-- Create camera sequences with Cinema Studio and render them to frame-accurate WebM footage independently of realtime playback speed.
-- Test projects through Play Preview or Simulate.
-- Export portable `.lkep.json` projects.
-- Export GitHub-safe split project folders: a small `.lkep.json` pointer, manifest and independently verified ~8 MB parts that Editor and Game reassemble automatically.
-- Export standalone playable ZIP builds for static websites.
-- Experiment with browser-to-browser P2P gameplay and coworking.
+- Build local-first projects with multiple levels, custom 3D menu scenes, reusable Logic Elements and editable game-mode starters.
+- Import GLB, GLTF, FBX and PBR assets, or keep supported scene objects and assets synchronized with Blender through the optional Live Link.
+- Author collision, physics, materials, cameras, lights, weather, sound, UI, objectives and procedural assets directly in the editor.
+- Use stable WebGL 2 rendering or experiment with WebGPU and its automatic fallback, Ray Lighting and progressive Path Tracing.
+- Turn the complete scene or individual materials into a configurable colour or monochrome illustrated Manga / paper-sketch style.
+- Generate performant island terrain, water and distant archipelagos around existing playable areas.
+- Build car, truck, trailer, motorcycle, bicycle, boat, airplane and helicopter gameplay through native or reusable Logic vehicle foundations.
+- Enter and leave vehicles with visible occupants, authorable full-body seating, engine sound, damage, destruction and towing support where applicable.
+- Configure Character, Animal, Vehicle and Soccer Pawns around imported assets or engine placeholders.
+- Build first- and third-person character gameplay with responsive animation blending, traversal, combat, inventory, physical death and contextual weapon grips through the evolving Pawn Studio workflow.
+- Create reusable Cinema Studio sequences with variable duration, editable spline motion, presets and frame-accurate WebM rendering.
+- Collaborate in realtime through encrypted browser-to-browser coworking with element locks and coordinated local saves, or build host-authoritative P2P multiplayer sessions.
+- Test immediately through Play Preview or Simulate, then export portable projects, GitHub-safe split folders or standalone playable ZIP builds for static websites.
 
 For the complete feature and architecture breakdown, read the
 [Technical README](README_TECHNICAL.md).
@@ -86,7 +99,7 @@ For the complete feature and architecture breakdown, read the
 
 The hosted version works as a private writable browser workspace.
 
-Projects and imported assets are stored only inside the current browser profile. They are not uploaded to GitHub and are not shared with other visitors.
+Projects and imported assets are stored only inside the current browser profile. They are not uploaded to GitHub or exposed to other visitors automatically; P2P coworking shares changes only inside a session the user deliberately joins.
 
 Choosing a local folder is optional. It can be used as a portable mirror when direct file access is preferred.
 
@@ -96,11 +109,11 @@ Important projects should still be backed up as `.lkep.json` files, split projec
 
 ---
 
-## From v0.0.1 to v0.7.7
+## From v0.0.1 to v0.7.8
 
 The first version, `v0.0.1`, was a small drift prototype created from one prompt.
 
-The Git-ready public history began at `v0.5.0-beta`. Since then, Lot King has gone through **28 public versioned milestones**, reaching `v0.7.7`.
+The Git-ready public history began at `v0.5.0-beta`. Lot King has completed **29 public versioned milestones** through `v0.7.8`.
 
 Each milestone preserves a real stage of the project rather than hiding the development history behind one final upload.
 
@@ -163,9 +176,9 @@ There is no mandatory framework, bundler or cloud backend.
 
 Lot King is usable, but still experimental.
 
-The vehicle and drift workflow is the strongest part today, and on-foot shooter gameplay is the fastest moving. Character animation, visual logic, Cinema Studio, P2P systems, browser compatibility and larger project round trips still need more testing and refinement. Faster authoring for common objectives, game rules and project-specific UI is also still missing.
+The vehicle and drift workflow is the strongest part today, and on-foot shooter gameplay is the fastest moving. Character/animal animation, visual logic, Cinema Studio, P2P systems, browser compatibility and larger project round trips still need more testing and refinement. Common objectives now have an editable shared foundation; broader game rules and project-specific UI still need faster authoring.
 
-The FPS layer is playable end to end but not finished: item contacts are spheres against boxes rather than a rigid-body solver, hits leave a flash rather than a decal, and traversal is animated procedurally until real clips are bound. The current limits are listed in full in [First Person Pawn](docs/FIRST_PERSON_PAWN.md).
+The Character layer is playable but not finished. Pawn Studio and authored clips now cover locomotion, traversal, weapon grips, cameras and vehicle seating, while retargeting, IK, animation edge cases and physical interactions still need refinement. The current FPS limits are listed in full in [First Person Pawn](docs/FIRST_PERSON_PAWN.md).
 
 Bugs and incomplete systems should be expected while development continues.
 
@@ -177,7 +190,7 @@ Feedback, testing, documentation, example projects, reusable logic and other for
 
 - [Technical README](README_TECHNICAL.md)
 - [Startup guide](HOW_TO_START.md)
-- [Current v0.7.7 release notes](RELEASE_NOTES_v0.7.7.md)
+- [Current v0.7.8 release notes](RELEASE_NOTES_v0.7.8.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Runtime modules](docs/RUNTIME_MODULES.md)
 - [First Person Pawn](docs/FIRST_PERSON_PAWN.md) — the shooter layer: rig, traversal, items, interactions, vitals and inventory
@@ -190,6 +203,15 @@ A screenshot-based manual may be added later, when the interface is stable enoug
 ## Credits
 
 Lot King builds on [Three.js](https://threejs.org/), [cannon.js](https://github.com/schteppe/cannon.js) and [JSZip](https://stuk.github.io/jszip/).
+
+The optional advanced Pawn family and parts of the bundled demo adapt vehicle
+physics, vehicle systems and Character foundations from Jan Bláha's
+MIT-licensed [Sketchbook](https://github.com/swift502/Sketchbook). Sincere
+thanks to [Jan Bláha (`swift502`)](https://github.com/swift502) and to the
+contributors thanked by the original project:
+[aleqsunder](https://github.com/aleqsunder),
+[barhatsor](https://github.com/barhatsor) and
+[danshuri](https://github.com/danshuri).
 
 The progressive Path Tracing mode uses Garrett Johnson's
 [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer). The

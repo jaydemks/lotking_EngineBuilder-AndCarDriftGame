@@ -45,6 +45,218 @@ function createPost(deps){
     high:{samples:16,radius:.13,scale:.54,denoiseSamples:16,blend:.72},
     ultra:{samples:24,radius:.11,scale:.48,denoiseSamples:24,blend:.76},
   });
+  const styleValue=(value,fallback,min=0,max=1)=>{
+    const number=Number(value);
+    return Math.max(min,Math.min(max,Number.isFinite(number)?number:fallback));
+  };
+
+  // WebGPURenderer cannot execute the legacy EffectComposer/ShaderPass graph.
+  // Keep the same scene/camera and route it through Three's common TSL render
+  // pipeline. This path also works if WebGPURenderer internally selected its
+  // WebGL 2 fallback, so the engine never needs a second material graph.
+  if(renderer&&renderer.isWebGPURenderer){
+    const TSL=THREE.TSL;
+    if(!TSL||typeof TSL.pass!=='function'||typeof THREE.RenderPipeline!=='function'){
+      return {ok:false,webgpu:true,supportsScoped:false,compatibility,reason:'TSL RenderPipeline unavailable'};
+    }
+    const scenePass=TSL.pass(scene,camera);
+    const sceneColor=scenePass.getTextureNode('output');
+    const gradeExposure=TSL.uniform(1);
+    const gradeBrightness=TSL.uniform(0);
+    const gradeContrast=TSL.uniform(1);
+    const gradeSaturation=TSL.uniform(1);
+    const sketchStrength=TSL.uniform(0);
+    const sketchDetail=TSL.uniform(.72);
+    const sketchHatching=TSL.uniform(1);
+    const sketchLineNoise=TSL.uniform(.35);
+    const sketchPigment=TSL.uniform(.82);
+    const sketchColorNoise=TSL.uniform(1);
+    const sketchSaturation=TSL.uniform(1);
+    const sketchLightGain=TSL.uniform(1);
+    const sketchAtmosphere=TSL.uniform(.68);
+    const sketchPaper=TSL.uniform(.38);
+    const sketchPaperMode=TSL.uniform(1);
+    const sketchStorybookMode=TSL.uniform(0);
+    const sketchMonochrome=TSL.uniform(0);
+    // The editor renders into a viewport surrounded by toolbars and panels.
+    // screenUV addresses that whole canvas, while scenePass is deliberately
+    // sized to the local 3D rectangle. Sampling the pass with screenUV therefore
+    // stretches/crops it and lets the canvas background appear at its sides.
+    // viewportUV keeps editor, Play and standalone game on the same camera
+    // aspect contract (and is identical to screenUV for a full-screen game).
+    const postUv=TSL.viewportUV;
+    const postSize=TSL.viewportSize;
+    const sceneSample=sceneColor.sample(postUv);
+    const exposed=sceneSample.rgb.mul(gradeExposure);
+    const luminance=TSL.luminance(exposed);
+    const saturated=TSL.mix(TSL.vec3(luminance),exposed,gradeSaturation);
+    const graded=saturated.sub(.5).mul(gradeContrast).add(.5).add(gradeBrightness);
+    const screenPixel=postUv.mul(postSize);
+    const paperNoise=TSL.fract(TSL.sin(TSL.dot(screenPixel,TSL.vec2(12.9898,78.233))).mul(43758.5453)).sub(.5);
+    const pixelSize=TSL.vec2(1).div(postSize.max(TSL.vec2(1)));
+    const left=sceneColor.sample(postUv.sub(TSL.vec2(pixelSize.x,0))).rgb;
+    const right=sceneColor.sample(postUv.add(TSL.vec2(pixelSize.x,0))).rgb;
+    const up=sceneColor.sample(postUv.add(TSL.vec2(0,pixelSize.y))).rgb;
+    const down=sceneColor.sample(postUv.sub(TSL.vec2(0,pixelSize.y))).rgb;
+    const edge=TSL.abs(TSL.luminance(left).sub(TSL.luminance(right)))
+      .add(TSL.abs(TSL.luminance(up).sub(TSL.luminance(down))))
+      .mul(TSL.mix(5,14,sketchDetail));
+    // Edge ink and cross-hatching are separate controls. Line noise changes
+    // contour weight only, so a clean drawing never grows a screen-space grid.
+    const ink=TSL.smoothstep(.055,.34,edge).mul(sketchStrength)
+      .mul(TSL.float(1).add(paperNoise.mul(sketchLineNoise).mul(.45)));
+    const toneSteps=TSL.mix(5,9,sketchDetail);
+    const posterized=TSL.floor(TSL.luminance(graded).mul(toneSteps)).div(toneSteps.sub(1)).clamp(0,1);
+    const baseColor=graded.clamp(0,1);
+    const materialNoise=TSL.fract(TSL.sin(TSL.dot(screenPixel.add(baseColor.rg.mul(71)),TSL.vec2(4.898,7.23))).mul(23421.631)).sub(.5);
+    const baseLuma=TSL.luminance(baseColor);
+    const chroma=baseColor.sub(TSL.vec3(baseLuma));
+    const pigmentTone=TSL.mix(baseLuma,posterized,sketchPigment.mul(.84));
+    const rawPigment=TSL.vec3(pigmentTone).add(chroma.mul(TSL.mix(1,1.18,sketchPigment))).clamp(0,1);
+    const paletteSteps=TSL.mix(8,15,sketchDetail);
+    const paletteColor=TSL.floor(rawPigment.mul(paletteSteps).add(.5)).div(paletteSteps).clamp(0,1);
+    const coloredInk=TSL.mix(rawPigment,paletteColor,sketchPigment.mul(.62));
+    const hatchWave=TSL.sin(screenPixel.x.add(screenPixel.y.mul(.72)).mul(TSL.mix(.42,.82,sketchDetail)));
+    const hatchA=TSL.step(TSL.mix(.52,.78,sketchDetail),hatchWave.mul(.5).add(.5));
+    const hatchB=TSL.step(.86,TSL.sin(screenPixel.x.sub(screenPixel.y.mul(.58)).mul(.47)).mul(.5).add(.5));
+    const shadow=TSL.smoothstep(.76,.16,posterized);
+    const hatch=hatchA.add(hatchB.mul(TSL.smoothstep(.48,.08,posterized)))
+      .mul(shadow).mul(sketchStrength).mul(sketchHatching).mul(.105);
+    const fibre=TSL.sin(screenPixel.y.mul(.115).add(paperNoise.mul(3.1))).mul(.5).add(.5);
+    const pencilJitter=TSL.float(1).add(paperNoise.mul(sketchLineNoise).mul(.45));
+    const paperColor=TSL.vec3(1,.975,.91);
+    const inkIllustrated=TSL.mix(coloredInk,paperColor,sketchPaper.mul(.08))
+      .sub(ink.mul(.88)).sub(hatch).add(paperNoise.mul(sketchPaper).mul(.065)).clamp(0,1);
+    const pencilTone=TSL.smoothstep(-.06,1.08,posterized);
+    const pencilPigment=TSL.mix(TSL.vec3(pencilTone),graded.clamp(0,1),.56);
+    const paperSketch=TSL.mix(paperColor,pencilPigment,.82)
+      .sub(ink.mul(pencilJitter).mul(1.02))
+      .sub(hatch.mul(1.22))
+      .add(paperNoise.mul(sketchPaper).mul(.045))
+      .add(fibre.sub(.5).mul(sketchPaper).mul(.025)).clamp(0,1);
+    const chromaEnergy=TSL.length(chroma);
+    const softAtmosphere=TSL.smoothstep(.24,.018,chromaEnergy)
+      .mul(TSL.smoothstep(.08,.88,baseLuma)).mul(TSL.float(1).sub(ink.clamp(0,1)));
+    const brightFx=TSL.smoothstep(.68,1.25,TSL.max(exposed.r,TSL.max(exposed.g,exposed.b)));
+    const shadowWash=TSL.mix(TSL.vec3(.82,.87,1.02),TSL.vec3(1),TSL.smoothstep(.12,.72,baseLuma));
+    const paintedPigment=coloredInk.mul(shadowWash)
+      .add(materialNoise.mul(sketchPigment).mul(sketchColorNoise).mul(.052))
+      .add(paperNoise.mul(sketchPaper).mul(.025));
+    const atmosphereWash=paintedPigment
+      .add(materialNoise.mul(softAtmosphere).mul(sketchAtmosphere).mul(sketchColorNoise).mul(.11))
+      .add(TSL.vec3(1,.82,.55).mul(brightFx).mul(sketchAtmosphere).mul(.09));
+    const coloredLine=TSL.mix(TSL.vec3(.035,.028,.025),paintedPigment.mul(.16),.42);
+    const storybookInk=TSL.mix(atmosphereWash,coloredLine,ink.clamp(0,1))
+      .sub(hatch.mul(TSL.mix(.72,1.18,sketchPigment)))
+      .clamp(0,1);
+    const storybook=TSL.mix(storybookInk,paperColor,sketchPaper.mul(.045).mul(softAtmosphere)).clamp(0,1);
+    const illustrated=TSL.mix(TSL.mix(inkIllustrated,paperSketch,sketchPaperMode),storybook,sketchStorybookMode);
+    const styled=TSL.mix(graded,illustrated,sketchStrength);
+    const styledLuma=TSL.luminance(styled);
+    const coloredStyled=TSL.mix(TSL.vec3(styledLuma),styled,sketchSaturation).max(TSL.vec3(0));
+    const finalColor=TSL.mix(coloredStyled,TSL.vec3(styledLuma),sketchMonochrome)
+      .mul(TSL.mix(1,sketchLightGain,sketchStrength));
+    const pipeline=new THREE.RenderPipeline(renderer,TSL.vec4(finalColor,sceneSample.a));
+    const initialSize=size();
+    const rawScenePassSetSize=scenePass.setSize.bind(scenePass);
+    let scopedWidth=0;
+    let scopedHeight=0;
+    let scopedPixelRatio=0;
+    function setScopedSize(width,height){
+      const nextWidth=Math.max(1,Math.round(Number(width)||1));
+      const nextHeight=Math.max(1,Math.round(Number(height)||1));
+      const nextPixelRatio=Math.max(.01,Number(renderer.getPixelRatio&&renderer.getPixelRatio())||1);
+      if(nextWidth===scopedWidth&&nextHeight===scopedHeight&&nextPixelRatio===scopedPixelRatio)return;
+      scopedWidth=nextWidth;
+      scopedHeight=nextHeight;
+      scopedPixelRatio=nextPixelRatio;
+      rawScenePassSetSize(
+        Math.max(1,Math.round(scopedWidth*scopedPixelRatio)),
+        Math.max(1,Math.round(scopedHeight*scopedPixelRatio))
+      );
+    }
+    // PassNode normally re-sizes itself to the whole renderer drawing buffer in
+    // updateBefore(). Pin it to the requested local viewport instead; otherwise
+    // a camera authored for the Editor rectangle is rasterised into the wider
+    // canvas aspect before the final quad even samples it.
+    scenePass.setSize=function(){
+      rawScenePassSetSize(
+        Math.max(1,Math.round(scopedWidth*scopedPixelRatio)),
+        Math.max(1,Math.round(scopedHeight*scopedPixelRatio))
+      );
+      return this;
+    };
+    setScopedSize(initialSize.width,initialSize.height);
+    const composer={
+      setSize:setScopedSize,
+      setPixelRatio(){},
+      render(){pipeline.render();},
+      dispose(){scenePass.dispose();pipeline.dispose();},
+    };
+    let renderFailed=false;
+    function failToDirect(error){
+      if(renderFailed)return;
+      renderFailed=true;
+      console.error('LotKing WebGPU post: TSL pipeline failed, using direct scene render',error);
+    }
+    function needsPost(){
+      const grade=config&&config.grade;
+      // This TSL graph currently implements grade and illustrated output. Do
+      // not route Natural WebGPU through it merely because legacy-only FXAA,
+      // volumetrics, quality sharpening, DoF or ray effects are selected: that
+      // replaced a valid direct frame with an empty intermediate target.
+      return !!(
+        grade&&grade.enabled===true ||
+        video&&video.visualStyle==='illustrated-sketch' ||
+        video&&video.monochrome===true
+      );
+    }
+    function render(cameraOverride,options){
+      activeCamera=cameraOverride||camera;
+      scenePass.camera=activeCamera;
+      if(renderFailed){renderer.render(scene,activeCamera);return;}
+      const requested=options&&options.width!=null&&options.height!=null?options:size();
+      setScopedSize(requested.width,requested.height);
+      const grade=config&&config.grade||{};
+      const enabled=grade.enabled===true;
+      gradeExposure.value=enabled?Math.max(0,Number(grade.exposure)||1):1;
+      gradeBrightness.value=enabled?Number(grade.brightness)||0:0;
+      gradeContrast.value=enabled?Math.max(0,Number(grade.contrast)||1):1;
+      gradeSaturation.value=enabled?Math.max(0,Number(grade.saturation)||1):1;
+      const illustrated=video&&video.visualStyle==='illustrated-sketch';
+      sketchStrength.value=illustrated?styleValue(video.sketchStrength,.78):0;
+      sketchDetail.value=styleValue(video&&video.sketchDetail,.72);
+      sketchHatching.value=styleValue(video&&video.sketchHatching,1);
+      sketchLineNoise.value=styleValue(video&&video.sketchLineNoise,.35);
+      sketchPigment.value=styleValue(video&&video.sketchPigment,.82);
+      sketchColorNoise.value=styleValue(video&&video.sketchColorNoise,1);
+      sketchSaturation.value=styleValue(video&&video.sketchSaturation,1,0,2);
+      sketchLightGain.value=styleValue(video&&video.sketchLightGain,1,.25,3);
+      sketchAtmosphere.value=styleValue(video&&video.sketchAtmosphere,.68);
+      sketchPaper.value=styleValue(video&&video.sketchPaper,.38);
+      sketchPaperMode.value=video&&video.sketchMedium==='paper-pencil'?1:0;
+      sketchStorybookMode.value=!video||video.sketchMedium==='painted-storybook'?1:0;
+      sketchMonochrome.value=video&&video.monochrome===true?1:0;
+      try{
+        const submission=pipeline.render();
+        // Some WebGPU backends surface pipeline creation/device validation as
+        // a rejected Promise rather than a synchronous throw. Retire the post
+        // graph so the next frame presents the direct scene instead of staying
+        // blank indefinitely.
+        if(submission&&typeof submission.then==='function') submission.catch(failToDirect);
+      }
+      catch(error){
+        failToDirect(error);
+        renderer.render(scene,activeCamera);
+      }
+    }
+    return {
+      ok:true,webgpu:true,supportsScoped:true,compatibility,composer,renderPass:scenePass,
+      pipeline,render,needsPost,needsOpticalPost:()=>false,hasFailed:()=>renderFailed,
+      dispose(){composer.dispose();},
+      limitations:Object.freeze(['legacy-ray-effects','legacy-dof','legacy-optical-flares']),
+    };
+  }
 
   const ok = typeof THREE.EffectComposer !== 'undefined' && typeof THREE.RenderPass !== 'undefined' && typeof THREE.ShaderPass !== 'undefined';
   if(!ok) return {ok:false};
@@ -216,6 +428,7 @@ function createPost(deps){
     rawComposerSetSize(currentSize.width, currentSize.height);
     if(dofPass) dofPass.uniforms.resolution.value.set(currentSize.width, currentSize.height);
     if(videoProfilePass) videoProfilePass.uniforms.resolution.value.set(currentSize.width, currentSize.height);
+    if(sketchPass) sketchPass.uniforms.resolution.value.set(currentSize.width, currentSize.height);
     syncFxaaResolution();
   };
 
@@ -487,6 +700,99 @@ function createPost(deps){
     }))
     : [];
   sceneCinematicFlarePasses.forEach(pass => { if(pass) composer.addPass(pass); });
+  // Backend-neutral illustrated look: the WebGPU path above expresses the
+  // same operations with TSL, while WebGL uses this bounded full-screen pass.
+  // It never mutates authored materials, so viewport, Play and export remain
+  // visually connected and disabling it is an exact restoration.
+  const sketchPass = typeof THREE.ShaderPass !== 'undefined' ? new THREE.ShaderPass({
+    uniforms:{
+      tDiffuse:{value:null}, resolution:{value:new THREE.Vector2(size().width,size().height)},
+      strength:{value:.78}, detail:{value:.72}, hatching:{value:1}, lineNoise:{value:.35},
+      pigment:{value:.82}, colorNoise:{value:1}, saturation:{value:1}, lightGain:{value:1},
+      atmosphere:{value:.68}, paper:{value:.38}, paperMode:{value:0}, storybookMode:{value:1}, monochrome:{value:0},
+    },
+    vertexShader:[
+      'varying vec2 vUv;',
+      'void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }'
+    ].join('\n'),
+    fragmentShader:[
+      'uniform sampler2D tDiffuse;',
+      'uniform vec2 resolution;',
+      'uniform float strength;',
+      'uniform float detail;',
+      'uniform float hatching;',
+      'uniform float lineNoise;',
+      'uniform float pigment;',
+      'uniform float colorNoise;',
+      'uniform float saturation;',
+      'uniform float lightGain;',
+      'uniform float atmosphere;',
+      'uniform float paper;',
+      'uniform float paperMode;',
+      'uniform float storybookMode;',
+      'uniform float monochrome;',
+      'varying vec2 vUv;',
+      'float lum(vec3 c){ return dot(c,vec3(.2126,.7152,.0722)); }',
+      'float hash(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }',
+      'void main(){',
+      '  vec2 px=1.0/max(resolution,vec2(1.0));',
+      '  vec4 source=texture2D(tDiffuse,vUv);',
+      '  vec3 c=max(source.rgb,vec3(0.0));',
+      '  float gx=lum(texture2D(tDiffuse,vUv+vec2(px.x,0.0)).rgb)-lum(texture2D(tDiffuse,vUv-vec2(px.x,0.0)).rgb);',
+      '  float gy=lum(texture2D(tDiffuse,vUv+vec2(0.0,px.y)).rgb)-lum(texture2D(tDiffuse,vUv-vec2(0.0,px.y)).rgb);',
+      '  float edge=smoothstep(.045,.30,length(vec2(gx,gy))*mix(5.0,14.0,detail));',
+      '  float steps=mix(5.0,9.0,detail);',
+      '  float l=clamp(lum(c),0.0,1.0);',
+      '  float tone=floor(l*steps)/max(1.0,steps-1.0);',
+      '  vec3 baseColor=clamp(c,0.0,1.0);',
+      '  float baseLuma=lum(baseColor);',
+      '  vec3 chroma=baseColor-vec3(baseLuma);',
+      '  float pigmentTone=mix(baseLuma,tone,pigment*.84);',
+      '  vec3 rawPigment=clamp(vec3(pigmentTone)+chroma*mix(1.0,1.18,pigment),0.0,1.0);',
+      '  float paletteSteps=mix(8.0,15.0,detail);',
+      '  vec3 paletteColor=clamp(floor(rawPigment*paletteSteps+.5)/paletteSteps,0.0,1.0);',
+      '  vec3 illustrated=mix(rawPigment,paletteColor,pigment*.62);',
+      '  vec2 sp=vUv*resolution;',
+      '  float hatchA=step(mix(.52,.78,detail),sin((sp.x+sp.y*.72)*mix(.42,.82,detail))*.5+.5);',
+      '  float hatchB=step(.86,sin((sp.x-sp.y*.58)*.47)*.5+.5);',
+      '  float shadow=smoothstep(.76,.16,tone);',
+      '  float hatch=(hatchA+hatchB*smoothstep(.48,.08,tone))*shadow*strength*hatching*.105;',
+      '  float noise=hash(sp)-.5;',
+      '  float materialNoise=hash(sp+baseColor.rg*71.0)-.5;',
+      '  float lineInk=edge*strength*(1.0+noise*lineNoise*.45);',
+      '  vec3 paperColor=vec3(1.0,.975,.91);',
+      '  illustrated=mix(illustrated,paperColor,paper*.08);',
+      '  illustrated-=lineInk*.88+hatch;',
+      '  illustrated+=noise*paper*.065;',
+      '  float pencilTone=smoothstep(-.06,1.08,tone);',
+      '  vec3 pencilPigment=mix(vec3(pencilTone),clamp(c,0.0,1.0),.56);',
+      '  float fibre=sin(sp.y*.115+noise*3.1)*.5+.5;',
+      '  vec3 paperSketch=mix(paperColor,pencilPigment,.82);',
+      '  paperSketch-=lineInk*1.02+hatch*1.22;',
+      '  paperSketch+=noise*paper*.045+(fibre-.5)*paper*.025;',
+      '  float chromaEnergy=length(chroma);',
+      '  float softAtmosphere=smoothstep(.24,.018,chromaEnergy)*smoothstep(.08,.88,baseLuma)*(1.0-clamp(lineInk,0.0,1.0));',
+      '  float brightFx=smoothstep(.68,1.25,max(c.r,max(c.g,c.b)));',
+      '  vec3 shadowWash=mix(vec3(.82,.87,1.02),vec3(1.0),smoothstep(.12,.72,baseLuma));',
+      '  vec3 paintedPigment=mix(rawPigment,paletteColor,pigment*.62)*shadowWash;',
+      '  paintedPigment+=materialNoise*pigment*colorNoise*.052+noise*paper*.025;',
+      '  vec3 atmosphereWash=paintedPigment+materialNoise*softAtmosphere*atmosphere*colorNoise*.11;',
+      '  atmosphereWash+=vec3(1.0,.82,.55)*brightFx*atmosphere*.09;',
+      '  vec3 coloredLine=mix(vec3(.035,.028,.025),paintedPigment*.16,.42);',
+      '  vec3 storybook=mix(atmosphereWash,coloredLine,clamp(lineInk,0.0,1.0));',
+      '  storybook=clamp(storybook-hatch*mix(.72,1.18,pigment),0.0,1.0);',
+      '  storybook=mix(storybook,paperColor,paper*.045*softAtmosphere);',
+      '  illustrated=mix(illustrated,clamp(paperSketch,0.0,1.0),paperMode);',
+      '  illustrated=mix(illustrated,storybook,storybookMode);',
+      '  vec3 outColor=mix(c,clamp(illustrated,0.0,1.0),strength);',
+      '  outColor=max(mix(vec3(lum(outColor)),outColor,saturation),vec3(0.0));',
+      '  outColor=mix(outColor,vec3(lum(outColor)),monochrome);',
+      '  outColor*=mix(1.0,lightGain,strength);',
+      '  gl_FragColor=vec4(outColor,source.a);',
+      '}'
+    ].join('\n'),
+  }) : null;
+  if(sketchPass) composer.addPass(sketchPass);
   // r185 render targets stay in linear working space. OutputPass applies the
   // renderer tone mapping and output color conversion before FXAA samples the
   // final display-referred image.
@@ -841,6 +1147,28 @@ function createPost(deps){
       });
     }
 
+    if(sketchPass){
+      const illustrated=!!(video&&video.visualStyle==='illustrated-sketch');
+      const monochrome=!!(video&&video.monochrome===true);
+      // `videoOnly` disables player-camera DOF/grade in editor views; the
+      // project-owned visual style must still match viewport, Play and game.
+      sketchPass.enabled=illustrated||monochrome;
+      sketchPass.uniforms.resolution.value.set(currentSize.width,currentSize.height);
+      sketchPass.uniforms.strength.value=illustrated?styleValue(video.sketchStrength,.78):0;
+      sketchPass.uniforms.detail.value=styleValue(video&&video.sketchDetail,.72);
+      sketchPass.uniforms.hatching.value=styleValue(video&&video.sketchHatching,1);
+      sketchPass.uniforms.lineNoise.value=styleValue(video&&video.sketchLineNoise,.35);
+      sketchPass.uniforms.pigment.value=styleValue(video&&video.sketchPigment,.82);
+      sketchPass.uniforms.colorNoise.value=styleValue(video&&video.sketchColorNoise,1);
+      sketchPass.uniforms.saturation.value=styleValue(video&&video.sketchSaturation,1,0,2);
+      sketchPass.uniforms.lightGain.value=styleValue(video&&video.sketchLightGain,1,.25,3);
+      sketchPass.uniforms.atmosphere.value=styleValue(video&&video.sketchAtmosphere,.68);
+      sketchPass.uniforms.paper.value=styleValue(video&&video.sketchPaper,.38);
+      sketchPass.uniforms.paperMode.value=video&&video.sketchMedium==='paper-pencil'?1:0;
+      sketchPass.uniforms.storybookMode.value=!video||video.sketchMedium==='painted-storybook'?1:0;
+      sketchPass.uniforms.monochrome.value=monochrome?1:0;
+    }
+
     if(fxaaPass){
       fxaaPass.enabled = !!(video && video.antialiasing === 'fxaa');
       syncFxaaResolution();
@@ -849,7 +1177,7 @@ function createPost(deps){
     composer.render();
   }
 
-  return {ok:true, compatibility, composer, renderPass, gtaoPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, needsOpticalPost, hasFailed: () => renderFailed};
+  return {ok:true, compatibility, composer, renderPass, gtaoPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, needsOpticalPost, hasFailed: () => renderFailed, dispose(){composer.dispose();}};
 }
 
 window.LK_RUNTIME_POST = Object.freeze({createPost});

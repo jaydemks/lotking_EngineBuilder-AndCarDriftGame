@@ -77,6 +77,7 @@ function create(opts){
     const hits = ray.intersectObject(group, true);
     for(const hit of hits){
       let node = hit.object;
+      let cinemaPathHandle = null;
       let preview = null;
       let owner = null;
       let ref = null;
@@ -85,6 +86,7 @@ function create(opts){
       let logicVehicleCollider = false;
       while(node){
         const data = node.userData || {};
+        if(data.cinemaPathHandle) cinemaPathHandle = cinemaPathHandle || node;
         if(data.colliderPreview) preview = preview || node;
         if(data.colliderOwner) owner = owner || data.colliderOwner;
         if(data.colliderRef) ref = ref || data.colliderRef;
@@ -94,6 +96,12 @@ function create(opts){
         if(node === group) break;
         node = node.parent;
       }
+      if(cinemaPathHandle && isEntityWorldVisible(cinemaPathHandle)) return {
+        entity:cinemaPathHandle,
+        point:hit.point,
+        distance:hit.distance,
+        cinemaPath:true,
+      };
       if(!preview || !owner || !isEntityWorldVisible(preview)) continue;
       return {
         entity:owner,
@@ -151,11 +159,23 @@ function create(opts){
     return cam.position.clone().addScaledVector(new THREE.Vector3(0,0,-1).applyQuaternion(cam.quaternion), 12).setY(0);
   }
 
+  // Hover and material-pick helpers are rebuilt on mouse movement, so their frees
+  // land in the middle of a frame. The rendering backend keeps them until the
+  // submit has drained on WebGPU, where destroying a recorded buffer invalidates
+  // the command buffer; on WebGL it frees them at once, as before.
+  function releaseGpu(release){
+    const backend = window.LK_RUNTIME_RENDERING_BACKEND;
+    if(backend && typeof backend.deferGpuRelease === 'function') return backend.deferGpuRelease(release);
+    release();
+    return false;
+  }
+
   function clearHover(){
     const group = helperGroup();
     if(hoverHelper && group){
       group.remove(hoverHelper);
-      hoverHelper.geometry.dispose();
+      const geometry = hoverHelper.geometry;
+      releaseGpu(() => geometry.dispose());
     }
     hoverHelper = null;
   }
@@ -273,18 +293,21 @@ function create(opts){
   }
 
   function clearMaterialPickHelper(){
+    const doomed = [];
     if(materialPickHelper && helperGroup()){
       helperGroup().remove(materialPickHelper);
-      if(materialPickHelper.geometry) materialPickHelper.geometry.dispose();
-      if(materialPickHelper.material) materialPickHelper.material.dispose();
+      doomed.push(materialPickHelper);
     }
     materialPickHelper = null;
     materialPickHelpers.forEach(helper => {
       if(helper.parent) helper.parent.remove(helper);
-      if(helper.geometry) helper.geometry.dispose();
-      if(helper.material) helper.material.dispose();
+      doomed.push(helper);
     });
     materialPickHelpers = [];
+    if(doomed.length) releaseGpu(() => doomed.forEach(helper => {
+      if(helper.geometry && helper.geometry.dispose) helper.geometry.dispose();
+      if(helper.material && helper.material.dispose) helper.material.dispose();
+    }));
   }
 
   function createMaterialPickHelper(slot, color){

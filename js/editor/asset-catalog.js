@@ -16,12 +16,24 @@ function create(deps){
   const $ = deps.$;
   const placeProjectAsset = deps.placeProjectAsset || function(){ return Promise.resolve(false); };
   const addLogicElement = deps.addLogicElement || function(){};
+  const addProceduralAsset = deps.addProceduralAsset || function(){};
   const LEVEL_PREFIX = 'lotking.level.';
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
 
   function clone(value){
     try { return value == null ? value : JSON.parse(JSON.stringify(value)); }
     catch(err){ return value; }
+  }
+
+  function bundledAssets(){
+    const pack = window.LK_LOGIC_TEMPLATES_SKETCHBOOK;
+    return pack && pack.ASSETS
+      ? Object.keys(pack.ASSETS).map(key => pack.ASSETS[key]).filter(asset => asset && asset.kind === 'glb' && asset.id && asset.src)
+      : [];
+  }
+
+  function bundledAssetById(id){
+    return bundledAssets().find(asset => asset.id === id) || null;
   }
 
   function parseSceneFromLevelProject(project){
@@ -85,7 +97,7 @@ function create(deps){
     const source = String(added.source || o.userData.assetSource || '').toLowerCase();
     const name = String(added.name || o.userData.assetName || o.userData.editorName || '').toLowerCase();
     const kind = String(added.kind || '').toLowerCase();
-    if(added.kind === 'primitive' || added.prim) return true;
+    if(added.kind === 'primitive' || added.kind === 'proceduralAsset' || added.prim) return true;
     if(['box', 'sphere', 'cylinder', 'cone', 'plane', 'ramp', 'torus'].includes(kind)) return true;
     if(String(added.asset && added.asset.key || o.userData.assetKey || '').toLowerCase().indexOf('primitive:') === 0) return true;
     if(source.indexOf('editor primitive') === 0 || name.indexOf('primitive') === 0) return true;
@@ -98,7 +110,7 @@ function create(deps){
     const source = String(entry.source || entry.asset && entry.asset.source || '').toLowerCase();
     const name = String(entry.name || entry.editorName || '').toLowerCase();
     const kind = String(entry.kind || '').toLowerCase();
-    if(entry.kind === 'primitive' || entry.prim) return true;
+    if(entry.kind === 'primitive' || entry.kind === 'proceduralAsset' || entry.prim) return true;
     if(['box', 'sphere', 'cylinder', 'cone', 'plane', 'ramp', 'torus'].includes(kind)) return true;
     if(entry.asset && String(entry.asset.key || '').toLowerCase().indexOf('primitive:') === 0) return true;
     if(source.indexOf('editor primitive') === 0 || name.indexOf('primitive') === 0) return true;
@@ -224,7 +236,7 @@ function create(deps){
       const previewSrc = entry.src || entryAsset.src || (type === 'texture' && entry.props && entry.props.src) || '';
       const previewDbKey = entry.dbKey || entryAsset.dbKey || (type === 'texture' && entry.props && entry.props.dbKey) || '';
       const item = {
-        kind:'project-asset',
+        kind:'project-asset',assetOrigin:'user',
         ref,
         id: entry.id || assetKey,
         levelId: level && level.id,
@@ -340,68 +352,129 @@ function create(deps){
     if(ref.indexOf('level:') === 0 && LV){
       const id = ref.slice(6);
       const l = LV.list().find(x => x.id === id);
-      return l ? {kind:'level', ref, id:l.id, name:l.name, raw:l} : null;
+      return l ? {kind:'level',assetOrigin:'user', ref, id:l.id, name:l.name, raw:l} : null;
     }
     if(ref.indexOf('sound:') === 0 && STORE.soundSets){
       const id = ref.slice(6);
       const s = STORE.soundSets.list().find(x => x.id === id);
-      return s ? {kind:'sound-set', ref, id:s.id, name:s.name, raw:s} : null;
+      return s ? {kind:'sound-set',assetOrigin:'user', ref, id:s.id, name:s.name, raw:s} : null;
     }
     if(ref.indexOf('imported:') === 0){
       const id = ref.slice(9);
       const asset = deps.assetLibraryLoad().find(a => a.id === id);
       if(!asset) return null;
       return {
-        kind: asset.kind === 'texture' ? 'imported-texture' : 'imported-glb',
+        kind: asset.kind === 'texture' ? 'imported-texture' : 'imported-glb',assetOrigin:'user',
         ref,
         id:asset.id,
         name:asset.name,
         raw:asset,
       };
     }
+    if(ref.indexOf('bundled:') === 0){
+      const id = ref.slice(8);
+      const asset = bundledAssetById(id);
+      return asset ? {kind:'bundled-glb',assetOrigin:'engine',ref,id:asset.id,name:asset.name,raw:asset} : null;
+    }
+    if(ref.indexOf('procedural:') === 0){
+      const type=ref.slice(11),api=window.LK_ENGINE_PROCEDURAL_ASSETS;
+      const descriptor=api&&api.list?api.list().find(item=>item.type===type):null;
+      return descriptor?{kind:'procedural-asset',assetOrigin:'engine',ref,id:type,name:descriptor.name,raw:descriptor}:null;
+    }
     if(ref.indexOf('scene:') === 0){
       const key = ref.slice(6);
       const a = collectAssets().find(x => x.key === key);
-      return a ? {kind:'scene', ref, key:a.key, name:a.name, type:a.type, raw:a} : null;
+      return a ? {kind:'scene',assetOrigin:'user', ref, key:a.key, name:a.name, type:a.type, raw:a} : null;
     }
     if(ref.indexOf('project:') === 0){
       const item = collectProjectAssets().find(x => x.ref === ref);
-      return item ? {kind:'project-asset', ref, raw:item.raw, name:item.name, source:item.source, type:item.type, levelId:item.levelId, levelName:item.levelName, badges:item.badges || []} : null;
+      return item ? {kind:'project-asset',assetOrigin:'user', ref, raw:item.raw, name:item.name, source:item.source, type:item.type, levelId:item.levelId, levelName:item.levelName, badges:item.badges || []} : null;
+    }
+    if(ref.indexOf('plugin:')===0){
+      const panel=deps.getAssetPanel&&deps.getAssetPanel(),item=panel&&panel.pluginItems?panel.pluginItems('',true).find(candidate=>candidate.ref===ref):null;
+      return item||null;
     }
     if(ref.indexOf('blueprint:') === 0){
       const id = ref.slice(10);
       if(id === 'base'){
         const player = STORE.playerBlueprints && STORE.playerBlueprints.default() || deps.currentPlayerBlueprint();
-        return {kind:'player-blueprint', ref, id:'base', name:'player_car Logic Base', base:true, raw:{id:'base', name:'player_car Logic Base', player}};
+        return {kind:'player-blueprint',assetOrigin:'user', ref, id:'base', name:'player_car Logic Base', base:true, raw:{id:'base', name:'player_car Logic Base', player}};
       }
       const asset = STORE.playerBlueprints && STORE.playerBlueprints.list().find(x => x.id === id);
-      return asset ? {kind:'player-blueprint', ref, id:asset.id, name:asset.name, raw:asset} : null;
+      return asset ? {kind:'player-blueprint',assetOrigin:'user', ref, id:asset.id, name:asset.name, raw:asset} : null;
     }
     if(ref.indexOf('logic-blueprint:') === 0){
       const id = ref.slice(16);
       const asset = STORE.logicElementAssets && STORE.logicElementAssets.get(id);
-      return asset ? {kind:'logic-blueprint', ref, id:asset.id, name:asset.name, raw:asset} : null;
+      return asset ? {kind:'logic-blueprint',assetOrigin:'user', ref, id:asset.id, name:asset.name, raw:asset} : null;
     }
     if(ref.indexOf('logic-template:') === 0){
       const id = ref.slice(15);
       const template = window.LK_LOGIC_TEMPLATES && window.LK_LOGIC_TEMPLATES.get(id);
-      return template ? {kind:'logic-template', ref, id:template.id, name:template.name, raw:template} : null;
+      return template ? {kind:'logic-template',assetOrigin:'engine', ref, id:template.id, name:template.name, raw:template} : null;
     }
     return null;
   }
 
   function placeAssetRef(item, at){
     if(!item) return;
-    if(item.kind === 'imported-glb' || item.kind === 'imported-texture'){
+    if(item.kind==='procedural-asset'){
+      return addProceduralAsset(item.id||item.raw&&item.raw.type,at||deps.spawnPointAhead(),item.raw&&item.raw.recipe);
+    }
+    if(item.kind==='plugin-asset'){
+      const descriptor=item.raw&&item.raw.descriptor,provider=item.raw&&item.raw.provider;
+      if(!(descriptor&&typeof descriptor.place==='function')){deps.status(tr('Plugin asset cannot be placed','L’asset del plugin non può essere posizionato'));return;}
+      try{
+        return Promise.resolve(descriptor.place(at||deps.spawnPointAhead(),{GAME,STORE,pluginId:item.pluginId,provider})).then(result=>{
+          if(result&&deps.setLeftMode)deps.setLeftMode('scene');
+          return result;
+        }).catch(err=>{deps.status(tr('Plugin asset placement failed: ','Posizionamento asset plugin non riuscito: ')+(err&&err.message||err));return null;});
+      }catch(err){deps.status(tr('Plugin asset placement failed: ','Posizionamento asset plugin non riuscito: ')+(err&&err.message||err));return null;}
+    }
+    if(item.kind === 'imported-glb' || item.kind === 'imported-texture' || item.kind === 'bundled-glb'){
       deps.setAssetLoading(true, item.name, 20, 'Loading asset instance');
-      deps.placeImportedAsset(item.raw, at || deps.spawnPointAhead()).then(() => {
+      return deps.placeImportedAsset(item.raw, at || deps.spawnPointAhead()).then(object => {
+        if(item.kind === 'bundled-glb' && object && object.userData && object.userData.addedEntry){
+          const entry = object.userData.addedEntry;
+          const pack = window.LK_LOGIC_TEMPLATES_SKETCHBOOK || {};
+          const source = pack.SOURCE || {};
+          entry.src = item.raw.src;
+          entry.dbKey = null;
+          entry.fit = item.raw.fit || entry.fit;
+          entry.asset = Object.assign({}, entry.asset || {}, {
+            id:item.raw.id,
+            ref:'bundled:' + item.raw.id,
+            key:item.raw.key,
+            name:item.raw.name,
+            kind:'glb',
+            src:item.raw.src,
+            bundled:true,
+            source:source.repository || item.raw.source || 'Bundled asset',
+            license:source.license || 'MIT',
+            attribution:source.attribution || null,
+            sourceCommit:source.commit || null,
+          });
+          if(item.raw.id === 'sketchbook-world'){
+            entry.metadataMode = 'gltf-extras';
+            entry.physicsBackend = 'sketchbook-metadata';
+            entry.collide = false;
+            entry.physics = false;
+          }
+          object.userData.assetKey = item.raw.key;
+          object.userData.assetName = item.raw.name;
+          object.userData.assetSource = entry.asset.source;
+          if(item.raw.id === 'sketchbook-world' && GAME && GAME.systems && GAME.systems.sketchbookPawns && GAME.systems.sketchbookPawns.coordinator){
+            GAME.systems.sketchbookPawns.coordinator.refreshWorldPhysicsExtras(true);
+          }
+        }
         deps.setAssetLoading(true, item.name, 100, 'Placed in scene');
         setTimeout(() => deps.setAssetLoading(false), 300);
+        return object;
       }).catch(err => {
         deps.setAssetLoading(false);
         deps.status('Place failed: ' + err.message);
+        return null;
       });
-      return;
     }
     if(item.kind === 'scene'){
       const a = item.raw;
@@ -457,6 +530,7 @@ function create(deps){
     entityIcon,
     assetKeyOf,
     assetNameOf,
+    bundledAssets,
     collectAssets,
     collectProjectAssets,
     assetMatchesSearch,

@@ -23,7 +23,7 @@ assert.ok(exists('vendor/THIRD_PARTY_LICENSES.md'), 'third-party license notices
 
 ['engine_editor.html', 'gameplay.html', 'test-editor.html'].forEach(file => {
   const source = read(file);
-  assert.match(source, /vendor\/three-r185-compat\.min\.js\?v=0\.185\.1-lk6/, `${file} does not load the pinned bundle`);
+  assert.match(source, /vendor\/three-r185-compat\.min\.js\?v=0\.185\.1-lk8-webgpu/, `${file} does not load the pinned WebGPU-capable bundle`);
 });
 ['engine_editor.html', 'gameplay.html'].forEach(file => {
   assert.match(read(file), /vendor\/cannon-0\.6\.2\.min\.js\?v=0\.6\.2-lk1/, `${file} does not load local Cannon`);
@@ -105,6 +105,14 @@ assert.match(threeEntry, /TGALoader/, 'Three.js compatibility bundle must expose
 assert.match(threeEntry, /GLTFExporter/, 'Three.js compatibility bundle must expose GLTFExporter for browser conversion');
 assert.match(threeEntry, /GTAOPass/, 'Three.js compatibility bundle must expose r185 GTAO for the stable WebGL pipeline');
 assert.match(threeEntry, /WebGLPathTracer/, 'path tracing must share the primary Three.js module graph');
+assert.match(threeEntry, /WebGPURenderer/, 'compatibility bundle must expose WebGPURenderer');
+assert.match(threeEntry, /RenderPipeline/, 'compatibility bundle must expose the WebGPU RenderPipeline');
+assert.match(threeEntry, /WebGPUPMREMGenerator/, 'compatibility bundle must expose the common-renderer PMREM generator');
+assert.match(threeEntry, /\bTSL\b/, 'compatibility bundle must expose TSL');
+assert.match(threeEntry, /externalDepthTextureOwnership:true/, 'compatibility bundle must advertise the WebGPU depth-texture ownership backport');
+const threeBuild = read('scripts/build-three-compat.js');
+assert.match(threeBuild, /patchWebGPUTextureOwnership/, 'Three.js build must apply the WebGPU depth-texture ownership backport');
+assert.match(threeBuild, /depthTexture\.renderTarget === renderTarget/, 'Three.js build is missing the external depth-texture ownership guard');
 assert.ok(exists('js/runtime/rendering-backend.js'), 'central rendering backend service is missing');
 const fbxPlugin = read('js/plugins/fbx-import-plugin.js');
 assert.match(fbxPlugin, /enabledByDefault:true/, 'FBX importer plugin must be enabled by default');

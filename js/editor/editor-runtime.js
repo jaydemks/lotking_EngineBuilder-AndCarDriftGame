@@ -25,12 +25,36 @@ function create(deps){
   const $ = deps.$;
   const overlay = document.getElementById('overlay');
   const levelSelect = document.getElementById('levelSelect');
+  const viewportY = (bottomY, height) => {
+    const backend = window.LK_RUNTIME_RENDERING_BACKEND;
+    return backend && backend.viewportOriginY
+      ? backend.viewportOriginY(renderer, bottomY, height, innerHeight)
+      : (renderer && renderer.isWebGPURenderer ? innerHeight - bottomY - height : bottomY);
+  };
   function transformControlsHelper(controls){
     return controls && typeof controls.getHelper === 'function' ? controls.getHelper() : controls;
   }
   let previewWarmupTimer = 0;
   let previewWarmupCompileTimer = 0;
   let previewWarmupSeq = 0;
+  // Authoring does not need to submit an identical GPU frame sixty times per
+  // second while nobody is touching the editor. Keep interaction/Play/Cinema
+  // fully realtime and pace only a truly idle authoring viewport.
+  const EDITOR_IDLE_AFTER_MS = 1800;
+  const EDITOR_IDLE_FRAME_MS = 250;
+  const EDITOR_HIDDEN_FRAME_MS = 1000;
+  let lastEditorActivity = performance.now();
+  let lastPacedEditorFrame = 0;
+  let pacedEditorDt = 0;
+  const markEditorActivity = () => { lastEditorActivity = performance.now(); };
+  if(root){
+    root.addEventListener('pointermove',markEditorActivity,{passive:true});
+    root.addEventListener('pointerdown',markEditorActivity,{passive:true});
+    root.addEventListener('wheel',markEditorActivity,{passive:true});
+    root.addEventListener('input',markEditorActivity,true);
+    root.addEventListener('change',markEditorActivity,true);
+  }
+  window.addEventListener('keydown',markEditorActivity,true);
   const cinemaTriggerState = new Map();
   const runtimeCamPos = new THREE.Vector3();
   const runtimeCamQuat = new THREE.Quaternion();
@@ -38,9 +62,12 @@ function create(deps){
   const playerDummyPreviewCamera = new THREE.PerspectiveCamera(72, 16 / 9, .03, 500);
   let cinemaVideoExporter = null;
   const cinemaStudio = window.LK_EDITOR_CINEMA_STUDIO && window.LK_EDITOR_CINEMA_STUDIO.create({
+    THREE,
     GAME,
     ED,
     root,
+    helperGroup,
+    getGizmo:deps.getGizmo,
     sceneCameras,
     editorViewportRect: deps.editorViewportRect,
     markDirty: deps.markDirty,
@@ -55,6 +82,7 @@ function create(deps){
     openVideoExport:studio => {
       if(cinemaVideoExporter) cinemaVideoExporter.open(studio);
     },
+    exportInteractive:deps.exportInteractive,
   });
   cinemaVideoExporter = window.LK_EDITOR_CINEMA_VIDEO_EXPORT && window.LK_EDITOR_CINEMA_VIDEO_EXPORT.create({
     THREE,
@@ -92,18 +120,23 @@ function create(deps){
       const post = GAME.systems && GAME.systems.post;
       const pathTracing = GAME.systems && GAME.systems.pathTracing;
       const video = GAME.settings && GAME.settings.video;
-      if(video&&video.rendererMode==='pathtracing'&&ED.viewportMode!=='quad'&&pathTracing&&pathTracing.supported){
+      const illustratedOutput=video&&(video.visualStyle==='illustrated-sketch'||video.monochrome===true);
+      if(!illustratedOutput&&video&&video.rendererMode==='pathtracing'&&ED.viewportMode!=='quad'&&pathTracing&&pathTracing.supported){
         try {
           if(pathTracing.render(camera,video,{width:rect.w,height:rect.h}))return true;
         } catch(err){}
       }
-      const enabled = post && post.ok && video && (
-        video.rendererMode === 'raytracing' ||
-        video.volumetricLighting ||
-        video.quality !== 'high' ||
-        video.antialiasing === 'fxaa' ||
-        post.needsOpticalPost && post.needsOpticalPost(camera)
-      );
+      const enabled = post && post.ok && video && (post.webgpu && post.needsPost
+        ? post.needsPost(camera)
+        : (
+          video.rendererMode === 'raytracing' ||
+          video.visualStyle === 'illustrated-sketch' ||
+          video.monochrome === true ||
+          video.volumetricLighting ||
+          video.quality !== 'high' ||
+          video.antialiasing === 'fxaa' ||
+          post.needsOpticalPost && post.needsOpticalPost(camera)
+        ));
       // One composer cannot efficiently serve four differently sized cameras:
       // every setSize reallocates all SSR/DOF/bloom render targets. In quad view
       // use the direct renderer; single view keeps the configured post effects.
@@ -303,16 +336,11 @@ function create(deps){
 
   function startPlayPreview(mode){
     mode = mode === 'simulate' ? 'simulate' : 'play';
-    // Request before saving and before the asynchronous pre-benchmark while
-    // the toolbar click still owns browser user activation.
+    // Preview is a simulation boundary, never a persistence boundary. The old
+    // path persisted here and could replace the complete LOCAL DISK project
+    // merely because the author pressed Play. Disk/browser/workspace
+    // writes now remain exclusive to an explicit Save, import or rename action.
     if(mode === 'play' && GAME.actions.armFreeCamera) GAME.actions.armFreeCamera();
-    const onlineDemo = window.LK_PROJECT_WORKSPACE
-      && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode
-      && window.LK_PROJECT_WORKSPACE.isOnlineDemoMode();
-    if(!onlineDemo && !deps.saveScene()){
-      if(GAME.actions.disarmFreeCamera) GAME.actions.disarmFreeCamera();
-      return;
-    }
     deps.closeMenu();
     deps.status(mode === 'simulate' ? 'Pre-benchmark simulation...' : 'Pre-benchmark preview...');
     const startRequest = GAME.actions.startEditorPreview ? GAME.actions.startEditorPreview(mode) : Promise.resolve(false);
@@ -417,10 +445,28 @@ function create(deps){
     // frame concurrently doubles GPU work and exposes transient scene state.
     if(GAME.state.preBenchmarkRunning) return;
     if(ED.playPreview){
+      pacedEditorDt = 0;
       renderPlayPreview(dt);
       return;
     }
-    if(ED.simulatePreview) stepSimulationPreview(dt);
+    if(ED.simulatePreview){
+      pacedEditorDt = 0;
+      stepSimulationPreview(dt);
+    } else {
+      const now = performance.now();
+      const cinemaPlaying = !!(ED.cinemaPreview && ED.cinemaPreview.playing);
+      const idleFor = now - lastEditorActivity;
+      const frameInterval = document.visibilityState === 'hidden'
+        ? EDITOR_HIDDEN_FRAME_MS
+        : (!cinemaPlaying && idleFor >= EDITOR_IDLE_AFTER_MS ? EDITOR_IDLE_FRAME_MS : 0);
+      if(frameInterval && now - lastPacedEditorFrame < frameInterval){
+        pacedEditorDt += Math.max(0,Number(dt)||0);
+        return;
+      }
+      lastPacedEditorFrame = now;
+      dt = Math.min(.05,Math.max(0,Number(dt)||0) + pacedEditorDt);
+      pacedEditorDt = 0;
+    }
     deps.updateEditorControls(dt);
     const viewRect = deps.editorViewportRect();
     camE.aspect = viewRect.w / viewRect.h;
@@ -459,6 +505,9 @@ function create(deps){
     if(GAME.actions && GAME.actions.closePause) GAME.actions.closePause();
     if(GAME.settings && GAME.settings.setTuningOpen) GAME.settings.setTuningOpen(false);
   }
+  function syncCinemaTimeline(){
+    if(cinemaStudio) cinemaStudio.syncTimeline(deps.editorViewportRect());
+  }
 
   function renderPlayPreview(dt){
     if(GAME.actions.stepGameplayPreview) GAME.actions.stepGameplayPreview(dt);
@@ -467,18 +516,37 @@ function create(deps){
     let runtimeShot = null;
     if(runtimeState && cinemaStudio){
       const shot = cinemaStudio.updatePreview(dt);
-      runtimeShot = runtimeState.playing ? shot : null;
+      runtimeShot = runtimeState.playing || runtimeState.blending ? shot : null;
     }
-    GAME.state.cinemaInputLocked = !!runtimeShot;
-    if(!runtimeShot){
-      const runtimeCameraId = GAME.state && GAME.state.runtimeActiveSceneCameraId;
-      const playerUnavailable = GAME.player && (GAME.player.enabled === false || GAME.player.hidden === true || GAME.player.controllerIndex == null);
-      const active = runtimeCameraId ? sceneCameraHolderById(runtimeCameraId) : (playerUnavailable
-        ? sceneCameras().find(holder => holder.userData.cameraProps && holder.userData.cameraProps.activeLevelCamera === true)
-          || sceneCameras().find(holder => holder.userData.cameraProps && holder.userData.cameraProps.outputPlayerIndex === 0)
-        : null);
-      if(active) runtimeShot = {cameraId:active.userData.editorId};
-    }
+    const outputApi=window.LK_RUNTIME_PLAYER_OUTPUT;
+    if(!outputApi||typeof outputApi.resolve!=='function')throw new Error('LotKing Player Output resolver unavailable');
+    const state=GAME.state||{},cameraOutputs=state.runtimeVehicleCameraPawnIds||{};
+    const pawnCameraId=cameraOutputs[1]||state.runtimeVehicleCameraPawnId;
+    const pawnById=id=>id&&GAME.pawns&&GAME.pawns.get?GAME.pawns.get(id):null;
+    const possessedPawn=GAME.pawns&&GAME.pawns.getByPlayerId?GAME.pawns.getByPlayerId(1):null;
+    const cinemaCamera=runtimeShot&&runtimeShot.cameraId?sceneCameraHolderById(runtimeShot.cameraId):null;
+    const runtimeCamera=state.runtimeActiveSceneCameraId?sceneCameraHolderById(state.runtimeActiveSceneCameraId):null;
+    const levelCamera=sceneCameras().find(holder=>(holder.userData.cameraProps||{}).activeLevelCamera===true)
+      ||sceneCameras().find(holder=>Number((holder.userData.cameraProps||{}).outputPlayerIndex)===0)||null;
+    const output=outputApi.resolve({
+      playerId:1,
+      cinemaActive:!!runtimeShot,
+      cinemaCamera,
+      logicCamera:runtimeCamera,
+      possessedPawn,
+      cameraPawn:pawnById(pawnCameraId),
+      nativePlayer:GAME.player,
+      levelCamera,
+    });
+    // Lock gameplay input only when Cinema actually owns a valid output. A
+    // stale/missing shot camera must fall through without trapping the player.
+    GAME.state.cinemaInputLocked=output.kind==='cinema';
+    // stepGameplayPreview() has already updated Pawn/native cameras. Editor Play
+    // only copies a selected Scene/Cinema camera; otherwise it preserves that
+    // gameplay camera exactly as the standalone runtime does.
+    if(output.camera){
+      if(output.kind!=='cinema'||!runtimeShot)runtimeShot={cameraId:output.camera.userData.editorId};
+    }else runtimeShot=null;
     if(viewportLayout) viewportLayout.updateOverlays(null);
     const forcedCollisionDummies = ED.forceCollisionDummiesInPreview === true && ED.showCollisionDummies === true;
     const helperVisibility = [];
@@ -500,8 +568,9 @@ function create(deps){
       if(GAME.actions.renderGameplayCameraRect) GAME.actions.renderGameplayCameraRect(glRect);
       else {
         renderer.setScissorTest(true);
-        renderer.setViewport(glRect.x, glRect.y, glRect.w, glRect.h);
-        renderer.setScissor(glRect.x, glRect.y, glRect.w, glRect.h);
+        const targetY = viewportY(glRect.y, glRect.h);
+        renderer.setViewport(glRect.x, targetY, glRect.w, glRect.h);
+        renderer.setScissor(glRect.x, targetY, glRect.w, glRect.h);
         renderer.render(scene, gameCam);
       }
     } finally {
@@ -522,6 +591,25 @@ function create(deps){
         if(cameraDummies[key]) cameraDummies[key].visible = nativePlayerCameraActive && !ED.playPreview;
       });
     }
+    // Logic Pawn camera transforms stay parented to their Pawn, but their
+    // geometry is mounted only for the selected camera. Keeping an invisible
+    // mesh under every Character still lets Box3 include its distant position;
+    // a detached visual gives the author the familiar vehicle-camera dummy
+    // without changing Pawn selection bounds, collider fitting or traversal.
+    let pawnCameraVisualChanged=false;
+    (GAME.world&&GAME.world.registry||[]).forEach(owner=>{
+      const dummies=owner&&owner.userData&&owner.userData.pawnCameraDummies;
+      if(!Array.isArray(dummies))return;
+      dummies.forEach(dummy=>{
+        const visual=dummy&&dummy.userData&&dummy.userData.pawnCameraVisual;
+        if(!dummy||!visual)return;
+        const show=!ED.playPreview&&!ED.simulatePreview&&ED.selected===dummy;
+        if(show&&visual.parent!==dummy){dummy.add(visual);pawnCameraVisualChanged=true;}
+        else if(!show&&visual.parent===dummy){dummy.remove(visual);pawnCameraVisualChanged=true;}
+        visual.visible=show;
+      });
+    });
+    if(pawnCameraVisualChanged&&deps.refreshSelectionHelpers)deps.refreshSelectionHelpers();
     camProxy.position.copy(gameCam.position);
     camProxy.quaternion.copy(gameCam.quaternion);
     camProxy.fov = gameCam.fov;
@@ -557,8 +645,10 @@ function create(deps){
 
   function renderEditorViewportFallback(viewRect){
     renderer.setScissorTest(true);
-    renderer.setViewport(viewRect.x, innerHeight - viewRect.y - viewRect.h, viewRect.w, viewRect.h);
-    renderer.setScissor(viewRect.x, innerHeight - viewRect.y - viewRect.h, viewRect.w, viewRect.h);
+    const bottomY = innerHeight - viewRect.y - viewRect.h;
+    const targetY = viewportY(bottomY, viewRect.h);
+    renderer.setViewport(viewRect.x, targetY, viewRect.w, viewRect.h);
+    renderer.setScissor(viewRect.x, targetY, viewRect.w, viewRect.h);
     camE.aspect = viewRect.w / Math.max(1, viewRect.h);
     camE.updateProjectionMatrix();
     renderer.render(scene, camE);
@@ -615,7 +705,12 @@ function create(deps){
     const isSceneCamera = !!selectedCameraHolder;
     const rightW = deps.panelWidth('right');
     const usableW = Math.max(320, innerWidth - deps.panelWidth('left') - rightW - 28);
-    const aspect = GAME.player.cameraAspectValue ? GAME.player.cameraAspectValue() : (sourceCamera.aspect || innerWidth / innerHeight);
+    // THE bug behind "every camera previews as 16:9": this read
+    // `GAME.player.cameraAspectValue()` - the PLAYER camera's ratio - for whichever
+    // camera you had selected, so a scene camera could never show its own shape.
+    // The selected camera's own aspect is asked for first now, with the editor-wide
+    // master override above it and the level default below.
+    const aspect = editorPreviewAspect(selectedCameraHolder, selectedPlayerCamera).ratio;
     const w = Math.round(Math.min(ED.pipW, usableW * .9));
     const hgt = Math.round(w / aspect);
     const displayW = ED.pipMinimized ? 170 : w;
@@ -659,8 +754,9 @@ function create(deps){
     const glY = innerHeight - y - hgt;
     try {
       renderer.setScissorTest(true);
-      renderer.setViewport(x, glY, w, hgt);
-      renderer.setScissor(x, glY, w, hgt);
+      const targetY = viewportY(glY, hgt);
+      renderer.setViewport(x, targetY, w, hgt);
+      renderer.setScissor(x, targetY, w, hgt);
       sourceCamera.aspect = w / Math.max(1, hgt);
       sourceCamera.updateProjectionMatrix();
       // The shared composer cannot render the main viewport and a differently
@@ -676,13 +772,38 @@ function create(deps){
       cameraHelperVisibility.forEach(pair => { if(pair[0]) pair[0].visible = pair[1]; });
     }
   }
+  // ---------------------------------------------------------- preview aspect
+  // Every editor preview resolves its shape here, through one policy, so the PIP,
+  // the Cinema floating preview and the floating layout can no longer disagree.
+  // `ED.masterPreviewAspect` is the editor-wide override; 'auto' means it is off.
+  function aspectPolicy(){ return window.LK_ASPECT_POLICY; }
+  function levelDefaultAspect(){
+    const cfg = GAME.player && GAME.player.cameraCfg;
+    return cfg && cfg.aspect || 'auto';
+  }
+  /** The shape a camera preview should have. `authored` is the camera's own choice. */
+  function resolvePreviewAspect(authored){
+    const policy = aspectPolicy();
+    if(!policy) return {ratio:16 / 9, name:'16:9', source:'fallback', scoped:true};
+    return policy.resolve({
+      mode:'editor',
+      authored,
+      level:levelDefaultAspect(),
+      master:ED.masterPreviewAspect,
+      width:innerWidth,
+      height:innerHeight,
+    });
+  }
+  /** The PIP's shape: the selected camera's own aspect, whichever kind it is. */
+  function editorPreviewAspect(sceneCameraHolder, playerCameraNode){
+    const authored = sceneCameraHolder
+      ? (sceneCameraHolder.userData && sceneCameraHolder.userData.cameraProps || {}).aspect
+      : (playerCameraNode ? levelDefaultAspect() : levelDefaultAspect());
+    return resolvePreviewAspect(authored);
+  }
   function cinemaFloatAspect(){
-    const spec = ED.cinemaFloatPreviewAspect || '16:9';
-    if(spec === '21:9') return 21 / 9;
-    if(spec === '4:3') return 4 / 3;
-    if(spec === '1:1') return 1;
-    if(spec === '9:16') return 9 / 16;
-    return 16 / 9;
+    // The Cinema select is this preview's authored choice; the master still wins.
+    return resolvePreviewAspect(ED.cinemaFloatPreviewAspect || '16:9').ratio;
   }
   function shouldHideForFinalPreview(node){
     const ud = node && node.userData || {};
@@ -744,6 +865,11 @@ function create(deps){
   }
   function startOnPlayCinematics(){
     if(!cinemaStudio) return false;
+    const explicit=ED.cinemaPreview&&ED.cinemaPreview.runtime&&ED.cinemaPreview.playing&&ED.cinemaPreview.source==='logic-element';
+    // startEditorPreview resolves after Logic On Start has run. Never let the
+    // subsequent automatic Studio scan overwrite that explicit one-shot state
+    // (and its deferred Completed continuation) with the authored loop state.
+    if(explicit)return true;
     let started = false;
     cinemaStudios().forEach(studio => {
       const props = cinemaStudio.propsFor(studio);
@@ -777,7 +903,13 @@ function create(deps){
       (item.userData.cinemaProps && item.userData.cinemaProps.eventName === ref));
     if(studio){
       GAME.state.cinemaInputLocked = true;
-      cinemaStudio.playStudio(studio, {time:detail.time || 0, playing:true, runtime:true, source:'logic-element'});
+      cinemaStudio.playStudio(studio, {
+        time:detail.time || 0,playing:true,runtime:true,source:'logic-element',
+        playerId:Number(detail.playerId)||null,
+        playbackOverride:detail.playbackOverride==='once'?'once':null,
+        onComplete:typeof detail.onComplete==='function'?detail.onComplete:null,
+        completionOverride:detail.completion&&typeof detail.completion==='object'?detail.completion:null,
+      });
     }
   });
   window.addEventListener('lotking:cinemastop', () => {
@@ -835,6 +967,11 @@ function create(deps){
     const holder = sceneCameraHolderById(shot.cameraId);
     const cam = holder && normalizeSceneCameraLocal(holder);
     if(!holder || !cam) return false;
+    const blendAlpha=Number(shot.__completionBlendAlpha);
+    const blending=Number.isFinite(blendAlpha);
+    const targetPosition=blending?gameCam.position.clone():null;
+    const targetQuaternion=blending?gameCam.quaternion.clone():null;
+    const targetFov=gameCam.fov,targetNear=gameCam.near,targetFar=gameCam.far;
     holder.updateMatrixWorld(true);
     cam.updateMatrixWorld(true);
     cam.getWorldPosition(runtimeCamPos);
@@ -844,6 +981,14 @@ function create(deps){
     gameCam.fov = cam.fov || gameCam.fov;
     gameCam.near = cam.near || gameCam.near;
     gameCam.far = cam.far || gameCam.far;
+    if(blending){
+      const alpha=Math.max(0,Math.min(1,blendAlpha));
+      gameCam.position.lerp(targetPosition,alpha);
+      gameCam.quaternion.slerp(targetQuaternion,alpha);
+      gameCam.fov+=(targetFov-gameCam.fov)*alpha;
+      gameCam.near+=(targetNear-gameCam.near)*alpha;
+      gameCam.far+=(targetFar-gameCam.far)*alpha;
+    }
     gameCam.aspect = rect && rect.h ? rect.w / Math.max(1, rect.h) : gameCam.aspect;
     gameCam.updateProjectionMatrix();
     gameCam.updateMatrixWorld(true);
@@ -924,8 +1069,9 @@ function create(deps){
     const glY = innerHeight - y - hgt;
     try {
       renderer.setScissorTest(true);
-      renderer.setViewport(x, glY, w, hgt);
-      renderer.setScissor(x, glY, w, hgt);
+      const targetY = viewportY(glY, hgt);
+      renderer.setViewport(x, targetY, w, hgt);
+      renderer.setScissor(x, targetY, w, hgt);
       renderer.render(scene, cam);
     } finally {
       renderer.setScissorTest(false);
@@ -1021,6 +1167,7 @@ function create(deps){
     syncGamePreviewCamera,
     triggerCinemaEvent,
     openCinemaVideoExport,
+    syncCinemaTimeline,
     requestWarmup,
   });
 }

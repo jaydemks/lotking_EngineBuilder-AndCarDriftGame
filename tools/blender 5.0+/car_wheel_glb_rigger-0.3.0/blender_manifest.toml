@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "car_wheel_glb_rigger"
+version = "0.3.0"
+name = "Lot King Vehicle GLB Rigger"
+tagline = "Guided car and aircraft rigs for Lot King GLB workflows"
+maintainer = "CodesAndTips"
+type = "add-on"
+
+blender_version_min = "5.0.0"
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 CodesAndTips"]
+tags = ["Object", "Rigging", "Import-Export"]
+
+[permissions]
+files = "Export GLB files selected by the user"

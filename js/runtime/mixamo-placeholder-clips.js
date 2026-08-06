@@ -9,7 +9,7 @@
 (function(){
 'use strict';
 
-const SLOT_DURATIONS=Object.freeze({idle:2.8,walk:1.05,run:.72,strafeLeft:.92,strafeRight:.92,jump:.72,land:.48,shoot:.86,pass:.7,cross:.94,tackle:.82,save:.72,diveLeft:.9,diveRight:.9,celebrate:1.65,defeat:1.45,interact:.9});
+const SLOT_DURATIONS=Object.freeze({idle:2.8,walk:1.05,run:.72,strafeLeft:.92,strafeRight:.92,jump:.72,land:.48,shoot:.86,pass:.7,cross:.94,tackle:.82,save:.72,diveLeft:.9,diveRight:.9,celebrate:1.65,defeat:1.45,interact:.9,fireSingleIdle:.24,fireSingleWalk:.24,fireSingleRun:.22,fireAutoIdle:.34,fireAutoWalk:.34,fireAutoRun:.3});
 const LOOP_SLOTS=new Set(['idle','walk','run','strafeLeft','strafeRight']);
 const BONE_ALIASES=Object.freeze({
   hips:['hips','pelvis'],spine:['spine'],spine1:['spine1'],spine2:['spine2','chest'],neck:['neck'],head:['head'],
@@ -19,7 +19,7 @@ const BONE_ALIASES=Object.freeze({
   thighR:['rightupleg','rightthigh','thighr'],legR:['rightleg','rightlowerleg','calfr'],footR:['rightfoot','footr'],toeR:['righttoebase','toer'],
 });
 
-function canonical(value){return String(value||'').toLowerCase().replace(/^(?:mixamorig|armature|skeleton|rig)/,'').replace(/[^a-z0-9]/g,'');}
+function canonical(value){return String(value||'').toLowerCase().replace(/^(?:mixamorig|armature|skeleton|rig)(?:[_\-\s]*\d+)?[_\-\s]*/,'').replace(/[^a-z0-9]/g,'');}
 function clamp(value,min,max){return Math.max(min,Math.min(max,value));}
 function add(pose,key,x,y,z){const current=pose[key]||(pose[key]=[0,0,0]);current[0]+=(x||0);current[1]+=(y||0);current[2]+=(z||0);return pose;}
 function readyPose(pose,keeper){
@@ -34,6 +34,16 @@ function readyPose(pose,keeper){
 function samplePose(slot,phase,role){
   const p=clamp(Number(phase)||0,0,1),cycle=Math.sin(p*Math.PI*2),cycle2=Math.cos(p*Math.PI*2),pulse=Math.sin(p*Math.PI),keeper=role==='goalkeeper';
   const pose={};
+  if(/^fire(?:Single|Auto)(?:Idle|Walk|Run)$/.test(slot)){
+    const automatic=slot.indexOf('fireAuto')===0,gait=/Run$/.test(slot)?'run':(/Walk$/.test(slot)?'walk':'idle');
+    // Only the upper chain is authored here. The live weapon-pose solver then
+    // places one or two hands according to pistol/rifle/shotgun grip data,
+    // while the real Idle/Walk/Run loop keeps complete ownership of the legs.
+    const recoil=automatic?Math.max(0,Math.sin(p*Math.PI*2)):Math.sin(p*Math.PI),kick=gait==='run'?.72:(gait==='walk'?.86:1);
+    add(pose,'spine',-2.5*recoil*kick,0,0);add(pose,'spine2',-7*recoil*kick,0,0);add(pose,'neck',2.2*recoil,0,0);add(pose,'head',2.8*recoil,0,0);
+    add(pose,'shoulderL',-2.5*recoil,0,0);add(pose,'shoulderR',-2.5*recoil,0,0);add(pose,'armL',5*recoil,0,0);add(pose,'armR',7*recoil,0,0);add(pose,'forearmL',3*recoil,0,0);add(pose,'forearmR',4*recoil,0,0);
+    return pose;
+  }
   if(slot==='idle'){
     readyPose(pose,keeper);add(pose,'spine2',Math.sin(p*Math.PI*2)*1.25,Math.sin(p*Math.PI)*.7,cycle*.45);add(pose,'head',-cycle*.7,cycle2*.7,0);
     add(pose,'forearmL',0,cycle*1.8,0);add(pose,'forearmR',0,-cycle*1.8,0);add(pose,'hips',0,cycle*.7,cycle*.45);return pose;

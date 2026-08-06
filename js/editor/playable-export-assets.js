@@ -270,6 +270,30 @@ function create(deps){
     }
   }
 
+  async function normalizeGraphUiAssets(graph, overrides, prefix, dbCache, library, warnings){
+    if(!graph) return;
+    async function walk(element){
+      if(!element || typeof element !== 'object') return;
+      if(String(element.type || '').toLowerCase() === 'image' && element.asset && typeof element.asset === 'object'){
+        await normalizePlayableAssetRef(element.asset, 'src', prefix + '.' + (element.id || 'image'), dbCache, library, warnings);
+      }
+      for(const child of (Array.isArray(element.children) ? element.children : [])) await walk(child);
+    }
+    await walk(graph.uiElement);
+    for(const node of (Array.isArray(graph.nodes) ? graph.nodes : [])){
+      if(node && node.type === 'ui.createImage' && node.data && node.data.asset && typeof node.data.asset === 'object'){
+        await normalizePlayableAssetRef(node.data.asset, 'src', prefix + '.node.' + (node.id || 'image'), dbCache, library, warnings);
+      }
+    }
+    for(const variable of (Array.isArray(graph.variables) ? graph.variables : [])){
+      const binding = String(variable && variable.binding || '');
+      if(!/^ui\./.test(binding) || !/(?:asset|src|image|texture)/i.test(binding)) continue;
+      if(variable.value && typeof variable.value === 'object') await normalizePlayableAssetRef(variable.value, 'src', prefix + '.variable.' + (variable.name || binding), dbCache, library, warnings);
+      const override = overrides && overrides[variable.name];
+      if(override && typeof override === 'object') await normalizePlayableAssetRef(override, 'src', prefix + '.override.' + (variable.name || binding), dbCache, library, warnings);
+    }
+  }
+
   async function preparePlayableProject(project, opts){
     opts = opts || {};
     const prepared = JSON.parse(JSON.stringify(project || {}));
@@ -308,13 +332,19 @@ function create(deps){
             if(element && (element.matProps || element.materials || element.props)) await normalizePlayableObjectBlobs(element.matProps || element.materials || element.props, 'logicElementAsset.materials.' + (element.name || element.id || 'element'), dbCache, library, warnings, 0);
           }
           await normalizeGraphAnimationAssets(entry.graph, entry.variableOverrides, 'logicElement.animations', dbCache, library, warnings);
+          await normalizeGraphUiAssets(entry.graph, entry.variableOverrides, 'logicElement.ui', dbCache, library, warnings);
           if(entry.logicAsset && entry.logicAsset.graph){
             await normalizeGraphAnimationAssets(entry.logicAsset.graph, null, 'logicElementAsset.animations', dbCache, library, warnings);
+            await normalizeGraphUiAssets(entry.logicAsset.graph, null, 'logicElementAsset.ui', dbCache, library, warnings);
           }
           const vehicleAudio = entry.graph && entry.graph.vehiclePawn && entry.graph.vehiclePawn.engineAudio;
           if(vehicleAudio && vehicleAudio.set) await normalizePlayableObjectBlobs(vehicleAudio.set, 'logicElement.vehiclePawn.engineAudio.set', dbCache, library, warnings, 0);
           const assetVehicleAudio = entry.logicAsset && entry.logicAsset.graph && entry.logicAsset.graph.vehiclePawn && entry.logicAsset.graph.vehiclePawn.engineAudio;
           if(assetVehicleAudio && assetVehicleAudio.set) await normalizePlayableObjectBlobs(assetVehicleAudio.set, 'logicElementAsset.vehiclePawn.engineAudio.set', dbCache, library, warnings, 0);
+          const sketchbookAudio=entry.graph&&entry.graph.sketchbookPawn&&entry.graph.sketchbookPawn.engineAudio;
+          if(sketchbookAudio&&sketchbookAudio.set)await normalizePlayableObjectBlobs(sketchbookAudio.set,'logicElement.sketchbookPawn.engineAudio.set',dbCache,library,warnings,0);
+          const assetSketchbookAudio=entry.logicAsset&&entry.logicAsset.graph&&entry.logicAsset.graph.sketchbookPawn&&entry.logicAsset.graph.sketchbookPawn.engineAudio;
+          if(assetSketchbookAudio&&assetSketchbookAudio.set)await normalizePlayableObjectBlobs(assetSketchbookAudio.set,'logicElementAsset.sketchbookPawn.engineAudio.set',dbCache,library,warnings,0);
         }
       }
     }

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 
 const store = fs.readFileSync('js/engine/scene-store.js', 'utf8');
 const inspector = fs.readFileSync('js/editor/object-inspector.js', 'utf8');
-const notes = fs.readFileSync('RELEASE_NOTES_v0.7.7.md', 'utf8');
+const notes = fs.readFileSync('docs/releases/v0.7.7.md', 'utf8');
 
 assert.match(inspector, /value:'surface'.*Surface Layer/s,
   'the decal Inspector exposes the material-preserving Surface Layer mode');

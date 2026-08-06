@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+id = "lotking_live_link"
+version = "0.1.9"
+name = "Lot King Live Link"
+tagline = "Live scene and asset bridge for Lot King Editor"
+maintainer = "Lot King Engine"
+type = "add-on"
+website = "https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame"
+tags = ["3D View", "Import-Export", "Pipeline"]
+blender_version_min = "5.0.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+network = "Runs the token-protected localhost Live Link server"
+files = "Uses temporary GLB files only during explicit transfer"

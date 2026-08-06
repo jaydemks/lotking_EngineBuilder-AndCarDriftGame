@@ -32,6 +32,10 @@ function registerAll(registry){
   registry.register({type:'event.onDestroy', title:'On Destroy', category:'Events', description:'Runs once before this graph runtime is disposed.', event:'OnDestroy', outputs:[thenOut]});
   registry.register({type:'event.onKeyDown', title:'On Key Down', category:'Events', description:'Runs when a key is pressed.', event:'OnKeyDown', inputs:[dataIn('key', 'string', '')], outputs:[thenOut, dataOut('key', 'string')]});
   registry.register({type:'event.onKeyUp', title:'On Key Up', category:'Events', description:'Runs when a key is released.', event:'OnKeyUp', inputs:[dataIn('key', 'string', '')], outputs:[thenOut, dataOut('key', 'string')]});
+  registry.register({type:'event.onInputActionDown', title:'On Input Action Down', category:'Input', description:'Runs when an action becomes pressed for the Player possessing this Pawn.', event:'OnInputActionDown', inputs:[dataIn('action', 'string', 'interact')], outputs:[thenOut, dataOut('action', 'string'), dataOut('playerId', 'number'), dataOut('pawn', 'vehiclePawn'), dataOut('contextId', 'string')]});
+  registry.register({type:'event.onInputActionUp', title:'On Input Action Up', category:'Input', description:'Runs when an action is released for the Player possessing this Pawn.', event:'OnInputActionUp', inputs:[dataIn('action', 'string', 'interact')], outputs:[thenOut, dataOut('action', 'string'), dataOut('playerId', 'number'), dataOut('pawn', 'vehiclePawn'), dataOut('contextId', 'string')]});
+  registry.register({type:'event.onPlayerInputActionDown', title:'On Player Input Action Down', category:'Input', description:'Runs from one explicit Player slot, using the mapping/profile of the Pawn that Player possesses.', event:'OnPlayerInputActionDown', inputs:[dataIn('playerId', 'number', 1), dataIn('action', 'string', 'interact')], outputs:[thenOut, dataOut('action', 'string'), dataOut('playerId', 'number'), dataOut('pawn', 'vehiclePawn'), dataOut('contextId', 'string')]});
+  registry.register({type:'event.onPlayerInputActionUp', title:'On Player Input Action Up', category:'Input', description:'Runs when an action is released by one explicit Player slot.', event:'OnPlayerInputActionUp', inputs:[dataIn('playerId', 'number', 1), dataIn('action', 'string', 'interact')], outputs:[thenOut, dataOut('action', 'string'), dataOut('playerId', 'number'), dataOut('pawn', 'vehiclePawn'), dataOut('contextId', 'string')]});
   registry.register({type:'event.onPointerDown', title:'On Pointer Down', category:'Events', description:'Runs when pointer is pressed.', event:'OnPointerDown', inputs:[dataIn('button', 'string', 'any')], outputs:[thenOut, dataOut('x', 'number'), dataOut('y', 'number'), dataOut('button', 'number')]});
   registry.register({type:'event.onPointerMove', title:'On Pointer Move', category:'Events', description:'Runs when pointer moves.', event:'OnPointerMove', outputs:[thenOut, dataOut('x', 'number'), dataOut('y', 'number'), dataOut('deltaX', 'number'), dataOut('deltaY', 'number')]});
   registry.register({type:'event.onPointerUp', title:'On Pointer Up', category:'Events', description:'Runs when pointer is released.', event:'OnPointerUp', inputs:[dataIn('button', 'string', 'any')], outputs:[thenOut, dataOut('x', 'number'), dataOut('y', 'number'), dataOut('button', 'number')]});
@@ -52,6 +56,12 @@ function registerAll(registry){
     type:'input.isKeyPressed', title:'Is Key Pressed', category:'Events', description:'Checks if a key is currently held.',
     inputs:[dataIn('key', 'string', 'w')], outputs:[dataOut('value', 'boolean')],
     evaluate(api){ return !!(api.services.input && api.services.input.isKeyPressed(api.getInput('key'))); },
+  });
+
+  registry.register({
+    type:'input.isActionPressed', title:'Is Input Action Pressed', category:'Input', description:'Checks a remappable action owned by the Player possessing this Pawn.',
+    inputs:[dataIn('action', 'string', 'interact')], outputs:[dataOut('value', 'boolean')],
+    evaluate(api){ return !!(api.services.input && api.services.input.isActionPressed(api.getInput('action'))); },
   });
 
   registry.register({
@@ -981,9 +991,24 @@ function registerAll(registry){
   });
 
   registry.register({
-    type:'cinema.playTimeline', title:'Play Cinema Timeline', category:'Cinema', description:'Starts a Cinema Studio timeline immediately in the active Player 1/preview frame.',
-    inputs:[execIn, dataIn('studio', 'string', ''), dataIn('startTime', 'number', 0)], outputs:[completedOut],
-    run(api){ if(api.services.cinema) api.services.cinema.playTimeline(api.getInput('studio'), api.getInput('startTime')); return {exec:'completed'}; },
+    type:'cinema.playTimeline', title:'Play Cinema Timeline', category:'Cinema', description:'Starts a Cinema Studio timeline. Its authored Cut/Blend exit can be overridden here; Completed fires after the final camera blend.',
+    inputs:[execIn, dataIn('studio', 'string', ''), dataIn('startTime', 'number', 0), dataIn('endMode', 'string', 'studio'), dataIn('blendDuration', 'number', -1), dataIn('returnPlayerId', 'number', 0), dataIn('returnPawn', 'vehiclePawn', null)], outputs:[execOutput('started'), completedOut],
+    run(api){
+      const cinema=api.services.cinema;
+      if(!cinema)return {exec:'completed'};
+      const waitForEnd=api.isOutputConnected('completed');
+      const endMode=api.getInput('endMode'),blendDuration=Number(api.getInput('blendDuration')),returnPlayerId=Number(api.getInput('returnPlayerId'));
+      const completion={};
+      if(endMode==='cut'||endMode==='blend')completion.mode=endMode;
+      if(Number.isFinite(blendDuration)&&blendDuration>=0)completion.duration=blendDuration;
+      if(Number.isInteger(returnPlayerId)&&returnPlayerId>=1&&returnPlayerId<=4)completion.playerId=returnPlayerId;
+      const returnPawn=api.getInput('returnPawn');
+      if(returnPawn)completion.pawnRef=returnPawn;
+      const options=Object.keys(completion).length?{completion}:{};
+      if(waitForEnd){options.playbackOverride='once';options.onComplete=api.defer('completed');}
+      const started=cinema.playTimeline(api.getInput('studio'),api.getInput('startTime'),Object.keys(options).length?options:null);
+      return {exec:started?'started':'completed'};
+    },
   });
 
   registry.register({

@@ -181,6 +181,8 @@ function create(deps){
     const lang = GAME && GAME.i18n && GAME.i18n.lang === 'it' ? 'it' : 'en';
     const tr = (en, it) => lang === 'it' ? (it || en) : en;
     bindInspectorHistory(box, o);
+    const pawnCameraDummy=o.userData&&o.userData.pawnCameraDummy===true;
+    const syncPawnCamera=()=>{if(pawnCameraDummy&&window.LK_LOGIC_GRAPH&&window.LK_LOGIC_GRAPH.syncPawnCameraNode)window.LK_LOGIC_GRAPH.syncPawnCameraNode(o);};
     const head = el('<div class="lk-head"><span class="lk-head-ic">' + entityIcon(o) + '</span><input class="lk-head-name"><span class="lk-head-id">' + o.userData.editorId + (o.userData.builtin ? ' · ' + tr('original', 'originale') : ' · ' + tr('added', 'aggiunto')) + '</span></div>');
     const nameI = head.querySelector('input');
     nameI.value = o.userData.editorName || '';
@@ -188,12 +190,13 @@ function create(deps){
     box.appendChild(head);
     if(o.userData.editorType === 'playerLight' || o.userData.editorType === 'playerEffect' ||
       o.userData.editorType === 'playerSkid' || o.userData.editorType === 'playerDataWidget' ||
-      o.userData.editorType === 'playerCamera'){
+      o.userData.editorType === 'playerCamera' || pawnCameraDummy){
+      let cameraOwner=o;while(cameraOwner&&!(cameraOwner.userData&&cameraOwner.userData.editorType==='logicElement'))cameraOwner=cameraOwner.parent;
       box.appendChild(btnRow([
-        {label:'← player_car Logic', action:() => selectObject(GAME.player.car)},
+        {label:pawnCameraDummy?tr('← Pawn Logic Element','← Logic Element Pawn'):'← player_car Logic', action:() => selectObject(pawnCameraDummy&&cameraOwner||GAME.player.car)},
         {label:tr('Focus component', 'Focus componente'), action: focusSelected},
       ]));
-      box.appendChild(el('<div class="lk-hint">This component belongs to the player vehicle. Go back to player_car Logic to edit global settings, presets and sources.</div>'));
+      box.appendChild(el('<div class="lk-hint">'+(pawnCameraDummy?tr('This is a persistent gameplay camera mount. Its local gizmo transform is saved into the Pawn and used unchanged by Play.','Questo è un mount camera gameplay persistente. La trasformazione locale del gizmo viene salvata nel Pawn e usata invariata in Play.'):'This component belongs to the player vehicle. Go back to player_car Logic to edit global settings, presets and sources.')+'</div>'));
     }
     if(o.userData.linkParentId){
       const parent = GAME.world.registry.find(p => p.userData.editorId === o.userData.linkParentId);
@@ -222,7 +225,7 @@ function create(deps){
         const i = el('<input type="number" step="' + (isDeg ? 1 : .1) + '" title="' + axis.label + '">');
         i.value = +get(ax).toFixed(3);
         i.addEventListener('focus', beginTransformHistory);
-        i.addEventListener('input', () => { set(ax, parseFloat(i.value) || 0); STORE.syncCollider(o); markDirty(); if(o.userData.editorType==='player' || o.userData.editorType==='playerDataWidget' || o.userData.editorType==='playerSkid' || o.userData.editorType==='playerCamera') onGizmoChange(); });
+        i.addEventListener('input', () => { set(ax, parseFloat(i.value) || 0); STORE.syncCollider(o); markDirty(); if(o.userData.editorType==='player' || o.userData.editorType==='playerDataWidget' || o.userData.editorType==='playerSkid' || o.userData.editorType==='playerCamera' || pawnCameraDummy){syncPawnCamera();onGizmoChange();} });
         i.addEventListener('change', () => commitTransformHistory(label));
         row.appendChild(i); ins.push({input:i, prop:ax, kind});
       });
@@ -238,8 +241,41 @@ function create(deps){
     });
     tf.inputs = [...pI, ...rI, ...sI];
     st.body.appendChild(checkRow('Uniform scale', false, v => uniform = v).root);
-    st.body.appendChild(btnRow([{label:'↺ Reset', action:() => { resetTransform(o); syncTransformFields(); }}]));
+    st.body.appendChild(btnRow([{label:'↺ Reset', action:() => { resetTransform(o);syncPawnCamera();syncTransformFields(); }}]));
     box.appendChild(st.root);
+
+    if(pawnCameraDummy){
+      let owner=o;while(owner&&!(owner.userData&&owner.userData.logicGraph))owner=owner.parent;
+      const graph=owner&&owner.userData&&owner.userData.logicGraph,role=String(o.userData.pawnCameraRole||''),pawn=graph&&(graph.characterPawn||graph.soccerPawn||graph.vehiclePawn||graph.sketchbookPawn),character=/^character-/.test(role),camera=pawn&&(character?pawn.firstPerson:pawn.camera);
+      if(camera){
+        const target=role==='character-third'?(camera.thirdPerson||(camera.thirdPerson={})):camera;
+        const keys=role==='vehicle-interior'?{fov:'interiorFov',near:'interiorNear',focus:'interiorFocusDistance'}:{fov:'fov',near:'near',focus:'focusDistance'};
+        const defaults=role==='character-first'?{fov:78,near:.14,focus:9}:role==='character-third'?{fov:68,near:.1,focus:9}:role==='vehicle-interior'?{fov:72,near:.1,focus:9}:{fov:70,near:.1,focus:12};
+        const opticBinding=key=>{
+          if(role==='character-first')return 'firstPerson.'+key;
+          if(role==='character-third')return 'firstPerson.thirdPerson.'+key;
+          if(role==='vehicle-interior')return 'camera.'+key;
+          return 'camera.'+key;
+        };
+        const saveOptic=(key,value)=>{
+          target[key]=value;
+          // Exposed graph variables are applied when Play starts. Keep their
+          // value in lockstep with the spatial dummy, otherwise a perfectly
+          // saved camera would jump back to the old Inspector value on Start.
+          const binding=opticBinding(key);
+          const variable=(graph.variables||[]).find(item=>item&&item.binding===binding);
+          if(variable)variable.value=value;
+          if(owner.userData.addedEntry)owner.userData.addedEntry.graph=window.LK_LOGIC_GRAPH.clone(graph);
+          markDirty();
+        };
+        const optics=section(tr('GAMEPLAY CAMERA OPTICS','OTTICA CAMERA GAMEPLAY'));
+        optics.body.appendChild(sliderRow('FOV',Number(target[keys.fov])||defaults.fov,20,130,1,value=>saveOptic(keys.fov,value),value=>Math.round(value)+'°').root);
+        optics.body.appendChild(sliderRow(tr('Near clipping plane','Piano clipping vicino'),Number(target[keys.near])||defaults.near,.02,.5,.01,value=>saveOptic(keys.near,value),value=>(+value).toFixed(2)+' m').root);
+        optics.body.appendChild(sliderRow(tr('Focus distance','Distanza messa a fuoco'),Number(target[keys.focus])||defaults.focus,.25,200,.25,value=>saveOptic(keys.focus,value),value=>(+value).toFixed(2)+' m').root);
+        optics.body.appendChild(el('<div class="lk-hint">'+tr('Position, rotation and lens values belong to this Pawn camera only and persist with the Logic Element.','Posizione, rotazione e valori ottici appartengono solo a questa camera Pawn e persistono nel Logic Element.')+'</div>'));
+        box.appendChild(optics.root);
+      }
+    }
 
     const sd = section(tr('VISIBILITY', 'VISIBILITA'));
     sd.body.appendChild(checkRow(tr('Visible', 'Visibile'), o.visible, v => { if(toggleVisible&&o.visible!==v)toggleVisible(o);else {o.visible=v;markDirty();refreshOutliner();} }).root);
@@ -256,6 +292,37 @@ function create(deps){
       }).root);
     }
     box.appendChild(sd.root);
+
+    const proceduralEntry=o.userData&&o.userData.addedEntry;
+    const proceduralApi=window.LK_ENGINE_PROCEDURAL_ASSETS;
+    if(proceduralEntry&&proceduralEntry.kind==='proceduralAsset'&&proceduralApi&&STORE.rebuildProceduralAsset){
+      let recipe=proceduralApi.normalize(proceduralEntry.procedural);
+      const ps=section(tr('PROCEDURAL ASSET','ASSET PROCEDURALE'),true);
+      const rebuild=change=>{
+        change(recipe);recipe=proceduralApi.normalize(recipe);
+        proceduralEntry.procedural=JSON.parse(JSON.stringify(recipe));
+        proceduralEntry.props=Object.assign({},proceduralEntry.props||{},proceduralApi.materialProps(recipe));
+        STORE.rebuildProceduralAsset(o,recipe);markDirty();requestWarmup('Rebuild procedural asset...');
+      };
+      ps.body.appendChild(el('<div class="lk-hint">Serializable Engine Asset recipe. The same factory rebuilds this object in Editor, Play and exported gameplay.</div>'));
+      const dimensionLabels={width:tr('Width','Larghezza'),height:tr('Height','Altezza'),depth:tr('Depth','Profondità'),radius:tr('Radius','Raggio'),openingWidth:tr('Opening width','Larghezza apertura'),openingHeight:tr('Opening height','Altezza apertura'),steps:tr('Steps','Gradini')};
+      Object.keys(recipe.dimensions).forEach(key=>{
+        const integer=key==='steps',maximum=integer?128:200;
+        ps.body.appendChild(sliderRow(dimensionLabels[key]||key,recipe.dimensions[key],integer?1:.01,maximum,integer?1:.05,v=>rebuild(next=>{next.dimensions[key]=integer?Math.round(v):v;}),v=>integer?String(Math.round(v)):(+v).toFixed(2)+'m').root);
+      });
+      const segmentKeys=recipe.type==='sphere'?['radial','height']:recipe.type==='cylinder'||recipe.type==='pipe'?['radial','height']:recipe.type==='box'?['width','height','depth']:recipe.type==='plane'?['width','depth']:[];
+      segmentKeys.forEach(key=>ps.body.appendChild(sliderRow((key[0].toUpperCase()+key.slice(1))+' segments',recipe.segments[key],1,128,1,v=>rebuild(next=>{next.segments[key]=Math.round(v);}),v=>String(Math.round(v))).root));
+      ps.body.appendChild(colorRow(tr('Material color','Colore materiale'),recipe.material.color,v=>rebuild(next=>{next.material.color=v;})).root);
+      ps.body.appendChild(sliderRow(tr('Roughness','Ruvidità'),recipe.material.roughness,0,1,.01,v=>rebuild(next=>{next.material.roughness=v;}),v=>Math.round(v*100)+'%').root);
+      ps.body.appendChild(sliderRow(tr('Metallic','Metallico'),recipe.material.metalness,0,1,.01,v=>rebuild(next=>{next.material.metalness=v;}),v=>Math.round(v*100)+'%').root);
+      ps.body.appendChild(selectRow(tr('Material model','Modello materiale'),recipe.material.model,[{value:'standard',label:'PBR Standard'},{value:'toon',label:'Toon'},{value:'unlit',label:'Unlit'}],v=>rebuild(next=>{next.material.model=v;})).root);
+      const surfaceApi=window.LK_ENGINE_PROCEDURAL_SURFACES,surfaceValue=typeof recipe.material.surfaceTexture==='string'?recipe.material.surfaceTexture:'';
+      const surfaceOptions=[{value:'',label:tr('None / flat','Nessuna / piatta')}].concat(surfaceApi&&surfaceApi.list?surfaceApi.list().map(item=>({value:item.id,label:lang==='it'?item.labelIt:item.label})):[]);
+      ps.body.appendChild(selectRow(tr('Procedural surface','Superficie procedurale'),surfaceValue,surfaceOptions,v=>rebuild(next=>{next.material.surfaceTexture=v||null;})).root);
+      ['scale','offset'].forEach(field=>[0,1].forEach(axis=>ps.body.appendChild(sliderRow('UV '+field+' '+(axis?'V':'U'),recipe.uv[field][axis],field==='scale'?.01:-10,field==='scale'?20:10,.01,v=>rebuild(next=>{next.uv[field][axis]=v;}),v=>(+v).toFixed(2)).root)));
+      ps.body.appendChild(sliderRow(tr('UV rotation','Rotazione UV'),THREE.MathUtils.radToDeg(recipe.uv.rotation),-360,360,1,v=>rebuild(next=>{next.uv.rotation=THREE.MathUtils.degToRad(v);}),v=>(+v).toFixed(0)+'°').root);
+      box.appendChild(ps.root);
+    }
 
     if(o.userData.driftTrack && STORE.rebuildDriftTrack){
       const gen = window.LK_RUNTIME_DRIFT_TRACK;
@@ -353,10 +420,27 @@ function create(deps){
       });
       return opts;
     };
+    const cinemaPawnOptions = () => {
+      const opts=[{value:'',label:tr('Current/automatic possessed Pawn','Pawn posseduto corrente/automatico')}],seen=new Set();
+      const add=(id,label)=>{
+        const value=String(id||'').trim();
+        if(!value||seen.has(value))return;
+        seen.add(value);opts.push({value,label:label||value});
+      };
+      if(GAME.pawns&&GAME.pawns.list){
+        GAME.pawns.list().forEach(pawn=>add(pawn&&pawn.id,(pawn&&pawn.owner&&(pawn.owner.userData.editorName||pawn.owner.name))||pawn&&pawn.id));
+      }
+      GAME.world.registry.forEach(item=>{
+        const graph=item&&item.userData&&item.userData.logicGraph;
+        const pawn=graph&&(graph.characterPawn||graph.animalPawn||graph.soccerPawn||graph.sketchbookPawn||graph.vehiclePawn||graph.playerPawnBlueprint);
+        if(pawn)add(pawn.id||item.userData.vehiclePawnId||item.userData.logicInstanceId,(item.userData.editorName||item.name||'Pawn')+' · '+(pawn.id||'auto'));
+      });
+      return opts;
+    };
 
     if(o.userData.editorType === 'camera'){
       const camSec = section('SCENE CAMERA');
-      const props = Object.assign({fov:50, near:.05, far:800, helperSize:1.2, preview:true}, o.userData.cameraProps || {});
+      const props = Object.assign({fov:50, near:.05, far:800, helperSize:1.2, preview:true, aspect:'auto'}, o.userData.cameraProps || {});
       o.userData.cameraProps = props;
       const updateCamera = patch => {
         Object.assign(props, patch || {});
@@ -395,6 +479,17 @@ function create(deps){
       camSec.body.appendChild(sliderRow('Far clip', props.far || 800, 10, 3000, 10, v => updateCamera({far:Math.max(10, v)}), v => Math.round(v) + 'm').root);
       camSec.body.appendChild(sliderRow('Helper size', props.helperSize || 1.2, .25, 8, .05, v => updateCamera({helperSize:v}), v => (+v).toFixed(2) + 'm').root);
       camSec.body.appendChild(checkRow('Show helper', props.preview !== false, v => updateCamera({preview:v})).root);
+      // Its OWN shape. A scene camera had no aspect field at all, so every preview
+      // fell back to the player camera's ratio and looked identical whichever camera
+      // you picked. `Auto` defers to the level default, then to the viewport; the
+      // editor-wide master in View settings overrides all of them while framing.
+      const aspectPolicy = window.LK_ASPECT_POLICY;
+      if(aspectPolicy){
+        camSec.body.appendChild(selectRow(tr('Aspect ratio', 'Rapporto d\'aspetto'), props.aspect || 'auto',
+          aspectPolicy.OPTIONS.map(option => ({value:option.value,
+            label:option.value === 'auto' ? tr('Auto (level default)', 'Auto (default del livello)') : option.label})),
+          v => updateCamera({aspect:v})).root);
+      }
       const cameraOutput = props.activeLevelCamera === true ? 0 : props.outputPlayerIndex;
       camSec.body.appendChild(selectRow(tr('Player output', 'Uscita giocatore'), cameraOutput == null ? 'none' : String(cameraOutput), [
         {value:'none', label:tr('None', 'Nessuna')},
@@ -416,8 +511,9 @@ function create(deps){
 
     if(o.userData.editorType === 'cinemaStudio'){
       const cinemaSec = section('CINEMA STUDIO', true);
-      const props = Object.assign({version:2, duration:6, fps:24, playback:'one-shot', trigger:'manual', eventName:'', outputPlayerIndex:null, previewCamera:'', cameraCuts:[], movieTrack:[], cameras:[], keyframes:[], objectTracks:[], lensTracks:[], eventTracks:[], markers:[]}, o.userData.cinemaProps || {});
-      props.version = Math.max(2, Number(props.version) || 1);
+      const props = Object.assign({version:4, duration:6, fps:24, playback:'one-shot', trigger:'manual', eventName:'', outputPlayerIndex:null, previewCamera:'', cameraCuts:[], movieTrack:[], cameras:[], keyframes:[], objectTracks:[], lensTracks:[], eventTracks:[], markers:[], completion:{mode:'cut',duration:1,curve:'ease-in-out',playerId:null,pawnId:''}}, o.userData.cinemaProps || {});
+      props.version = Math.max(4, Number(props.version) || 1);
+      props.completion=Object.assign({mode:'cut',duration:1,curve:'ease-in-out',playerId:null,pawnId:''},props.completion||{});
       if(!Array.isArray(props.cameraCuts)) props.cameraCuts = Array.isArray(props.movieTrack) ? props.movieTrack : [];
       props.movieTrack = props.cameraCuts;
       if(!Array.isArray(props.cameras)) props.cameras = [];
@@ -437,7 +533,7 @@ function create(deps){
         markDirty();
         refreshOutliner();
       };
-      cinemaSec.body.appendChild(sliderRow('Duration', props.duration || 6, .5, 240, .1, v => saveCinema({duration:v}), v => (+v).toFixed(1) + 's').root);
+      cinemaSec.body.appendChild(sliderRow('Duration', props.duration || 6, .1, 86400, .1, v => saveCinema({duration:v}), v => (+v).toFixed(1) + 's').root);
       cinemaSec.body.appendChild(sliderRow('FPS', props.fps || 24, 12, 120, 1, v => saveCinema({fps:Math.round(v)}), v => Math.round(v)).root);
       cinemaSec.body.appendChild(selectRow('Playback', props.playback || 'one-shot', [
         {value:'one-shot', label:'One-shot'},
@@ -463,6 +559,28 @@ function create(deps){
           window.dispatchEvent(new CustomEvent('lotking:cinemastop', {detail:{playerId:previousOutput + 1, reason:'cinema-output-changed'}}));
         }
       }).root);
+      const saveCompletion=patch=>saveCinema({completion:Object.assign({},props.completion,patch||{})});
+      cinemaSec.body.appendChild(selectRow(tr('End transition','Transizione finale'),props.completion.mode||'cut',[
+        {value:'cut',label:tr('Cut (instant)','Cut (istantaneo)')},
+        {value:'blend',label:tr('Smooth camera blend','Blend camera fluido')},
+      ],v=>saveCompletion({mode:v})).root);
+      cinemaSec.body.appendChild(sliderRow(tr('Blend duration','Durata blend'),Number.isFinite(Number(props.completion.duration))?Number(props.completion.duration):1,0,10,.05,v=>saveCompletion({duration:v}),v=>(+v).toFixed(2)+'s').root);
+      cinemaSec.body.appendChild(selectRow(tr('Blend curve','Curva blend'),props.completion.curve||'ease-in-out',[
+        {value:'ease-in-out',label:'Ease in/out'},
+        {value:'ease-in',label:'Ease in'},
+        {value:'ease-out',label:'Ease out'},
+        {value:'linear',label:'Linear'},
+      ],v=>saveCompletion({curve:v})).root);
+      cinemaSec.body.appendChild(selectRow(tr('Return controller','Controller finale'),props.completion.playerId==null?'auto':String(props.completion.playerId),[
+        {value:'auto',label:tr('Cinema output / automatic','Uscita Cinema / automatico')},
+        {value:'1',label:'Player 1'},{value:'2',label:'Player 2'},{value:'3',label:'Player 3'},{value:'4',label:'Player 4'},
+      ],v=>saveCompletion({playerId:v==='auto'?null:Number(v)})).root);
+      const returnPawnOptions=cinemaPawnOptions();
+      if(props.completion.pawnId&&!returnPawnOptions.some(option=>option.value===props.completion.pawnId)){
+        returnPawnOptions.push({value:props.completion.pawnId,label:props.completion.pawnId+' · '+tr('unavailable now','non disponibile ora')});
+      }
+      cinemaSec.body.appendChild(selectRow(tr('Return Pawn','Pawn finale'),props.completion.pawnId||'',returnPawnOptions,v=>saveCompletion({pawnId:v})).root);
+      cinemaSec.body.appendChild(el('<div class="lk-hint">'+tr('The selected Pawn is possessed before a Blend; Logic Completed fires only after the camera handoff.','Il Pawn scelto viene posseduto prima del Blend; Completed della Logic scatta solo dopo il passaggio camera.')+'</div>'));
       const eventRow = el('<div class="lk-row"><label>Event name</label><input type="text"></div>');
       const eventInput = eventRow.querySelector('input');
       eventInput.value = props.eventName || '';
@@ -800,6 +918,11 @@ function create(deps){
       const sc = section('PHYSICS');
       sc.root.dataset.historyManaged = 'collider';
       const c = o.userData && o.userData.collider;
+      const syncProceduralCollision=patch=>{
+        const entry=o.userData&&o.userData.addedEntry,api=window.LK_ENGINE_PROCEDURAL_ASSETS;
+        if(!entry||entry.kind!=='proceduralAsset'||!api)return;
+        const value=api.normalize(entry.procedural);Object.assign(value.collision,patch||{});entry.procedural=api.normalize(value);
+      };
       if(c && c.ref) STORE.syncCollider(o);
       const hasCollider = !!(c && c.ref && c.ref.enabled !== false);
       const hasPhysics = !!(o.userData.physicsEnabled || (c && c.ref && c.ref.physics));
@@ -822,6 +945,7 @@ function create(deps){
         if(o.userData.collider && o.userData.collider.ref) o.userData.collider.ref.mass = m;
         o.userData.physicsMass = m;
         if(o.userData.addedEntry) o.userData.addedEntry.physicsMass = m;
+        syncProceduralCollision({mass:m});
         if(c && c.ref) STORE.syncCollider(o);
         markDirty();
       });
@@ -830,6 +954,7 @@ function create(deps){
         if(o.userData.collider && o.userData.collider.ref) o.userData.collider.ref.impact = force;
         o.userData.physicsImpact = force;
         if(o.userData.addedEntry) o.userData.addedEntry.physicsImpact = force;
+        syncProceduralCollision({impact:force});
         markDirty();
       });
       if(physicsMassRow.input) physicsMassRow.input.disabled = !hasPhysics;
@@ -838,19 +963,31 @@ function create(deps){
       if(impactRow.valueInput) impactRow.valueInput.disabled = !hasPhysics;
       const collisionRow = checkRow('Collision', hasCollider, v => {
         beginColliderHistory(o);
+        if(!v && o.userData.driveSurface === true){
+          o.userData.driveSurface = false;
+          if(o.userData.addedEntry) o.userData.addedEntry.driveSurface = false;
+          syncProceduralCollision({driveSurface:false});
+        }
         setColliderEnabled(o, v);
+        syncProceduralCollision({enabled:v});
         commitColliderHistory('Collision enabled');
       });
       sc.body.appendChild(collisionRow.root);
       sc.body.appendChild(checkRow('Physics', hasPhysics, v => {
         beginColliderHistory(o);
         setPhysicsEnabled(o, v);
+        syncProceduralCollision({physics:v});
         commitColliderHistory('Physics enabled');
       }).root);
       sc.body.appendChild(checkRow('Drive surface', !!o.userData.driveSurface, v => {
         beginColliderHistory(o);
         o.userData.driveSurface = v;
         if(o.userData.addedEntry) o.userData.addedEntry.driveSurface = v;
+        syncProceduralCollision({driveSurface:v});
+        if(v && !(o.userData.collider && o.userData.collider.ref && o.userData.collider.ref.enabled !== false)){
+          setColliderEnabled(o, true);
+          syncProceduralCollision({enabled:true});
+        }
         requestPhysicsRebuild();
         markDirty();
         commitColliderHistory('Drive surface');

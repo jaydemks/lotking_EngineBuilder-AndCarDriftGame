@@ -196,14 +196,19 @@ function clone(value){ return value == null ? value : JSON.parse(JSON.stringify(
 
 // ================================================================= 04 helpers
 
-function buildScene(baseScene){
-  const scene = baseScene || {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, ui:{}, logic:{}};
-  // The blank template ships a small default ground plane; the facility floor
-  // below replaces it entirely.
-  scene.added = (scene.added || []).filter(entry => !(entry && entry.name === 'Ground' && entry.asset && entry.asset.source === 'Editor primitive'));
-
+// A prop builder bound to one scene. Extracted from `buildScene` so a level that
+// EXTENDS this facility - the Enemy Outpost adds two more sectors to it - can
+// author in the same material classes, the same surface grain and the same entry
+// shape instead of copying the material table and drifting from it.
+//
+//   prefix   id namespace, so two builders on one scene cannot collide
+//   source   what the editor shows as the asset source for these props
+function createBuilder(scene, options){
+  const opts = options || {};
+  const prefix = String(opts.prefix || 'fps_range');
+  const source = String(opts.source || SOURCE);
   let seq = 0;
-  function nextId(){ return 'fps_range_' + String(++seq).padStart(3, '0'); }
+  function nextId(){ return prefix + '_' + String(++seq).padStart(3, '0'); }
 
   // `spec` is a material class name, or a raw colour for the handful of
   // one-off accents that do not deserve a class of their own. An unknown class
@@ -254,7 +259,7 @@ function buildScene(baseScene){
       item:opts.item || undefined,
       props,
       t:{p:position.slice(), r:(opts.rotation || [0, 0, 0]).slice(), s:scale.slice(), v:opts.visible !== false},
-      asset:{key:'primitive:' + prim, name, source:SOURCE},
+      asset:{key:'primitive:' + prim, name, source},
       templateGroup:opts.group || GROUP.terrain,
     });
   }
@@ -282,6 +287,18 @@ function buildScene(baseScene){
     const s = outerRadius / 1.8;
     add(name, 'torus', position, [s, s, s], spec, false, options);
   }
+  return {scene, nextId, resolveMaterial, add, box, plane, cylinder, ring, MAT, COLOR, GROUP};
+}
+
+function buildScene(baseScene){
+  const scene = baseScene || {version:1, counter:0, transforms:{}, props:{}, deleted:[], added:[], env:{}, player:{}, ui:{}, logic:{}};
+  // The blank template ships a small default ground plane; the facility floor
+  // below replaces it entirely.
+  scene.added = (scene.added || []).filter(entry => !(entry && entry.name === 'Ground' && entry.asset && entry.asset.source === 'Editor primitive'));
+
+  const builder = createBuilder(scene, {prefix:'fps_range', source:SOURCE});
+  const nextId = builder.nextId, add = builder.add, box = builder.box;
+  const plane = builder.plane, cylinder = builder.cylinder, ring = builder.ring;
   // Emissive-looking surfaces (lamp lenses, lit signs, screens) use the unlit
   // material so they stay bright regardless of the scene lighting.
   function glow(name, position, size, color, options){
@@ -294,6 +311,7 @@ function buildScene(baseScene){
   // which is the only way a level with forty overlapping ground planes does
   // not z-fight somewhere. Later in the list means higher, so it wins.
   const DECAL_LAYER = {wear:.004, apron:.008, lane:.012, divider:.016, stain:.02, marking:.024};
+  const weaponPickupPlacements = [];
   function decal(name, x, z, width, depth, spec, layer, options){
     // A decal lies flat on the surface it stains, so its shadow falls on the
     // geometry it is already touching: invisible, but redrawn into the shadow
@@ -1074,8 +1092,13 @@ function buildScene(baseScene){
     const pickup = (name, position, size, spec, item) => box(name, position, size, spec, false, {
       group:g, item:Object.assign({name, visual:'auto'}, item),
     });
-    const weapon = (name, position, preset, respawn) =>
-      pickup(name, position, [.5, .18, .16], 'steelPale', {kind:'weapon', preset, respawn:respawn || 20, radius:1.6});
+    // Weapons are full Logic Elements. Their placeholder, imported animated
+    // model, ammo, respawn and Character action mapping all travel together.
+    // Consumables remain ordinary item contracts because they have no equip or
+    // animation behaviour to author.
+    const weapon = (name, position, preset, respawn) => weaponPickupPlacements.push({
+      name, position:position.slice(), preset, respawn:respawn || 20,
+    });
     const medkit = (name, position, amount) =>
       pickup(name, position, [.42, .26, .3], 0xe8e8ea, {kind:'health', amount:amount || 35, respawn:25, radius:1.5});
     const armour = (name, position) =>
@@ -1197,12 +1220,38 @@ function buildScene(baseScene){
     return entry;
   }
 
+  weaponPickupPlacements.forEach(spec => {
+    const templateId = 'logic-template-weapon-pickup-' + spec.preset;
+    const entry = placeLogic(templateId, spec.name, spec.position, 0, GROUP.pickups, graph => {
+      const set = (name, value) => {
+        const variable = (graph.variables || []).find(item => item && item.name === name);
+        if(variable) variable.value = value;
+      };
+      set('WeaponName', spec.name);
+      set('WeaponPreset', spec.preset);
+      set('RespawnSeconds', spec.respawn);
+    });
+    // A missing core template must not silently turn an authored gun into an
+    // invisible/non-interactive prop. Failing the level build names the exact
+    // dependency that is absent and is caught by the template test gate.
+    if(!entry) throw new Error('FPS level template: missing ' + templateId);
+  });
+
   const SPAWN = {x:0, y:GROUND_Y, z:8, heading:Math.PI};
   placeLogic('logic-template-player-first-person', 'Player (First Person)', [SPAWN.x, SPAWN.y, SPAWN.z], SPAWN.heading, GROUP.characters, graph => {
     graph.characterPawn.spawn = {x:SPAWN.x, y:SPAWN.y, z:SPAWN.z, heading:SPAWN.heading};
     graph.characterPawn.firstPerson.weapon = Object.assign({}, graph.characterPawn.firstPerson.weapon, {ammoReserve:600});
     const reserve = (graph.variables || []).find(variable => variable.name === 'ReserveAmmo');
     if(reserve) reserve.value = 600;
+    // First person is the eye camera of this SAME complete Character. Keep the
+    // world weapon on its real hand and the full-body mixer alive; no duplicate
+    // arms Pawn or second weapon is built in front of the lens.
+    const view = graph.characterPawn.firstPerson;
+    view.unifiedBodyCameraVersion=1;
+    view.viewPawn = {schemaVersion:1,kind:'none',enabled:false,showLegs:false};
+    view.presentation = 'body';view.hideOwnBody = false;view.showLegs = false;
+    const presentation = (graph.variables || []).find(variable => variable && variable.binding === 'firstPerson.viewPawn.kind');
+    if(presentation) presentation.value = 'none';
   });
 
   // Target ring: near practice, mid village targets, long range, and two
@@ -1289,7 +1338,7 @@ function buildScene(baseScene){
   scene.template = {
     id:'fps-shooter-test',
     name:'FPS Shooter Test',
-    version:5,
+    version:6,
     nativeEditable:true,
     setting:'Blackpine Urban Training Facility',
     zones:Object.keys(GROUP).map(key => GROUP[key]),
@@ -1313,7 +1362,7 @@ function buildScene(baseScene){
       viewToggle:'B  (first / third person)'  ,
       shoulderSwap:'V',
     },
-    notes:'A practice yard behind the firing line teaches every Use verb within sight of the spawn: a crate to carry to a marked pad, a swing door, a ladder, a vault rail and a 2.9 m ledge that can only be taken by jumping, catching it and pulling up. Traversal course on the east side teaches vault, mantle, slide, climbable net, ladder, sliding door and a carry-and-deliver task; weapons, medkits, armour and ammo are scattered as ordinary pickups. Covered staging bay with lockers, benches and lit briefing board; sandbag firing line; CQB village with stacked shipping containers, a walk-in two-room block house with window and breach openings, a wrecked car, tyre stacks and oil drums; long range with earth berms, target frames and a roofed watchtower; fenced perimeter with floodlight masts, razor wire and signage; a pine treeline, water tower and radio mast beyond the wall. Every surface names a material class, so colour, roughness and the procedural grain it wears are edited in one place. Twelve damageable targets from 10 m to 65 m. Player and targets are ordinary Logic Elements: duplicate, move or retune them like any other scene object.',
+    notes:'A practice yard behind the firing line teaches every Use verb within sight of the spawn: a crate to carry to a marked pad, a swing door, a ladder, a vault rail and a 2.9 m ledge that can only be taken by jumping, catching it and pulling up. Traversal course on the east side teaches vault, mantle, slide, climbable net, ladder, sliding door and a carry-and-deliver task; every weapon is an editable Logic Element with its own replaceable/animated model, ammo, respawn and Character action mapping, while medkits, armour and ammo remain lightweight item contracts. Covered staging bay with lockers, benches and lit briefing board; sandbag firing line; CQB village with stacked shipping containers, a walk-in two-room block house with window and breach openings, a wrecked car, tyre stacks and oil drums; long range with earth berms, target frames and a roofed watchtower; fenced perimeter with floodlight masts, razor wire and signage; a pine treeline, water tower and radio mast beyond the wall. Every surface names a material class, so colour, roughness and the procedural grain it wears are edited in one place. Twelve damageable targets from 10 m to 65 m. Player, targets and weapons are ordinary Logic Elements: duplicate, move or retune them like any other scene object.',
   };
   return scene;
 }
@@ -1324,7 +1373,22 @@ window.LK_RUNTIME_FPS_ARENA_LEVEL_TEMPLATE = Object.freeze({
   GROUPS:GROUP,
   MATERIALS:MAT,
   buildScene,
+  // A level that extends this facility builds its own sectors through the same
+  // builder, so one material language covers the whole map.
+  createBuilder,
   GROUND_Y,
   ARENA_HALF_X,
+  ARENA_MIN_Z,
+  ARENA_MAX_Z,
 });
+
+if(window.LK_LEVEL_TEMPLATES && window.LK_LEVEL_TEMPLATES.register){
+  window.LK_LEVEL_TEMPLATES.register({
+    id:'fps-shooter-test', name:'FPS Shooter Test (First Person)', nameIt:'FPS Shooter Test (Prima persona)',
+    category:'Shooter', order:300, ground:'plane', keepBuiltinPlayer:false,
+    description:'First-person arena with cover, weapons, targets and the FPS HUD.',
+    descriptionIt:'Arena in prima persona con coperture, armi, bersagli e HUD FPS.',
+    build:function(scene){ return buildScene(scene); },
+  });
+}
 })();

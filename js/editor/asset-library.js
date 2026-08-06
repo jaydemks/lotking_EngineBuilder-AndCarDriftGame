@@ -19,8 +19,11 @@ function create(opts){
     try {
       const raw = localStorage.getItem(ASSET_LIBRARY_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      if(Array.isArray(parsed)) return parsed;
-      return parsed && Array.isArray(parsed.assets) ? parsed.assets : [];
+      const assets=Array.isArray(parsed)?parsed:(parsed&&Array.isArray(parsed.assets)?parsed.assets:[]);
+      // Everything persisted in this library was imported/created by the
+      // project author. Old v1 entries predate provenance, so migrate them in
+      // memory instead of ever mistaking them for shipped engine content.
+      return assets.map(asset=>Object.assign({},asset,{assetOrigin:'user'}));
     } catch(err){ console.warn('LotKing editor: asset library corrupta', err); return []; }
   }
 
@@ -84,6 +87,7 @@ function create(opts){
     const has = key => Object.prototype.hasOwnProperty.call(info, key);
     const asset = {
       id: existing ? existing.id : ('asset_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7)),
+      assetOrigin:'user',
       key,
       kind,
       name: fileName(file),

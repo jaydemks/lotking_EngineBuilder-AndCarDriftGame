@@ -227,6 +227,13 @@ function create(deps){
 
   function withSyntheticExtras(items){
     const expanded = items.slice();
+    items.forEach(item=>{
+      if(!item||!item.userData||item.userData.editorType!=='logicElement'||!item.traverse)return;
+      item.traverse(node=>{
+        if(!node||node===item||!node.userData||node.userData.pawnCameraDummy!==true)return;
+        if(!expanded.includes(node))expanded.push(node);
+      });
+    });
     if(typeof selectColliderPart === 'function'){
       items.forEach(item => {
         const ud = item && item.userData;

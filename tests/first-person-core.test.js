@@ -6,6 +6,7 @@ const path = require('node:path');
 
 global.window = global;
 require('../js/runtime/character-placeholder-locomotion.js');
+require('../js/runtime/character-weapon-pose.js');
 require('../js/runtime/mixamo-placeholder-clips.js');
 require('../js/logic/logic-graph.js');
 require('../js/logic/logic-registry.js');
@@ -14,6 +15,7 @@ require('../js/logic/logic-nodes-character.js');
 require('../js/runtime/first-person-controller.js');
 require('../js/logic/logic-nodes-fps.js');
 require('../js/logic/logic-templates.js');
+require('../js/runtime/character-bodies.js');
 require('../js/logic/logic-templates-character.js');
 require('../js/logic/logic-templates-fps.js');
 require('../js/logic/logic-validator.js');
@@ -24,6 +26,7 @@ require('../js/runtime/fps-hud.js');
 const FP = global.LK_RUNTIME_FIRST_PERSON;
 const ACT = global.LK_RUNTIME_INPUT_ACTIONS;
 const FPS_HUD = global.LK_RUNTIME_FPS_HUD;
+const WEAPON_POSE = global.LK_RUNTIME_CHARACTER_WEAPON_POSE;
 const registry = global.LK_LOGIC_NODES_MVP.createRegistry();
 
 function test(name, run){
@@ -50,12 +53,182 @@ function fakePawn(overrides){
 test('config normalization clamps and defaults every field', () => {
   const config = FP.normalizeConfig({eyeHeight:99, sensitivity:-4, pitchMaxDeg:400, fov:5, viewBob:{amplitude:9}});
   assert.equal(config.eyeHeight, 4, 'eye height clamps to the 4 m ceiling');
+  assert.equal(config.autoEyeHeight, true, 'the real Main Mesh head drives camera height by default');
+  assert.equal(config.eyeBoneOffset, .08, 'the Head pivot is raised to approximate eye level');
+  assert.equal(config.bodyEyeForward,.28,'the full-body eye starts beyond the face shell');
+  assert.equal(config.bodyEyeSide,0,'the eye camera starts centred but can be authored laterally');
   assert.equal(config.sensitivity, .05, 'sensitivity clamps to the low bound');
   assert.equal(config.pitchMaxDeg, 89, 'pitch clamps below straight up');
   assert.equal(config.fov, 20, 'fov clamps to the low bound');
   assert.equal(config.viewBob.amplitude, .4, 'view bob amplitude clamps');
   assert.equal(config.enabled, true, 'enabled defaults on');
-  assert.equal(config.hideOwnBody, true, 'own body is hidden by default');
+  // The default flipped deliberately: first person now presents the character's OWN
+  // body seen from its eyes, because building a second arms rig plus a duplicate
+  // weapon in front of the camera cost a large frame-rate drop and showed the
+  // weapon twice. `presentation: 'arms'` is the opt-in shooter look, and
+  // `hideOwnBody` survives only as a derived mirror of it.
+  assert.equal(config.presentation, 'body', 'the cheap presentation is the default');
+  assert.equal(config.hideOwnBody, false, 'so the body is NOT culled unless arms are asked for');
+  assert.equal(FP.normalizeConfig({presentation:'arms'}).hideOwnBody, true,
+    'and the mirror follows the presentation rather than being set independently');
+  assert.equal(FP.normalizeConfig({view:'third',presentation:'arms'}).presentation,'body',
+    'saved third-person combat Pawns migrate from the old duplicate arms rig');
+  assert.equal(FP.normalizeConfig({view:'first',presentation:'arms'}).presentation,'arms',
+    'dedicated first-person levels keep the explicit arms-only presentation');
+  assert.equal(FP.normalizeConfig({view:'first',allowViewToggle:false,unifiedBodyCameraVersion:1,viewPawn:{kind:'first-person-arms',enabled:true}}).presentation,'arms',
+    'a dedicated arms-only FPS Pawn remains available when view switching is disabled');
+  const savedInEye=FP.normalizeConfig({view:'first',allowViewToggle:true,unifiedBodyCamera:true,unifiedBodyCameraVersion:1,viewPawn:{kind:'first-person-arms',enabled:true}});
+  assert.equal(savedInEye.presentation,'body','saving a switchable Character while in eye view cannot resurrect duplicate arms');
+  assert.equal(savedInEye.viewPawn.kind,'none');
+  assert.equal(FP.normalizeConfig({view:'third',presentation:'arms',presentationVersion:3,viewPawn:{kind:'first-person-arms',enabled:true}}).presentation,'body',
+    'a convertible third-person Character never loads a second arms Pawn');
+});
+
+test('weapon normalization preserves Pawn Studio grip profiles', () => {
+  const source={preset:'rifle',grip:{hands:'double',profiles:{'aim.idle.right':{trigger:{position:[.31,-.12,.48],rotation:[0,18,4]}}}}};
+  const weapon=FP.normalizeWeapon(source);
+  assert.deepEqual(weapon.grip,source.grip,'equipping a normalized loadout weapon must not discard its authored hands');
+  assert.notEqual(weapon.grip,source.grip,'runtime normalization keeps project data isolated');
+});
+
+test('first person resolves eye height from the same Character Head bone', () => {
+  const previousTHREE=global.THREE,THREE=require('three');global.THREE=THREE;
+  try{
+    const owner=new THREE.Group();owner.position.y=2;
+    const hips=new THREE.Bone(),head=new THREE.Bone();hips.name='mixamorig5Hips';head.name='mixamorig5Head';
+    hips.position.y=1;head.position.y=.65;hips.add(head);owner.add(hips);owner.updateMatrixWorld(true);
+    const pawn=fakePawn({owner});
+    const automatic=FP.create(null,pawn,{view:'first',eyeHeight:1.2,autoEyeHeight:true,eyeBoneOffset:.08,bodyEyeForward:0,viewBob:{enabled:false}});
+    assert.ok(Math.abs(automatic.eyeTransform().position.y-3.73)<1e-6,
+      'camera uses Pawn origin + real Head height + eye offset');
+    assert.equal(automatic.applyBinding('firstPerson.eyeBoneOffset',.18),true);
+    assert.ok(Math.abs(automatic.eyeTransform().position.y-3.83)<1e-6,
+      'editing the Head-to-eyes offset invalidates the cached height immediately');
+    const manual=FP.create(null,pawn,{view:'first',eyeHeight:1.2,autoEyeHeight:false,bodyEyeForward:0,viewBob:{enabled:false}});
+    assert.ok(Math.abs(manual.eyeTransform().position.y-3.2)<1e-6,
+      'disabling automatic height preserves the author value');
+  } finally {global.THREE=previousTHREE;}
+});
+
+test('camera view changes never revive model-loading placeholder meshes', () => {
+  const previousTHREE=global.THREE,THREE=require('three');global.THREE=THREE;
+  try{
+    const owner=new THREE.Group(),dummy=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial());
+    dummy.visible=false;dummy.userData.characterPlaceholderSuppressedByAsset=true;dummy.userData.firstPersonBaseVisible=true;owner.add(dummy);
+    const rig=FP.create(null,fakePawn({owner}),{view:'first',bodyEyeForward:0});
+    rig.syncBodyVisibility();assert.equal(dummy.visible,false,'first person cannot revive the hidden dummy');
+    rig.setViewMode('third');assert.equal(dummy.visible,false,'third person restoration cannot revive it either');
+  } finally {global.THREE=previousTHREE;}
+});
+
+test('fixed third person stays collision-safe and never renders from inside the Character body', () => {
+  const previousTHREE=global.THREE,THREE=require('three');global.THREE=THREE;
+  try{
+    const owner=new THREE.Group();owner.updateMatrixWorld(true);
+    const GAME={world:{colliders:{box:[{enabled:true,x:0,y:1.5,z:-.45,hx:2,hy:2,hz:.1}]}}};
+    const rig=FP.create(GAME,fakePawn({owner}),{view:'third',bodyEyeForward:.28,thirdPerson:{distance:3.3,height:1.5,shoulder:0,collisionMode:'fixed',minimumBodyDistance:.55}});
+    const blocked=rig.cameraTransform();
+    assert.equal(blocked.bodySafetyFallback,true,'a collapsed spring arm uses the forward-cleared eye instead of skin/hair');
+    assert.ok(blocked.position.z>=.27,'the safety camera remains beyond the face');
+    GAME.world.colliders.box=[];
+    const clear=rig.cameraTransform();
+    assert.equal(clear.bodySafetyFallback,undefined);
+    assert.ok(clear.position.z<-2.5,'fixed framing restores immediately when geometry clears');
+  } finally {global.THREE=previousTHREE;}
+});
+
+test('third-person camera ignores compound broad-phase envelopes but still sees their real parts', () => {
+  const previousTHREE=global.THREE,THREE=require('three');global.THREE=THREE;
+  try{
+    const owner=new THREE.Group();owner.updateMatrixWorld(true);
+    const envelope={enabled:true,compoundRoot:true,x:0,y:1.5,z:-.45,hx:20,hy:4,hz:20};
+    const road={enabled:true,compoundPart:true,horizontalSurface:true,x:0,y:.75,z:0,hx:20,hy:.75,hz:20};
+    const GAME={world:{colliders:{box:[envelope,road]}}};
+    const rig=FP.create(GAME,fakePawn({owner}),{view:'third',thirdPerson:{distance:3.3,height:1.5,shoulder:0,collisionMode:'fixed'}});
+    assert.equal(rig.cameraTransform().bodySafetyFallback,undefined,
+      'a generated road envelope and its shallow support surface do not swallow an arm running above them');
+    GAME.world.colliders.box.push({enabled:true,compoundPart:true,x:0,y:1.5,z:-.45,hx:2,hy:2,hz:.1});
+    assert.equal(rig.cameraTransform().bodySafetyFallback,true,
+      'an actual compound part still blocks the camera');
+  } finally {global.THREE=previousTHREE;}
+});
+
+test('unified first person never mutates the Head bone or repeats body traversal per frame', () => {
+  const previousTHREE=global.THREE,THREE=require('three');global.THREE=THREE;
+  try{
+    const owner=new THREE.Group(),head=new THREE.Bone(),mesh=new THREE.SkinnedMesh(new THREE.BufferGeometry(),new THREE.MeshBasicMaterial());head.name='mixamorigHead';mesh.name='HeadAndBody';owner.add(head,mesh);
+    let traversals=0,boneWorldUpdates=0;
+    const originalTraverse=owner.traverse.bind(owner),originalBoneUpdate=head.updateWorldMatrix.bind(head);
+    owner.traverse=visitor=>{traversals++;return originalTraverse(visitor);};
+    head.updateWorldMatrix=(parents,children)=>{boneWorldUpdates++;return originalBoneUpdate(parents,children);};
+    const rig=FP.create(null,fakePawn({owner}),{view:'third',allowViewToggle:true,unifiedBodyCamera:true,bodyEyeForward:0});
+    rig.setViewMode('first');rig.syncBodyVisibility();
+    assert.equal(mesh.visible,true,'the complete imported body mesh stays resident and visible');
+    assert.deepEqual(head.scale.toArray(),[1,1,1],'the eye camera cannot scale or hide the shared Head bone');
+    const afterTransition=traversals;
+    for(let frame=0;frame<120;frame++)rig.syncBodyVisibility();
+    assert.equal(traversals,afterTransition,'stable first-person frames perform no full body traversal');
+    assert.equal(boneWorldUpdates,0,'camera switching performs no recursive skeleton update');
+    const eye=rig.eyeTransform();
+    assert.ok(eye.position.z>=.18,'saved zero/old clearance is normalized beyond the face');
+    assert.equal(eye.near,.14,'the body eye supplies a safe near plane without editing the mesh');
+    rig.setViewMode('third');
+    assert.deepEqual(head.scale.toArray(),[1,1,1],'third person receives the untouched authored skeleton');
+  } finally {global.THREE=previousTHREE;}
+});
+
+test('releasing Player ownership clears held weapon/view edges without resetting inventory', () => {
+  const rig = FP.create(null, fakePawn(), {weapon:{magazine:8, ammoReserve:24, fireRate:1000, spreadHip:0}});
+  rig.setAimDownSights(true);
+  rig.preMovement(.016, {aim:true, fire:true, reload:true, viewToggle:true, swapShoulder:true, leanRight:true});
+  const ammo = rig.ammo();
+  assert.equal(rig.state.adsHeld, true);
+  assert.equal(rig.state.firePressed, true);
+  assert.equal(rig.state.reloadPressed, true);
+  assert.equal(rig.releaseInput(), true);
+  assert.equal(rig.state.adsHeld, false);
+  assert.equal(rig.state.adsForced, false);
+  assert.equal(rig.state.firePressed, false);
+  assert.equal(rig.state.reloadPressed, false);
+  assert.equal(rig.state.viewTogglePressed, false);
+  assert.equal(rig.state.swapPressed, false);
+  assert.equal(rig.ammo().ammo, ammo.ammo, 'ownership release is not a Pawn reset');
+  assert.equal(rig.ammo().reserve, ammo.reserve, 'reserve ammo must stay with the actor');
+});
+
+test('combat HUD feedback belongs only to the possessed player Pawn', () => {
+  const player={id:'player-one'};
+  const previous=global.LK_RUNTIME_FIRST_PERSON;
+  global.LK_RUNTIME_FIRST_PERSON=Object.assign({},previous,{activePawn(){return player;}});
+  assert.equal(FPS_HUD.isOwnedPawnEvent({}, {pawnId:'player-one'}), true);
+  assert.equal(FPS_HUD.isOwnedPawnEvent({}, {pawnId:'enemy-one'}), false,
+    'damaging an enemy cannot trigger the player damage vignette');
+  assert.equal(FPS_HUD.isOwnedPawnEvent({}, {}), true, 'legacy anonymous local events remain compatible');
+  global.LK_RUNTIME_FIRST_PERSON=previous;
+});
+
+test('full-body weapon pose resolves both Mixamo arm chains without assuming axes', () => {
+  const bones=['mixamorig:RightArm','mixamorig:RightForeArm','mixamorig:RightHand',
+    'Armature|LeftUpperArm','Armature|LeftLowerArm','Armature|LeftHand'].map(name=>({name,isBone:true}));
+  const root={traverse(visitor){bones.forEach(visitor);}};
+  const rig=WEAPON_POSE.classifyBones(root);
+  assert.equal(rig.right.upper.name,'mixamorig:RightArm');
+  assert.equal(rig.right.lower.name,'mixamorig:RightForeArm');
+  assert.equal(rig.right.hand.name,'mixamorig:RightHand');
+  assert.equal(rig.left.upper.name,'Armature|LeftUpperArm');
+  assert.equal(rig.left.lower.name,'Armature|LeftLowerArm');
+});
+
+test('full-body weapon pose applies without aborting the Character frame', () => {
+  const THREE=require('three');
+  const root=new THREE.Group();
+  const upper=new THREE.Bone(),lower=new THREE.Bone(),hand=new THREE.Bone();
+  upper.name='mixamorig:RightArm';lower.name='mixamorig:RightForeArm';hand.name='mixamorig:RightHand';
+  upper.position.set(0,1,0);lower.position.set(0,.5,0);hand.position.set(0,.45,0);
+  root.add(upper);upper.add(lower);lower.add(hand);root.updateMatrixWorld(true);
+  assert.doesNotThrow(()=>WEAPON_POSE.apply(THREE,root,{side:1,triggerTarget:{x:.8,y:1.5,z:-1}},.84));
+  assert.equal(WEAPON_POSE.apply(THREE,root,{side:1,triggerTarget:{x:.8,y:1.5,z:-1}},.84),true,
+    'a complete arm chain receives the post-animation weapon correction');
 });
 
 test('weapon presets resolve and individual values override them', () => {
@@ -68,6 +241,12 @@ test('weapon presets resolve and individual values override them', () => {
   assert.equal(tuned.damage, 99, 'explicit values win over the preset');
   assert.equal(tuned.magazine, 30, 'unspecified values still come from the preset');
   assert.equal(FP.normalizeWeapon({mode:'nonsense'}).mode, 'auto', 'unknown fire mode falls back to auto');
+  assert.equal(FP.normalizeWeapon({preset:'pistol'}).tracer.enabled, true);
+  ['fists','knife','grenade'].forEach(preset=>{
+    const weapon=FP.normalizeWeapon({preset});
+    assert.equal(weapon.tracer.enabled, false, preset+' cannot emit a firearm tracer or muzzle effect');
+    assert.equal(weapon.tracer.impact, false);
+  });
 });
 
 test('damage contract respects health, headshot zones and death', () => {
@@ -137,6 +316,64 @@ test('fire cadence and semi-automatic mode gate the trigger', () => {
   semi.preMovement(.016, {fire:false});
   semi.preMovement(.016, {fire:true});
   assert.equal(semi.state.shotsFired, afterHold + 1, 'releasing and pulling again fires once more');
+});
+
+test('third-person hip travel faces movement while ADS keeps crosshair strafing', () => {
+  const pawn=fakePawn();
+  const rig=FP.create(null,pawn,{view:'third',weapon:{preset:'rifle'}});
+  rig.setViewAngles(1.1,0);
+  const hip={x:1,z:1};
+  rig.preMovement(.016,hip);
+  assert.equal(hip.inputMode,'camera');
+  assert.equal(hip.facingMode,'movement','hip running is oriented by travel, not pinned to the reticle');
+  assert.equal(pawn.owner.rotation.y,0,'the view rig leaves hip-facing rotation to movement');
+  rig.state.ads=1;
+  const aimed={x:1,z:0,aim:true};
+  rig.preMovement(.016,aimed);
+  assert.equal(aimed.inputMode,'heading');
+  assert.equal(aimed.facingMode,'heading');
+  assert.equal(pawn.owner.rotation.y,rig.aimAngles().yaw,'ADS aligns the body and crosshair for a true strafe');
+});
+
+test('fire clips are selected by trigger mode and gait with generic fallback', () => {
+  const played=[];
+  const semiPawn=fakePawn({config:{movement:{runSpeed:6},animations:{fireSingleRun:'Single Run',fire:'Generic'}},
+    playAction(slot){played.push(slot);return true;}});
+  semiPawn.state.speed=6;
+  const semi=FP.create(null,semiPawn,{view:'third',weapon:{preset:'pistol',mode:'semi',fireRate:1000}});
+  assert.ok(semi.fire());
+  assert.equal(played.pop(),'fireSingleRun');
+
+  const autoPawn=fakePawn({config:{movement:{runSpeed:6},animations:{fire:'Generic'}},
+    playAction(slot){played.push(slot);return true;}});
+  autoPawn.state.speed=2;
+  const automatic=FP.create(null,autoPawn,{view:'third',weapon:{preset:'rifle',mode:'auto',fireRate:1000}});
+  assert.ok(automatic.fire());
+  assert.equal(played.pop(),'fire','missing fireAutoWalk degrades to the existing generic shot');
+
+  autoPawn.state.abilityPose='climbUp';
+  automatic.state.cooldown=0;
+  assert.equal(automatic.fire(),null,'a full-body climb cannot be overwritten by weapon fire');
+});
+
+test('automatic fire holds one animation cycle until the trigger is released', () => {
+  const calls=[];
+  const pawn=fakePawn({config:{movement:{runSpeed:6},animations:{fireAutoRun:'Auto Run'}},state:{speed:6,airborne:false}});
+  pawn.locomotion={
+    playing:false,
+    isActionPlaying(){return this.playing;},
+    stopAction(){this.playing=false;pawn.state.action=null;},
+  };
+  pawn.playAction=function(slot,options){calls.push({slot,options});this.state.action=slot;this.locomotion.playing=true;return true;};
+  const rig=FP.create(null,pawn,{view:'third',weapon:{preset:'rifle',mode:'auto',fireRate:1000}});
+  for(let frame=0;frame<5;frame++)rig.preMovement(.016,{fire:true});
+  assert.equal(rig.state.shotsFired,5,'the weapon cadence remains per projectile');
+  assert.equal(calls.length,1,'the body cycle is not reset for every projectile');
+  assert.equal(calls[0].slot,'fireAutoRun');
+  assert.equal(calls[0].options.loop,true,'automatic recoil is a held cycle');
+  assert.equal(calls[0].options.locomotionFloor,.72,'Run keeps ownership of the feet');
+  rig.preMovement(.016,{fire:false});
+  assert.equal(pawn.locomotion.playing,false,'releasing the trigger releases the fire cycle');
 });
 
 test('aim down sights blends in and narrows spread', () => {
@@ -212,7 +449,7 @@ test('the FPS template disables the native vehicle and native effects follow rea
   assert.equal(scene.player.enabled,false);
   assert.equal(scene.player.hidden,true);
   assert.equal(scene.player.controllerIndex,null);
-  assert.equal(scene.template.version,5);
+  assert.equal(scene.template.version,6);
   const runtime=fs.readFileSync(path.join(__dirname,'../js/lot-king.js'),'utf8');
   assert.ok(runtime.includes('function nativePlayerRuntimeActive()'));
   assert.ok(runtime.includes('if(!nativePlayerRuntimeActive()){\n    exhaustSmokeAcc = 0;'),
@@ -346,6 +583,9 @@ test('first person and target templates validate cleanly', () => {
   const player = global.LK_LOGIC_TEMPLATES.get('logic-template-player-first-person');
   assert.ok(player && player.graph.characterPawn, 'the player template is still a Character Pawn');
   assert.ok(player.graph.characterPawn.firstPerson.enabled, 'the first person rig is enabled');
+  assert.ok(player.graph.characterPawn.animationSet.length>0,'the eye camera keeps the complete Character locomotion set');
+  assert.equal(player.graph.characterPawn.firstPerson.presentation,'body');
+  assert.equal(player.graph.characterPawn.firstPerson.viewPawn.kind,'none','the default creates no separate arms Pawn');
   assert.equal(player.graph.characterPawn.movement.inputMode, 'heading', 'the body follows the view, not the camera frame');
   assert.equal(player.graph.characterPawn.movement.facingMode, 'heading', 'facing must not turn toward velocity');
   const playerResult = global.LK_LOGIC_VALIDATOR.validateGraph(player.graph, registry);
@@ -389,6 +629,9 @@ test('the FPS Shooter Test level builds a complete, playable range', () => {
   const targets = logic.filter(entry => entry.asset.key === 'logic:template:logic-template-shooting-target');
   assert.equal(players.length, 1, 'exactly one possessed first-person player');
   assert.equal(targets.length, 12, 'twelve shooting targets');
+  assert.equal(players[0].graph.characterPawn.firstPerson.presentation,'body');
+  assert.equal(players[0].graph.characterPawn.firstPerson.viewPawn.enabled,false,'the arena camera sees the same Character body');
+  assert.ok(players[0].graph.characterPawn.animationSet.length>0,'the body shown from the eye remains fully animated');
 
   assert.ok(scene.added.some(entry => entry.name === 'Range Floor'), 'the range has a floor');
   assert.ok(scene.added.filter(entry => /^Wall /.test(entry.name)).length >= 4, 'the arena is enclosed');
@@ -757,12 +1000,13 @@ test('the FPS level scales target difficulty with distance', () => {
   assert.ok(furthest.points > nearest.points, 'distant targets are worth more');
 });
 
-test('the third-person character path is untouched by the first-person addition', () => {
+test('the default Character uses the same-body view rig and remains valid', () => {
   const normal = global.LK_LOGIC_TEMPLATES.get('logic-template-player-character-normal');
   assert.ok(normal, 'the generic character template still exists');
-  assert.equal(normal.graph.characterPawn.firstPerson, undefined, 'it must not gain a first-person rig');
-  assert.equal(normal.graph.characterPawn.camera.view, 'third');
-  assert.equal(normal.graph.characterPawn.movement.inputMode, 'camera', 'it keeps camera-relative input');
+  assert.equal(normal.graph.characterPawn.firstPerson.view, 'third');
+  assert.equal(normal.graph.characterPawn.firstPerson.unifiedBodyCamera, true);
+  assert.equal(normal.graph.characterPawn.firstPerson.viewPawn.kind, 'none');
+  assert.equal(normal.graph.characterPawn.movement.inputMode, 'heading');
   const result = global.LK_LOGIC_VALIDATOR.validateGraph(normal.graph, registry);
   assert.equal(result.ok, true, JSON.stringify(result.errors));
 });

@@ -29,7 +29,14 @@
    Geometry is shared by every streak and materials are cached per colour, so a
    project with five weapons holds five materials, not five hundred.
 
-   Removing this script removes the visible rounds and nothing else.
+   AN EXPLOSION IS BUILT FROM THE SAME BUDGET. A grenade already resolved its
+   damage and its impulses before this file hears about it, so what is drawn here
+   is only the read: a fireball that expands and cools from white through orange
+   to smoke, a ground shockwave ring, a burst of embers thrown on ballistic arcs,
+   and a single light that flashes and dies. All of it comes out of a fixed pool
+   allocated once, like the tracers, so ten grenades cost what one costs.
+
+   Removing this script removes the visible rounds and blasts and nothing else.
    ========================================================= */
 (function(){
 'use strict';
@@ -41,6 +48,18 @@ const MAX_IMPACTS = 32;
 // screen and still a single fixed allocation.
 const MAX_DECALS = 64;
 const DECAL_SECONDS = 14;
+// Three simultaneous blasts is already more than a firefight produces; each one
+// owns a fireball, a shockwave, a smoke ball and a fixed ember budget.
+const MAX_BLASTS = 3;
+const EMBERS_PER_BLAST = 24;
+// A blast reads in well under a second. Smoke is the part that lingers.
+const BLAST_SECONDS = .5;
+const SMOKE_SECONDS = 1.5;
+const EMBER_SECONDS = .85;
+const EMBER_GRAVITY = 15;
+// The fireball's colour ramp, hottest first. Sampled by age, which is what makes
+// a blast look like it is cooling instead of just fading out.
+const FIRE_RAMP = Object.freeze([0xfff3d0, 0xffc247, 0xff7a1c, 0x8f2f0c]);
 
 function finite(value, fallback){ const n = Number(value); return Number.isFinite(n) ? n : fallback; }
 function clamp(value, min, max){ return Math.max(min, Math.min(max, value)); }
@@ -60,6 +79,9 @@ function create(GAME){
   let decalGeometry = null;
   let decalMaterial = null;
   let shotCount = 0;
+  const blasts = [];
+  let blastCursor = 0;
+  let fireGeometry = null, shockGeometry = null, emberGeometry = null, smokeGeometry = null;
 
   const from = THREE ? new THREE.Vector3() : null;
   const to = THREE ? new THREE.Vector3() : null;
@@ -110,9 +132,180 @@ function create(GAME){
       // nudge, so a hole never floats on a wall seen from an angle.
       polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4,
     });
+    // Blast geometry. All four are shared by every blast in the pool.
+    fireGeometry = new THREE.SphereGeometry(1, 14, 10);
+    smokeGeometry = new THREE.SphereGeometry(1, 10, 8);
+    // A flat ring on the ground: the shockwave. Drawn face-up, scaled outward.
+    shockGeometry = new THREE.RingGeometry(.55, 1, 28);
+    emberGeometry = new THREE.SphereGeometry(1, 5, 4);
     const target = scene();
     if(target) target.add(root);
     return root;
+  }
+
+  // --- explosions ----------------------------------------------------------
+  // Cosmetic only: the damage, the impulses and the OnExplosion event were all
+  // resolved by item-system.js before this runs.
+  function fireColorAt(t){
+    const span = FIRE_RAMP.length - 1;
+    const at = clamp(t, 0, 1) * span;
+    const index = Math.min(span - 1, Math.floor(at));
+    return {from:FIRE_RAMP[index], to:FIRE_RAMP[index + 1], blend:at - index};
+  }
+  function buildBlast(){
+    const fire = markRuntimeOnly(new THREE.Mesh(fireGeometry, new THREE.MeshBasicMaterial({
+      color:FIRE_RAMP[0], transparent:true, opacity:1, depthWrite:false,
+      toneMapped:false, blending:THREE.AdditiveBlending,
+    })));
+    fire.renderOrder = 960;
+    const shock = markRuntimeOnly(new THREE.Mesh(shockGeometry, new THREE.MeshBasicMaterial({
+      color:0xffd9a0, transparent:true, opacity:.8, depthWrite:false,
+      toneMapped:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide,
+    })));
+    shock.renderOrder = 959;
+    shock.rotation.x = -Math.PI / 2;
+    const smoke = markRuntimeOnly(new THREE.Mesh(smokeGeometry, new THREE.MeshBasicMaterial({
+      color:0x2b2622, transparent:true, opacity:.5, depthWrite:false, toneMapped:false,
+    })));
+    smoke.renderOrder = 958;
+    // Embers share one additive material: they are all the same spark.
+    const emberMaterial = new THREE.MeshBasicMaterial({
+      color:0xffb457, transparent:true, opacity:1, depthWrite:false,
+      toneMapped:false, blending:THREE.AdditiveBlending,
+    });
+    const embers = [];
+    for(let i = 0; i < EMBERS_PER_BLAST; i++){
+      const mesh = markRuntimeOnly(new THREE.Mesh(emberGeometry, emberMaterial));
+      mesh.renderOrder = 961;
+      mesh.visible = false;
+      embers.push({mesh, vx:0, vy:0, vz:0});
+      root.add(mesh);
+    }
+    // One light, not one per ember: a blast is a single flash.
+    const light = THREE.PointLight ? new THREE.PointLight(0xffb066, 0, 1) : null;
+    if(light){ markRuntimeOnly(light); light.castShadow = false; root.add(light); }
+    [fire, shock, smoke].forEach(node => { node.visible = false; root.add(node); });
+    const entry = {fire, shock, smoke, embers, emberMaterial, light, life:0, total:BLAST_SECONDS, radius:4, at:new THREE.Vector3()};
+    blasts.push(entry);
+    return entry;
+  }
+  function takeBlast(){
+    ensurePool();
+    if(!root) return null;
+    if(blasts.length < MAX_BLASTS) return buildBlast();
+    const entry = blasts[blastCursor % blasts.length];
+    blastCursor++;
+    return entry;
+  }
+  // Returns the pooled entry it used, so warmup can put the very blast it lit
+  // back to sleep instead of guessing which one that was.
+  function spawnBlast(detail){
+    if(!THREE) return null;
+    const at = detail && (detail.at || detail.origin || detail.point);
+    if(!at) return null;
+    const entry = takeBlast();
+    if(!entry) return null;
+    // The authored damage radius IS the size of the blast: an author who widens
+    // the grenade sees a wider explosion without a second setting to keep in sync.
+    const radius = clamp(finite(detail.radius, 4), .5, 40);
+    entry.radius = radius;
+    entry.at.set(finite(at.x, 0), finite(at.y, 0), finite(at.z, 0));
+    entry.life = entry.total = BLAST_SECONDS;
+    entry.smokeLife = SMOKE_SECONDS;
+    entry.emberLife = EMBER_SECONDS;
+    entry.fire.position.copy(entry.at);
+    entry.fire.scale.setScalar(radius * .16);
+    entry.fire.material.color.setHex(FIRE_RAMP[0]);
+    entry.fire.material.opacity = 1;
+    entry.fire.visible = true;
+    // The shockwave rides the ground under the blast, not the blast centre.
+    entry.shock.position.set(entry.at.x, entry.at.y - radius * .35 + .06, entry.at.z);
+    entry.shock.scale.setScalar(radius * .2);
+    entry.shock.material.opacity = .8;
+    entry.shock.visible = true;
+    entry.smoke.position.copy(entry.at);
+    entry.smoke.scale.setScalar(radius * .2);
+    entry.smoke.material.opacity = .0;
+    entry.smoke.visible = true;
+    entry.emberMaterial.opacity = 1;
+    for(let i = 0; i < entry.embers.length; i++){
+      const ember = entry.embers[i];
+      // Spread over a hemisphere, biased upward: debris goes up and out.
+      const yaw = Math.random() * Math.PI * 2;
+      const lift = .25 + Math.random() * .95;
+      const speed = radius * (1.4 + Math.random() * 1.8);
+      const flat = Math.sqrt(Math.max(0, 1 - lift * lift));
+      ember.vx = Math.cos(yaw) * flat * speed;
+      ember.vz = Math.sin(yaw) * flat * speed;
+      ember.vy = lift * speed;
+      ember.mesh.position.copy(entry.at);
+      ember.mesh.scale.setScalar(radius * (.012 + Math.random() * .022));
+      ember.mesh.visible = true;
+    }
+    if(entry.light){
+      entry.light.position.set(entry.at.x, entry.at.y + radius * .2, entry.at.z);
+      entry.light.distance = radius * 4;
+      entry.light.intensity = radius * 9;
+    }
+    return entry;
+  }
+  function onExplosion(detail){ return !!spawnBlast(detail); }
+  function stepBlasts(h){
+    for(let i = 0; i < blasts.length; i++){
+      const entry = blasts[i];
+      if(!entry.fire.visible && !entry.smoke.visible && entry.emberLife <= 0) continue;
+      // --- fireball: expands fast, cools through the ramp, then hands over to smoke
+      if(entry.fire.visible){
+        entry.life -= h;
+        const t = clamp(1 - entry.life / Math.max(.01, entry.total), 0, 1);
+        // Fast at first and easing out, the way a pressure front actually goes.
+        const grow = 1 - Math.pow(1 - t, 3);
+        entry.fire.scale.setScalar(entry.radius * (.16 + grow * .62));
+        const ramp = fireColorAt(t);
+        entry.fire.material.color.setHex(ramp.from).lerp(new THREE.Color(ramp.to), ramp.blend);
+        entry.fire.material.opacity = Math.pow(1 - t, 1.4);
+        if(entry.life <= 0) entry.fire.visible = false;
+      }
+      // --- shockwave: a ring racing outward and thinning
+      if(entry.shock.visible){
+        const t = clamp(1 - entry.life / Math.max(.01, entry.total), 0, 1);
+        entry.shock.scale.setScalar(entry.radius * (.2 + t * 1.15));
+        entry.shock.material.opacity = .8 * Math.pow(1 - t, 2);
+        if(entry.life <= 0) entry.shock.visible = false;
+      }
+      // --- smoke: rises and swells long after the fire is gone
+      if(entry.smoke.visible){
+        entry.smokeLife -= h;
+        const s = clamp(1 - entry.smokeLife / SMOKE_SECONDS, 0, 1);
+        entry.smoke.scale.setScalar(entry.radius * (.2 + s * .95));
+        entry.smoke.position.y = entry.at.y + entry.radius * s * .5;
+        // In quickly behind the flash, out slowly.
+        entry.smoke.material.opacity = .5 * Math.min(1, s / .2) * Math.pow(1 - s, 1.2);
+        if(entry.smokeLife <= 0) entry.smoke.visible = false;
+      }
+      // --- embers: ballistic, and they dim together on the shared material
+      if(entry.emberLife > 0){
+        entry.emberLife -= h;
+        const e = clamp(entry.emberLife / EMBER_SECONDS, 0, 1);
+        entry.emberMaterial.opacity = e * e;
+        for(let k = 0; k < entry.embers.length; k++){
+          const ember = entry.embers[k];
+          if(!ember.mesh.visible) continue;
+          ember.vy -= EMBER_GRAVITY * h;
+          ember.mesh.position.x += ember.vx * h;
+          ember.mesh.position.y += ember.vy * h;
+          ember.mesh.position.z += ember.vz * h;
+          // Drag, so sparks slow instead of flying away in straight lines.
+          ember.vx *= .965; ember.vz *= .965;
+          if(entry.emberLife <= 0) ember.mesh.visible = false;
+        }
+      }
+      // --- the flash: bright for an instant, then nothing
+      if(entry.light){
+        const t = clamp(1 - entry.life / Math.max(.01, entry.total), 0, 1);
+        entry.light.intensity = entry.life > 0 ? entry.radius * 9 * Math.pow(1 - t, 3) : 0;
+      }
+    }
   }
 
   function takeTracer(color){
@@ -291,6 +484,7 @@ function create(GAME){
       if(entry.life <= 0){ entry.mesh.visible = false; continue; }
       if(entry.life < 1) entry.mesh.scale.setScalar(entry.size * Math.max(.05, entry.life));
     }
+    stepBlasts(h);
     return true;
   }
 
@@ -303,11 +497,21 @@ function create(GAME){
     const flash = takeImpact(0xffd9a0);
     if(entry){ entry.mesh.visible = true; entry.mesh.scale.set(.02, .02, 1); }
     if(flash){ flash.mesh.visible = true; flash.life = .001; flash.total = .1; }
+    // A blast compiles four more materials. Warming it here means the first
+    // grenade thrown in anger does not pay for them mid-firefight.
+    const blast = spawnBlast({at:{x:0, y:-9999, z:0}, radius:1});
+    if(blast){ blast.life = .001; blast.smokeLife = .001; blast.emberLife = .001; }
     return {
-      objects:[entry && entry.mesh, flash && flash.mesh].filter(Boolean),
+      objects:[entry && entry.mesh, flash && flash.mesh,
+        blast && blast.fire, blast && blast.shock, blast && blast.smoke].filter(Boolean),
       dispose(){
         if(entry) entry.mesh.visible = false;
         if(flash) flash.mesh.visible = false;
+        if(blast){
+          blast.fire.visible = false; blast.shock.visible = false; blast.smoke.visible = false;
+          blast.embers.forEach(ember => { ember.mesh.visible = false; });
+          if(blast.light) blast.light.intensity = 0;
+        }
       },
     };
   }
@@ -316,6 +520,7 @@ function create(GAME){
     const detail = event && event.detail || {};
     if(detail.type === 'OnWeaponFired') onFired(detail);
     else if(detail.type === 'OnWeaponHit') onHit(detail);
+    else if(detail.type === 'OnExplosion') onExplosion(detail);
   }
   if(typeof window !== 'undefined' && window.addEventListener) window.addEventListener('lk-pawn-event', onPawnEvent);
 
@@ -328,20 +533,33 @@ function create(GAME){
     materials.clear();
     if(decalGeometry) decalGeometry.dispose();
     if(decalMaterial) decalMaterial.dispose();
+    // Blast materials are per blast, not shared with the tracer cache, so they
+    // are freed here or they outlive the level.
+    blasts.forEach(entry => {
+      [entry.fire, entry.shock, entry.smoke].forEach(node => { if(node && node.material) node.material.dispose(); });
+      if(entry.emberMaterial) entry.emberMaterial.dispose();
+      if(entry.light && entry.light.dispose) entry.light.dispose();
+    });
+    [fireGeometry, shockGeometry, emberGeometry, smokeGeometry].forEach(geometry => { if(geometry) geometry.dispose(); });
+    fireGeometry = shockGeometry = emberGeometry = smokeGeometry = null;
     tracers.length = 0;
     impacts.length = 0;
     decals.length = 0;
+    blasts.length = 0;
     root = null;
   }
 
   return Object.freeze({
     MAX_TRACERS,
     MAX_IMPACTS,
+    MAX_BLASTS,
     update,
     warmup,
     dispose,
     addDecal,
-    stats:() => ({tracers:tracers.length, impacts:impacts.length, decals:decals.length, materials:materials.size}),
+    explode:onExplosion,
+    stats:() => ({tracers:tracers.length, impacts:impacts.length, decals:decals.length,
+      blasts:blasts.length, materials:materials.size}),
   });
 }
 
@@ -353,5 +571,5 @@ function install(GAME){
   return GAME.systems.weaponTracers;
 }
 
-window.LK_RUNTIME_WEAPON_TRACERS = Object.freeze({MAX_TRACERS, MAX_IMPACTS, create, install});
+window.LK_RUNTIME_WEAPON_TRACERS = Object.freeze({MAX_TRACERS, MAX_IMPACTS, MAX_BLASTS, FIRE_RAMP, create, install});
 })();

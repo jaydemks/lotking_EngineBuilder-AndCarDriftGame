@@ -143,8 +143,11 @@ function create(deps){
   function placeImportedAsset(asset, at){
     if(!asset) return Promise.reject(new Error(tr('invalid asset', 'asset non valido')));
     if(asset.kind === 'texture') return Promise.resolve(registerImportedTexture(asset, at));
+    const glbOptions = {
+      hidePhysicsMetadata:asset.physicsBackend === 'sketchbook-metadata' || asset.metadataMode === 'gltf-extras',
+    };
     return resolveImportedAssetUrl(asset)
-      .then(src => STORE.loadGlb(src, asset.fit || 5))
+      .then(src => STORE.loadGlb(src, asset.fit || 5, glbOptions))
       .then(obj => registerImportedObject(asset, obj, at));
   }
   function objectAssetRefs(target){

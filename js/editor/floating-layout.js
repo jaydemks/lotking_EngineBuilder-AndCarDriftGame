@@ -13,6 +13,20 @@ function create(deps){
   const status = deps.status || function(){};
   const cameraAspect = deps.cameraAspect || function(){ return innerWidth / innerHeight; };
 
+  /** The floating Cinema preview's shape, from the shared policy: its own select,
+   *  under the editor-wide master override, over the level default. */
+  function previewAspectRatio(){
+    const policy = window.LK_ASPECT_POLICY;
+    if(!policy) return 16 / 9;
+    return policy.resolve({
+      mode:'editor',
+      authored:ED.cinemaFloatPreviewAspect || '16:9',
+      master:ED.masterPreviewAspect,
+      width:innerWidth,
+      height:innerHeight,
+    }).ratio;
+  }
+
   function isFinitePosValue(value){ return Number.isFinite(Number(value)); }
   function panelWidth(side){
     const prop = side === 'left' ? '--lk-left-w' : '--lk-right-w';
@@ -160,7 +174,9 @@ function create(deps){
       const startW = ED.cinemaFloatPreviewW || 640;
       const startRect = frame.getBoundingClientRect();
       const move = ev => {
-        const aspect = ED.cinemaFloatPreviewAspect === '21:9' ? 21 / 9 : (ED.cinemaFloatPreviewAspect === '4:3' ? 4 / 3 : (ED.cinemaFloatPreviewAspect === '1:1' ? 1 : (ED.cinemaFloatPreviewAspect === '9:16' ? 9 / 16 : 16 / 9)));
+        // The third copy of this mapping, now deferring to the one policy - a resize
+        // handle that disagreed with the renderer would fight it every drag.
+        const aspect = previewAspectRatio();
         const view = editorViewportRect();
         const maxW = Math.max(80, Math.min(1280, view.w - 20, (view.h - 20) * aspect));
         const minW = Math.min(360, maxW);

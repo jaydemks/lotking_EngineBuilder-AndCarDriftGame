@@ -277,11 +277,20 @@ pluginManager = window.LK_PLUGIN_MANAGER && window.LK_PLUGIN_MANAGER.create({
   root,
   status,
   buildInspector,
+  importAssetFiles,
+  markDirty,
+  saveScene,
+  removeEntity,
+  getGizmo: () => gizmo,
+  spawnPointAhead,
+  refreshOutliner,
+  refreshAssetsPanel,
 });
 if(pluginManager && window.LK_LOGIC_ELEMENT_PLUGIN) pluginManager.register(window.LK_LOGIC_ELEMENT_PLUGIN);
 if(pluginManager && window.LK_FBX_IMPORT_PLUGIN) pluginManager.register(window.LK_FBX_IMPORT_PLUGIN);
 if(pluginManager && window.LK_CLOTH_AUTHORING_PLUGIN) pluginManager.register(window.LK_CLOTH_AUTHORING_PLUGIN);
 if(pluginManager && window.LK_P2P_COLLABORATION_PLUGIN) pluginManager.register(window.LK_P2P_COLLABORATION_PLUGIN);
+if(pluginManager && window.LK_BLENDER_LIVE_LINK_PLUGIN) pluginManager.register(window.LK_BLENDER_LIVE_LINK_PLUGIN);
 lockEditorTrackSelector();
 assetLibrary = window.LK_EDITOR_ASSET_LIBRARY && window.LK_EDITOR_ASSET_LIBRARY.create({store: STORE, status, pluginManager});
 thumbnails = window.LK_EDITOR_THUMBNAILS && window.LK_EDITOR_THUMBNAILS.create({
@@ -1162,6 +1171,7 @@ assetCatalog = window.LK_EDITOR_ASSET_CATALOG && window.LK_EDITOR_ASSET_CATALOG.
   setAssetLoading,
   placeProjectAsset,
   placeImportedAsset,
+  addProceduralAsset:(type, at, overrides) => addProceduralAsset(type, at, overrides),
   addLogicElement:(at, asset) => addLogicElement(at, asset),
   convertPlayerToLogicElement,
   spawnPointAhead,
@@ -1349,6 +1359,8 @@ assetPanel = window.LK_EDITOR_ASSET_PANEL && window.LK_EDITOR_ASSET_PANEL.create
   setLeftMode,
   setAssetDragRef,
   openAssetProperties,
+  pluginAssetProviders:()=>pluginManager&&pluginManager.extensions?pluginManager.extensions('assetProvider'):[],
+  pluginList:()=>pluginManager&&pluginManager.list?pluginManager.list():[],
 });
 outliner = window.LK_EDITOR_OUTLINER && window.LK_EDITOR_OUTLINER.create({
   GAME, ED, $,
@@ -1419,6 +1431,7 @@ function openCinemaTimeline(o){
   ED.cinemaTimelineId = o.userData.editorId;
   ED.cinemaTimelineOpen = true;
   selectObject(o);
+  if(editorRuntime && editorRuntime.syncCinemaTimeline) editorRuntime.syncCinemaTimeline();
   status((editorLang() === 'it' ? 'Timeline Cinema aperta: ' : 'Cinema timeline opened: ') + (o.userData.editorName || 'Cinema Studio'));
 }
 function selectCollider(o){
@@ -1849,6 +1862,7 @@ addActions = window.LK_EDITOR_ADD_ACTIONS && window.LK_EDITOR_ADD_ACTIONS.create
   refreshAssetsPanel,
 });
 function addPrimitive(prim, at){ return addActions.addPrimitive(prim, at); }
+function addProceduralAsset(type, at, overrides){ return addActions.addProceduralAsset(type, at, overrides); }
 function addLight(kind, at){ return addActions.addLight(kind, at); }
 function addEffect(kind, at){ return addActions.addEffect(kind, at); }
 function addText(kind, at){ return addActions.addText(kind, at); }
@@ -2264,6 +2278,9 @@ editorRuntime = window.LK_EDITOR_RUNTIME && window.LK_EDITOR_RUNTIME.create({
   updateEditorControls,
   editorViewportRect,
   pushHistory,
+  exportInteractive:() => {
+    if(playableExport) return playableExport.exportCurrentPlayableProjectZip();
+  },
   setActiveViewportSlot,
   cameraForView: editorCameraForView,
   updateCameraRigHelper,
@@ -2306,6 +2323,7 @@ GAME.editor = {
   enter: enterEditor,
   exit: exitEditor,
   openCharacterSoundDesigner,
+  openCinemaTimeline,
   state: ED,
   requestWarmup: requestEditorWarmup,
   markDirty,

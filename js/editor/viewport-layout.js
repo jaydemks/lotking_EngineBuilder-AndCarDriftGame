@@ -27,6 +27,12 @@ function create(deps){
   let longTaskMaxMs = 0;
   const tr = (en, it) => GAME && GAME.i18n && GAME.i18n.lang === 'it' ? (it || en) : en;
   const transformControlsHelper = controls => controls && typeof controls.getHelper === 'function' ? controls.getHelper() : controls;
+  const viewportY = (bottomY, height) => {
+    const backend = window.LK_RUNTIME_RENDERING_BACKEND;
+    return backend && backend.viewportOriginY
+      ? backend.viewportOriginY(renderer, bottomY, height, innerHeight)
+      : (renderer && renderer.isWebGPURenderer ? innerHeight - bottomY - height : bottomY);
+  };
 
   if(typeof PerformanceObserver !== 'undefined'){
     try {
@@ -299,8 +305,9 @@ function create(deps){
   }
   function renderRect(rect, camera){
     const glY = innerHeight - rect.y - rect.h;
-    renderer.setViewport(rect.x, glY, rect.w, rect.h);
-    renderer.setScissor(rect.x, glY, rect.w, rect.h);
+    const targetY = viewportY(glY, rect.h);
+    renderer.setViewport(rect.x, targetY, rect.w, rect.h);
+    renderer.setScissor(rect.x, targetY, rect.w, rect.h);
     if(camera && camera.isPerspectiveCamera){
       camera.aspect = rect.w / Math.max(1, rect.h);
       camera.updateProjectionMatrix();

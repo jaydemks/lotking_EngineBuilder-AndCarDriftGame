@@ -21,6 +21,7 @@ exports/
 playable-exports/
 *.zip
 !tools/blender 5.0+/car_wheel_glb_rigger-*.zip
+!tools/blender 5.0+/lotking_live_link-0.1.9.zip
 
 # Oversized source/runtime assets: keep locally, publish through Git LFS or release assets.
 models/player.glb

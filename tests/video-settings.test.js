@@ -125,7 +125,12 @@ const hidden = api.normalizeProject({defaults:{quality:'extreme'}, exposed:{rend
 assert(hidden.defaults.quality === 'extreme', 'project default quality is normalized');
 assert(hidden.exposed.rendererMode === false, 'author can hide renderer selection');
 assert(hidden.exposed.quality === true, 'unspecified exposure remains enabled');
-assert(hidden.version === 5, 'project video schema is upgraded to version 5');
+assert(hidden.version === 8, 'project video schema is upgraded to version 8');
+assert(hidden.defaults.visualStyle === 'natural' && hidden.defaults.monochrome === false, 'existing projects retain natural color rendering');
+assert(hidden.defaults.sketchMedium === 'painted-storybook', 'existing projects receive full-colour material/FX stylisation without enabling sketch');
+assert(hidden.defaults.sketchHatching === 1 && hidden.defaults.sketchLineNoise === .35, 'existing sketch projects retain hatching and gain a restrained organic line variation');
+assert(hidden.defaults.sketchColorNoise === 1 && hidden.defaults.sketchSaturation === 1 && hidden.defaults.sketchLightGain === 1, 'new pigment, colour and light controls preserve the previous picture by default');
+assert(hidden.authority.visualStyle === 'player' && hidden.authority.monochrome === 'player', 'existing projects keep player visual authority until the author opts in');
 assert(hidden.defaults.cinematicLensFlares === false, 'existing projects default cinematic lens flares to off until the user enables them');
 assert(hidden.defaults.exposure === 1.12, 'r185 exposure default brightens the scene without camera grading');
 assert(hidden.defaults.shadowNormalBias === .035, 'sun shadow acne protection has a stable project default');

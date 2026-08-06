@@ -44,6 +44,15 @@
     </span>
     <button id="lkCamHelper" class="on" type="button" title="Toggle camera helpers">🎥 Cam</button>
     <button id="lkPipToggle" class="on" type="button" title="Toggle player camera preview">❐ Preview</button>
+    <select id="lkMasterAspect" title="Master aspect ratio: forces every camera preview in the editor to one shape. Auto lets each camera use its own, then the level default.">
+      <option value="auto">Aspect: per camera</option>
+      <option value="16:9">Aspect: 16:9 (all)</option>
+      <option value="21:9">Aspect: 21:9 (all)</option>
+      <option value="2.39:1">Aspect: 2.39:1 (all)</option>
+      <option value="4:3">Aspect: 4:3 (all)</option>
+      <option value="1:1">Aspect: 1:1 (all)</option>
+      <option value="9:16">Aspect: 9:16 (all)</option>
+    </select>
     <button id="lkAddMenu" type="button" title="Add object">+ Add ▾</button>
     <button id="lkSoundDesigner" type="button" title="Character Sound Designer: footsteps, weapons, explosions and body foley">🎚 Sound Lab</button>
     </div>
@@ -249,7 +258,11 @@
       <button id="lkCinemaTlZoomReset" type="button" title="Reset timeline zoom">1:1</button>
       <button id="lkCinemaTlPlay" type="button">Play</button>
       <button id="lkCinemaTlStop" type="button">Stop</button>
+      <label class="lk-cinema-duration" title="Complete sequence duration in seconds"><span>Duration</span><input id="lkCinemaTlDuration" type="number" min="0.1" max="86400" step="0.1" inputmode="decimal"><i>s</i></label>
       <button id="lkCinemaTlExport" class="lk-cinema-export-button" type="button" title="Render every timeline frame to a deterministic WebM video">Render video</button>
+      <button id="lkCinemaTlExportWeb" class="lk-cinema-web-button" type="button" title="Export the complete project/level as an interactive Three.js web player">Web player ZIP</button>
+      <button id="lkCinemaTlSaveSequence" type="button" title="Save this reusable Cinema Studio sequence asset">Save sequence</button>
+      <button id="lkCinemaTlLoadSequence" type="button" title="Import a Cinema Studio sequence and remap its bindings">Load sequence</button>
       <select id="lkCinemaTlCamera" title="Shot camera"></select>
       <button id="lkCinemaTlAddCut" type="button">Add shot</button>
       <button id="lkCinemaTlInsertCut" type="button" title="Split the current camera cut at the playhead">Insert cut</button>
@@ -260,10 +273,19 @@
       <button id="lkCinemaTlAddObject" type="button" title="Add selected object or camera as an animated target">Add target</button>
       <button id="lkCinemaTlKeyObject" type="button" title="Key selected object or camera transform at the current time">Key selected</button>
       <button id="lkCinemaTlKeyLens" type="button" title="Key selected Scene Camera FOV at the current time">Key FOV</button>
-      <button id="lkCinemaTlCurve" type="button" title="Edit selected key curves">∿</button>
+      <button id="lkCinemaTlCurve" type="button" title="Edit selected key time interpolation">Time curve ∿</button>
       <button id="lkCinemaTlDuplicate" type="button" title="Duplicate selected timeline item">Duplicate</button>
       <button id="lkCinemaTlDelete" type="button" title="Delete selected timeline item">Delete</button>
       <button id="lkCinemaTlClose" type="button" title="Close sequencer">×</button>
+    </div>
+    <div class="lk-cinema-motion-bar">
+      <b id="lkCinemaMotionKind">OBJECT MOTION</b>
+      <select id="lkCinemaTlMotionPreset" title="Movement presets compatible with the selected target"></select>
+      <label class="lk-cinema-motion-duration" title="Preset movement duration in seconds"><span>Motion</span><input id="lkCinemaTlMotionDuration" type="number" min="0.1" max="86400" step="0.1" value="6" inputmode="decimal"><i>s</i></label>
+      <label class="lk-cinema-motion-duration" title="Approximate preset travel distance in scene units"><span>Distance</span><input id="lkCinemaTlMotionDistance" type="number" min="0.1" max="100000" step="0.5" value="8" inputmode="decimal"><i>u</i></label>
+      <button id="lkCinemaTlApplyMotion" type="button" title="Create editable transform keys from the selected movement preset">Apply motion</button>
+      <button id="lkCinemaTlEditPath" type="button" title="Show and edit the selected target motion path in the 3D viewport">Edit path</button>
+      <span>Creates editable 3D path keys from the playhead</span>
     </div>
     <div id="lkCinemaTlBody">
       <div class="lk-cinema-row lk-cinema-ruler-row">
@@ -294,7 +316,7 @@
     </div>
     <div id="lkCinemaViewportHud"></div>
     <div id="lkCinemaCurvePanel">
-      <span>Curve</span>
+      <span>Time curve</span>
       <select id="lkCinemaCurveMode">
         <option value="linear">Linear</option>
         <option value="ease-in">Ease in</option>
@@ -304,6 +326,7 @@
       </select>
     </div>
     <div id="lkCinemaClipPanel"></div>
+    <input id="lkCinemaSequenceInput" type="file" accept=".lkcinema,.json,application/json" hidden>
   </div>
   <div id="lkCinemaExportOverlay" aria-hidden="true">
     <section class="lk-cinema-export-panel" role="dialog" aria-modal="true" aria-labelledby="lkCinemaExportTitle">
@@ -350,7 +373,7 @@
     <div class="lk-levels-foot"><button id="lkLevelsNew" type="button">New level</button><button id="lkLevelsFromFile" type="button">Load from file...</button></div>
   </div></div>
   <div id="lkProjectsOverlay"><div class="lk-levels-panel">
-    <div class="lk-levels-head"><div class="lk-projects-title">🗂 PROJECTS</div><div class="lk-projects-sub">stored in this browser</div><div class="lk-projects-lang" role="group" aria-label="Editor language"><button data-project-lang="en" type="button" title="English">EN</button><button data-project-lang="it" type="button" title="Italiano">IT</button></div><button id="lkProjectsClose" type="button">×</button></div>
+    <div class="lk-levels-head"><div class="lk-projects-title">🗂 PROJECTS</div><div class="lk-projects-sub">browser projects + immutable disk history</div><div class="lk-projects-lang" role="group" aria-label="Editor language"><button data-project-lang="en" type="button" title="English">EN</button><button data-project-lang="it" type="button" title="Italiano">IT</button></div><button id="lkProjectsClose" type="button">×</button></div>
     <div id="lkProjectsList"></div>
     <div class="lk-levels-foot"><button id="lkProjectsNew" type="button">New project</button><button id="lkProjectsFromFile" type="button">Import project file...</button></div>
   </div></div>

@@ -8,7 +8,7 @@
 <meta name="robots" content="noindex,follow">
 <link rel="canonical" href="https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/lot-king.css?v=0.7.7-dynamic-surfaces-1">
+<link rel="stylesheet" href="css/lot-king.css?v=0.7.8-vehicle-damage-hud-1">
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -35,7 +35,8 @@
         <span><b>ESC / Start</b></span><span>Pause menu</span>
         <span><b>H</b></span><span>Toggle controls legend</span>
         <span><b>Drag &amp; drop .glb</b></span><span>Use your own car model</span>
-        <span><b>F / X</b></span><span>Flash high beams</span>
+        <span><b>F / X</b></span><span>Exit vehicle</span>
+        <span><b>L / D-pad left</b></span><span>Flash high beams</span>
       </div>
     </div>
         <button id="quickPlayBtn">QUICK PLAY</button>
@@ -86,7 +87,7 @@
     <div class="soccerKicks"><span id="soccerKicksA"></span><span id="soccerKicksB"></span></div>
     <div class="soccerMeta"><span id="soccerRoundHud">ROUND 1</span><b id="soccerPhaseHud">READY</b></div>
     <div class="soccerResult" id="soccerResultHud"></div>
-    <div class="soccerShotMeter" id="soccerShotMeter"><span>AIM / SHOT</span><div><i id="soccerShotPower"></i><b id="soccerShotAim"></b></div></div>
+    <div class="soccerShotMeter" id="soccerShotMeter"><span>AIM / SHOT</span><div class="ssmPower"><i id="soccerShotPower"></i><u id="soccerShotSweet"></u><b id="soccerShotAim"></b></div><div class="ssmAxes"><label class="ssmHeight"><span>HEIGHT</span><div><i id="soccerShotHeight"></i></div></label><label class="ssmCurve"><span>CURVE</span><div><i id="soccerShotCurve"></i></div></label></div></div>
   </div>
   <div id="soccerAimReticle" aria-hidden="true"><i></i><b></b><span></span></div>
   <button id="settingsBtn" type="button" title="Menu">⚙</button>
@@ -176,7 +177,7 @@
       <b>W A S D / arrows</b> drive · <b>SPACE</b> handbrake (drift)<br>
       <b>Mouse / RS</b> free look · <b>Scroll</b> zoom · <b>V / B</b> look back · <b>C / R3</b> camera · <b>R / L3</b> reset<br>
       <b>TAB / View</b> radio · <b>P / Y</b> play/pause · <b>N / D-pad right</b> next · <b>Keyboard B / D-pad down</b> prev<br>
-      <b>ESC / Start</b> menu · <b>U / D-pad up</b> driving setup · <b>M / LB</b> mute · <b>F / X</b> flash · <b>H</b> help<br>
+      <b>ESC / Start</b> menu · <b>U / D-pad up</b> driving setup · <b>M / LB</b> mute · <b>F / X</b> exit · <b>L / D-pad left</b> flash · <b>H</b> help<br>
       <b>Gamepad / touch</b> supported · remap keys from <b>ESC → Controls</b>
     </div>
   </div>
@@ -240,6 +241,18 @@
     </div>
 
     <div class="settingsSection" data-settings-section="video">
+      <div class="settingsRow" data-gpu-backend-row>
+        <div class="settingsMeta">
+          <div class="settingsName">GPU backend</div>
+          <div class="settingsDesc">Graphics API used by the engine. WebGPU remains visible but locked until engine and mobile parity are qualified.</div>
+          <div class="settingsDesc" id="videoGpuBackendStatus">Checking WebGPU readiness…</div>
+        </div>
+        <select id="videoGpuBackend" class="settingsSelect">
+          <option value="auto" selected>Auto · guarded WebGL 2</option>
+          <option value="webgpu" disabled>WebGPU · checking readiness…</option>
+          <option value="webgl">WebGL 2 · stable</option>
+        </select>
+      </div>
       <div class="settingsRow" data-video-setting="quality">
         <div class="settingsMeta">
           <div class="settingsName">Render quality</div>
@@ -293,10 +306,62 @@
           <div class="settingsDesc">WebGL, enhanced ray lighting, or progressive path tracing with automatic compatibility fallback.</div>
         </div>
         <select id="videoRenderer" class="settingsSelect">
-          <option value="webgl">Three.js WebGL</option>
+          <option value="webgl">Real-time raster · active GPU backend</option>
           <option value="raytracing">Ray lighting</option>
           <option value="pathtracing">Path tracing · progressive (Experimental - Not stable)</option>
         </select>
+      </div>
+      <div class="settingsRow" data-video-setting="visualStyle">
+        <div class="settingsMeta"><div class="settingsName">Visual style</div><div class="settingsDesc">Automatic detailed illustrated rendering for viewport, Play and game.</div></div>
+        <select id="videoVisualStyle" class="settingsSelect"><option value="natural">Natural</option><option value="illustrated-sketch">Detailed illustrated sketch</option></select>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchMedium">
+        <div class="settingsMeta"><div class="settingsName">Sketch medium</div><div class="settingsDesc">Painted Storybook filters materials, light and atmosphere; Paper Pencil is high-key; Illustrated Ink is graphic.</div></div>
+        <select id="videoSketchMedium" class="settingsSelect"><option value="painted-storybook">Painted storybook</option><option value="paper-pencil">Paper pencil</option><option value="illustrated-ink">Illustrated ink</option></select>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchStrength">
+        <div class="settingsMeta"><div class="settingsName">Ink strength</div><output class="settingsVal" for="videoSketchStrength">78%</output><div class="settingsDesc">Weight of outlines and illustrated tonal shaping.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchStrength" type="range" min="0" max="1" step="0.01" value="0.78"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchDetail">
+        <div class="settingsMeta"><div class="settingsName">Line detail</div><output class="settingsVal" for="videoSketchDetail">72%</output><div class="settingsDesc">Fine contours and cross-hatching density.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchDetail" type="range" min="0" max="1" step="0.01" value="0.72"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchHatching">
+        <div class="settingsMeta"><div class="settingsName">Hatching / grid</div><output class="settingsVal" for="videoSketchHatching">100%</output><div class="settingsDesc">Cross-hatched shading independent from the drawn object outlines. Set to zero for clean contour lines.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchHatching" type="range" min="0" max="1" step="0.01" value="1"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchLineNoise">
+        <div class="settingsMeta"><div class="settingsName">Drawn-line noise</div><output class="settingsVal" for="videoSketchLineNoise">35%</output><div class="settingsDesc">Organic variation in contour weight without adding screen-aligned grid lines.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchLineNoise" type="range" min="0" max="1" step="0.01" value="0.35"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchPigment">
+        <div class="settingsMeta"><div class="settingsName">Pigment &amp; palette</div><output class="settingsVal" for="videoSketchPigment">82%</output><div class="settingsDesc">Filters surface colors into illustrated pigment and tonal color bands.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchPigment" type="range" min="0" max="1" step="0.01" value="0.82"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchColorNoise">
+        <div class="settingsMeta"><div class="settingsName">Pigment noise</div><output class="settingsVal" for="videoSketchColorNoise">100%</output><div class="settingsDesc">Granular variation applied to illustrated colours, materials and atmospheric pigment.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchColorNoise" type="range" min="0" max="1" step="0.01" value="1"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchSaturation">
+        <div class="settingsMeta"><div class="settingsName">Sketch colour</div><output class="settingsVal" for="videoSketchSaturation">1.00×</output><div class="settingsDesc">From colourless pigment at zero to strongly saturated illustrated colour.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchSaturation" type="range" min="0" max="2" step="0.01" value="1"><span>2×</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchLightGain">
+        <div class="settingsMeta"><div class="settingsName">Sketch light gain</div><output class="settingsVal" for="videoSketchLightGain">1.00×</output><div class="settingsDesc">Global illustrated-light amplification, up to a deliberately strong high-key result.</div></div>
+        <div class="settingsControl"><span>.25</span><input id="videoSketchLightGain" type="range" min="0.25" max="3" step="0.01" value="1"><span>3×</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchAtmosphere">
+        <div class="settingsMeta"><div class="settingsName">Atmosphere treatment</div><output class="settingsVal" for="videoSketchAtmosphere">68%</output><div class="settingsDesc">Stylises smoke, clouds, rain, haze, emissive light and transparent effects.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchAtmosphere" type="range" min="0" max="1" step="0.01" value="0.68"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="sketchPaper">
+        <div class="settingsMeta"><div class="settingsName">Paper grain</div><output class="settingsVal" for="videoSketchPaper">38%</output><div class="settingsDesc">Subtle organic paper variation over the final image.</div></div>
+        <div class="settingsControl"><span>0</span><input id="videoSketchPaper" type="range" min="0" max="1" step="0.01" value="0.38"><span>100</span></div>
+      </div>
+      <div class="settingsRow" data-video-setting="monochrome">
+        <div class="settingsMeta"><div class="settingsName">Black &amp; white</div><div class="settingsDesc">Independent global monochrome filter, also available with Natural rendering.</div></div>
+        <label class="settingsToggle"><input id="videoMonochrome" type="checkbox"><span>Enabled</span></label>
       </div>
       <div class="settingsRow" data-video-setting="exposure">
         <div class="settingsMeta"><div class="settingsName">Exposure</div><output class="settingsVal" for="videoExposure">1.12×</output><div class="settingsDesc">Scene brightness before display output.</div></div>
@@ -425,110 +490,175 @@
   })();
 </script>
 
-<script src="vendor/three-r185-compat.min.js?v=0.185.1-lk6"></script>
+<script src="vendor/three-r185-compat.min.js?v=0.185.1-lk8-webgpu-submit-retirement-1"></script>
 <script src="vendor/cannon-0.6.2.min.js?v=0.6.2-lk1"></script>
-<script src="js/runtime/console-policy.js?v=0.7.7-console-1"></script>
-<script src="js/runtime/split-project.js?v=0.7.7-split-project-1"></script>
-<script src="js/runtime/assets.js"></script>
+<script src="js/runtime/console-policy.js?v=0.7.8-console-3"></script>
+<script src="js/runtime/split-project.js?v=0.7.8-split-project-1"></script>
+<script src="js/runtime/assets.js?v=0.7.8-cache-sweep-1"></script>
 <script src="js/runtime/music-library.js?v=0.7.4-music-order-1"></script>
-<script src="js/runtime/menu-music.js?v=0.7.7-media-audio-focus-1"></script>
-<script src="js/runtime/player-camera.js?v=0.7.7-cockpit-motion-2"></script>
-<script src="js/runtime/radio-hud.js?v=0.7.7-cockpit-interaction-3"></script>
-<script src="js/runtime/audio.js?v=0.7.7-fps-fixes-2"></script>
-<script src="js/runtime/engine-audio.js?v=0.7.7-drift-axles-1"></script>
-<script src="js/runtime/volumetric-clouds.js?v=0.7.4-cinematic-optics-1"></script>
-<script src="js/runtime/rain.js?v=0.7.4-rain-ribbons-1"></script>
-<script src="js/runtime/sky.js?v=0.7.7-pathtracing-environment-1"></script>
-<script src="js/runtime/cinematic-lens-flare.js?v=0.7.7-halfres-optics-1"></script>
-<script src="js/runtime/post.js?v=0.7.7-ssr-optics-1"></script>
-<script src="js/runtime/path-tracing-renderer.js?v=0.7.7-pathtracing-5"></script>
-<script src="js/runtime/physics-world.js?v=0.7.7-drift-axles-1"></script>
-<script src="js/runtime/vehicle-visual-controller.js?v=0.6.7-menu-sequence-1"></script>
-<script src="js/runtime/vehicle-raycast-actuator.js?v=0.7.7-drift-axles-1"></script>
+<script src="js/runtime/menu-music.js?v=0.7.8-media-audio-focus-1"></script>
+<script src="js/runtime/aspect-policy.js?v=0.7.8-aspect-policy-1"></script>
+<script src="js/runtime/player-camera.js?v=0.7.8-pawn-camera-rig-1"></script>
+<script src="js/runtime/radio-hud.js?v=0.7.8-player-ui-gate-1"></script>
+<script src="js/runtime/audio.js?v=0.7.8-fps-fixes-2"></script>
+<script src="js/runtime/engine-audio.js?v=0.7.8-native-possession-audio-1"></script>
+<script src="js/runtime/vehicle-engine-audio.js?v=0.7.8-vehicle-exit-prewarm-1"></script>
+<script src="js/runtime/volumetric-clouds.js?v=0.7.8-webgpu-safe-2"></script>
+<script src="js/runtime/rain.js?v=0.7.8-webgpu-rain-1"></script>
+<script src="js/runtime/sky.js?v=0.7.8-webgpu-init-2"></script>
+<script src="js/runtime/cinematic-lens-flare.js?v=0.7.8-halfres-optics-1"></script>
+<script src="js/runtime/post.js?v=0.7.8-sketch-controls-1"></script>
+<script src="js/runtime/path-tracing-renderer.js?v=0.7.8-webgpu-safe-1"></script>
+<script src="js/runtime/physics-world.js?v=0.7.8-procedural-heightfield-1"></script>
+<script src="js/runtime/vehicle-visual-controller.js?v=0.7.8-steer-pivot-1"></script>
+<script src="js/runtime/vehicle-raycast-actuator.js?v=0.7.8-weather-1"></script>
 <script src="js/runtime/vehicle-steering-controller.js?v=0.6.7-menu-sequence-1"></script>
-<script src="js/runtime/vehicle-engine-controller.js?v=0.7.7-drift-axles-1"></script>
-<script src="js/runtime/drive-tuning.js?v=0.7.7-drift-axles-1"></script>
+<script src="js/runtime/vehicle-engine-controller.js?v=0.7.8-drift-axles-1"></script>
+<script src="js/runtime/drive-tuning.js?v=0.7.8-drift-axles-1"></script>
 <script src="js/runtime/player-data-widgets.js?v=0.7.4-three-r185-1"></script>
-<script src="js/runtime/game-hud.js?v=0.7.4-soccer-feedback-1"></script>
-<script src="js/runtime/character-audio.js?v=0.7.7-audio-designer-1"></script>
-<script src="js/runtime/interaction-system.js?v=0.7.7-fps-fixes-4"></script>
-<script src="js/runtime/item-system.js?v=0.7.7-fps-fixes-3"></script>
-<script src="js/runtime/weapon-tracers.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/inventory-ui.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/fps-hud.js?v=0.7.7-fps-fixes-4"></script>
-<script src="js/runtime/vehicle-radar.js?v=0.7.7-radar-top-left-4"></script>
-<script src="js/runtime/fps-view-model.js?v=0.7.7-fps-systems-14"></script>
+<script src="js/runtime/game-hud.js?v=0.7.8-soccer-input-1"></script>
+<script src="js/runtime/character-audio.js?v=0.7.8-weapon-semantics-1"></script>
+<script src="js/runtime/interaction-system.js?v=0.7.8-fps-fixes-4"></script>
+<script src="js/runtime/combat/damage-contract.js?v=0.7.8-actor-foundations-3"></script>
+<script src="js/runtime/vehicle-damage.js?v=0.7.8-vehicle-exit-prewarm-1"></script>
+<script src="js/runtime/physics/pawn-death-physics.js?v=0.7.8-horizontal-surface-1"></script>
+<script src="js/runtime/item-system.js?v=0.7.8-weapon-pickup-logic-1"></script>
+<script src="js/runtime/weapon-tracers.js?v=0.7.8-blast-fx-1"></script>
+<script src="js/runtime/inventory-ui.js?v=0.7.8-fps-systems-14"></script>
+<script src="js/runtime/weather-system.js?v=0.7.8-weather-1"></script>
+<script src="js/runtime/objective-hud.js?v=0.7.8-objectives-1"></script>
+<script src="js/runtime/objective-system.js?v=0.7.8-objectives-1"></script>
+<script src="js/runtime/fps-hud.js?v=0.7.8-owned-feedback-1"></script>
+<script src="js/runtime/vehicle-radar.js?v=0.7.8-horizontal-surface-1"></script>
+<script src="js/runtime/fps-view-model.js?v=0.7.8-action-holster-1"></script>
 <script src="js/runtime/track-catalog.js?v=0.7.4-menu-role-music-1"></script>
-<script src="js/runtime/loading-flow.js"></script>
-<script src="js/runtime/pre-benchmark.js?v=0.7.7-runtime-warmup-2"></script>
-<script src="js/runtime/runtime-loader.js?v=0.7.7-runtime-warmup-2"></script>
-<script src="js/runtime/model-assets.js?v=0.7.7-steering-wheel-local-pivot-3"></script>
-<script src="js/runtime/player-model.js?v=0.7.7-steering-wheel-2"></script>
-<script src="js/runtime/player-light-rig.js?v=0.7.7-ssr-optics-1"></script>
-<script src="js/runtime/world-state.js"></script>
-<script src="js/runtime/world-generation.js?v=0.7.4-three-r185-1"></script>
-<script src="js/runtime/session-flow.js"></script>
-<script src="js/runtime/settings-menu.js?v=0.7.7-renderer-switch-1"></script>
+<script src="js/runtime/loading-flow.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/pre-benchmark.js?v=0.7.8-webgpu-targets-1"></script>
+<script src="js/runtime/runtime-loader.js?v=0.7.8-runtime-warmup-2"></script>
+<script src="js/runtime/model-assets.js?v=0.7.8-steering-wheel-local-pivot-3"></script>
+<script src="js/runtime/player-model.js?v=0.7.8-steering-wheel-2"></script>
+<script src="js/runtime/player-light-rig.js?v=0.7.8-ssr-optics-1"></script>
+<script src="js/runtime/world-state.js?v=0.7.8-horizontal-surface-1"></script>
+<script src="js/runtime/world-generation.js?v=0.7.8-drive-surface-support-1"></script>
+<script src="js/runtime/world/procedural-world-schema.js?v=0.7.8-lowered-collidable-world-1"></script>
+<script src="js/runtime/world/procedural-terrain.js?v=0.7.8-procedural-world-1"></script>
+<script src="js/runtime/world/procedural-water.js?v=0.7.8-procedural-world-1"></script>
+<script src="js/runtime/world/procedural-archipelago.js?v=0.7.8-procedural-world-1"></script>
+<script src="js/runtime/world/procedural-world-system.js?v=0.7.8-procedural-world-1"></script>
+<script src="js/runtime/session-flow.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/settings-menu.js?v=0.7.8-sketch-controls-1"></script>
 <script src="js/runtime/gameplay-difficulty.js?v=0.7.4-gameplay-difficulty-1"></script>
-<script src="js/runtime/rendering-backend.js?v=0.7.4-shader-warmup-1"></script>
-<script src="js/runtime/game-flow.js?v=0.7.7-runtime-warmup-1"></script>
-<script src="js/runtime/ui/window-manager.js?v=0.7.7-viewport-clamp-1"></script>
-<script src="js/runtime/input/input-actions.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/input/input-devices.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/input/input-manager.js?v=0.7.4-player-contexts-1"></script>
-<script src="js/runtime/input/device-visuals.js"></script>
-<script src="js/runtime/input/mapping-overlay.js"></script>
-<script src="js/runtime/input/touch-controls.js"></script>
-<script src="js/runtime/input/input-menu.js"></script>
-<script src="js/runtime/pawn-core.js"></script>
-<script src="js/lot-king.js?v=0.7.7-drift-axles-1"></script>
-<script src="js/runtime/vehicle-physics-backends.js"></script>
-<script src="js/runtime/vehicle-pawns.js?v=0.7.7-drift-axles-1"></script>
-<script src="js/runtime/character-movement.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/character-abilities.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/character-vitals.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/character-placeholder-locomotion.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/mixamo-placeholder-clips.js?v=0.7.4-keeper-placeholder-2"></script>
-<script src="js/runtime/character-animation-set.js?v=0.7.4-root-yaw-1"></script>
+<script src="js/runtime/rendering-backend.js?v=0.7.8-webgpu-submit-retirement-1"></script>
+<script src="js/runtime/game-flow.js?v=0.7.8-level-role-authority-1"></script>
+<script src="js/runtime/ui/window-manager.js?v=0.7.8-viewport-clamp-1"></script>
+<script src="js/runtime/ui-elements.js?v=0.7.8-authorable-ui-1"></script>
+<script src="js/runtime/input/input-actions.js?v=0.7.8-tow-action-1"></script>
+<script src="js/runtime/input/input-devices.js?v=0.7.8-input-context-v15-4"></script>
+<script src="js/runtime/input/input-manager.js?v=0.7.8-input-context-v15-4"></script>
+<script src="js/runtime/input/player-action-router.js?v=0.7.8-vehicle-exit-respawn-1"></script>
+<script src="js/runtime/input/device-visuals.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/input/mapping-overlay.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/input/touch-controls.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/input/input-menu.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/pawn-core.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/cinema-sequence.js?v=0.7.8-cinema-exit-blend-1"></script>
+<script src="js/runtime/player-output-resolver.js?v=0.7.8-player-output-authority-1"></script>
+<script src="js/lot-king.js?v=0.7.8-pawn-camera-rig-1"></script>
+<script src="js/runtime/vehicle-physics-backends.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/runtime/vehicle-towing.js?v=0.7.8-dynamic-towing-2"></script>
+<script src="js/runtime/vehicle-pawns.js?v=0.7.8-native-collider-parity-1"></script>
+<script src="js/runtime/character-movement.js?v=0.7.8-complex-ground-fail-closed-1"></script>
+<script src="js/runtime/character-abilities.js?v=0.7.8-crouch-pace-1"></script>
+<script src="js/runtime/character-combat-cover.js?v=0.7.8-horizontal-surface-1"></script>
+<script src="js/runtime/character-vitals.js?v=0.7.8-actor-foundations-3"></script>
+<script src="js/runtime/character-animation-blend.js?v=0.7.8-fire-loop-1"></script>
+<script src="js/runtime/character-placeholder-locomotion.js?v=0.7.8-fire-loop-1"></script>
+<script src="js/runtime/animal-placeholder-locomotion.js?v=0.7.8-stair-pose-1"></script>
+<script src="js/runtime/mixamo-placeholder-clips.js?v=0.7.8-fire-loop-1"></script>
+<script src="js/runtime/character-animation-set.js?v=0.7.8-pose-timeline-1"></script>
 <script src="js/runtime/cloth-system.js?v=0.7.4-cloth-studio-2"></script>
-<script src="js/runtime/first-person-controller.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/character-pawn-base.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/runtime/soccer-locomotion.js?v=0.7.4-root-yaw-1"></script>
-<script src="js/runtime/character-pawns.js?v=0.7.4-character-2"></script>
-<script src="js/runtime/soccer-pawns.js?v=0.7.4-soccer-difficulty-1"></script>
+<script src="js/runtime/first-person-view-pawn.js?v=0.7.8-first-person-view-pawn-1"></script>
+<script src="js/runtime/first-person-controller.js?v=0.7.8-fire-loop-1"></script>
+<script src="js/runtime/combat/actor-combat.js?v=0.7.8-actor-foundations-3"></script>
+<script src="js/runtime/character-bodies.js?v=0.7.8-frontflip-action-migration-1"></script>
+<script src="js/runtime/character-pawn-base.js?v=0.7.8-fire-loop-1"></script>
+<script src="js/runtime/character-weapon-pose.js?v=0.7.8-seating-dummy-binding-1"></script>
+<script src="js/runtime/soccer-locomotion.js?v=0.7.8-fire-loop-1"></script>
+<script src="js/runtime/character-implementations.js?v=0.7.8-vehicle-mixer-wreck-1"></script>
+<script src="js/runtime/character-pawns.js?v=0.7.8-wall-flip-run-tuning-1"></script>
+<script src="js/runtime/animal-pawns.js?v=0.7.8-stair-pose-1"></script>
+<script src="js/runtime/ai/actor-cover-planner.js?v=0.7.8-horizontal-surface-1"></script>
+<script src="js/runtime/ai/actor-behavior.js?v=0.7.8-horizontal-surface-1"></script>
+<script src="js/runtime/soccer-pawns.js?v=0.7.8-player-ownership-1"></script>
+<script src="js/runtime/vehicle-occupancy.js?v=0.7.8-high-poly-seat-default-1"></script>
+<script src="js/runtime/character-vehicle-dismount.js?v=0.7.8-physical-dismount-1"></script>
+<script src="js/runtime/sketchbook-pawns.js?v=0.7.8-piloted-landing-1"></script>
 <script src="js/runtime/soccer-ball.js?v=0.7.4-soccer-difficulty-1"></script>
-<script src="js/runtime/penalty-flow.js?v=0.7.4-soccer-feedback-1"></script>
-<script src="js/runtime/soccer-stadium.js?v=0.7.4-soccer-play-6"></script>
+<script src="js/runtime/soccer-tactics.js?v=0.7.8-soccer-11v11-1"></script>
+<script src="js/runtime/soccer-team-ai.js?v=0.7.8-soccer-11v11-1"></script>
+<script src="js/runtime/soccer-match-flow.js?v=0.7.8-soccer-match-1"></script>
+<script src="js/runtime/penalty-flow.js?v=0.7.8-soccer-feedback-2"></script>
+<script src="js/runtime/soccer-stadium.js?v=0.7.8-soccer-play-7"></script>
 <script src="js/runtime/drift-track-generator.js?v=0.7.4-drift-track-1"></script>
-<script src="js/runtime/character-level-template.js?v=0.7.4-character-2"></script>
-<script src="js/runtime/penalty-shootout-level-template.js?v=0.7.4-soccer-play-6"></script>
-<script src="js/runtime/fps-arena-level-template.js?v=0.7.7-fps-fixes-4"></script>
-<script src="js/runtime/p2p-session.js?v=0.7.4-p2p-session-1"></script>
-<script src="js/plugins/plugin-api.js?v=0.7.4-pawn-studio-1"></script>
-<script src="js/plugins/plugin-manager.js"></script>
-<script src="js/plugins/logic-element-plugin.js"></script>
-<script src="js/plugins/fbx-import-plugin.js?v=1.0.2"></script>
+<script src="js/engine/level-template-registry.js?v=0.7.8-level-templates-1"></script>
+<script src="js/runtime/character-level-template.js?v=0.7.8-wall-flip-run-tuning-1"></script>
+<script src="js/runtime/penalty-shootout-level-template.js?v=0.7.8-level-templates-1"></script>
+<script src="js/runtime/soccer-match-level-template.js?v=0.7.8-soccer-11v11-1"></script>
+<script src="js/runtime/fps-arena-level-template.js?v=0.7.8-unified-body-camera-1"></script>
+<script src="js/runtime/open-world-districts.js?v=0.7.8-aaaa-1"></script>
+<script src="js/runtime/open-world-streaming.js?v=0.7.8-aaaa-1"></script>
+<script src="js/runtime/sketchbook-open-world-level-template.js?v=0.7.8-vehicle-mixer-wreck-1"></script>
+<script src="js/runtime/snow-terrain.js?v=0.7.8-aaaa-1"></script>
+<script src="js/runtime/snow-trail.js?v=0.7.8-webgpu-safe-1"></script>
+<script src="js/runtime/snowboarding-level-template.js?v=0.7.8-game-mode-templates-1"></script>
+<script src="js/runtime/jungle-car-escape-level-template.js?v=0.7.8-game-mode-templates-1"></script>
+<script src="js/runtime/fps-enemy-outpost-level-template.js?v=0.7.8-wall-flip-run-tuning-1"></script>
+<script src="js/runtime/cat-neighborhood-level-template.js?v=0.7.8-game-mode-templates-1"></script>
+<script src="js/runtime/p2p-protocol.js?v=0.7.8-session-monitor-1"></script>
+<script src="js/runtime/p2p-session.js?v=0.7.8-session-monitor-1"></script>
+<script src="js/runtime/p2p-replication.js?v=0.7.8-host-migration-1"></script>
+<script src="js/runtime/p2p-multiplayer-director.js?v=0.7.8-session-lifetime-1"></script>
+<script src="js/runtime/p2p-multiplayer-level-template.js?v=0.7.8-session-lifetime-1"></script>
+<script src="js/plugins/plugin-api.js?v=0.7.8-asset-provider-1"></script>
+<script src="js/plugins/plugin-manager.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/plugins/logic-element-plugin.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/engine/skinned-rig-repair.js?v=0.7.8-root-centre-1"></script>
+<script src="js/plugins/fbx-import-plugin.js?v=1.0.3-rig-repair"></script>
 <script src="js/plugins/cloth-authoring-plugin.js?v=0.7.4-cloth-studio-2"></script>
-<script src="js/plugins/p2p-collaboration-plugin.js?v=0.7.4-p2p-session-1"></script>
-<script src="js/logic/logic-graph.js?v=0.7.7-steering-wheel-2"></script>
-<script src="js/logic/logic-exporter.js"></script>
-<script src="js/logic/logic-templates.js?v=0.7.7-steering-wheel-2"></script>
-<script src="js/logic/logic-templates-soccer.js?v=0.7.4-soccer-play-6"></script>
-<script src="js/logic/logic-templates-character.js?v=0.7.4-free-camera-1"></script>
-<script src="js/logic/logic-templates-fps.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/logic/logic-registry.js"></script>
-<script src="js/logic/logic-validator.js"></script>
-<script src="js/logic/logic-services.js?v=0.7.4-p2p-session-1"></script>
-<script src="js/logic/logic-runtime.js?v=0.7.4-p2p-session-1"></script>
-<script src="js/logic/logic-nodes-mvp.js?v=0.7.4-character-2"></script>
+<script src="js/plugins/p2p-cowork-locks.js?v=0.7.8-cowork-locks-1"></script>
+<script src="js/plugins/p2p-collaboration-plugin.js?v=0.7.8-session-monitor-1"></script>
+<script src="js/plugins/blender-live-link-core.js?v=0.7.8-blender-binary-scene-1"></script>
+<script src="js/plugins/blender-live-link-plugin.js?v=0.7.8-live-link-experimental-1"></script>
+<script src="js/logic/logic-graph.js?v=0.7.8-crouch-pace-1"></script>
+<script src="js/logic/logic-exporter.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/logic/logic-templates.js?v=0.7.8-pawn-camera-rig-1"></script>
+<script src="js/logic/logic-templates-ui.js?v=0.7.8-authorable-ui-1"></script>
+<script src="js/logic/logic-templates-sketchbook.js?v=0.7.8-pawn-camera-rig-1"></script>
+<script src="js/logic/logic-templates-vehicle-pack.js?v=0.7.8-pawn-camera-rig-1"></script>
+<script src="js/logic/logic-templates-soccer.js?v=0.7.8-player-ownership-1"></script>
+<script src="js/logic/logic-templates-network.js?v=0.7.8-session-lifetime-1"></script>
+<script src="js/logic/logic-templates-character.js?v=0.7.8-crouch-pace-1"></script>
+<script src="js/logic/logic-templates-animal.js?v=0.7.8-player-ownership-1"></script>
+<script src="js/logic/logic-nodes-animal.js?v=0.7.8-animal-1"></script>
+<script src="js/logic/logic-templates-mission.js?v=0.7.8-objectives-1"></script>
+<script src="js/logic/logic-templates-fps.js?v=0.7.8-crouch-pace-1"></script>
+<script src="js/logic/logic-registry.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/logic/logic-validator.js?v=0.7.8-cache-sweep-1"></script>
+<script src="js/logic/logic-services.js?v=0.7.8-cinema-exit-blend-1"></script>
+<script src="js/logic/logic-runtime.js?v=0.7.8-cinema-logic-completion-1"></script>
+<script src="js/logic/logic-nodes-mvp.js?v=0.7.8-cinema-exit-blend-1"></script>
+<script src="js/logic/logic-nodes-ui.js?v=0.7.8-authorable-ui-1"></script>
 <script src="js/logic/logic-nodes-soccer.js?v=0.7.4-soccer-play-6"></script>
 <script src="js/logic/logic-nodes-character.js?v=0.7.4-character-1"></script>
-<script src="js/logic/logic-nodes-fps.js?v=0.7.7-fps-systems-14"></script>
-<script src="js/logic/logic-nodes-network.js?v=0.7.4-p2p-session-1"></script>
-<script src="js/engine/texture-budget.js?v=0.7.7-texture-budget-1"></script>
-<script src="js/engine/procedural-surfaces.js?v=0.7.7-fps-surfaces-2"></script>
-<script src="js/engine/scene-store.js?v=0.7.7-split-project-1"></script>
-<script src="js/runtime/logic-elements-runner.js?v=0.7.7-runtime-warmup-1"></script>
+<script src="js/logic/logic-nodes-fps.js?v=0.7.8-weapon-pickup-logic-1"></script>
+<script src="js/logic/logic-nodes-weather.js?v=0.7.8-weather-1"></script>
+<script src="js/logic/logic-nodes-objectives.js?v=0.7.8-objectives-1"></script>
+<script src="js/logic/logic-nodes-network.js?v=0.7.8-p2p-session-2"></script>
+<script src="js/engine/texture-budget.js?v=0.7.8-texture-budget-1"></script>
+<script src="js/engine/procedural-assets.js?v=0.7.8-procedural-library-1"></script>
+<script src="js/engine/procedural-surfaces.js?v=0.7.8-fps-surfaces-2"></script>
+<script src="js/engine/scene-store.js?v=0.7.8-manual-save-target-1"></script>
+<script src="js/runtime/logic-elements-runner.js?v=0.7.8-vehicle-exit-prewarm-1"></script>
   <script>
   (function(){
     'use strict';

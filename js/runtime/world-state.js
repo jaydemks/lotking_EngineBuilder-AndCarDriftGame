@@ -112,6 +112,7 @@ function create(options){
   }
 
   function isDriveSurfaceCollider(col){
+    if(col&&col.horizontalSurface===true)return true;
     const owner = col && col.owner;
     const ud = owner && owner.userData;
     if(!ud) return false;
@@ -308,8 +309,12 @@ function create(options){
 
   function collidePhysicsObjects(){
     const all = [];
-    for(const c of colliders.circle) if(c && c.enabled !== false) all.push(c);
-    for(const b of colliders.box) if(b && b.enabled !== false) all.push(b);
+    // separateColliderPair can only resolve two movable bodies. Keeping the
+    // hundreds of authored static Open World colliders out of this list turns
+    // the pair pass from O(all colliders^2) into O(dynamic bodies^2) without
+    // changing any collision result.
+    for(const c of colliders.circle) if(canMoveCollider(c)) all.push(c);
+    for(const b of colliders.box) if(canMoveCollider(b)) all.push(b);
     for(let pass = 0; pass < 2; pass++){
       for(let i = 0; i < all.length; i++){
         for(let j = i + 1; j < all.length; j++) separateColliderPair(all[i], all[j]);
@@ -400,7 +405,10 @@ function create(options){
 
   function updatePhysicsObjects(dt){
     const update = col => {
-      if(!col || !col.owner || col.compoundRoot || col.compoundPart) return;
+      // Static colliders are handled by Cannon/rebuildPhysicsStatics and never
+      // receive velocity integration here. Reject them before owner/surface
+      // work so a large authored level is not scanned once per static object.
+      if(!col || !col.physics || !col.owner || col.compoundRoot || col.compoundPart) return;
       if(isDriveSurfaceCollider(col)) return;
       if(col.hitCooldown > 0) col.hitCooldown = Math.max(0, col.hitCooldown - dt);
       const ud = col.owner.userData || {};
