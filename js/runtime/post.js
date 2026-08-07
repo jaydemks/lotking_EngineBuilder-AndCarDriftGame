@@ -20,6 +20,58 @@ function createPost(deps){
   const tmpTargetPos = new THREE.Vector3();
   const tmpCameraForward = new THREE.Vector3();
   const tmpLightVector = new THREE.Vector3();
+  const overlapCameraPosition = new THREE.Vector3();
+  const overlapLocalPosition = new THREE.Vector3();
+  const overlapBoundsSize = new THREE.Vector3();
+  const overlapWorldScale = new THREE.Vector3();
+  const overlapInverseMatrix = new THREE.Matrix4();
+  let overlapCandidates = [];
+  let overlapCandidateScan = -Infinity;
+  function refreshCameraOverlapCandidates(){
+    const now=performance.now();
+    if(now-overlapCandidateScan<750)return;
+    overlapCandidateScan=now;
+    overlapCandidates=[];
+    scene.traverseVisible(node=>{
+      const data=node.userData||{};
+      if(!node.isMesh||node.isSkinnedMesh||node.isInstancedMesh||!node.geometry||data.cameraOverlapCull===false||data.runtimeVisual||data.logicElementRuntimeVisual)return;
+      const geometry=node.geometry;
+      if(!geometry.boundingBox&&geometry.computeBoundingBox)geometry.computeBoundingBox();
+      if(geometry.boundingBox&&!geometry.boundingBox.isEmpty())overlapCandidates.push(node);
+    });
+  }
+  function hideCameraContainers(renderCamera){
+    if(!renderCamera||!renderCamera.getWorldPosition)return [];
+    refreshCameraOverlapCandidates();
+    renderCamera.getWorldPosition(overlapCameraPosition);
+    const hidden=[];
+    for(let index=0;index<overlapCandidates.length;index++){
+      const mesh=overlapCandidates[index],box=mesh.geometry&&mesh.geometry.boundingBox;
+      if(!mesh.visible||!box||!mesh.parent)continue;
+      box.getSize(overlapBoundsSize);
+      mesh.getWorldScale(overlapWorldScale);
+      overlapBoundsSize.set(
+        Math.abs(overlapBoundsSize.x*overlapWorldScale.x),
+        Math.abs(overlapBoundsSize.y*overlapWorldScale.y),
+        Math.abs(overlapBoundsSize.z*overlapWorldScale.z)
+      );
+      // Never hide terrain, a whole city GLB, or paper-thin road surfaces.
+      if(Math.max(overlapBoundsSize.x,overlapBoundsSize.y,overlapBoundsSize.z)>32||Math.min(overlapBoundsSize.x,overlapBoundsSize.y,overlapBoundsSize.z)<.08)continue;
+      overlapInverseMatrix.copy(mesh.matrixWorld).invert();
+      overlapLocalPosition.copy(overlapCameraPosition).applyMatrix4(overlapInverseMatrix);
+      const margin=.006;
+      if(overlapLocalPosition.x>box.min.x+margin&&overlapLocalPosition.x<box.max.x-margin&&overlapLocalPosition.y>box.min.y+margin&&overlapLocalPosition.y<box.max.y-margin&&overlapLocalPosition.z>box.min.z+margin&&overlapLocalPosition.z<box.max.z-margin){
+        mesh.visible=false;
+        hidden.push(mesh);
+      }
+    }
+    return hidden;
+  }
+  function renderWithoutCameraContainers(renderCamera,callback){
+    const hidden=hideCameraContainers(renderCamera);
+    try{return callback();}
+    finally{for(let index=0;index<hidden.length;index++)hidden[index].visible=true;}
+  }
   const sceneFlareRaycaster = new THREE.Raycaster();
   const sceneFlareCameraPosition = new THREE.Vector3();
   const sceneFlareWorldPosition = new THREE.Vector3();
@@ -190,7 +242,7 @@ function createPost(deps){
     const composer={
       setSize:setScopedSize,
       setPixelRatio(){},
-      render(){pipeline.render();},
+      render(){return renderWithoutCameraContainers(activeCamera,()=>pipeline.render());},
       dispose(){scenePass.dispose();pipeline.dispose();},
     };
     let renderFailed=false;
@@ -214,7 +266,7 @@ function createPost(deps){
     function render(cameraOverride,options){
       activeCamera=cameraOverride||camera;
       scenePass.camera=activeCamera;
-      if(renderFailed){renderer.render(scene,activeCamera);return;}
+      if(renderFailed){renderWithoutCameraContainers(activeCamera,()=>renderer.render(scene,activeCamera));return;}
       const requested=options&&options.width!=null&&options.height!=null?options:size();
       setScopedSize(requested.width,requested.height);
       const grade=config&&config.grade||{};
@@ -238,7 +290,7 @@ function createPost(deps){
       sketchStorybookMode.value=!video||video.sketchMedium==='painted-storybook'?1:0;
       sketchMonochrome.value=video&&video.monochrome===true?1:0;
       try{
-        const submission=pipeline.render();
+        const submission=renderWithoutCameraContainers(activeCamera,()=>pipeline.render());
         // Some WebGPU backends surface pipeline creation/device validation as
         // a rejected Promise rather than a synchronous throw. Retire the post
         // graph so the next frame presents the direct scene instead of staying
@@ -247,7 +299,7 @@ function createPost(deps){
       }
       catch(error){
         failToDirect(error);
-        renderer.render(scene,activeCamera);
+        renderWithoutCameraContainers(activeCamera,()=>renderer.render(scene,activeCamera));
       }
     }
     return {
@@ -997,7 +1049,7 @@ function createPost(deps){
         console.error('LotKing post: render composito fallito, fallback al render diretto', err);
       }
       try { renderer.setRenderTarget(null); } catch(e){}
-      renderer.render(scene, activeCamera);
+      renderWithoutCameraContainers(activeCamera,()=>renderer.render(scene,activeCamera));
     }
   }
   function renderComposed(options){
@@ -1174,7 +1226,7 @@ function createPost(deps){
       syncFxaaResolution();
     }
 
-    composer.render();
+    renderWithoutCameraContainers(activeCamera,()=>composer.render());
   }
 
   return {ok:true, compatibility, composer, renderPass, gtaoPass, bokeh, dofPass, gradePass, videoProfilePass, rayLightingPass, ssrPass, volumetricPass, cinematicFlarePass, sceneCinematicFlarePasses, fxaaPass, render, needsOpticalPost, hasFailed: () => renderFailed, dispose(){composer.dispose();}};

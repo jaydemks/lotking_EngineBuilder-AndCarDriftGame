@@ -822,6 +822,10 @@ function vehiclePhysicsOriginY(pawn,collision){
 function makeBody(pawn){
   const CANNON=root.CANNON,raw=rawPhysics(pawn.GAME),world=raw&&raw.world;if(!CANNON||!world)return false;
   const cfg=pawn.config,collision=cfg.collision||{},material=new CANNON.Material('sketchbook-'+pawn.type+'-'+pawn.id);material.friction=finite(collision.friction,.18);
+  // Helicopter skids must absorb landing energy. A non-zero authored or
+  // inherited restitution turns the complete chassis into a ball before the
+  // flight controller gets its next support frame.
+  material.restitution=pawn.type==='helicopter'?0:Math.max(0,finite(collision.restitution,0));
   const body=new CANNON.Body({mass:Math.max(.01,finite(collision.mass,50)),material,linearDamping:clamp(collision.linearDamping,0,1),angularDamping:clamp(collision.angularDamping,0,1)});
   const spawn=cfg.spawn,originY=vehiclePhysicsOriginY(pawn,collision);pawn.physicsOriginY=originY;
   body.position.set(spawn.x,spawn.y+originY,spawn.z);body.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0),spawn.heading);syncBodyInterpolation(body);
@@ -1386,7 +1390,9 @@ function helicopterBefore(pawn,dt){
   const input=flightInput(pawn.GAME,pawn),body=pawn.body,flight=pawn.config.flight,motion=localMotion(pawn),occupied=!!(pawn.possessed||pawn.driverPawn||pawn.control),authored=pawn.config.tuning||{},sourceFlight=authored.flight||{},sourceRotor=authored.rotor||{},frames=clamp(dt*60,0,6);
   pawn.enginePower=clamp(pawn.enginePower+(occupied?finite(sourceRotor.spoolUp,finite(flight.spoolUp,.2)):-finite(sourceRotor.spoolDown,finite(flight.spoolDown,.06)))*dt,0,1);
   const gravity=pawn.world&&pawn.world.gravity?Math.abs(finite(pawn.world.gravity.y,-9.82)):9.82,upDot=clamp(motion.up.y,0,1),thrust=finite(sourceFlight.thrust,.15),gravityCompensation=finite(sourceFlight.gravityCompensation,.98),verticalDamping=finite(sourceFlight.verticalDamping,.01),horizontalMultiplier=clamp(finite(sourceFlight.horizontalDamping,.995),0,1),rotationGain=finite(sourceFlight.rotationGain,.07),angularMultiplier=clamp(finite(sourceFlight.angularDamping,.97),0,1);
-  const supported=helicopterSupported(pawn),takeoff=input.collective>.08;
+  const supported=helicopterSupported(pawn,dt),takeoff=input.collective>.08;
+  pawn.helicopterLandingSettled=supported&&!takeoff;
+  pawn.helicopterLastCollective=input.collective;
   // A spooled rotor normally cancels almost all gravity. On the skids that
   // leaves the contact solver with no steady load and every tiny penetration is
   // returned as another launch impulse. While the pilot is neutral/descending,
@@ -1417,11 +1423,26 @@ function isStaticHelicopterSupport(body,contact){
   const other=contact.bi===body?contact.bj:contact.bi,normal=contact.ni;
   return !!(other&&finite(other.mass,0)===0&&normal&&Math.abs(finite(normal.y,0))>.55);
 }
-function helicopterSupported(pawn){
+function helicopterSupported(pawn,dt){
   const body=pawn&&pawn.body,world=pawn&&pawn.world;if(!body||!world)return false;
-  const supported=pawn.helicopterSupportContact===true||(world.contacts||[]).some(contact=>isStaticHelicopterSupport(body,contact));
+  const contactNow=pawn.helicopterSupportContact===true||(world.contacts||[]).some(contact=>isStaticHelicopterSupport(body,contact));
+  pawn.helicopterSupportGrace=contactNow ? .18 : Math.max(0,finite(pawn.helicopterSupportGrace,0)-Math.max(0,finite(dt,PHYSICS_FRAME_TIME)));
   pawn.helicopterSupportContact=false;
-  return supported;
+  return contactNow||pawn.helicopterSupportGrace>0;
+}
+function settleLandedHelicopter(pawn){
+  const body=pawn&&pawn.body;if(!body)return false;
+  const neutral=finite(pawn.helicopterLastCollective,0)<=.08;
+  const supported=pawn.helicopterLandingSettled===true||pawn.helicopterSupportContact===true;
+  if(!neutral||!supported)return false;
+  // Run after Cannon as well as in the flight controller. This consumes the
+  // solver impulse on the exact contact frame instead of displaying one full
+  // upward bounce before the next beforePhysics tick can see the support.
+  body.velocity.y=Math.min(0,finite(body.velocity.y,0))*0.18;
+  body.velocity.x*=.72;body.velocity.z*=.72;
+  body.angularVelocity.x*=.18;body.angularVelocity.z*=.18;
+  syncBodyInterpolation(body);
+  return true;
 }
 function settleParkedHelicopter(pawn){
   const body=pawn&&pawn.body,world=pawn&&pawn.world;
@@ -1441,6 +1462,7 @@ function settleParkedHelicopter(pawn){
 }
 function vehicleAfter(pawn,dt){
   if(!pawn.body||!pawn.owner)return;const body=pawn.body,position=renderBodyPosition(body),rotation=renderBodyQuaternion(body);
+  if(pawn.type==='helicopter'){settleLandedHelicopter(pawn);settleParkedHelicopter(pawn);}
   setOwnerWorldTransform(pawn.owner,{x:position.x,y:position.y-finite(pawn.physicsOriginY,vehiclePhysicsOriginY(pawn,pawn.config.collision)),z:position.z},rotation);
   pawn.owner.updateMatrixWorld&&pawn.owner.updateMatrixWorld(true);syncWheels(pawn,dt);
   updateSeatDoors(pawn,dt);(pawn.parts.seats||[]).forEach(seat=>{if(seat.occupiedBy&&!(seat.occupiedBy.entryTransition&&seat.occupiedBy.entryTransition.phase==='exit'))syncSeatOccupant(seat.occupiedBy);});
@@ -1454,7 +1476,6 @@ function vehicleAfter(pawn,dt){
   (pawn.parts.ailerons||[]).forEach(node=>rotatePart(node,hingeAxis(node),finite(controls.aileron)*surfaceSideSign(pawn.owner,node)));
   (pawn.parts.elevators||[]).forEach(node=>rotatePart(node,hingeAxis(node),finite(controls.elevator)));
   (pawn.parts.rudders||[]).forEach(node=>rotatePart(node,hingeAxis(node),finite(controls.rudder)));
-  if(pawn.type==='helicopter')settleParkedHelicopter(pawn);
 }
 
 function safeExitPosition(vehicle,character){

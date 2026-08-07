@@ -1928,6 +1928,13 @@ async function localizePortableObjectAssets(value, path, seen, depth){
   if(isDataUrl(value.modelSrc)) await moveDataUrlToAssetDb(value, 'modelSrc', label, 'modelDbKey');
   if(isDataUrl(value.src)) await moveDataUrlToAssetDb(value, 'src', label, 'dbKey');
   if(isDataUrl(value.url)) await moveDataUrlToAssetDb(value, 'url', label, 'dbKey');
+  for(const pair of [
+    ['mapSrc','mapDbKey'],['normalMapSrc','normalMapDbKey'],
+    ['roughnessMapSrc','roughnessMapDbKey'],['metalnessMapSrc','metalnessMapDbKey'],
+    ['alphaMapSrc','alphaMapDbKey'],['emissiveMapSrc','emissiveMapDbKey'],
+  ]){
+    if(isDataUrl(value[pair[0]]))await moveDataUrlToAssetDb(value,pair[0],label,pair[1]);
+  }
   for(const key of Object.keys(value)){
     const child = value[key];
     if(typeof child === 'string' && child.trim().charAt(0) === '{' && /"(?:src|url|modelSrc|dbKey|modelDbKey)"\s*:/.test(child)){
@@ -4616,7 +4623,10 @@ function applyMatProps(obj, p){
     return budgetTexture(tx);
   };
   const resolveTextureUrl = (src, dbKey) => {
-    if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey);
+    if(dbKey && window.LK_ASSET_BLOBS) return window.LK_ASSET_BLOBS.getUrl(dbKey).catch(error=>{
+      if(src)return src;
+      throw error;
+    });
     return Promise.resolve(src || null);
   };
   const applyTextureTransform = (tx, props) => {

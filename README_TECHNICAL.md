@@ -6,7 +6,7 @@ This document contains the deeper project information that used to live in the m
 
 Lot King is a local-first, browser-native 3D engine/editor in active development. It uses plain JavaScript, Three.js and Cannon.js, with static browser files and no mandatory runtime framework or application build step.
 
-The `v0.7.8` release adds the illustrated-sketch pipeline, experimental WebGPU dual-backend work with automatic WebGL fallback, procedural terrain and water, expanded Character/Animal authoring, terrestrial/water/air vehicle foundations, reusable Cinema Studio sequences, P2P coworking and multiplayer, and Blender Live Link. It builds on the v0.7.7 production workflow for frame-accurate video export, runtime preparation, GitHub-safe split projects, vehicle authoring and material effects.
+The `v0.7.9` release strengthens online material portability and gameplay stability for vehicle exits, helicopter landings, damage dummies and close-camera mesh overlap. It builds on the v0.7.8 illustrated-sketch pipeline, experimental WebGPU dual-backend work with automatic WebGL fallback, procedural worlds, expanded Pawn authoring, reusable Cinema Studio sequences, P2P collaboration and Blender Live Link.
 
 The released `v0.7.5` milestone adds **Asset Scout** (free online model and texture search imported straight into the project) and a **first-person Pawn** with its own FPS Shooter Test level. Both are additive: the existing import paths and the third-person character path are unchanged.
 
@@ -81,7 +81,7 @@ Models, materials, mesh parts, transforms, lights, primitives, text, effects and
 
 This is an assembly and gameplay-authoring workflow, not full mesh creation. Complex topology, sculpting, rig creation and complete texture authoring remain tasks for Blender or another dedicated content tool.
 
-**Asset Scout remains temporarily disabled in v0.7.8.** Poly Haven's live API is
+**Asset Scout remains temporarily disabled in v0.7.9.** Poly Haven's live API is
 commercially usable, but its current service terms require requests to carry an
 application-identifying `Referer` or `User-Agent`. A static browser application cannot
 reliably set those protected headers when it runs from localhost or generic hosting.

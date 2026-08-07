@@ -31,7 +31,7 @@ function normalizeConfig(source,type){
   const smokeThreshold=clamp(finite(src.smokeThreshold,.62),0,1),fireThreshold=Math.min(smokeThreshold,clamp(finite(src.fireThreshold,.28),0,1));
   return {
     schemaVersion:SCHEMA_VERSION,enabled:src.enabled!==false,maxEnergy,
-    fuelTank:{enabled:tank.enabled!==false,position:triple(tank.position,preset.tank),radius:clamp(finite(tank.radius,preset.radius),.08,5),damageMultiplier:clamp(finite(tank.damageMultiplier,2.5),1,20),dummyVisible:tank.dummyVisible!==false},
+    fuelTank:{enabled:tank.enabled!==false,position:triple(tank.position,preset.tank),radius:clamp(finite(tank.radius,preset.radius),.08,5),damageMultiplier:clamp(finite(tank.damageMultiplier,2.5),1,20),dummyVisible:tank.dummyVisible===true},
     engineSmoke:{position:triple(engine.position,preset.engine),dummyVisible:engine.dummyVisible!==false},
     exhaust:{position:triple(exhaust.position,preset.exhaust),dummyVisible:exhaust.dummyVisible!==false},
     smokeThreshold,fireThreshold,

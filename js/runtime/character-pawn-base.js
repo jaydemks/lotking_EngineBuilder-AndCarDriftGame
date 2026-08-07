@@ -183,6 +183,11 @@ function setOwnerWorldHeading(owner,heading){
   owner.updateMatrixWorld&&owner.updateMatrixWorld(true);
   return true;
 }
+function ownerWorldHeading(owner){
+  const occupancy=window.LK_RUNTIME_VEHICLE_OCCUPANCY;
+  if(occupancy&&typeof occupancy.worldHeading==='function')return finite(occupancy.worldHeading(owner),0);
+  return finite(owner&&owner.rotation&&owner.rotation.y,0);
+}
 function characterExitGroundY(GAME,vehicle,x,z,fallback,maxSurfaceY){
   const world=GAME&&GAME.world||{};let ground=finite(fallback,0);
   if(typeof world.characterGroundHeight==='function')ground=finite(world.characterGroundHeight(x,z),ground);
@@ -575,6 +580,17 @@ function create(GAME,owner,config,services,options){
     // post-mixer arm layer while the inventory/equipped weapon remains intact.
     if(actionState.bodyLocked){if(rig.state)rig.state.weaponGripRotation=null;return null;}
     const weapon=rig.config().weapon;
+    // Merely carrying an equipped inventory item must not turn the arms into a
+    // permanent world-space IK layer. This was especially visible after a
+    // vehicle exit: possession restored the equipped weapon and both hands
+    // immediately pointed at its fallback targets over idle, walk and run.
+    // Authored locomotion owns the limbs until the player actually aims or
+    // fires; authored reload/full-body actions continue to own themselves.
+    const combatPoseActive=clamp(finite(rig.state.ads,0),0,1)>.015||finite(rig.state.sinceShot,9)<.18||rig.state.reloading===true;
+    if(!combatPoseActive){
+      if(rig.state)rig.state.weaponGripRotation=null;
+      return null;
+    }
     const poses=window.LK_RUNTIME_CHARACTER_WEAPON_POSE;
     // Where the hands go, resolved from authored data instead of literals. Two
     // sparse sources are read, least specific first: this Pawn's own `weaponGrip`
@@ -844,7 +860,8 @@ function create(GAME,owner,config,services,options){
     // cleanup is atomic from the player's point of view.
     if(this.locomotion&&typeof this.locomotion.restorePresentationRoot==='function')this.locomotion.restorePresentationRoot();
     const node=this.locomotionNode||this.findLocomotionNode&&this.findLocomotionNode(),copy=value=>value&&value.clone?value.clone():null;
-    this.preVehiclePresentation={ownerScale:copy(this.owner&&this.owner.scale),node:node&&node!==this.owner?node:null,nodePosition:copy(node&&node.position),nodeQuaternion:copy(node&&node.quaternion),nodeScale:copy(node&&node.scale)};this.captureVehicleSkeletonState(node||this.owner);return this.preVehiclePresentation;
+    const view=this.firstPerson&&typeof this.firstPerson.viewAngles==='function'?this.firstPerson.viewAngles():null;
+    this.preVehiclePresentation={ownerScale:copy(this.owner&&this.owner.scale),ownerHeading:ownerWorldHeading(this.owner),viewYaw:finite(view&&view.yaw,NaN),viewPitch:finite(view&&view.pitch,NaN),node:node&&node!==this.owner?node:null,nodePosition:copy(node&&node.position),nodeQuaternion:copy(node&&node.quaternion),nodeScale:copy(node&&node.scale)};this.captureVehicleSkeletonState(node||this.owner);return this.preVehiclePresentation;
   };
   pawn.restoreVehiclePresentationState=function(){
     const saved=this.preVehiclePresentation;if(!saved)return false;
@@ -852,7 +869,7 @@ function create(GAME,owner,config,services,options){
     // the single post-pose/controller reset after the saved skeleton is back.
     if(this.locomotion&&this.locomotion.restorePresentationRoot)this.locomotion.restorePresentationRoot();
     if(saved.ownerScale&&this.owner&&this.owner.scale)this.owner.scale.copy(saved.ownerScale);
-    const node=saved.node;if(node&&node.parent){if(saved.nodePosition&&node.position)node.position.copy(saved.nodePosition);if(saved.nodeQuaternion&&node.quaternion)node.quaternion.copy(saved.nodeQuaternion);if(saved.nodeScale&&node.scale)node.scale.copy(saved.nodeScale);node.updateMatrixWorld&&node.updateMatrixWorld(true);}
+    const node=saved.node;if(node&&node.parent){if(saved.nodePosition&&node.position)node.position.copy(saved.nodePosition);if(saved.nodeQuaternion&&node.quaternion)node.quaternion.copy(saved.nodeQuaternion);if(saved.nodeScale&&node.scale)node.scale.copy(saved.nodeScale);node.updateMatrixWorld&&node.updateMatrixWorld(true);if(this.locomotion&&typeof this.locomotion.setPresentationRootRest==='function')this.locomotion.setPresentationRootRest(node);}
     this.restoreVehicleSkeletonState();this.preVehiclePresentation=null;return true;
   };
   pawn.tryEnterNearestVehicle=function(role){
@@ -903,13 +920,22 @@ function create(GAME,owner,config,services,options){
     if(!vehicle||!seat||(!force&&this.entryCooldown>0))return false;
     const driver=seat.type==='driver',playerId=driver?vehicle.playerId:this.playerId;
     const occupancy=window.LK_RUNTIME_VEHICLE_OCCUPANCY,footprint=occupancy.collisionFootprint(vehicle),center=footprint.center,characterRadius=Math.max(.1,finite(this.config.movement&&this.config.movement.radius,.35));
+    const presentation=this.preVehiclePresentation||{},exitView=this.firstPerson&&typeof this.firstPerson.viewAngles==='function'?this.firstPerson.viewAngles():null;
     const dismountRuntime=window.LK_RUNTIME_CHARACTER_VEHICLE_DISMOUNT;
     const dismount=dismountRuntime&&dismountRuntime.plan
       ?dismountRuntime.plan(vehicle,this.config.entry&&this.config.entry.dismount)
       :{kind:'land',mode:'normal',velocity:{x:0,y:0,z:0},horizontalMps:0,speedKmh:0,roll:false,damage:0,lethal:false,config:{}};
     const offset=Math.max(footprint.hx+characterRadius+.18,finite(vehicle.config&&vehicle.config.entry&&vehicle.config.entry.exitOffset,finite(this.config.entry&&this.config.entry.exitOffset,1.65)));
-    const heading=footprint.heading;
-    const exitX=center.x+Math.cos(heading)*offset,exitZ=center.z-Math.sin(heading)*offset;
+    // The vehicle's forward axis determines only which side is clear. Body and
+    // view are restored independently from their last valid on-foot frame: a
+    // third-person camera may legitimately orbit away from the body, and an
+    // imported rig may carry a 180-degree visual-forward correction. Collapsing
+    // both frames onto the vehicle heading inverted W/S after custom-car exits.
+    const vehicleHeading=footprint.heading;
+    const heading=finite(presentation.ownerHeading,finite(this.state&&this.state.heading,vehicleHeading));
+    const viewHeading=finite(presentation.viewYaw,finite(exitView&&exitView.yaw,heading));
+    const viewPitch=finite(presentation.viewPitch,finite(exitView&&exitView.pitch,0));
+    const exitX=center.x+Math.cos(vehicleHeading)*offset,exitZ=center.z-Math.sin(vehicleHeading)*offset;
     const seatedWorld=occupancy.worldPosition(this.owner);
     const groundY=characterExitGroundY(GAME,vehicle,exitX,exitZ,this.config.spawn&&this.config.spawn.y,
       finite(seatedWorld&&seatedWorld.y,finite(center&&center.y,0))+Math.max(1,finite(footprint.hy,.75)+.5));
@@ -928,17 +954,29 @@ function create(GAME,owner,config,services,options){
     }
     if(occupancy&&occupancy.releaseSeatOccupant)occupancy.releaseSeatOccupant(this);
     seat.occupiedBy=null;seat.reservedBy=null;this.inVehicle=null;this.occupyingSeat=null;
+    // Restore the structural Character/IK pose before publishing the world
+    // transform. A custom vehicle seat can carry pitch or roll (including a
+    // 180-degree rig correction); restoring presentation after the upright
+    // reset allowed that seat transform to win again and spawned the Character
+    // upside down with its visual body below the floor.
+    this.restoreVehiclePresentationState();
     setOwnerWorldPosition(this.owner,exit);
     setOwnerWorldHeading(this.owner,heading);
-    this.restoreVehiclePresentationState();
     if(this.movementController)this.movementController.reset(heading);
     if(this.abilities&&typeof this.abilities.reset==='function')this.abilities.reset();
     this.clearPlayerControlState('vehicle-exit');
     if(this.firstPerson&&typeof this.firstPerson.setViewAngles==='function'){
-      const view=typeof this.firstPerson.viewAngles==='function'?this.firstPerson.viewAngles():null;
-      this.firstPerson.setViewAngles(heading,view&&view.pitch);
+      this.firstPerson.setViewAngles(viewHeading,viewPitch);
+    }
+    // Publish the ownership mapping immediately. Explicit Character reads are
+    // already deterministic, while this also protects HUD/plugin consumers
+    // that intentionally read the possessed Player's current context.
+    if(GAME&&GAME.input&&GAME.input.player&&playerId!=null){
+      const inputView=GAME.input.player(playerId-1);
+      if(inputView&&typeof inputView.setContext==='function')inputView.setContext('character');
     }
     this.postVehiclePoseReset=.08;
+    this.vehicleExitThirdPersonFacing=true;
     if(this.locomotion&&typeof this.locomotion.stopAction==='function')this.locomotion.stopAction();
     const inherited=airborne?dismount.velocity:{x:0,y:0,z:0},exitSpeed=airborne?Math.hypot(finite(inherited.x,0),finite(inherited.z,0)):0;
     if(airborne&&this.movementController&&typeof this.movementController.launch==='function')this.movementController.launch(inherited);
@@ -950,6 +988,11 @@ function create(GAME,owner,config,services,options){
     const exitSnapshot={speed:exitSpeed,speedKmh:exitSpeed*3.6,moving:exitSpeed>.15,sprinting:false,sprintAmount:0,inputMagnitude:0,grounded:!airborne,groundContact:!airborne,airborne,velocityX:finite(inherited.x,0),velocityY:finite(inherited.y,0),velocityZ:finite(inherited.z,0)};
     try{this.restartLocomotionPresentation('vehicle-exit');this.updateLocomotionFrame(.0001,neutralMove(),exitSnapshot);}
     finally{
+      // Animation/IK teardown is allowed to repair local bones, never the
+      // Character's world root. Reassert a yaw-only root after every teardown
+      // path so all native, Logic and custom vehicles share one dismount frame.
+      setOwnerWorldPosition(this.owner,exit);
+      setOwnerWorldHeading(this.owner,heading);
       if(this.owner)this.owner.visible=this.hidden!==true;
       if(this.firstPerson&&typeof this.firstPerson.syncBodyVisibility==='function')this.firstPerson.syncBodyVisibility(true);
       this.previousOwnerVisible=null;
@@ -1081,7 +1124,7 @@ function create(GAME,owner,config,services,options){
   };
   pawn.updateLocomotionFrame=function(h,move,snapshot){
     const locomotion=this.ensureLocomotion();if(!locomotion)return false;
-    const facing=this.owner&&this.owner.rotation?this.owner.rotation.y:0;
+    const facing=ownerWorldHeading(this.owner);
     let velocityX=snapshot?finite(snapshot.velocityX,0):finite(this.state.velocityX,0),velocityZ=snapshot?finite(snapshot.velocityZ,0):finite(this.state.velocityZ,0);
     // Traversal owns world translation and can bypass MovementController. Give
     // its current forward speed to the animation selector while still letting
@@ -1168,9 +1211,26 @@ function create(GAME,owner,config,services,options){
     if(this.possessed)this.stepWorldVerbs(h,move);
     if(typeof this.beforeMovementStep==='function'&&this.beforeMovementStep(h,move)===true){this.updateLocomotionFrame(h,move,null);this.syncRuntimeColliders();return;}
     if(move.jump===true)this.jump();
+    // A vehicle hand-off must not leave the saved heading/heading fallback in
+    // charge of ordinary third-person locomotion. Travel remains camera-relative
+    // and the rendered body follows that travel on every frame, not only on the
+    // first step after dismount. ADS/fire/first-person keep their strafe-facing
+    // policy from the view rig.
+    if(this.vehicleExitThirdPersonFacing===true){
+      const rigState=this.firstPerson&&this.firstPerson.state||{},hipTravel=rigState.viewMode!=='first'&&finite(rigState.ads,0)<.18&&move.fire!==true&&rigState.reloading!==true;
+      if(hipTravel){move.inputMode='camera';move.facingMode='movement';}
+    }
     const scale=typeof this.movementScale==='function'?clamp(finite(this.movementScale(move),1),0,1):1;
     const snapshot=this.movementController?this.movementController.step(this.owner,{x:clamp(finite(move.x,0),-1,1)*scale,z:clamp(finite(move.z,0),-1,1)*scale,sprint:move.sprint===true,sprintAmount:clamp(finite(move.sprintAmount,move.sprint===true?1:0),0,1),inputMode:move.inputMode,facingMode:move.facingMode},h,this.config.spawn.y):{speed:0,speedKmh:0,moving:false,sprinting:false,sprintAmount:0,inputMagnitude:0,grounded:true,airborne:false,velocityX:0,velocityY:0,velocityZ:0};
-    Object.assign(this.state,{velocityX:snapshot.velocityX,velocityY:snapshot.velocityY,velocityZ:snapshot.velocityZ,heading:this.owner&&this.owner.rotation?this.owner.rotation.y:this.state.heading,speed:snapshot.speed,speedKmh:snapshot.speedKmh,moving:snapshot.moving,sprinting:snapshot.sprinting,sprintAmount:snapshot.sprintAmount,inputMagnitude:snapshot.inputMagnitude,grounded:snapshot.grounded,airborne:snapshot.airborne});
+    // Keep the visible on-foot root aligned in WORLD space for the whole
+    // post-vehicle session. A one-frame repair appeared correct near spawn but
+    // a later local/root update could reintroduce the cockpit heading after the
+    // vehicle had travelled farther through the level.
+    if(this.vehicleExitThirdPersonFacing===true&&snapshot.moving&&Math.hypot(finite(snapshot.velocityX,0),finite(snapshot.velocityZ,0))>.15){
+      const rigState=this.firstPerson&&this.firstPerson.state||{},hipTravel=rigState.viewMode!=='first'&&finite(rigState.ads,0)<.18&&move.fire!==true&&rigState.reloading!==true;
+      if(hipTravel)setOwnerWorldHeading(this.owner,Math.atan2(snapshot.velocityX,snapshot.velocityZ));
+    }
+    Object.assign(this.state,{velocityX:snapshot.velocityX,velocityY:snapshot.velocityY,velocityZ:snapshot.velocityZ,heading:ownerWorldHeading(this.owner),speed:snapshot.speed,speedKmh:snapshot.speedKmh,moving:snapshot.moving,sprinting:snapshot.sprinting,sprintAmount:snapshot.sprintAmount,inputMagnitude:snapshot.inputMagnitude,grounded:snapshot.grounded,airborne:snapshot.airborne});
     this.updateLocomotionFrame(h,move,snapshot);
     this.state.surface=snapshot.surface||null;
     // Footsteps, landings and breathing belong to the Pawn, not to any one

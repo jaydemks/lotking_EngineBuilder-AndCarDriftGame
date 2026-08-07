@@ -377,6 +377,18 @@ function createController(options){
     const root=state.motionRoot,rest=state.motionRootRest;if(!root||!rest)return;
     root.position.copy(rest.position);root.quaternion.copy(rest.quaternion);root.scale.copy(rest.scale);root.updateMatrixWorld(true);
   }
+  // The holder alignment is editable independently from the AnimationMixer.
+  // Vehicle seating temporarily moves the Character root, then restores the
+  // exact pre-entry holder transform. Adopt that restored structural transform
+  // before resetPresentation(), otherwise the controller can replay an older
+  // cached rest quaternion and leave the visible model facing 180 degrees away
+  // from the correctly moving Pawn.
+  function setPresentationRootRest(transform){
+    const root=state.motionRoot,source=transform||root;
+    if(!root||!source||!source.position||!source.quaternion||!source.scale)return false;
+    state.motionRootRest={position:source.position.clone(),quaternion:source.quaternion.clone(),scale:source.scale.clone()};
+    restoreMotionRoot();return true;
+  }
   function dispose(preserveMixerActions,preservePresentationRoot){
     if(state.node&&state.node.userData&&state.node.userData.logicCharacterRigPostUpdate===state.postUpdateGuard)delete state.node.userData.logicCharacterRigPostUpdate;
     if(state.node&&state.node.userData&&state.node.userData.logicCharacterLocomotionMixerOwner===state.mixerOwnerToken)delete state.node.userData.logicCharacterLocomotionMixerOwner;
@@ -1090,6 +1102,7 @@ function createController(options){
     actionDuration,
     releaseExternalPose,
     resetPresentation,
+    setPresentationRootRest,
     prepareForReplacement:()=>{releaseExternalPose();restoreRigRest();restoreMotionRoot();return true;},
     restorePresentationRoot:()=>{restoreMotionRoot();return true;},
     configure,

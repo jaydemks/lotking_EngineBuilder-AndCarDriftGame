@@ -188,6 +188,11 @@ test('presentation reset never promotes Motion Set offsets into a new Character 
     assert.ok(node.scale.distanceTo(rest.scale)<1e-9,'reset '+cycle+' restores the structural holder scale');
     assert.ok([hips.position.x,hips.position.y,hips.position.z,hips.quaternion.x,hips.quaternion.y,hips.quaternion.z,hips.quaternion.w].every(Number.isFinite),'skeleton remains finite after reset '+cycle);
   }
+  const aligned=new THREE.Quaternion().setFromEuler(new THREE.Euler(.03,.42,.02));
+  node.quaternion.copy(aligned);
+  assert.equal(controller.setPresentationRootRest(node),true,'a restored Character holder becomes the new structural presentation baseline');
+  assert.equal(controller.resetPresentation(),true);
+  assert.ok(node.quaternion.angleTo(aligned)<1e-7,'vehicle-exit reset cannot replay an obsolete visual-forward quaternion');
   controller.dispose();
 });
 

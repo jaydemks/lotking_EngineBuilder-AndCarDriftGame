@@ -6,7 +6,7 @@
 > It started as a parking-lot drift prototype.<br>
 > It is now a local-first, browser-native engine for building, testing, collaborating on and exporting playable 3D experiences.
 
-**Current version: `v0.7.8` · Experimental Alpha**
+**Current version: `v0.7.9` · Experimental Alpha**
 
 [Open Lot King Online](https://jaydemks.github.io/lotking_EngineBuilder-AndCarDriftGame/) ·
 [Technical README](README_TECHNICAL.md) ·
@@ -17,11 +17,11 @@
 
 ## What is Lot King?
 
-Lot King is an experimental, local-first 3D game engine and visual editor that runs entirely in the browser. Version `0.7.8` broadens the original vehicle foundation with illustrated rendering, procedural worlds, improved Character and Animal Pawns, more vehicle families, Cinema Studio sequencing, browser-to-browser collaboration and multiplayer, and an optional Blender Live Link.
+Lot King is an experimental, local-first 3D game engine and visual editor that runs entirely in the browser. Version `0.7.9` builds on the expanded vehicle, Character, procedural-world, illustrated-rendering, Cinema Studio, collaboration and optional Blender Live Link foundations introduced in the previous release.
 
 It began as a small car drift game, but it is not a car-only editor. It is gradually growing into a tool for assembling imported 3D assets into levels, interactive visuals and playable browser projects, then connecting them through physics, animation, cinematics, sound and visual JavaScript logic.
 
-Lot King is not a complete 3D modelling package. Vehicles, characters and other complex meshes are normally created in Blender or another dedicated tool and then imported as GLB, GLTF or FBX assets. Inside Lot King you can place and transform them, adjust supported mesh, material, texture and animation properties, and connect them to gameplay systems.
+Lot King is not a complete 3D modelling package. Vehicles, characters and other complex meshes are normally created in Blender or another dedicated tool and then imported as GLB, GLTF or FBX assets. Inside Lot King you can place and transform your own models, then use its mesh, material, texture, animation, collision, rig and Pawn Studio tools to adapt them to gameplay.
 
 For vehicles, `tools/blender 5.0+` includes the optional open-source Vehicle GLB Rigger 0.3.0 source and Blender-built ZIP. It supports the established car wheel, brake and steering setup plus guided Normal and DollBody-compatible vehicle and aircraft workflows.
 
@@ -70,7 +70,7 @@ https://github.com/user-attachments/assets/9c1c8dc2-2d93-4434-958f-23d9f546ac55
 
 https://github.com/user-attachments/assets/c481af98-95d2-46b7-aac4-99a6be812e85
 
-The `v0.7.8` release contains additional systems and fixes that are not shown in these videos yet.
+The current release contains additional systems and fixes that are not shown in these videos yet.
 
 ---
 
@@ -109,11 +109,11 @@ Important projects should still be backed up as `.lkep.json` files, split projec
 
 ---
 
-## From v0.0.1 to v0.7.8
+## From v0.0.1 to v0.7.9
 
 The first version, `v0.0.1`, was a small drift prototype created from one prompt.
 
-The Git-ready public history began at `v0.5.0-beta`. Lot King has completed **29 public versioned milestones** through `v0.7.8`.
+The Git-ready public history began at `v0.5.0-beta`. Lot King has completed **30 public versioned milestones** through `v0.7.9`.
 
 Each milestone preserves a real stage of the project rather than hiding the development history behind one final upload.
 
@@ -178,9 +178,11 @@ Lot King is usable, but still experimental.
 
 The vehicle and drift workflow is the strongest part today, and on-foot shooter gameplay is the fastest moving. Character/animal animation, visual logic, Cinema Studio, P2P systems, browser compatibility and larger project round trips still need more testing and refinement. Common objectives now have an editable shared foundation; broader game rules and project-specific UI still need faster authoring.
 
-The Character layer is playable but not finished. Pawn Studio and authored clips now cover locomotion, traversal, weapon grips, cameras and vehicle seating, while retargeting, IK, animation edge cases and physical interactions still need refinement. The current FPS limits are listed in full in [First Person Pawn](docs/FIRST_PERSON_PAWN.md).
+The Character layer is playable but not yet optimized for every level. Pawn Studio and authored clips cover locomotion, traversal, weapon grips, cameras and vehicle seating, while retargeting, IK, animation edge cases and physical interactions still need refinement. To start testing these systems, create or open a Shooter level, which currently provides the most suitable Character setup. The current FPS limits are listed in full in [First Person Pawn](docs/FIRST_PERSON_PAWN.md).
 
 Bugs and incomplete systems should be expected while development continues.
+
+Custom models are supported and can be adapted with the editor's import, fitting, collision, material, animation, rigging and Pawn Studio tools. If a model or feature does not work as expected, please [report it](https://github.com/jaydemks/lotking_EngineBuilder-AndCarDriftGame/issues) with enough detail to reproduce it; reported regressions will be investigated and corrected as soon as possible.
 
 Feedback, testing, documentation, example projects, reusable logic and other forms of support can all help the engine mature faster.
 
@@ -190,7 +192,7 @@ Feedback, testing, documentation, example projects, reusable logic and other for
 
 - [Technical README](README_TECHNICAL.md)
 - [Startup guide](HOW_TO_START.md)
-- [Current v0.7.8 release notes](RELEASE_NOTES_v0.7.8.md)
+- [Current v0.7.9 release notes](RELEASE_NOTES_v0.7.9.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Runtime modules](docs/RUNTIME_MODULES.md)
 - [First Person Pawn](docs/FIRST_PERSON_PAWN.md) — the shooter layer: rig, traversal, items, interactions, vitals and inventory

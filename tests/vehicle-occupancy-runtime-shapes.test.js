@@ -132,6 +132,8 @@ function ordinaryCharacter(fixture){
 function assertDriverRoundTrip(fixture, character, vehicle, label,options){
   options=options||{};
   const scaleBefore=character.owner.scale.toArray();
+  const characterHeadingBefore=OCC.worldHeading(character.owner);
+  const viewBefore=character.firstPerson&&character.firstPerson.viewAngles?character.firstPerson.viewAngles():null;
   character.entryCooldown=0;
   character.possessCamera(true);
   assert.equal(character.enterVehicle(vehicle,'driver'),true,label+' accepts the ordinary Character');
@@ -145,7 +147,6 @@ function assertDriverRoundTrip(fixture, character, vehicle, label,options){
   const requestedExitHeading=.63;
   vehicle.owner.rotation.y=requestedExitHeading;
   vehicle.owner.updateMatrixWorld&&vehicle.owner.updateMatrixWorld(true);
-  const exitHeading=OCC.collisionFootprint(vehicle).heading;
   character.entryCooldown=0;
   assert.equal(character.exitVehicle(false),true,label+' exits through the same contract');
   assert.equal(fixture.pawns.getByPlayerId(1),character,label+' returns Player 1 atomically');
@@ -154,15 +155,15 @@ function assertDriverRoundTrip(fixture, character, vehicle, label,options){
   assert.equal(character.owner.visible,true,label+' restores the on-foot presentation');
   assert.equal(character.state.seated,false,label+' releases the persistent seated pose');
   assert.equal(vehicle.driverPawn,null,label+' clears its driver');
-  assert.ok(Math.abs(character.state.heading-exitHeading)<1e-6,label+' aligns Character heading with the vehicle on exit');
-  assert.ok(Math.abs(character.owner.rotation.y-exitHeading)<1e-6,label+' aligns the visible body instead of walking backward');
+  assert.ok(Math.abs(character.state.heading-characterHeadingBefore)<1e-6,label+' restores the last valid on-foot body heading');
+  assert.ok(Math.abs(OCC.worldHeading(character.owner)-characterHeadingBefore)<1e-6,label+' cannot inherit an imported vehicle forward axis');
   assert.ok(Math.abs(character.owner.rotation.x)<1e-6&&Math.abs(character.owner.rotation.z)<1e-6,label+' removes vehicle pitch/roll from the on-foot root');
   assert.deepEqual(character.owner.scale.toArray(),scaleBefore,label+' preserves the Character root scale/pivot contract');
   if(options.airborne){
     assert.ok(character.owner.position.y>0,label+' keeps the live seat altitude instead of teleporting to terrain');
     assert.equal(character.state.airborne,true,label+' returns ownership in free fall');
   }else assert.ok(Math.abs(character.owner.position.y)<1e-6,label+' places Character feet on world ground instead of the vehicle body centre');
-  if(character.firstPerson&&character.firstPerson.viewAngles)assert.ok(Math.abs(character.firstPerson.viewAngles().yaw-exitHeading)<1e-6,label+' aligns first-person yaw with the restored body');
+  if(viewBefore&&character.firstPerson&&character.firstPerson.viewAngles)assert.ok(Math.abs(character.firstPerson.viewAngles().yaw-viewBefore.yaw)<1e-6,label+' restores the independent on-foot view heading');
   const beforeWalk=character.owner.position.clone();
   const walk=character.movementController.step(character.owner,{x:0,z:1,sprint:false},.05,0);
   if(options.airborne)assert.ok(character.owner.position.y<beforeWalk.y,label+' gravity owns the first on-foot frame after an air exit');

@@ -11,7 +11,7 @@
 const RIG_PROFILES=Object.freeze(['normal','sketchbook']);
 function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
 function mesh(id,name,primitive,parentId,position,rotation,scale,color,role){return {id,name,type:'mesh',primitive,parentId:parentId||'root',linked:true,position:position||[0,0,0],rotation:rotation||[0,0,0],scale:scale||[1,1,1],color:color||'#64748b',vehicleRigRole:role||null};}
-function dummy(id,name,parentId,position,color,role){return {id,name,type:'empty',parentId:parentId||'root',linked:true,dummyVisible:true,position:position||[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:color||'#38bdf8',vehicleRigRole:role||id};}
+function dummy(id,name,parentId,position,color,role,dummyVisible){return {id,name,type:'empty',parentId:parentId||'root',linked:true,dummyVisible:dummyVisible!==false,position:position||[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:color||'#38bdf8',vehicleRigRole:role||id};}
 function wheel(id,name,x,y,z,radius,width){return mesh(id,name,'cylinder','root',[x,y,z],[0,0,90],[radius*2,width,radius*2],'#111827','wheel');}
 function variables(spec,rigProfile){return [
   {name:'PawnEnabled',type:'boolean',value:true,exposed:true,binding:'enabled',label:'Pawn Enabled',category:'Pawn'},
@@ -72,7 +72,7 @@ function placeholder(spec){
   }
   p.push(dummy('driver_seat','Driver Seat','root',[spec.seat[0],spec.seat[1],spec.seat[2]],'#38bdf8','seat-driver'));
   p.push(dummy('camera_anchor','Player Camera Anchor','root',[0,spec.camera[1],-spec.camera[0]*.55],'#a78bfa','camera'));
-  p.push(dummy('vehicle_fuel_tank','Fuel Tank Damage Dummy','root',[0,spec.damage[0],spec.damage[1]],'#ffb52e','damage-fuel-tank'));
+  p.push(dummy('vehicle_fuel_tank','Fuel Tank Damage Dummy','root',[0,spec.damage[0],spec.damage[1]],'#ffb52e','damage-fuel-tank',false));
   p.push(dummy('vehicle_engine_smoke','Engine Smoke Dummy','root',[0,spec.damage[0]+.25,spec.damage[1]+.2],'#64748b','damage-engine'));
   p.push(dummy('vehicle_exhaust','Exhaust / Prop Wash Dummy','root',[0,spec.damage[0],-spec.size[2]],'#94a3b8','exhaust'));
   if(spec.hitch!==false)p.push(dummy('tow_hitch','Tow Hitch','root',[0,.35,-spec.size[2]],'#f59e0b','tow-hitch'));
@@ -89,6 +89,7 @@ function physicsWheels(spec){
 function graph(spec,rigProfile){
   const scene=placeholder(spec),water=spec.className==='watercraft',trailer=spec.className==='trailer';
   const result={version:1,name:(rigProfile==='sketchbook'?'DollBody-compatible ':'')+spec.name,scope:'element',enabled:true,variables:variables(spec,rigProfile),nodes:[{id:'on_start',type:'event.onStart',x:80,y:100,data:{}},{id:'ready',type:'debug.print',x:390,y:100,data:{message:spec.name+' Logic Vehicle ready.',duration:3}}],edges:[{id:'ready_edge',from:{node:'on_start',pin:'then'},to:{node:'ready',pin:'exec'}}],comments:[{id:'vehicle_pack_info',title:'Editable '+spec.name+' Logic Element. Replace the placeholder with a Normal or DollBody-compatible GLB without losing semantic joints, damage anchors, seat, camera or towing points.',x:35,y:35,w:860,h:245,color:spec.color}],subgraphs:[],logicScene:scene,vehiclePawn:{template:true,schemaVersion:2,id:'vehicle-'+rigProfile+'-'+spec.id,playerId:null,possessed:false,enabled:true,hidden:false,vehicleClass:spec.className,archetype:spec.id,rigProfile,physicsBackend:water?'arcade-fallback':'auto',proceduralFallback:'vehicle-pack-placeholder-v1',collision:{mass:spec.mass,hx:spec.size[0],hy:spec.size[1],hz:spec.size[2],bodyY:spec.size[1]},suspension:{stiffness:spec.className==='bicycle'?18:32,restLength:.3,travel:.25,radius:(spec.className==='truck'||trailer) ? .5 : .34,compression:4,relaxation:2.5,rollInfluence:.2},wheels:physicsWheels(spec),camera:{mode:'free',distance:spec.camera[0],height:spec.camera[1],lag:6,fov:70},entry:{enabled:!trailer,radius:Math.max(2,spec.size[0]*1.5),exitOffset:Math.max(1.4,spec.size[0]+.5)},tuning:{maxSpeed:spec.speed,acceleration:spec.acceleration,brake:spec.acceleration*1.6,reverseSpeed:Math.max(2,spec.speed*.22),steer:spec.steer,grip:spec.className==='watercraft'?.52:.82,drag:spec.className==='watercraft'?.55:1.8},watercraft:water?{enabled:true,waterline:0,buoyancy:1,planing:spec.id==='small-boat'?1:.55,turnDrag:.45}:null,towing:{enabled:spec.hitch!==false,hitch:{position:[0,.35,-spec.size[2]]},attachRadius:1.25,maxAngle:70},towable:{enabled:spec.towable!==false,coupler:{position:[0,.5,spec.size[2]]},driverSeat:!trailer},damage:{enabled:true,maxEnergy:Math.max(180,spec.mass*.7),fuelTank:{enabled:spec.className!=='bicycle',position:[0,spec.damage[0],spec.damage[1]],radius:Math.max(.2,spec.size[0]*.18),damageMultiplier:2.5,dummyVisible:true},engineSmoke:{position:[0,spec.damage[0]+.25,spec.damage[1]+.2],dummyVisible:true},exhaust:{position:[0,spec.damage[0],-spec.size[2]],dummyVisible:true},smokeThreshold:.62,fireThreshold:.28,explosion:{delay:.75,radius:Math.max(4,spec.size[0]*1.2),force:120,detachWheels:true,blacken:true}}}};
+  result.vehiclePawn.damage.fuelTank.dummyVisible=false;
   if(root.LK_LOGIC_GRAPH&&root.LK_LOGIC_GRAPH.ensurePawnCameraRigs)root.LK_LOGIC_GRAPH.ensurePawnCameraRigs(result);
   return result;
 }

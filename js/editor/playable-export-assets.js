@@ -144,7 +144,7 @@ function create(deps){
     const fallbackName = owner.name || owner.id || label || 'asset';
     const meta = {
       src: owner[prop],
-      dbKey: owner[explicitDbProp] || owner.dbKey || (owner.asset && owner.asset.dbKey),
+      dbKey: owner[explicitDbProp] || (!dbProp && (owner.dbKey || (owner.asset && owner.asset.dbKey))),
       key: owner.key || owner.id || (owner.asset && owner.asset.key),
       source: owner.source || (owner.asset && owner.asset.source),
       name: owner.name || (owner.asset && owner.asset.name),
@@ -156,8 +156,8 @@ function create(deps){
     if(rootPath){
       owner[prop] = rootPath;
       if(owner[explicitDbProp]) owner[explicitDbProp] = null;
-      if(owner.dbKey) owner.dbKey = null;
-      if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+      if(!dbProp && owner.dbKey) owner.dbKey = null;
+      if(!dbProp && owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
       return;
     }
     if((!meta.src || /^blob:/i.test(meta.src)) && !meta.dbKey){
@@ -173,8 +173,8 @@ function create(deps){
     if(libraryRootPath){
       owner[prop] = libraryRootPath;
       if(owner[explicitDbProp]) owner[explicitDbProp] = null;
-      if(owner.dbKey) owner.dbKey = null;
-      if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+      if(!dbProp && owner.dbKey) owner.dbKey = null;
+      if(!dbProp && owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
       return;
     }
     if(typeof meta.src === 'string' && /^blob:/i.test(meta.src)){
@@ -202,12 +202,12 @@ function create(deps){
       // stores the first payload in IndexedDB before the scene is applied.
       owner[prop] = alreadyEmbedded ? null : resolved;
       owner[explicitDbProp] = meta.dbKey;
-      if(owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = meta.dbKey;
+      if(!dbProp && owner.asset && typeof owner.asset === 'object') owner.asset.dbKey = meta.dbKey;
     } else {
       owner[prop] = resolved;
       if(owner[explicitDbProp]) owner[explicitDbProp] = null;
-      if(owner.dbKey) owner.dbKey = null;
-      if(owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
+      if(!dbProp && owner.dbKey) owner.dbKey = null;
+      if(!dbProp && owner.asset && owner.asset.dbKey) owner.asset.dbKey = null;
     }
   }
 
@@ -229,6 +229,38 @@ function create(deps){
       if(!Object.prototype.hasOwnProperty.call(obj, key)) continue;
       if(!obj[key] || typeof obj[key] !== 'object') continue;
       await normalizePlayableObjectBlobs(obj[key], prefix + '.' + key, dbCache, library, warnings, (depth || 0) + 1);
+    }
+  }
+
+  const MATERIAL_TEXTURE_REFS = Object.freeze([
+    ['mapSrc','mapDbKey'],
+    ['normalMapSrc','normalMapDbKey'],
+    ['roughnessMapSrc','roughnessMapDbKey'],
+    ['metalnessMapSrc','metalnessMapDbKey'],
+    ['alphaMapSrc','alphaMapDbKey'],
+    ['emissiveMapSrc','emissiveMapDbKey'],
+  ]);
+
+  async function normalizeMaterialTextureAssets(value, prefix, dbCache, library, warnings, seen, depth){
+    if(!value || typeof value !== 'object' || (depth || 0) > 24) return;
+    seen = seen || new WeakSet();
+    if(seen.has(value)) return;
+    seen.add(value);
+    if(Array.isArray(value)){
+      for(let index=0; index<value.length; index++){
+        await normalizeMaterialTextureAssets(value[index], prefix+'['+index+']', dbCache, library, warnings, seen, (depth||0)+1);
+      }
+      return;
+    }
+    for(const pair of MATERIAL_TEXTURE_REFS){
+      const srcProp=pair[0],dbProp=pair[1];
+      if(Object.prototype.hasOwnProperty.call(value,srcProp)||Object.prototype.hasOwnProperty.call(value,dbProp)){
+        await normalizePlayableAssetRef(value,srcProp,prefix+'.'+srcProp,dbCache,library,warnings,dbProp);
+      }
+    }
+    for(const key of Object.keys(value)){
+      const child=value[key];
+      if(child&&typeof child==='object')await normalizeMaterialTextureAssets(child,prefix+'.'+key,dbCache,library,warnings,seen,(depth||0)+1);
     }
   }
 
@@ -305,11 +337,20 @@ function create(deps){
     if(opts.deduplicateEmbeddedAssets) dbCache.lkDeduplicate = true;
     const library = assetLibraryLoad();
 
+    // Base-world materials (for example the authored Parking Lot asphalt) are
+    // stored under scene.props rather than scene.added. Their IndexedDB keys
+    // must carry one portable payload exactly like imported GLBs and decals;
+    // otherwise localhost can resolve them from its private database while the
+    // same Author DEMO is textureless on a clean hosted browser.
+    await normalizeMaterialTextureAssets(scene&&scene.props||{},'scene.props',dbCache,library,warnings,new WeakSet(),0);
+
     if(scene && scene.player && (typeof scene.player.modelSrc === 'string' || scene.player.modelDbKey)){
       await normalizePlayableAssetRef(scene.player, 'modelSrc', 'player.modelSrc', dbCache, library, warnings, 'modelDbKey');
     }
     if(Array.isArray(scene && scene.added)){
       for(const entry of scene.added){
+        if(entry&&entry.props)await normalizeMaterialTextureAssets(entry.props,'added.props.'+(entry.name||entry.id||'entry'),dbCache,library,warnings,new WeakSet(),0);
+        if(entry&&entry.meshEdits)await normalizeMaterialTextureAssets(entry.meshEdits,'added.meshEdits.'+(entry.name||entry.id||'entry'),dbCache,library,warnings,new WeakSet(),0);
         if(entry && entry.kind === 'glb'){
           await normalizePlayableAssetRef(entry, 'src', 'added.glb' + (entry.name ? ' "' + entry.name + '"' : ''), dbCache, library, warnings);
         }

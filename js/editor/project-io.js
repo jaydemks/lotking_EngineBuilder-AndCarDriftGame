@@ -1330,6 +1330,21 @@ function create(deps){
   async function localizePortableProjectAssets(project){
     const scene = project && (project.scene || project);
     if(!scene || !window.LK_ASSET_BLOBS) return project;
+    const materialPairs=[
+      ['mapSrc','mapDbKey'],['normalMapSrc','normalMapDbKey'],
+      ['roughnessMapSrc','roughnessMapDbKey'],['metalnessMapSrc','metalnessMapDbKey'],
+      ['alphaMapSrc','alphaMapDbKey'],['emissiveMapSrc','emissiveMapDbKey'],
+    ];
+    const localizeMaterialMaps=async(value,seen,depth)=>{
+      if(!value||typeof value!=='object'||depth>24)return;
+      seen=seen||new WeakSet();if(seen.has(value))return;seen.add(value);
+      if(Array.isArray(value)){for(const child of value)await localizeMaterialMaps(child,seen,depth+1);return;}
+      const label=value.name||value.id||'material-texture';
+      for(const pair of materialPairs)await moveDataUrlToAssetDb(value,pair[0],label,pair[1]);
+      for(const key of Object.keys(value))if(value[key]&&typeof value[key]==='object')await localizeMaterialMaps(value[key],seen,depth+1);
+    };
+    await localizeMaterialMaps(scene.props||{},new WeakSet(),0);
+    await localizeMaterialMaps(scene.added||[],new WeakSet(),0);
     if(scene.player) await moveDataUrlToAssetDb(scene.player, 'modelSrc', scene.player.modelName || 'player-model', 'modelDbKey');
     if(Array.isArray(scene.added)){
       for(const entry of scene.added){

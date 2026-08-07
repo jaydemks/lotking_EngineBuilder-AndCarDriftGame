@@ -65,7 +65,7 @@ function selectVar(name,value,binding,label,category,options){
 }
 function vehicleDamageDefaults(type){
   const values=type==='helicopter'?{energy:1150,tank:[-.65,.72,-.35],engine:[0,1.05,.2],exhaust:[0,.92,-1.35],radius:.48,blast:8}:type==='airplane'?{energy:1400,tank:[0,.42,-.2],engine:[0,.52,1.15],exhaust:[0,.45,-1.65],radius:.5,blast:9}:{energy:850,tank:[-.72,.48,-1.18],engine:[0,.72,.82],exhaust:[0,.42,-1.72],radius:.42,blast:7};
-  return {enabled:true,maxEnergy:values.energy,fuelTank:{enabled:true,position:values.tank,radius:values.radius,damageMultiplier:2.5,dummyVisible:true},engineSmoke:{position:values.engine,dummyVisible:true},exhaust:{position:values.exhaust,dummyVisible:true},smokeThreshold:.62,fireThreshold:.28,smokeRate:8,fireRate:14,explosion:{delay:.75,radius:values.blast,force:120,detachWheels:true,blacken:true}};
+  return {enabled:true,maxEnergy:values.energy,fuelTank:{enabled:true,position:values.tank,radius:values.radius,damageMultiplier:2.5,dummyVisible:false},engineSmoke:{position:values.engine,dummyVisible:true},exhaust:{position:values.exhaust,dummyVisible:true},smokeThreshold:.62,fireThreshold:.28,smokeRate:8,fireRate:14,explosion:{delay:.75,radius:values.blast,force:120,detachWheels:true,blacken:true}};
 }
 function vehicleDamageVariables(type){const cfg=vehicleDamageDefaults(type);return [
   variable('VehicleDamageEnabled','boolean',true,'damage.enabled','Vehicle Damage Enabled','Vehicle / Damage'),
@@ -73,7 +73,7 @@ function vehicleDamageVariables(type){const cfg=vehicleDamageDefaults(type);retu
   variable('FuelTankPosition','vector3',cfg.fuelTank.position,'damage.fuelTank.position','Fuel Tank Dummy','Vehicle / Damage'),
   numberVar('FuelTankRadius',cfg.fuelTank.radius,'damage.fuelTank.radius','Fuel Tank Radius','Vehicle / Damage',.08,5,.01),
   numberVar('FuelTankDamageMultiplier',2.5,'damage.fuelTank.damageMultiplier','Fuel Tank Damage Multiplier','Vehicle / Damage',1,20,.1),
-  variable('ShowFuelTankDummy','boolean',true,'damage.fuelTank.dummyVisible','Show Fuel Tank Dummy','Vehicle / Damage'),
+  variable('ShowFuelTankDummy','boolean',false,'damage.fuelTank.dummyVisible','Show Fuel Tank Dummy','Vehicle / Damage'),
   variable('EngineSmokePosition','vector3',cfg.engineSmoke.position,'damage.engineSmoke.position','Engine Smoke Dummy','Vehicle / Damage'),
   variable('ExhaustPosition','vector3',cfg.exhaust.position,'damage.exhaust.position','Exhaust / Muffler Dummy','Vehicle / Damage'),
   numberVar('VehicleSmokeThreshold',.62,'damage.smokeThreshold','Smoke Threshold','Vehicle / Damage',0,1,.01),
@@ -234,7 +234,7 @@ function makeLogicScene(spec){
   const modelElement={id:spec.kind+'_model',name:spec.name+' Model',type:'mesh',primitive:'box',parentId:'root',linked:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:spec.color,asset:clone(spec.asset)};
   if(spec.kind==='advanced-character')modelElement.animation={enabled:true,clip:'idle',autoplay:false,loop:'repeat',speed:1,playInEditor:false};
   const damage=spec.kind==='advanced-character'?null:vehicleDamageDefaults(spec.kind),damageElements=damage?[
-    {id:'vehicle_fuel_tank',name:'Fuel Tank Damage Dummy',type:'empty',parentId:'root',linked:true,position:damage.fuelTank.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:'#ffb52e',vehicleDamageAnchor:'fuelTank'},
+    {id:'vehicle_fuel_tank',name:'Fuel Tank Damage Dummy',type:'empty',parentId:'root',linked:true,dummyVisible:false,position:damage.fuelTank.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:'#ffb52e',vehicleDamageAnchor:'fuelTank'},
     {id:'vehicle_engine_smoke',name:'Engine Smoke Dummy',type:'empty',parentId:'root',linked:true,position:damage.engineSmoke.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:'#667788',vehicleDamageAnchor:'engineSmoke'},
     {id:'vehicle_exhaust',name:'Exhaust / Muffler Dummy',type:'empty',parentId:'root',linked:true,position:damage.exhaust.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:'#667788',vehicleDamageAnchor:'exhaust'},
   ]:[];

@@ -349,7 +349,7 @@ function create(deps){
     damage.body.appendChild(vector(tr('Fuel Tank dummy','Dummy serbatoio'),cfg.fuelTank));
     damage.body.appendChild(number(tr('Fuel Tank radius','Raggio serbatoio'),cfg.fuelTank,'radius',.08,5,.01));
     damage.body.appendChild(number(tr('Fuel Tank damage multiplier','Moltiplicatore danno serbatoio'),cfg.fuelTank,'damageMultiplier',1,20,.1));
-    damage.body.appendChild(checkRow(tr('Show Fuel Tank dummy','Mostra dummy serbatoio'),cfg.fuelTank.dummyVisible!==false,value=>{cfg.fuelTank.dummyVisible=value;commit();}).root);
+    damage.body.appendChild(checkRow(tr('Show Fuel Tank dummy','Mostra dummy serbatoio'),cfg.fuelTank.dummyVisible===true,value=>{cfg.fuelTank.dummyVisible=value;commit();}).root);
     damage.body.appendChild(vector(tr('Engine smoke dummy','Dummy fumo motore'),cfg.engineSmoke));
     damage.body.appendChild(vector(tr('Exhaust / muffler dummy','Dummy scarico / marmitta'),cfg.exhaust));
     damage.body.appendChild(number(tr('Smoke energy threshold','Soglia energia fumo'),cfg,'smokeThreshold',0,1,.01));

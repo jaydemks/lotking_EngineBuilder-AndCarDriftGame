@@ -6184,7 +6184,7 @@ function create(deps){
         definition.damage=damageApi&&damageApi.normalizeConfig?damageApi.normalizeConfig(definition.damage,vehicleType):definition.damage||{};
         const livePawn=()=>GAME.pawns&&GAME.pawns.list?GAME.pawns.list().find(item=>item&&item.owner===object)||null:null;
         const scene=graph.logicScene||(graph.logicScene={root:{id:'root',name:'Vehicle Root',type:'empty',linked:true},elements:[],components:[]});scene.elements=Array.isArray(scene.elements)?scene.elements:[];
-        const ensureAnchor=(id,name,role,target)=>{let anchor=scene.elements.find(item=>item&&item.id===id);if(!anchor){anchor={id,name,type:'empty',parentId:'root',linked:true,position:target.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:role==='fuelTank'?'#ffb52e':'#667788'};scene.elements.push(anchor);}anchor.vehicleDamageAnchor=role;anchor.position=target.position.slice();return anchor;};
+        const ensureAnchor=(id,name,role,target)=>{let anchor=scene.elements.find(item=>item&&item.id===id);if(!anchor){anchor={id,name,type:'empty',parentId:'root',linked:true,dummyVisible:role==='fuelTank'?false:target.dummyVisible===true,position:target.position.slice(),rotation:[0,0,0],scale:[1,1,1],color:role==='fuelTank'?'#ffb52e':'#667788'};scene.elements.push(anchor);}anchor.vehicleDamageAnchor=role;anchor.dummyVisible=target.dummyVisible===true;anchor.position=target.position.slice();return anchor;};
         const syncAnchors=()=>{
           [['vehicle_fuel_tank','Fuel Tank Damage Dummy','fuelTank',definition.damage.fuelTank],['vehicle_engine_smoke','Engine Smoke Dummy','engineSmoke',definition.damage.engineSmoke],['vehicle_exhaust','Exhaust / Muffler Dummy','exhaust',definition.damage.exhaust]].forEach(spec=>{const anchor=ensureAnchor(spec[0],spec[1],spec[2],spec[3]);let runtimeNode=null;object.traverse(node=>{if(!runtimeNode&&node.userData&&node.userData.logicElementSceneId===anchor.id)runtimeNode=node;});if(runtimeNode&&runtimeNode.position&&runtimeNode.position.set)runtimeNode.position.set(anchor.position[0],anchor.position[1],anchor.position[2]);});
         };
@@ -6270,12 +6270,12 @@ function create(deps){
       const vehicleDamageRuntime=window.LK_RUNTIME_VEHICLE_DAMAGE;
       graph.vehiclePawn.damage=vehicleDamageRuntime
         ?vehicleDamageRuntime.normalizeConfig(graph.vehiclePawn.damage,'car')
-        :mergePawnConfig({enabled:true,maxEnergy:850,fuelTank:{position:[-.72,.48,-1.18],radius:.42,damageMultiplier:2.5,dummyVisible:true},engineSmoke:{position:[0,.72,.82],dummyVisible:true},exhaust:{position:[0,.42,-1.72],dummyVisible:true},smokeThreshold:.62,fireThreshold:.28,explosion:{delay:.75,radius:7,force:120,detachWheels:true,blacken:true}},graph.vehiclePawn.damage||{});
+        :mergePawnConfig({enabled:true,maxEnergy:850,fuelTank:{position:[-.72,.48,-1.18],radius:.42,damageMultiplier:2.5,dummyVisible:false},engineSmoke:{position:[0,.72,.82],dummyVisible:true},exhaust:{position:[0,.42,-1.72],dummyVisible:true},smokeThreshold:.62,fireThreshold:.28,explosion:{delay:.75,radius:7,force:120,detachWheels:true,blacken:true}},graph.vehiclePawn.damage||{});
       const damageScene=graph.logicScene||(graph.logicScene={root:{id:'root',name:'Vehicle Root',type:'empty',linked:true},elements:[],components:[]});
       damageScene.elements=Array.isArray(damageScene.elements)?damageScene.elements:[];
       const ensureDamageAnchor=(id,name,role,position)=>{
         let element=damageScene.elements.find(item=>item&&item.id===id);
-        if(!element){element={id,name,type:'empty',parentId:'root',linked:true,position:(position||[0,0,0]).slice(),rotation:[0,0,0],scale:[1,1,1],color:role==='fuelTank'?'#ffb52e':'#667788',vehicleDamageAnchor:role};damageScene.elements.push(element);}
+        if(!element){element={id,name,type:'empty',parentId:'root',linked:true,dummyVisible:role!=='fuelTank',position:(position||[0,0,0]).slice(),rotation:[0,0,0],scale:[1,1,1],color:role==='fuelTank'?'#ffb52e':'#667788',vehicleDamageAnchor:role};damageScene.elements.push(element);}
         element.vehicleDamageAnchor=role;element.position=Array.isArray(element.position)?element.position:(position||[0,0,0]).slice();return element;
       };
       const damageAnchors={
@@ -6283,6 +6283,9 @@ function create(deps){
         engineSmoke:ensureDamageAnchor('vehicle_engine_smoke','Engine Smoke Dummy','engineSmoke',graph.vehiclePawn.damage.engineSmoke.position),
         exhaust:ensureDamageAnchor('vehicle_exhaust','Exhaust / Muffler Dummy','exhaust',graph.vehiclePawn.damage.exhaust.position),
       };
+      damageAnchors.fuelTank.dummyVisible=graph.vehiclePawn.damage.fuelTank.dummyVisible===true;
+      damageAnchors.engineSmoke.dummyVisible=graph.vehiclePawn.damage.engineSmoke.dummyVisible===true;
+      damageAnchors.exhaust.dummyVisible=graph.vehiclePawn.damage.exhaust.dummyVisible===true;
       graph.vehiclePawn.damage.fuelTank.position=damageAnchors.fuelTank.position.slice();graph.vehiclePawn.damage.engineSmoke.position=damageAnchors.engineSmoke.position.slice();graph.vehiclePawn.damage.exhaust.position=damageAnchors.exhaust.position.slice();
       const liveVehiclePawn = () => GAME.pawns && GAME.pawns.list
         ? GAME.pawns.list().find(item => item && item.kind === 'logic-element' && item.owner === object) || null
@@ -6317,7 +6320,7 @@ function create(deps){
         return row;
       };
       const syncVehicleDamage=()=>{const live=liveVehiclePawn();if(live&&live.setDamageConfig)live.setDamageConfig(graph.vehiclePawn.damage);saveElementGraph(object,graph);};
-      const damageToggle=(label,target,key)=>{const row=el('<div class="lk-row"></div>'),caption=document.createElement('label'),input=el('<input type="checkbox">');caption.textContent=label;input.checked=target[key]===true;input.addEventListener('change',()=>{target[key]=input.checked;syncVehicleDamage();});row.append(caption,input);return row;};
+      const damageToggle=(label,target,key,anchor)=>{const row=el('<div class="lk-row"></div>'),caption=document.createElement('label'),input=el('<input type="checkbox">');caption.textContent=label;input.checked=target[key]===true;input.addEventListener('change',()=>{target[key]=input.checked;if(anchor)anchor.dummyVisible=input.checked;syncVehicleDamage();});row.append(caption,input);return row;};
       const damageNumber=(label,target,key,min,max,step)=>{const row=pawnNumber(label,target,key,min,max,step),input=row.querySelector('input');input.addEventListener('change',()=>{const live=liveVehiclePawn();if(live&&live.setDamageConfig)live.setDamageConfig(graph.vehiclePawn.damage);});return row;};
       const damageVector=(label,target,anchor)=>{const row=el('<div class="lk-vec"></div>'),caption=document.createElement('label');caption.textContent=label;row.appendChild(caption);const values=Array.isArray(target.position)?target.position:[0,0,0],safe=(value,fallback)=>Number.isFinite(Number(value))?Number(value):Number(fallback)||0;['X','Y','Z'].forEach((axis,index)=>{const input=el('<input type="number" step=".05" title="'+axis+'">');input.value=safe(values[index],0);input.addEventListener('change',()=>{values[index]=safe(input.value,values[index]);target.position=values.slice();anchor.position=values.slice();let runtimeNode=null;object.traverse(node=>{if(!runtimeNode&&node.userData&&node.userData.logicElementSceneId===anchor.id)runtimeNode=node;});if(runtimeNode&&runtimeNode.position&&runtimeNode.position.set)runtimeNode.position.set(values[0],values[1],values[2]);syncVehicleDamage();});row.appendChild(input);});return row;};
       pawn.body.appendChild(el('<div class="lk-hint">' + tr(
@@ -6368,7 +6371,7 @@ function create(deps){
       damage.body.appendChild(damageVector(tr('Fuel Tank dummy','Dummy serbatoio'),damageCfg.fuelTank,damageAnchors.fuelTank));
       damage.body.appendChild(damageNumber(tr('Fuel Tank radius','Raggio serbatoio'),damageCfg.fuelTank,'radius',.08,5,.01));
       damage.body.appendChild(damageNumber(tr('Fuel Tank damage multiplier','Moltiplicatore danno serbatoio'),damageCfg.fuelTank,'damageMultiplier',1,20,.1));
-      damage.body.appendChild(damageToggle(tr('Show Fuel Tank dummy','Mostra dummy serbatoio'),damageCfg.fuelTank,'dummyVisible'));
+      damage.body.appendChild(damageToggle(tr('Show Fuel Tank dummy','Mostra dummy serbatoio'),damageCfg.fuelTank,'dummyVisible',damageAnchors.fuelTank));
       damage.body.appendChild(damageVector(tr('Engine smoke dummy','Dummy fumo motore'),damageCfg.engineSmoke,damageAnchors.engineSmoke));
       damage.body.appendChild(damageToggle(tr('Show engine dummy','Mostra dummy motore'),damageCfg.engineSmoke,'dummyVisible'));
       damage.body.appendChild(damageVector(tr('Exhaust / muffler dummy','Dummy scarico / marmitta'),damageCfg.exhaust,damageAnchors.exhaust));
